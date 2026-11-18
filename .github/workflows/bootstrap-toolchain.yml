@@ -1,0 +1,64 @@
+# Bootstrap a Rust toolchain and vendored dependencies for network-restricted
+# development environments (sandboxes that cannot reach static.rust-lang.org
+# or crates.io). GitHub-hosted runners have full network access, so they
+# package both as artifacts that restricted environments can download through
+# the GitHub API. See docs/development.md, "Offline / sandboxed environments".
+#
+# This workflow runs automatically when dependency manifests change and can
+# be dispatched manually.
+
+name: bootstrap-toolchain
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/bootstrap-toolchain.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**/Cargo.toml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Package toolchain
+        run: |
+          toolchain_dir="$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu"
+          test -x "$toolchain_dir/bin/cargo"
+          tar -C "$HOME/.rustup/toolchains" -czf rust-toolchain.tar.gz \
+            stable-x86_64-unknown-linux-gnu
+          ls -lh rust-toolchain.tar.gz
+
+      - name: Vendor dependencies
+        run: |
+          cargo generate-lockfile
+          cargo vendor vendor
+          tar -czf cargo-vendor.tar.gz vendor Cargo.lock
+          ls -lh cargo-vendor.tar.gz
+
+      - name: Upload toolchain artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-toolchain
+          path: rust-toolchain.tar.gz
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Upload vendor artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-vendor
+          path: cargo-vendor.tar.gz
+          retention-days: 3
+          if-no-files-found: error

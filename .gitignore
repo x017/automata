@@ -1,0 +1,17 @@
+# Rust build artifacts
+/target
+**/*.rs.bk
+
+# Offline development environment (network-restricted sandboxes).
+# See docs/development.md, section "Offline / sandboxed environments".
+/vendor
+/.cargo
+
+# Python (used from Phase 5 onward)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Environment
+.env

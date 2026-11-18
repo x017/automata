@@ -1,0 +1,37 @@
+# AUTOMATA workspace.
+#
+# Subsystem crates are introduced incrementally as their boundaries become
+# meaningful (see build.md section 9). Phase 1 establishes `automata-core`.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/x017/automata"
+
+# Dependencies shared by workspace crates. Versions are pinned here so that
+# all subsystem crates resolve the same releases.
+[workspace.dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+
+[workspace.lints.rust]
+# The engine forbids unsafe code in its own crates; dependencies that need
+# unsafe internals (wgpu, rapier, ...) remain responsible for it themselves.
+unsafe_code = "forbid"
+# Every public API must be documented (build.md, engineering principle 8).
+missing_docs = "warn"
+rust_2018_idioms = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Documented exceptions to the pedantic set.
+cast_precision_loss = "allow"   # f32 is the engine's standard scalar; conversions are deliberate
+module_name_repetitions = "allow" # names like `config::EngineConfig` are acceptable
+similar_names = "allow"         # too noisy around math-heavy code

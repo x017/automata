@@ -1,0 +1,17 @@
+[package]
+name = "automata-core"
+description = "AUTOMATA engine core: application lifecycle, timekeeping, logging, error handling."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+tracing.workspace = true
+tracing-subscriber.workspace = true
+thiserror.workspace = true
