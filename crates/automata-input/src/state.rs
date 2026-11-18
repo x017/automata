@@ -25,7 +25,7 @@ pub struct InputState {
     just_pressed_buttons: HashSet<MouseButton>,
     just_released_buttons: HashSet<MouseButton>,
     cursor_position: Option<(f64, f64)>,
-    scroll_delta: (f32, f32),
+    scroll_delta: (f64, f64),
     modifiers: ModifiersState,
 }
 
@@ -60,8 +60,8 @@ impl InputState {
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let (x, y) = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => (*x, *y),
-                    MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32),
+                    MouseScrollDelta::LineDelta(x, y) => (f64::from(*x), f64::from(*y)),
+                    MouseScrollDelta::PixelDelta(pos) => (pos.x, pos.y),
                 };
                 self.handle_scroll(x, y);
             }
@@ -81,7 +81,7 @@ impl InputState {
                 }
             }
             ElementState::Released => {
-                if self.pressed_keys.remove(key) {
+                if self.pressed_keys.remove(&key) {
                     self.just_released_keys.insert(key);
                 }
             }
@@ -97,7 +97,7 @@ impl InputState {
                 }
             }
             ElementState::Released => {
-                if self.pressed_buttons.remove(button) {
+                if self.pressed_buttons.remove(&button) {
                     self.just_released_buttons.insert(button);
                 }
             }
@@ -112,7 +112,7 @@ impl InputState {
 
     /// Accumulates scroll input. Line-based and pixel-based deltas are added
     /// as-is; consumers that care about units should normalize by preference.
-    pub fn handle_scroll(&mut self, x: f32, y: f32) {
+    pub fn handle_scroll(&mut self, x: f64, y: f64) {
         self.scroll_delta.0 += x;
         self.scroll_delta.1 += y;
     }
@@ -179,7 +179,7 @@ impl InputState {
 
     /// The scroll delta accumulated since the previous frame.
     #[must_use]
-    pub fn scroll_delta(&self) -> (f32, f32) {
+    pub fn scroll_delta(&self) -> (f64, f64) {
         self.scroll_delta
     }
 
@@ -241,7 +241,10 @@ mod tests {
         input.end_frame();
 
         assert!(input.pressed(KeyCode::ShiftLeft), "held keys persist");
-        assert!(input.button_pressed(MouseButton::Left), "held buttons persist");
+        assert!(
+            input.button_pressed(MouseButton::Left),
+            "held buttons persist"
+        );
         assert!(!input.just_pressed(KeyCode::ShiftLeft));
         assert!(!input.button_just_pressed(MouseButton::Left));
         assert_eq!(input.scroll_delta(), (0.0, 0.0));

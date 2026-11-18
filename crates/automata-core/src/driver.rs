@@ -104,11 +104,11 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
         self.time.advance(delta);
         debug!(frame = self.time.frame_count(), "frame begin");
 
-        self.update(&mut AppContext {
-            time: self.time,
-            input: &self.input,
-            quit_requested: self.quit_requested,
-        });
+        (self.update)(&mut AppContext::new(
+            self.time,
+            &self.input,
+            self.quit_requested,
+        ));
         self.input.end_frame();
 
         if *self.quit_requested {
@@ -145,7 +145,11 @@ impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
             .with_resizable(self.window_config.resizable);
 
         let result = (|| -> Result<(Arc<Window>, RenderContext)> {
-            let window = Arc::new(event_loop.create_window(attributes).map_err(Error::Window)?);
+            let window = Arc::new(
+                event_loop
+                    .create_window(attributes)
+                    .map_err(Error::Window)?,
+            );
             let size = window.inner_size();
             let renderer = pollster::block_on(RenderContext::new(
                 window.clone(),

@@ -179,16 +179,17 @@ impl Application {
         info!(mode = ?self.config.window_mode, "entering main loop");
 
         let result = match self.config.window_mode.clone() {
-            WindowMode::Headless => self.run_headless(update),
-            WindowMode::Windowed(window_config) => {
-                driver::run_windowed(
-                    &self.config,
-                    &window_config,
-                    &mut self.time,
-                    &mut self.quit_requested,
-                    update,
-                )
+            WindowMode::Headless => {
+                self.run_headless(update);
+                Ok(())
             }
+            WindowMode::Windowed(window_config) => driver::run_windowed(
+                &self.config,
+                &window_config,
+                &mut self.time,
+                &mut self.quit_requested,
+                update,
+            ),
         };
 
         self.state = AppState::Shutdown;
@@ -202,7 +203,7 @@ impl Application {
 
     /// The headless main loop: frames as fast as [`EngineConfig::target_fps`]
     /// allows, without a window, GPU, or input events.
-    fn run_headless(&mut self, mut update: impl FnMut(&mut AppContext<'_>)) -> Result<()> {
+    fn run_headless(&mut self, mut update: impl FnMut(&mut AppContext<'_>)) {
         let mut input = InputState::new();
         let mut frame_start = Instant::now();
 
@@ -226,7 +227,6 @@ impl Application {
                 }
             }
         }
-        Ok(())
     }
 }
 

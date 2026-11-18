@@ -31,6 +31,12 @@ artifacts:
 
    The script also writes `.cargo/config.toml` (git-ignored) pointing Cargo
    at `vendor/`, so builds work fully offline.
+
+   **Note for sandboxed sessions:** only git-tracked file contents persist
+   across sandbox sessions — the toolchain (`~/.local/automata-rust`),
+   `vendor/`, and `.cargo/config.toml` are wiped between sessions. Re-run
+   `scripts/setup-offline-env.sh` at the start of every session.
+
 3. Re-run the bootstrap workflow whenever dependencies change (it triggers
    automatically on changes to any `Cargo.toml`).
 

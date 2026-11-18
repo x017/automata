@@ -123,9 +123,13 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 name = "automata-core"
 version = "0.1.0"
 dependencies = [
+ "automata-input",
+ "automata-renderer",
+ "pollster",
  "thiserror 2.0.21",
  "tracing",
  "tracing-subscriber",
+ "winit",
 ]
 
 [[package]]
@@ -139,6 +143,7 @@ dependencies = [
 name = "automata-renderer"
 version = "0.1.0"
 dependencies = [
+ "pollster",
  "thiserror 2.0.21",
  "tracing",
  "wgpu",
@@ -1310,6 +1315,12 @@ dependencies = [
  "rustix 1.1.6",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "pollster"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c2c80c4e3afbec8224b9d3e641fbf3a5690cc7595b887b0a27a926bb357ed5c"
 
 [[package]]
 name = "portable-atomic"

@@ -198,8 +198,6 @@ impl RenderContext {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     /// Device creation works wherever a GPU or software adapter (e.g.
     /// llvmpipe on CI) exists; the test skips gracefully otherwise, since
     /// sandboxes and some CI machines have no graphics driver at all.

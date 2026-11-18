@@ -5,7 +5,7 @@
 //! configuration types.
 
 /// How an [`Application`](crate::Application) presents itself.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub enum WindowMode {
     /// No window and no GPU surface: the loop runs headless.
     ///
@@ -14,8 +14,13 @@ pub enum WindowMode {
     Headless,
 
     /// Create an OS window and render to it (the default).
-    #[default]
     Windowed(WindowConfig),
+}
+
+impl Default for WindowMode {
+    fn default() -> Self {
+        Self::Windowed(WindowConfig::default())
+    }
 }
 
 /// Configuration of the application window in [`WindowMode::Windowed`].
