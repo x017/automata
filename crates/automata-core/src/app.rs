@@ -39,21 +39,32 @@ pub enum AppState {
 
 /// Per-frame context handed to the update callback.
 ///
-/// Exposes read-only timing and input information plus the frame controls the
-/// game is allowed to touch, such as requesting shutdown. Later phases extend
-/// this context with scenes and rendering access.
+/// Exposes read-only timing and input information, the frame's
+/// [`automata_renderer::DrawList`] for recording rendering commands, plus the
+/// frame controls the game is allowed to touch, such as requesting shutdown.
+/// Later phases extend this context with scenes.
 pub struct AppContext<'a> {
     time: &'a Time,
     input: &'a InputState,
+    draw: &'a mut automata_renderer::DrawList,
+    renderer: Option<&'a automata_renderer::Renderer>,
     quit_requested: &'a mut bool,
 }
 
 impl<'a> AppContext<'a> {
     /// Creates a frame context. Called by the main loop implementations only.
-    pub(crate) fn new(time: &'a Time, input: &'a InputState, quit_requested: &'a mut bool) -> Self {
+    pub(crate) fn new(
+        time: &'a Time,
+        input: &'a InputState,
+        draw: &'a mut automata_renderer::DrawList,
+        renderer: Option<&'a automata_renderer::Renderer>,
+        quit_requested: &'a mut bool,
+    ) -> Self {
         Self {
             time,
             input,
+            draw,
+            renderer,
             quit_requested,
         }
     }
@@ -68,6 +79,24 @@ impl<'a> AppContext<'a> {
     #[must_use]
     pub fn input(&self) -> &InputState {
         self.input
+    }
+
+    /// The frame's draw list: record sprites and meshes here.
+    ///
+    /// In headless mode the list is discarded each frame (no GPU exists to
+    /// present it); recording is still allowed so game code runs identically.
+    #[must_use]
+    pub fn draw(&mut self) -> &mut automata_renderer::DrawList {
+        self.draw
+    }
+
+    /// The renderer, when one exists.
+    ///
+    /// `Some` in windowed mode (where a GPU is present), `None` in headless
+    /// mode. Use it to create textures, meshes, and materials.
+    #[must_use]
+    pub fn renderer(&self) -> Option<&automata_renderer::Renderer> {
+        self.renderer
     }
 
     /// Requests that the main loop exits after the current frame completes.
@@ -202,9 +231,11 @@ impl Application {
     }
 
     /// The headless main loop: frames as fast as [`EngineConfig::target_fps`]
-    /// allows, without a window, GPU, or input events.
+    /// allows, without a window, GPU, or input events. Draw commands are
+    /// recorded into a throwaway list so game code runs identically.
     fn run_headless(&mut self, mut update: impl FnMut(&mut AppContext<'_>)) {
         let mut input = InputState::new();
+        let mut draw = automata_renderer::DrawList::new();
         let mut frame_start = Instant::now();
 
         while !self.quit_requested {
@@ -216,6 +247,8 @@ impl Application {
             update(&mut AppContext::new(
                 &self.time,
                 &input,
+                &mut draw,
+                None, // no renderer in headless mode
                 &mut self.quit_requested,
             ));
             input.end_frame();

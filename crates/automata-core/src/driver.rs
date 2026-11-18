@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use automata_input::InputState;
-use automata_renderer::RenderContext;
+use automata_renderer::{DrawList, Renderer};
 use tracing::{debug, info};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -32,15 +32,6 @@ use crate::config::EngineConfig;
 use crate::error::{Error, Result};
 use crate::time::Time;
 use crate::window::WindowConfig;
-
-/// The color the window is cleared to each frame until Phase 3 makes the
-/// clear color configurable together with materials and cameras.
-const CLEAR_COLOR: automata_renderer::Color = automata_renderer::Color {
-    r: 0.02,
-    g: 0.02,
-    b: 0.04,
-    a: 1.0,
-};
 
 /// Runs the windowed main loop to completion.
 ///
@@ -64,6 +55,7 @@ pub(super) fn run_windowed(
         input: InputState::new(),
         window: None,
         renderer: None,
+        draw: DrawList::new(),
         update,
         last_frame_start: None,
         next_frame_deadline: None,
@@ -86,7 +78,8 @@ struct WinitDriver<'a, F: FnMut(&mut AppContext<'_>)> {
     quit_requested: &'a mut bool,
     input: InputState,
     window: Option<Arc<Window>>,
-    renderer: Option<RenderContext>,
+    renderer: Option<Renderer>,
+    draw: DrawList,
     update: F,
     last_frame_start: Option<Instant>,
     next_frame_deadline: Option<Instant>,
@@ -104,9 +97,12 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
         self.time.advance(delta);
         debug!(frame = self.time.frame_count(), "frame begin");
 
+        let renderer_ref = self.renderer.as_ref();
         (self.update)(&mut AppContext::new(
             self.time,
             &self.input,
+            &mut self.draw,
+            renderer_ref,
             self.quit_requested,
         ));
         self.input.end_frame();
@@ -144,14 +140,14 @@ impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
             .with_inner_size(LogicalSize::new(f64::from(width), f64::from(height)))
             .with_resizable(self.window_config.resizable);
 
-        let result = (|| -> Result<(Arc<Window>, RenderContext)> {
+        let result = (|| -> Result<(Arc<Window>, Renderer)> {
             let window = Arc::new(
                 event_loop
                     .create_window(attributes)
                     .map_err(Error::Window)?,
             );
             let size = window.inner_size();
-            let renderer = pollster::block_on(RenderContext::new(
+            let renderer = pollster::block_on(Renderer::new(
                 window.clone(),
                 (size.width, size.height),
                 self.window_config.vsync,
@@ -192,8 +188,8 @@ impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(renderer) = &mut self.renderer {
-                    match renderer.render_clear(CLEAR_COLOR) {
-                        Ok(()) => {}
+                    match renderer.render(&self.draw) {
+                        Ok(()) => self.draw.clear(),
                         Err(error) => {
                             self.fatal_error = Some(Error::Renderer(error));
                             event_loop.exit();

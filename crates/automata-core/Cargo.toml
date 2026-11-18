@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 automata-input.workspace = true
 automata-renderer.workspace = true
+glam.workspace = true
 pollster.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

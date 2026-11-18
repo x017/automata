@@ -15,11 +15,13 @@ use crate::error::{Error, Result};
 /// validation failures are reported as errors.
 #[derive(Debug)]
 pub struct RenderContext {
-    surface: wgpu::Surface<'static>,
+    surface: Option<wgpu::Surface<'static>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
+    config: Option<wgpu::SurfaceConfiguration>,
     size: (u32, u32),
+    /// The target format (surface format, or the offscreen format).
+    format: wgpu::TextureFormat,
 }
 
 impl RenderContext {
@@ -93,11 +95,57 @@ impl RenderContext {
         );
 
         Ok(Self {
-            surface,
+            format: config.format,
+            surface: Some(surface),
             device,
             queue,
-            config,
+            config: Some(config),
             size: (width, height),
+        })
+    }
+
+    /// Creates a render context without a window surface.
+    ///
+    /// Used by tests and headless tooling; frames are rendered into a
+    /// texture supplied by the caller via offscreen rendering.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no suitable GPU adapter or device is available.
+    pub async fn new_offscreen(size: (u32, u32)) -> Result<Self> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::None,
+                force_fallback_adapter: true, // accept software adapters (llvmpipe/lavapipe)
+                compatible_surface: None,
+                apply_limit_buckets: false,
+            })
+            .await?;
+        info!(
+            adapter = adapter.get_info().name.as_str(),
+            backend = ?adapter.get_info().backend,
+            "offscreen GPU adapter selected"
+        );
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("automata-offscreen"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                memory_hints: wgpu::MemoryHints::default(),
+                trace: wgpu::Trace::Off,
+            })
+            .await?;
+
+        let (width, height) = (size.0.max(1), size.1.max(1));
+        Ok(Self {
+            surface: None,
+            device,
+            queue,
+            config: None,
+            size: (width, height),
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
         })
     }
 
@@ -119,10 +167,54 @@ impl RenderContext {
         self.size
     }
 
-    /// The surface's texture format.
+    /// The target texture format (the surface format when windowed).
     #[must_use]
     pub fn format(&self) -> wgpu::TextureFormat {
-        self.config.format
+        self.format
+    }
+
+    /// Acquires the next frame's surface texture.
+    ///
+    /// Transient acquisition outcomes are handled internally; `Ok(None)`
+    /// means this frame should be skipped (occluded/outdated surface, or
+    /// the context is surfaceless).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::SurfaceValidation`] on a validation failure.
+    pub(crate) fn acquire_frame(&mut self) -> Result<Option<wgpu::SurfaceTexture>> {
+        let Some(surface) = &self.surface else {
+            return Ok(None);
+        };
+        let texture = match surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(t) => t,
+            wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
+                warn!("surface suboptimal; reconfiguring");
+                self.reconfigure();
+                t
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(None);
+            }
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                self.reconfigure();
+                return Ok(None);
+            }
+            wgpu::CurrentSurfaceTexture::Validation => return Err(Error::SurfaceValidation),
+        };
+        Ok(Some(texture))
+    }
+
+    /// Presents an acquired frame's surface texture.
+    pub(crate) fn present(&mut self, texture: wgpu::SurfaceTexture) {
+        self.queue.present(texture);
+    }
+
+    /// Reconfigures the surface (helper for acquire/resize paths).
+    fn reconfigure(&mut self) {
+        if let (Some(surface), Some(config)) = (&self.surface, &self.config) {
+            surface.configure(&self.device, config);
+        }
     }
 
     /// Resizes the surface to match the window.
@@ -134,9 +226,11 @@ impl RenderContext {
             return;
         }
         self.size = (width, height);
-        self.config.width = width;
-        self.config.height = height;
-        self.surface.configure(&self.device, &self.config);
+        if let Some(config) = &mut self.config {
+            config.width = width;
+            config.height = height;
+        }
+        self.reconfigure();
         debug!(width, height, "surface resized");
     }
 
@@ -148,23 +242,8 @@ impl RenderContext {
     /// validation error. Transient outcomes (timeout, occlusion, outdated or
     /// lost surfaces) are handled internally and never reported.
     pub fn render_clear(&mut self, color: wgpu::Color) -> Result<()> {
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(texture) => texture,
-            wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
-                // The texture is still renderable; reconfigure so the next
-                // frame matches the surface again.
-                warn!("surface suboptimal; reconfiguring");
-                self.surface.configure(&self.device, &self.config);
-                texture
-            }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                self.surface.configure(&self.device, &self.config);
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Validation => return Err(Error::SurfaceValidation),
+        let Some(frame) = self.acquire_frame()? else {
+            return Ok(());
         };
 
         let view = frame

@@ -24,6 +24,10 @@ pub enum Error {
     /// A validation error occurred while acquiring the next frame.
     #[error("validation error while acquiring the next frame")]
     SurfaceValidation,
+
+    /// An image could not be decoded.
+    #[error("failed to decode image: {0}")]
+    Image(#[from] image::ImageError),
 }
 
 /// Convenience alias for results returned by the renderer.
