@@ -17,7 +17,7 @@ pub mod logging;
 pub mod time;
 pub mod window;
 
-pub use app::{AppContext, AppState, Application};
+pub use app::{AppContext, AppState, Application, WorldState};
 pub use config::EngineConfig;
 pub use error::{Error, Result};
 pub use time::Time;

@@ -17,6 +17,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use automata_input::InputState;
+use automata_scene::{Events, Resources, Scene};
 use tracing::{debug, info};
 
 use crate::config::EngineConfig;
@@ -37,17 +38,69 @@ pub enum AppState {
     Shutdown,
 }
 
+/// Engine state shared with the game each frame: the ECS scene, the event
+/// queue, and the resource store.
+///
+/// Owned by [`Application`]; borrowed by [`AppContext`] during the update
+/// callback. This is a single aggregate so the frame-context constructor
+/// stays small.
+#[derive(Default)]
+pub struct WorldState {
+    scene: Scene,
+    events: Events,
+    resources: Resources,
+}
+
+impl WorldState {
+    /// The active scene.
+    #[must_use]
+    pub fn scene(&self) -> &Scene {
+        &self.scene
+    }
+
+    /// The active scene, mutably.
+    #[must_use]
+    pub fn scene_mut(&mut self) -> &mut Scene {
+        &mut self.scene
+    }
+
+    /// The event queue.
+    #[must_use]
+    pub fn events(&self) -> &Events {
+        &self.events
+    }
+
+    /// The event queue, mutably.
+    #[must_use]
+    pub fn events_mut(&mut self) -> &mut Events {
+        &mut self.events
+    }
+
+    /// The shared resource store.
+    #[must_use]
+    pub fn resources(&self) -> &Resources {
+        &self.resources
+    }
+
+    /// The shared resource store, mutably.
+    #[must_use]
+    pub fn resources_mut(&mut self) -> &mut Resources {
+        &mut self.resources
+    }
+}
+
 /// Per-frame context handed to the update callback.
 ///
 /// Exposes read-only timing and input information, the frame's
-/// [`automata_renderer::DrawList`] for recording rendering commands, plus the
-/// frame controls the game is allowed to touch, such as requesting shutdown.
-/// Later phases extend this context with scenes.
+/// [`automata_renderer::DrawList`] for recording rendering commands, the
+/// engine's [`WorldState`] (scene, events, resources), plus the frame
+/// controls the game is allowed to touch, such as requesting shutdown.
 pub struct AppContext<'a> {
     time: &'a Time,
     input: &'a InputState,
     draw: &'a mut automata_renderer::DrawList,
     renderer: Option<&'a automata_renderer::Renderer>,
+    world: &'a mut WorldState,
     quit_requested: &'a mut bool,
 }
 
@@ -58,6 +111,7 @@ impl<'a> AppContext<'a> {
         input: &'a InputState,
         draw: &'a mut automata_renderer::DrawList,
         renderer: Option<&'a automata_renderer::Renderer>,
+        world: &'a mut WorldState,
         quit_requested: &'a mut bool,
     ) -> Self {
         Self {
@@ -65,6 +119,7 @@ impl<'a> AppContext<'a> {
             input,
             draw,
             renderer,
+            world,
             quit_requested,
         }
     }
@@ -97,6 +152,24 @@ impl<'a> AppContext<'a> {
     #[must_use]
     pub fn renderer(&self) -> Option<&automata_renderer::Renderer> {
         self.renderer
+    }
+
+    /// The active scene: spawn entities and edit components here.
+    #[must_use]
+    pub fn scene(&mut self) -> &mut Scene {
+        &mut self.world.scene
+    }
+
+    /// The event queue: send and read frame-scoped events.
+    #[must_use]
+    pub fn events(&mut self) -> &mut Events {
+        &mut self.world.events
+    }
+
+    /// The shared resource store.
+    #[must_use]
+    pub fn resources(&mut self) -> &mut Resources {
+        &mut self.world.resources
     }
 
     /// Requests that the main loop exits after the current frame completes.
@@ -134,6 +207,7 @@ pub struct Application {
     state: AppState,
     time: Time,
     quit_requested: bool,
+    world: WorldState,
 }
 
 impl Application {
@@ -148,6 +222,7 @@ impl Application {
             state: AppState::Created,
             time: Time::default(),
             quit_requested: false,
+            world: WorldState::default(),
         }
     }
 
@@ -167,6 +242,18 @@ impl Application {
     #[must_use]
     pub fn time(&self) -> &Time {
         &self.time
+    }
+
+    /// The engine's world state (scene, events, resources).
+    #[must_use]
+    pub fn world(&self) -> &WorldState {
+        &self.world
+    }
+
+    /// The engine's world state, mutably.
+    #[must_use]
+    pub fn world_mut(&mut self) -> &mut WorldState {
+        &mut self.world
     }
 
     /// Requests shutdown from outside the update callback.
@@ -216,6 +303,7 @@ impl Application {
                 &self.config,
                 &window_config,
                 &mut self.time,
+                &mut self.world,
                 &mut self.quit_requested,
                 update,
             ),
@@ -242,6 +330,7 @@ impl Application {
             let delta = frame_start.elapsed();
             frame_start = Instant::now();
             self.time.advance(delta);
+            self.world.events.update();
             debug!(frame = self.time.frame_count(), "frame begin");
 
             update(&mut AppContext::new(
@@ -249,8 +338,13 @@ impl Application {
                 &input,
                 &mut draw,
                 None, // no renderer in headless mode
+                &mut self.world,
                 &mut self.quit_requested,
             ));
+            self.world.scene.update();
+            // Record the scene into the throwaway draw list: headless frames
+            // exercise the same scene-to-renderer bridge as windowed ones.
+            automata_scene::record_draw_list(self.world.scene.world(), &mut draw);
             input.end_frame();
 
             if let Some(fps) = self.config.target_fps {

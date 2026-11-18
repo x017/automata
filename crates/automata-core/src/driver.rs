@@ -27,7 +27,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
-use crate::app::AppContext;
+use crate::app::{AppContext, WorldState};
 use crate::config::EngineConfig;
 use crate::error::{Error, Result};
 use crate::time::Time;
@@ -41,6 +41,7 @@ pub(super) fn run_windowed(
     config: &EngineConfig,
     window_config: &WindowConfig,
     time: &mut Time,
+    world: &mut WorldState,
     quit_requested: &mut bool,
     update: impl FnMut(&mut AppContext<'_>),
 ) -> Result<()> {
@@ -51,6 +52,7 @@ pub(super) fn run_windowed(
         config,
         window_config,
         time,
+        world,
         quit_requested,
         input: InputState::new(),
         window: None,
@@ -75,6 +77,7 @@ struct WinitDriver<'a, F: FnMut(&mut AppContext<'_>)> {
     config: &'a EngineConfig,
     window_config: &'a WindowConfig,
     time: &'a mut Time,
+    world: &'a mut WorldState,
     quit_requested: &'a mut bool,
     input: InputState,
     window: Option<Arc<Window>>,
@@ -87,7 +90,8 @@ struct WinitDriver<'a, F: FnMut(&mut AppContext<'_>)> {
 }
 
 impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
-    /// Runs one frame: advance time, update, clear per-frame input, redraw.
+    /// Runs one frame: advance time, age events, update, propagate scene
+    /// state, record the draw list, and request a redraw.
     fn run_frame(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         let delta = self
@@ -95,6 +99,7 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
             .map_or(Duration::ZERO, |start| now.saturating_duration_since(start));
         self.last_frame_start = Some(now);
         self.time.advance(delta);
+        self.world.events_mut().update();
         debug!(frame = self.time.frame_count(), "frame begin");
 
         let renderer_ref = self.renderer.as_ref();
@@ -103,9 +108,15 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
             &self.input,
             &mut self.draw,
             renderer_ref,
+            self.world,
             self.quit_requested,
         ));
         self.input.end_frame();
+
+        // Built-in scene systems (transform propagation) and the
+        // scene-to-renderer bridge run after the game update.
+        self.world.scene_mut().update();
+        automata_scene::record_draw_list(self.world.scene().world(), &mut self.draw);
 
         if *self.quit_requested {
             event_loop.exit();

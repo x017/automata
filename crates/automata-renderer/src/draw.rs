@@ -71,6 +71,36 @@ impl DrawList {
         });
     }
 
+    /// The number of sprite draw commands recorded so far.
+    #[must_use]
+    pub fn sprite_count(&self) -> usize {
+        self.sprites.len()
+    }
+
+    /// The number of mesh draw commands recorded so far.
+    #[must_use]
+    pub fn mesh_count(&self) -> usize {
+        self.meshes.len()
+    }
+
+    /// The active 2D camera, if one was set.
+    #[must_use]
+    pub fn camera_2d(&self) -> Option<Camera2D> {
+        self.camera_2d
+    }
+
+    /// The active 3D camera, if one was set.
+    #[must_use]
+    pub fn camera_3d(&self) -> Option<Camera3D> {
+        self.camera_3d
+    }
+
+    /// The clear color for the frame.
+    #[must_use]
+    pub fn clear_color(&self) -> Color {
+        self.clear_color
+    }
+
     /// Resets the list for the next frame, keeping allocations. Called by
     /// the engine after each presented frame.
     pub fn clear(&mut self) {
