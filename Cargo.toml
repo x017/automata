@@ -16,9 +16,17 @@ repository = "https://github.com/x017/automata"
 # Dependencies shared by workspace crates. Versions are pinned here so that
 # all subsystem crates resolve the same releases.
 [workspace.dependencies]
+# Engine crates
+automata-input = { path = "crates/automata-input" }
+automata-renderer = { path = "crates/automata-renderer" }
+
+# Third-party
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
+winit = "0.30"
+wgpu = "30"
+pollster = "1.0"
 
 [workspace.lints.rust]
 # The engine forbids unsafe code in its own crates; dependencies that need
