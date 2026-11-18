@@ -12,6 +12,10 @@ publish = false
 workspace = true
 
 [dependencies]
+automata-input.workspace = true
+automata-renderer.workspace = true
+pollster.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 thiserror.workspace = true
+winit.workspace = true

@@ -22,6 +22,18 @@ pub enum Error {
     /// An I/O operation failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    /// The OS event loop failed to start or run.
+    #[error("event loop error: {0}")]
+    EventLoop(#[from] winit::error::EventLoopError),
+
+    /// Window creation failed (for example, no display is available).
+    #[error("window error: {0}")]
+    Window(#[from] winit::error::OsError),
+
+    /// GPU initialization or presentation failed.
+    #[error("renderer error: {0}")]
+    Renderer(#[from] automata_renderer::Error),
 }
 
 /// Convenience alias for results returned by the engine core.

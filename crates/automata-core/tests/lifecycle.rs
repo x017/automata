@@ -7,11 +7,13 @@
 // `AppContext<'_>`; clippy's suggested method-path rewrite does not typecheck.
 #![allow(clippy::redundant_closure_for_method_calls)]
 
-use automata_core::{AppState, Application, EngineConfig, Error};
+use automata_core::{AppState, Application, EngineConfig, Error, WindowMode};
 
-/// A configuration without frame pacing so tests run at full speed.
+/// A headless configuration without frame pacing so tests run at full speed
+/// without a display.
 fn test_config() -> EngineConfig {
     EngineConfig {
+        window_mode: WindowMode::Headless,
         target_fps: None,
         ..EngineConfig::new("lifecycle-test")
     }

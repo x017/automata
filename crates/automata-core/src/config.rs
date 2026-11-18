@@ -5,6 +5,8 @@
 //! directly. File-based configuration arrives with the asset system in a
 //! later phase.
 
+use crate::window::WindowMode;
+
 /// Log filter applied when neither the configuration nor the `RUST_LOG`
 /// environment variable provides one.
 pub const DEFAULT_LOG_FILTER: &str = "info";
@@ -26,9 +28,14 @@ pub struct EngineConfig {
     /// Target frame rate for the main loop.
     ///
     /// `None` disables frame pacing and lets the loop run flat out, which is
-    /// useful for tests and headless tools. Phase 2 replaces this with frame
-    /// timing driven by the window event loop.
+    /// useful for tests and headless tools.
     pub target_fps: Option<u32>,
+
+    /// Whether the application opens a window or runs headless.
+    ///
+    /// Headless mode runs the same loop without a window, GPU surface, or
+    /// input events — the mode tests, CI, and headless tooling should use.
+    pub window_mode: WindowMode,
 }
 
 impl EngineConfig {
@@ -50,6 +57,7 @@ impl Default for EngineConfig {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             log_filter: DEFAULT_LOG_FILTER.to_owned(),
             target_fps: Some(60),
+            window_mode: WindowMode::default(),
         }
     }
 }
@@ -72,5 +80,6 @@ mod tests {
         assert_eq!(config.title, "My Game");
         assert_eq!(config.version, env!("CARGO_PKG_VERSION"));
         assert_eq!(config.target_fps, Some(60));
+        assert!(matches!(config.window_mode, WindowMode::Windowed(_)));
     }
 }
