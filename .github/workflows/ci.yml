@@ -23,11 +23,16 @@ jobs:
 
       # Software GPU (llvmpipe/lavapipe) so wgpu render tests actually
       # execute — without it they graceful-skip and the renderer goes
-      # untested on CI.
+      # untested on CI. Retry around the apt lock race on hosted runners.
       - name: Install software GPU
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libegl1-mesa libgl1-mesa-dri mesa-vulkan-drivers
+          for i in 1 2 3; do
+            sudo apt-get update && \
+            sudo apt-get install -y --no-install-recommends \
+              libegl1 libgl1 mesa-vulkan-drivers libvulkan1 && break
+            echo "apt attempt $i failed; retrying in 10s"
+            sleep 10
+          done
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
