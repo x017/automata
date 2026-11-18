@@ -643,12 +643,20 @@ mod tests {
         wgpu::util::DownloadBuffer::read_buffer(device, queue, &buffer.slice(..), move |r| {
             let _ = tx.send(r.map(|b| b.to_vec()));
         });
+        // Drive the device until the readback callback fires. `Poll` alone
+        // can stall on some drivers; alternate Poll with a blocking Wait.
         loop {
             let _ = device.poll(wgpu::PollType::Poll);
             if let Ok(received) = rx.try_recv() {
                 return received.expect("readback failed");
             }
-            std::thread::yield_now();
+            let _ = device.poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(std::time::Duration::from_millis(10)),
+            });
+            if let Ok(received) = rx.try_recv() {
+                return received.expect("readback failed");
+            }
         }
     }
 
