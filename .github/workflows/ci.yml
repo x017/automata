@@ -21,6 +21,14 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # Software GPU (llvmpipe/lavapipe) so wgpu render tests actually
+      # execute — without it they graceful-skip and the renderer goes
+      # untested on CI.
+      - name: Install software GPU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1-mesa libgl1-mesa-dri mesa-vulkan-drivers
+
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
 
@@ -32,6 +40,8 @@ jobs:
 
       - name: Tests
         run: cargo test --workspace --all-targets
+        env:
+          WGPU_BACKEND: vulkan,gl
 
       - name: Documentation
         run: cargo doc --workspace --no-deps
