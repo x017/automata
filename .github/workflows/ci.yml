@@ -43,8 +43,15 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Tests
-        run: cargo test --workspace --all-targets
+      - name: Tests (CPU + device)
+        run: cargo test --workspace --all-targets -- --skip offscreen
+        env:
+          WGPU_BACKEND: vulkan,gl
+
+      # Run GPU offscreen render tests separately so a software-adapter
+      # quirk doesn't mask the CPU suite, and so its failure is isolated.
+      - name: Tests (GPU offscreen)
+        run: cargo test -p automata-renderer --lib offscreen -- --nocapture
         env:
           WGPU_BACKEND: vulkan,gl
 
