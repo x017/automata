@@ -51,9 +51,24 @@ jobs:
       # Run GPU offscreen render tests separately so a software-adapter
       # quirk doesn't mask the CPU suite, and so its failure is isolated.
       - name: Tests (GPU offscreen)
-        run: cargo test -p automata-renderer --lib offscreen -- --nocapture
+        run: cargo test -p automata-renderer --lib offscreen -- --nocapture 2>&1 | tee /tmp/gpu-test.log
         env:
           WGPU_BACKEND: vulkan,gl
+
+      # The log-zip endpoint is unreachable from the dev sandbox; publish the
+      # GPU test output to a scratch branch on failure so it can be read via
+      # plain git. Only runs when the GPU tests failed.
+      - name: Publish GPU test log on failure
+        if: failure()
+        run: |
+          git config user.email ci@localhost
+          git config user.name "ci"
+          git checkout --orphan ci-logs
+          git rm -rf . > /dev/null 2>&1 || true
+          cp /tmp/gpu-test.log gpu-test.log
+          git add gpu-test.log
+          git commit -m "gpu test log $(date -u +%FT%TZ)"
+          git push -f origin ci-logs
 
       - name: Documentation
         run: cargo doc --workspace --no-deps
