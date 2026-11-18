@@ -1,0 +1,15 @@
+# AUTOMATA Python bindings (maturin build).
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "automata-engine"
+description = "AUTOMATA game engine — Python bindings"
+requires-python = ">=3.10"
+license = { text = "MIT OR Apache-2.0" }
+
+[tool.maturin]
+# The importable package is `automata`; the native module is `automata._core`.
+module-name = "automata._core"
+python-source = "python"

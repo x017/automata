@@ -21,11 +21,21 @@ glam = { workspace = true }
 pyo3 = { workspace = true }
 tracing = { workspace = true }
 
-[lints]
-workspace = true
-
+# NOTE: this mirrors the workspace lint table, with one exception — cargo
+# does not support overriding individual workspace lints per crate.
 [lints.rust]
-# PyO3 macro expansions contain `unsafe impl` blocks; the workspace-wide
-# forbid cannot be relaxed per-expansion, so this crate downgrades to deny.
-# Hand-written code in this crate stays free of unsafe blocks.
+# PyO3 macro expansions contain `unsafe impl` blocks, and `forbid` cannot be
+# relaxed per-expansion, so this crate downgrades to `deny`. Hand-written
+# code here stays free of unsafe blocks; a plain `unsafe` block still fails
+# the build unless explicitly allowed at that item.
 unsafe_code = "deny"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Documented exceptions to the pedantic set (same as the workspace).
+cast_precision_loss = "allow"
+module_name_repetitions = "allow"
+similar_names = "allow"
