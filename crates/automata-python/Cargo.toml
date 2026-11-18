@@ -1,0 +1,31 @@
+[package]
+name = "automata-python"
+description = "Python bindings for the AUTOMATA engine (PyO3)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# cdylib for the Python extension module; rlib so Rust tests can link it.
+name = "automata_python"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+automata-core = { workspace = true }
+automata-input = { workspace = true }
+automata-renderer = { workspace = true }
+automata-scene = { workspace = true }
+glam = { workspace = true }
+pyo3 = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true
+
+[lints.rust]
+# PyO3 macro expansions contain `unsafe impl` blocks; the workspace-wide
+# forbid cannot be relaxed per-expansion, so this crate downgrades to deny.
+# Hand-written code in this crate stays free of unsafe blocks.
+unsafe_code = "deny"

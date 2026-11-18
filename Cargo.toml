@@ -17,6 +17,7 @@ repository = "https://github.com/x017/automata"
 # all subsystem crates resolve the same releases.
 [workspace.dependencies]
 # Engine crates
+automata-core = { path = "crates/automata-core" }
 automata-input = { path = "crates/automata-input" }
 automata-renderer = { path = "crates/automata-renderer" }
 automata-scene = { path = "crates/automata-scene" }
@@ -33,6 +34,7 @@ bytemuck = { version = "1", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 naga = { version = "30", default-features = false }
 hecs = "0.11"
+pyo3 = "0.30"
 
 [workspace.lints.rust]
 # The engine forbids unsafe code in its own crates; dependencies that need
