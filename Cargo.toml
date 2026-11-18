@@ -27,6 +27,9 @@ thiserror = "2"
 winit = "0.30"
 wgpu = "30"
 pollster = "1.0"
+glam = "0.34"
+bytemuck = { version = "1", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [workspace.lints.rust]
 # The engine forbids unsafe code in its own crates; dependencies that need
