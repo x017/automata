@@ -1,0 +1,18 @@
+[package]
+name = "automata-scene"
+description = "AUTOMATA scene system: entities, components, transforms, events, and resources."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+automata-renderer.workspace = true
+glam.workspace = true
+hecs.workspace = true
+tracing.workspace = true
