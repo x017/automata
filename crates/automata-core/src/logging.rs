@@ -35,7 +35,9 @@ pub fn init(filter: &str) {
 
         // `try_init` fails only when a global subscriber already exists; in
         // that case the existing subscriber wins and we carry on.
-        let _ = tracing_subscriber::fmt().with_env_filter(env_filter).try_init();
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .try_init();
     });
 }
 

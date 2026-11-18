@@ -3,6 +3,10 @@
 //! These exercise the public API exactly as a game (or the Python binding
 //! layer) would consume it.
 
+// The closures passed to `Application::run` guide lifetime inference for
+// `AppContext<'_>`; clippy's suggested method-path rewrite does not typecheck.
+#![allow(clippy::redundant_closure_for_method_calls)]
+
 use automata_core::{AppState, Application, EngineConfig, Error};
 
 /// A configuration without frame pacing so tests run at full speed.

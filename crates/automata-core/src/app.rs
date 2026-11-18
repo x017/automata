@@ -133,7 +133,7 @@ impl Application {
     ///
     /// Returns [`Error::InvalidState`] if the application has already run,
     /// i.e. its state is not [`AppState::Created`].
-    pub fn run(&mut self, mut update: impl FnMut(&mut AppContext)) -> Result<()> {
+    pub fn run(&mut self, mut update: impl FnMut(&mut AppContext<'_>)) -> Result<()> {
         if self.state != AppState::Created {
             return Err(Error::InvalidState {
                 expected: format!("{:?}", AppState::Created),
@@ -173,7 +173,10 @@ impl Application {
     }
 }
 
+// The closures passed to `Application::run` guide lifetime inference for
+// `AppContext<'_>`; clippy's suggested method-path rewrite does not typecheck.
 #[cfg(test)]
+#[allow(clippy::redundant_closure_for_method_calls)]
 mod tests {
     use super::*;
 
