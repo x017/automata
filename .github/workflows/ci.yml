@@ -50,8 +50,10 @@ jobs:
 
       # Run GPU offscreen render tests separately so a software-adapter
       # quirk doesn't mask the CPU suite, and so its failure is isolated.
+      # GPU tests run single-threaded: concurrent wgpu instance/device
+      # creation on the software Vulkan driver (lavapipe) is flaky.
       - name: Tests (GPU offscreen)
-        run: cargo test -p automata-renderer --lib offscreen -- --nocapture 2>&1 | tee /tmp/gpu-test.log
+        run: cargo test -p automata-renderer --lib offscreen -- --nocapture --test-threads=1 2>&1 | tee /tmp/gpu-test.log
         env:
           WGPU_BACKEND: vulkan,gl
 

@@ -581,7 +581,12 @@ mod tests {
     /// Creates an offscreen renderer, or `None` when no GPU/software adapter
     /// exists (CI/sandbox without lavapipe).
     async fn offscreen() -> Option<Renderer> {
-        Renderer::new_offscreen((64, 64)).await.ok()
+        let renderer = Renderer::new_offscreen((64, 64)).await.ok()?;
+        eprintln!(
+            "offscreen GPU test running on adapter-backed device (size {:?})",
+            renderer.size()
+        );
+        Some(renderer)
     }
 
     /// Creates the RGBA8 render target for offscreen tests.
