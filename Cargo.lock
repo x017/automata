@@ -168,6 +168,7 @@ version = "0.1.0"
 dependencies = [
  "kira",
  "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]

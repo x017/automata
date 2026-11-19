@@ -93,6 +93,29 @@ fn tween_of(seconds: f64) -> Tween {
     }
 }
 
+/// Steps the silent backend forward by `delta_seconds` of audio.
+fn pump_silent(
+    manager: &mut AudioManager<kira::backend::mock::MockBackend>,
+    sample_rate: u32,
+    delta_seconds: f64,
+) {
+    if delta_seconds <= 0.0 {
+        return;
+    }
+    let backend = manager.backend_mut();
+    // The renderer processes in fixed buffers of `internal_buffer_size` (128
+    // by default). Step in whole buffers to cover `delta_seconds`.
+    let buffer = 128.0_f64;
+    let frames = delta_seconds * f64::from(sample_rate);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    // `frames` is positive and far below usize range for any real frame.
+    let steps = ((frames / buffer).ceil().max(1.0)) as usize;
+    for _ in 0..steps {
+        backend.on_start_processing();
+        backend.process();
+    }
+}
+
 /// Options for [`AudioEngine::play`].
 #[derive(Debug, Clone, Copy)]
 pub struct PlayOptions<'a> {
@@ -122,15 +145,32 @@ impl<'a> PlayOptions<'a> {
     }
 }
 
-/// The engine's audio system. Owns the kira manager and every live sound.
+/// The audio system. Owns the kira manager and every live sound.
+///
+/// The manager is either a real device backend (with the `cpal` feature) or a
+/// silent backend. With `cpal` enabled but no output device available (a
+/// headless CI box, for example), construction falls back to the silent
+/// backend so the engine never panics and game code paths stay identical.
 pub struct AudioEngine {
-    manager: AudioManager<kira::DefaultBackend>,
+    manager: Manager,
     /// Live sounds keyed by id.
     sounds: HashMap<u64, StaticSoundHandle>,
     /// Next sound id.
     next_id: u64,
-    /// Sample rate the (silent) backend runs at; drives the frame pump.
+    /// Sample rate the silent backend runs at; drives the frame pump.
     sample_rate: u32,
+}
+
+/// The audio manager, over whichever backend is active.
+///
+/// Both variants are boxed: the managers are large, so boxing keeps the enum
+/// small and its variants uniform in size.
+enum Manager {
+    /// Real device output (only present with the `cpal` feature).
+    #[cfg(feature = "cpal")]
+    Device(Box<AudioManager<kira::backend::cpal::CpalBackend>>),
+    /// Silent backend: no device, deterministic advancement.
+    Silent(Box<AudioManager<kira::backend::mock::MockBackend>>),
 }
 
 impl fmt::Debug for AudioEngine {
@@ -138,6 +178,7 @@ impl fmt::Debug for AudioEngine {
         f.debug_struct("AudioEngine")
             .field("sounds", &self.sounds.len())
             .field("sample_rate", &self.sample_rate)
+            .field("backend", &self.backend_name())
             .finish_non_exhaustive()
     }
 }
@@ -151,78 +192,111 @@ impl Default for AudioEngine {
 impl AudioEngine {
     /// Creates the audio engine with a default configuration.
     ///
-    /// With the `cpal` feature this opens the default output device; otherwise
-    /// it starts the silent backend at 44 100 Hz.
+    /// With the `cpal` feature this opens the default output device, falling
+    /// back to the silent backend if no device is available; without `cpal` it
+    /// starts the silent backend directly at 44 100 Hz.
     #[must_use]
     pub fn new() -> Self {
         Self::with_sample_rate(44_100)
     }
 
-    /// Creates the audio engine, overriding the (silent-backend) sample rate.
+    /// Creates the audio engine, overriding the silent-backend sample rate.
     ///
     /// The sample rate only drives the silent backend's deterministic
-    /// advancement; a real device reports its own rate.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the audio manager cannot be created (e.g. the `cpal` backend
-    /// fails to open an output device).
+    /// advancement; a real device reports its own rate. Never panics: if the
+    /// device backend cannot be created the engine silently falls back.
     #[must_use]
     pub fn with_sample_rate(sample_rate: u32) -> Self {
-        let manager = AudioManager::<kira::DefaultBackend>::new(Self::settings(sample_rate))
-            .expect("failed to create the audio manager");
         Self {
-            manager,
+            manager: Self::manager(sample_rate),
             sounds: HashMap::new(),
             next_id: 1,
             sample_rate,
         }
     }
 
-    #[cfg(feature = "cpal")]
-    fn settings(_sample_rate: u32) -> AudioManagerSettings<kira::DefaultBackend> {
-        // The cpal backend opens the device itself; its settings are defaulted.
-        AudioManagerSettings::default()
+    /// The active backend name (`"cpal"` or `"silent"`).
+    #[must_use]
+    pub fn backend_name(&self) -> &'static str {
+        match &self.manager {
+            #[cfg(feature = "cpal")]
+            Manager::Device(_) => "cpal",
+            Manager::Silent(_) => "silent",
+        }
     }
 
-    #[cfg(not(feature = "cpal"))]
-    fn settings(sample_rate: u32) -> AudioManagerSettings<kira::DefaultBackend> {
-        AudioManagerSettings {
+    /// Builds the manager: real device when possible, silent otherwise.
+    fn manager(sample_rate: u32) -> Manager {
+        #[cfg(feature = "cpal")]
+        {
+            let settings = AudioManagerSettings::default();
+            match AudioManager::<kira::backend::cpal::CpalBackend>::new(settings) {
+                Ok(manager) => return Manager::Device(Box::new(manager)),
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "no audio output device; falling back to the silent backend"
+                    );
+                }
+            }
+        }
+        Manager::Silent(Self::silent_manager(sample_rate))
+    }
+
+    fn silent_manager(sample_rate: u32) -> Box<AudioManager<kira::backend::mock::MockBackend>> {
+        let settings = AudioManagerSettings {
             backend_settings: kira::backend::mock::MockBackendSettings { sample_rate },
             ..AudioManagerSettings::default()
+        };
+        // The mock backend cannot fail to initialize.
+        Box::new(
+            AudioManager::<kira::backend::mock::MockBackend>::new(settings)
+                .expect("failed to create the silent audio manager"),
+        )
+    }
+
+    /// The silent manager, when the silent backend is active.
+    #[cfg(feature = "cpal")]
+    fn silent_manager_mut(
+        &mut self,
+    ) -> Option<&mut AudioManager<kira::backend::mock::MockBackend>> {
+        match &mut self.manager {
+            Manager::Device(_) => None,
+            Manager::Silent(manager) => Some(&mut **manager),
         }
+    }
+
+    /// The silent manager (the only backend without the `cpal` feature).
+    #[cfg(not(feature = "cpal"))]
+    fn silent_manager_mut(&mut self) -> &mut AudioManager<kira::backend::mock::MockBackend> {
+        let Manager::Silent(manager) = &mut self.manager;
+        manager
     }
 
     /// Advances the silent backend by one frame's worth of audio.
     ///
-    /// Only meaningful without the `cpal` feature (where the backend is a
-    /// mock); with a real device this is a no-op. The frame loop calls this
-    /// once per frame so playback positions advance deterministically.
-    pub fn pump_frame(&mut self, delta_seconds: f64) {
-        self.pump(delta_seconds);
-    }
-
-    #[cfg(not(feature = "cpal"))]
-    fn pump(&mut self, delta_seconds: f64) {
-        if delta_seconds <= 0.0 {
-            return;
-        }
-        let backend = self.manager.backend_mut();
-        // The renderer processes in fixed buffers of `internal_buffer_size`
-        // (128 by default). Step in whole buffers to cover `delta_seconds`.
-        let buffer = 128.0_f64;
-        let frames = delta_seconds * f64::from(self.sample_rate);
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        // `frames` is positive and far below usize range for any real frame.
-        let steps = ((frames / buffer).ceil().max(1.0)) as usize;
-        for _ in 0..steps {
-            backend.on_start_processing();
-            backend.process();
-        }
-    }
-
+    /// Only meaningful on the silent backend; with a real device this is a
+    /// no-op. The frame loop calls this once per frame so playback positions
+    /// advance deterministically.
     #[cfg(feature = "cpal")]
-    fn pump(&mut self, _delta_seconds: f64) {}
+    pub fn pump_frame(&mut self, delta_seconds: f64) {
+        let sample_rate = self.sample_rate;
+        let Some(manager) = self.silent_manager_mut() else {
+            return; // real device backend: it advances itself
+        };
+        pump_silent(manager, sample_rate, delta_seconds);
+    }
+
+    /// Advances the silent backend by one frame's worth of audio.
+    ///
+    /// Without the `cpal` feature the silent backend is the only one, so this
+    /// always pumps. The frame loop calls this once per frame so playback
+    /// positions advance deterministically.
+    #[cfg(not(feature = "cpal"))]
+    pub fn pump_frame(&mut self, delta_seconds: f64) {
+        let sample_rate = self.sample_rate;
+        pump_silent(self.silent_manager_mut(), sample_rate, delta_seconds);
+    }
 
     /// Loads a sound file and starts playing it.
     ///
@@ -251,10 +325,12 @@ impl AudioEngine {
         if looped {
             data = data.loop_region(..);
         }
-        let handle = self
-            .manager
-            .play(data)
-            .map_err(|err| AudioError::Play(format!("{err}")))?;
+        let handle = match &mut self.manager {
+            #[cfg(feature = "cpal")]
+            Manager::Device(manager) => manager.play(data),
+            Manager::Silent(manager) => manager.play(data),
+        }
+        .map_err(|err| AudioError::Play(format!("{err}")))?;
         let id = self.next_id;
         self.next_id += 1;
         self.sounds.insert(id, handle);
@@ -296,9 +372,12 @@ impl AudioEngine {
     /// Sets the master volume (linear amplitude; `1.0` = unity).
     pub fn set_master_volume(&mut self, volume: f64, fade_seconds: f64) {
         let db = linear_to_decibels(volume);
-        self.manager
-            .main_track()
-            .set_volume(db, tween_of(fade_seconds));
+        let tween = tween_of(fade_seconds);
+        match &mut self.manager {
+            #[cfg(feature = "cpal")]
+            Manager::Device(manager) => manager.main_track().set_volume(db, tween),
+            Manager::Silent(manager) => manager.main_track().set_volume(db, tween),
+        }
     }
 
     /// Stops every live sound and clears the registry.
