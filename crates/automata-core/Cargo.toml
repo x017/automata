@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 automata-input.workspace = true
+automata-physics.workspace = true
 automata-renderer.workspace = true
 automata-scene.workspace = true
 glam.workspace = true

@@ -30,7 +30,7 @@ thiserror = "2"
 winit = "0.30"
 wgpu = "30"
 pollster = "1.0"
-glam = "0.34"
+glam = "0.33"
 bytemuck = { version = "1", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 naga = { version = "30", default-features = false }

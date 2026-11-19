@@ -49,6 +49,9 @@ pub struct WorldState {
     scene: Scene,
     events: Events,
     resources: Resources,
+    physics3d: automata_physics::PhysicsWorld3D,
+    physics2d: automata_physics::PhysicsWorld2D,
+    physics_accumulator: f32,
 }
 
 impl WorldState {
@@ -87,6 +90,66 @@ impl WorldState {
     pub fn resources_mut(&mut self) -> &mut Resources {
         &mut self.resources
     }
+
+    /// The 3D physics world (queries and impulses; stepping is engine-side).
+    #[must_use]
+    pub fn physics3d(&mut self) -> &mut automata_physics::PhysicsWorld3D {
+        &mut self.physics3d
+    }
+
+    /// The 2D physics world (queries and impulses; stepping is engine-side).
+    #[must_use]
+    pub fn physics2d(&mut self) -> &mut automata_physics::PhysicsWorld2D {
+        &mut self.physics2d
+    }
+
+    /// Step both physics worlds at the fixed timestep until `delta` seconds
+    /// of accumulated frame time are consumed. Collision and contact-force
+    /// events are pushed onto the event queue.
+    pub(crate) fn step_physics(&mut self, delta: f32, timestep: f32) {
+        if timestep <= 0.0 {
+            return;
+        }
+        self.physics_accumulator += delta;
+        // Cap catch-up steps so a long hitch can't spiral.
+        const MAX_STEPS: u32 = 4;
+        let mut steps = 0;
+        while self.physics_accumulator >= timestep && steps < MAX_STEPS {
+            self.physics_accumulator -= timestep;
+            steps += 1;
+
+            {
+                let scene = self.scene.world_mut();
+                self.physics3d.sync_from_scene(scene);
+                self.physics3d.move_characters(scene, timestep);
+            }
+            let tick3d = {
+                let scene = self.scene.world_mut();
+                self.physics3d.step(scene, timestep)
+            };
+            self.push_physics_events(tick3d);
+
+            {
+                let scene = self.scene.world_mut();
+                self.physics2d.sync_from_scene(scene);
+                self.physics2d.move_characters(scene, timestep);
+            }
+            let tick2d = {
+                let scene = self.scene.world_mut();
+                self.physics2d.step(scene, timestep)
+            };
+            self.push_physics_events(tick2d);
+        }
+    }
+
+    fn push_physics_events(&mut self, tick: automata_physics::PhysicsTick) {
+        for event in tick.collisions {
+            self.events.send(event);
+        }
+        for event in tick.contact_forces {
+            self.events.send(event);
+        }
+    }
 }
 
 /// Per-frame context handed to the update callback.
@@ -98,6 +161,7 @@ impl WorldState {
 pub struct AppContext<'a> {
     time: &'a Time,
     input: &'a InputState,
+    gamepads: &'a automata_input::Gamepads,
     draw: &'a mut automata_renderer::DrawList,
     renderer: Option<&'a automata_renderer::Renderer>,
     world: &'a mut WorldState,
@@ -109,6 +173,7 @@ impl<'a> AppContext<'a> {
     pub(crate) fn new(
         time: &'a Time,
         input: &'a InputState,
+        gamepads: &'a automata_input::Gamepads,
         draw: &'a mut automata_renderer::DrawList,
         renderer: Option<&'a automata_renderer::Renderer>,
         world: &'a mut WorldState,
@@ -117,6 +182,7 @@ impl<'a> AppContext<'a> {
         Self {
             time,
             input,
+            gamepads,
             draw,
             renderer,
             world,
@@ -134,6 +200,25 @@ impl<'a> AppContext<'a> {
     #[must_use]
     pub fn input(&self) -> &InputState {
         self.input
+    }
+
+    /// Gamepad state for the current frame.
+    #[must_use]
+    pub fn gamepads(&self) -> &automata_input::Gamepads {
+        self.gamepads
+    }
+
+    /// The 3D physics world: raycasts, impulses, queries. Stepping happens
+    /// at the engine's fixed timestep before the update runs.
+    #[must_use]
+    pub fn physics3d(&mut self) -> &mut automata_physics::PhysicsWorld3D {
+        self.world.physics3d()
+    }
+
+    /// The 2D physics world: raycasts, impulses, queries.
+    #[must_use]
+    pub fn physics2d(&mut self) -> &mut automata_physics::PhysicsWorld2D {
+        self.world.physics2d()
     }
 
     /// The frame's draw list: record sprites and meshes here.
@@ -323,6 +408,7 @@ impl Application {
     /// recorded into a throwaway list so game code runs identically.
     fn run_headless(&mut self, mut update: impl FnMut(&mut AppContext<'_>)) {
         let mut input = InputState::new();
+        let mut gamepads = automata_input::Gamepads::new();
         let mut draw = automata_renderer::DrawList::new();
         let mut frame_start = Instant::now();
 
@@ -333,9 +419,18 @@ impl Application {
             self.world.events.update();
             debug!(frame = self.time.frame_count(), "frame begin");
 
+            gamepads.update();
+            for event in gamepads.drain_events() {
+                self.world.events.send(event);
+            }
+            if let Some(timestep) = self.config.physics_timestep {
+                self.world.step_physics(delta.as_secs_f32(), timestep);
+            }
+
             update(&mut AppContext::new(
                 &self.time,
                 &input,
+                &gamepads,
                 &mut draw,
                 None, // no renderer in headless mode
                 &mut self.world,

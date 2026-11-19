@@ -1,26 +1,37 @@
 //! AUTOMATA input system.
 //!
-//! [`InputState`] collects raw window events into a per-frame input snapshot
-//! that game code queries during its update:
+//! Two layers:
 //!
-//! 1. The window runtime feeds it events between frames
-//!    ([`InputState::handle_window_event`]).
-//! 2. Game logic queries it through [`AppContext`](https://docs.rs) during
-//!    the update (`pressed`, `just_pressed`, `cursor_position`, ...).
-//! 3. The main loop calls [`InputState::end_frame`] after each update,
-//!    clearing per-frame state (`just_pressed`, scroll deltas).
+//! - **Device state.** [`InputState`] collects keyboard/mouse events into a
+//!   per-frame snapshot; [`Gamepads`] does the same for gamepads. The main
+//!   loop feeds them events between frames and clears them after each
+//!   update.
+//! - **Action mapping.** [`ActionMap`] binds named actions ("jump") and
+//!   axes ("move_x") to physical controls so game code is device-independent
+//!   and controls are remappable at runtime.
 //!
-//! Keyboard, mouse, and gamepad *mapping* (binding actions to inputs) is a
-//! Phase 6 concern built on top of this crate.
+//! Gamepad and action events flow onto the engine's event stream as
+//! [`GamepadEvent`]s; keyboard/mouse stay poll-based (pressed/just_pressed).
 //!
 //! The keyboard/mouse key types are currently re-exports of `winit`'s
-//! well-established W3C-based enums. They will migrate to engine-native types
-//! when the Python binding layer needs them decoupled from the windowing
-//! backend; call sites should always refer to them through this crate.
+//! well-established W3C-based enums; call sites should always refer to them
+//! through this crate.
 
+mod gamepad;
+mod mapping;
 mod state;
 
+pub use gamepad::{GamepadAxis, GamepadButton, GamepadEvent, GamepadId, Gamepads};
+pub use mapping::{ActionMap, AxisBinding, Binding};
 pub use state::InputState;
 
 pub use winit::event::{ElementState, MouseButton};
 pub use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+
+/// Everything you need for input: `use automata_input::prelude::*`.
+pub mod prelude {
+    pub use crate::gamepad::{GamepadAxis, GamepadButton, GamepadEvent, GamepadId, Gamepads};
+    pub use crate::mapping::{ActionMap, AxisBinding, Binding};
+    pub use crate::state::InputState;
+    pub use crate::{ElementState, KeyCode, ModifiersState, MouseButton, PhysicalKey};
+}

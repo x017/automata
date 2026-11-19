@@ -55,6 +55,7 @@ pub(super) fn run_windowed(
         world,
         quit_requested,
         input: InputState::new(),
+        gamepads: automata_input::Gamepads::new(),
         window: None,
         renderer: None,
         draw: DrawList::new(),
@@ -80,6 +81,7 @@ struct WinitDriver<'a, F: FnMut(&mut AppContext<'_>)> {
     world: &'a mut WorldState,
     quit_requested: &'a mut bool,
     input: InputState,
+    gamepads: automata_input::Gamepads,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     draw: DrawList,
@@ -102,10 +104,19 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
         self.world.events_mut().update();
         debug!(frame = self.time.frame_count(), "frame begin");
 
+        self.gamepads.update();
+        for event in self.gamepads.drain_events() {
+            self.world.events_mut().send(event);
+        }
+        if let Some(timestep) = self.config.physics_timestep {
+            self.world.step_physics(delta.as_secs_f32(), timestep);
+        }
+
         let renderer_ref = self.renderer.as_ref();
         (self.update)(&mut AppContext::new(
             self.time,
             &self.input,
+            &self.gamepads,
             &mut self.draw,
             renderer_ref,
             self.world,

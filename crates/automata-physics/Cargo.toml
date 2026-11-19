@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 automata-scene = { workspace = true }
 glam = { workspace = true }
+hecs = { workspace = true }
 rapier2d = { workspace = true }
 rapier3d = { workspace = true }
 tracing = { workspace = true }

@@ -36,6 +36,14 @@ pub struct EngineConfig {
     /// Headless mode runs the same loop without a window, GPU surface, or
     /// input events — the mode tests, CI, and headless tooling should use.
     pub window_mode: WindowMode,
+
+    /// Fixed physics timestep, in seconds (default 1/60).
+    ///
+    /// The physics world steps at this rate regardless of frame rate: the
+    /// loop accumulates real time and runs as many fixed steps as fit,
+    /// keeping simulation deterministic. Set to `None` to disable the
+    /// physics step entirely (e.g. turn-based games).
+    pub physics_timestep: Option<f32>,
 }
 
 impl EngineConfig {
@@ -58,6 +66,7 @@ impl Default for EngineConfig {
             log_filter: DEFAULT_LOG_FILTER.to_owned(),
             target_fps: Some(60),
             window_mode: WindowMode::default(),
+            physics_timestep: Some(1.0 / 60.0),
         }
     }
 }

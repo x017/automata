@@ -45,6 +45,35 @@ replace-with = "vendored-sources"
 directory = "vendor"
 EOF
 
+# gilrs (gamepad input) links libudev on Linux via pkg-config. Sandboxes have
+# the runtime library but neither the dev symlink nor pkg-config, so provide
+# both locally. CI installs libudev-dev instead.
+if [ -e /usr/lib/x86_64-linux-gnu/libudev.so.1 ]; then
+    echo ">> Setting up libudev link shim (~/.local)"
+    mkdir -p "${HOME}/.local/bin" "${HOME}/.local/lib"
+    ln -sf /usr/lib/x86_64-linux-gnu/libudev.so.1 "${HOME}/.local/lib/libudev.so"
+    cat > "${HOME}/.local/bin/pkg-config" <<'EOF'
+#!/bin/sh
+# Minimal pkg-config shim for offline sandboxes (answers for libudev only).
+want_libs=""
+for arg in "$@"; do
+  case "$arg" in
+    --libs) want_libs="1" ;;
+    --modversion) echo 251; exit 0 ;;
+    --variable=*) echo /usr; exit 0 ;;
+    --exists) exit 0 ;;
+  esac
+done
+[ -n "$want_libs" ] && printf '%s\n' "-L${HOME}/.local/lib -ludev"
+exit 0
+EOF
+    chmod +x "${HOME}/.local/bin/pkg-config"
+    echo "   Add to your environment:"
+    echo "   export PATH=\"\$HOME/.local/bin:\$PATH\""
+    echo "   export PKG_CONFIG=\"\$HOME/.local/bin/pkg-config\""
+    echo "   export LIBRARY_PATH=\"\$HOME/.local/lib\""
+fi
+
 echo
 echo ">> Done. Activate the toolchain with:"
 echo "   export PATH=\"${TOOLCHAIN_HOME}/stable-x86_64-unknown-linux-gnu/bin:\$PATH\""
