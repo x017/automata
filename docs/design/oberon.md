@@ -113,7 +113,17 @@ Recorded decisions (both stand):
 Oberon consumes only public Python API. Four engine additions unlock it,
 in order:
 
-### 4.1 Scene serialization — RON *(decided)*
+> **Status for implementers:** M0 is shipped; M1–M2 are **contracts, not
+> yet code**. Scaffold against them with mocks — `render_frame` can be a
+> generated gradient `bytes` object, `step` a no-op — and the real engine
+> drops in without Oberon changes.
+>
+> **Dev setup for the Oberon repo:** `pip install nexa-ui` (tested:
+> 1.4.0), and the automata wheel built from this repo —
+> `python scripts/build.py` then `pip install target/wheels/*.whl`. Pin
+> both in `pyproject.toml`.
+
+### 4.1 Scene serialization — RON *(decided, shipped)*
 
 Scenes persist as **RON** (Rust Object Notation): text, comments, trailing
 commas, struct-like syntax, clean git diffs. Same choice Bevy made.
@@ -304,3 +314,27 @@ files, photo mode, debug cameras). M3+ live in the Oberon app.
 - No visual scripting / node graphs (far future, separate decision).
 - No asset *creation* (meshes/textures come from Blender etc.; Oberon
   arranges, it doesn't model).
+
+## 13. nexa integration notes (verified against nexa-ui 1.4.0)
+
+Hard-won facts from the feasibility pass — read before writing M3:
+
+- **Drive frames manually.** `ui.run(headless=True)` paces frames for idle
+  CPU savings; a live viewport needs the manual loop:
+  `ui.UI(width, height, renderer=...)`, `with ctx.frame(): ...` per tick.
+  The Oberon tick order is: pump nexa input → `game.step(dt)` (edit mode:
+  paused) → `game.render_frame(size)` → `ctx.image_destroy/create/image`.
+- **Image path:** `ctx.image_create(w, h, rgba_bytes)` →
+  `ctx.image(tex, width=, height=)`; destroy the old texture after
+  creating the new one. ~970 fps at 720p headless — not a bottleneck.
+- **Widget map:** layout = `dockspace`; hierarchy = `tree_table`;
+  inspector = `inspector` + `inspector_group`; console = `LogBuffer`;
+  project panel = `file_browser`; gizmo/overlay hit areas = `ctx.canvas`
+  with its `paint(ui, rect)` callback.
+- **Theming (dark white sci-fi):** `ThemeMode.DARK`, near-black surfaces,
+  off-white foreground (logo palette: paper white on true black), one
+  `Accent` used sparingly; OKLCH token overrides for the exact grays.
+- **Testing:** headless `SoftwareRenderer` + `ctx.render_to_png(path)`
+  gives deterministic PNG snapshot tests in CI from day one.
+- **Idle cost:** `ctx.request_redraw()` only when dirty — the editor
+  sleeps at 0% CPU when nothing moves.
