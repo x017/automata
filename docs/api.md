@@ -3,13 +3,13 @@
 ## Python API
 
 The Python API — AUTOMATA's primary user-facing interface — landed in
-**Phase 5** (PyO3 bindings, crate `automata-python`). Build and install it
-with maturin:
+**Phase 5** (PyO3 bindings, crate `automata-python`). Build and install
+everything with one script:
 
 ```console
-pip install maturin
-maturin build --release --manifest-path crates/automata-python/Cargo.toml
-pip install target/wheels/automata_engine-*.whl
+python scripts/build.py            # engine + Python wheel + install
+python scripts/build.py --all      # also run the gates and test suites
+python scripts/build.py --help     # all stages and flags
 ```
 
 ### Example
@@ -39,6 +39,51 @@ def on_hit(payload):
 
 game.run()  # uses the @game.update callback; game.run(fn) works too
 ```
+
+### Object-oriented style
+
+`Game`, `Scene`, and `Entity` are subclassable. Engine options are class
+attributes; lifecycle hooks are methods; methods named `on_<event>` are
+auto-registered as event handlers:
+
+```python
+import automata as at
+
+class Player(at.Entity):
+    def __init__(self):
+        super().__init__("player")
+        self.add(at.Transform(position=(0.0, 1.15, 0.0)))
+        self.add(at.RigidBody.kinematic_velocity())
+        self.add(at.Collider3D.capsule(0.5, 0.4))
+        self.add(at.CharacterController(snap_to_ground=0.5))
+        self.add(at.CharacterVelocity())
+
+class Level(at.Scene):
+    def __init__(self):
+        super().__init__()
+        self.add(Player())
+
+class Platformer(at.Game):
+    title = "Platformer"
+    resolution = (1280, 720)
+
+    def on_start(self):                # once, before the first frame
+        self.load_scene(Level())
+
+    def on_update(self, ctx):          # every frame
+        player = ctx.scene["player"]
+        if ctx.input.just_pressed("escape"):
+            ctx.quit()
+
+    def on_hit(self, payload):         # every readable "hit" event
+        print("hit!", payload)
+
+Platformer().run()
+```
+
+The decorator and procedural styles keep working unchanged; constructor
+keyword arguments override class attributes. See
+`examples/python/oop_platformer.py` for a complete game.
 
 The surface supports OO style (above), procedural style (plain functions
 passed to `game.run(update)`), and functional style (`game.run(lambda ctx:

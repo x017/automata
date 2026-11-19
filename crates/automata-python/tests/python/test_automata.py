@@ -667,3 +667,142 @@ def test_character_velocity_setter_validates():
 
     game.run(update)
     assert seen == {"via_component": True, "bad_type": True}
+
+
+# -- OOP game style -----------------------------------------------------------
+
+
+def test_oop_game_subclass_full_lifecycle():
+    log = []
+
+    class Platformer(at.Game):
+        title = "oop test"
+        headless = True
+        target_fps = 60
+
+        def on_start(self):
+            self.load_scene(at.Scene().add(at.Entity("marker")))
+            log.append("start")
+
+        def on_update(self, ctx):
+            log.append(ctx.time.frame)
+            if ctx.time.frame == 1:
+                ctx.events.send("hit", {"dmg": 5})
+
+        def on_hit(self, payload):
+            log.append(("hit", payload["dmg"]))
+
+    game = Platformer()
+    frames = game.run(max_frames=3)
+    assert frames == 3
+    # on_start once, three update ticks, the event lands the next frame.
+    assert log == ["start", 1, 2, ("hit", 5), 3]
+    assert game.state == "shutdown"
+
+
+def test_oop_constructor_kwargs_beat_class_attributes():
+    class Headed(at.Game):
+        headless = True
+
+    # Constructing must not error either way; there is no window in CI, so
+    # only assert the headless paths actually run.
+    game = Headed(title="kwarg title")
+    frames = game.run(lambda ctx: ctx.quit())
+    assert frames == 1
+
+    # Direct construction is strict about option names; subclasses may add
+    # their own constructor parameters.
+    with pytest.raises(TypeError, match="unknown Game options"):
+        at.Game(no_such_option=True)
+
+
+def test_oop_on_update_not_overridden_still_raises():
+    game = at.Game(headless=True)
+    with pytest.raises(TypeError, match="no update callback"):
+        game.run()
+
+
+def test_entity_and_scene_subclasses():
+    class Player(at.Entity):
+        def __init__(self, name="player"):
+            super().__init__(name)
+            self.add(at.Transform(position=(1.0, 2.0, 3.0)))
+
+    class Level(at.Scene):
+        def __init__(self):
+            super().__init__()
+            self.add(Player())
+
+    level = Level()
+    assert len(level) == 1
+
+    game = make_game()
+    game.load_scene(level)
+    seen = {}
+
+    def update(ctx):
+        player = ctx.scene["player"]
+        seen["pos"] = player.transform.position
+        ctx.quit()
+
+    game.run(update)
+    assert seen["pos"] == (1.0, 2.0, 3.0)
+
+
+def test_entity_rename_and_plain_constructor():
+    entity = at.Entity("cube")
+    assert entity.name == "cube"
+    entity.name = "renamed"
+    assert entity.name == "renamed"
+    entity.name = None
+    assert entity.name is None
+
+
+def test_decorator_style_still_wins_over_on_update():
+    order = []
+
+    class Both(at.Game):
+        headless = True
+
+        def on_update(self, ctx):
+            order.append("method")
+
+    game = Both()
+
+    @game.update
+    def tick(ctx):
+        order.append("decorator")
+
+    game.run(max_frames=2)
+    assert order == ["decorator", "decorator"]
+
+
+def test_entity_subclass_with_own_constructor_params():
+    class Crate(at.Entity):
+        def __init__(self, position=(0.0, 0.0, 0.0)):
+            super().__init__()
+            self.add(at.Transform(position=position))
+
+    crate = Crate(position=(2.0, 1.0, 0.0))
+    assert crate.name is None
+
+    # Direct construction stays strict: typos must not pass silently.
+    at.Scene().add(crate)  # subclass instances stage like plain entities
+    with pytest.raises(TypeError, match="unexpected Entity arguments"):
+        at.Entity("cube", bogus=1)
+    with pytest.raises(TypeError, match="Scene takes no arguments"):
+        at.Scene(nope=1)
+
+
+def test_game_subclass_with_own_constructor_params():
+    class Difficulty(at.Game):
+        headless = True
+
+        def __init__(self, difficulty="normal"):
+            self.difficulty = difficulty
+            super().__init__()
+
+    game = Difficulty(difficulty="hard")
+    assert game.difficulty == "hard"
+    frames = game.run(lambda ctx: ctx.quit())
+    assert frames == 1

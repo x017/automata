@@ -58,6 +58,15 @@ impl PyEntity {
         self.staged.name.clone()
     }
 
+    /// Sets the entity's name. Staging is plain data, so renaming before
+    /// the entity is spawned is always safe. (Also used by the Python
+    /// `Entity` wrapper so subclass constructors can pass the name through
+    /// `super().__init__(name)`.)
+    #[setter]
+    fn set_name(&mut self, name: Option<String>) {
+        self.staged.name = name;
+    }
+
     /// Attaches a component (`Transform`, `Camera3D`, `Camera2D`). Returns
     /// the entity so calls can chain.
     fn add<'py>(

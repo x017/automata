@@ -11,23 +11,29 @@ acceptance criteria — lives in [`build.md`](build.md).
 
 ## Status
 
-**Phase 2 — Window and Runtime** ✅ (Phase 1: Project Foundation ✅)
+**Phases 1–6 complete** ✅ — project foundation, windowed/headless runtime,
+wgpu rendering, scene/events core, Python bindings, and physics + input.
 
-- Cargo workspace with shared dependency and lint configuration
-- `automata-core`: application lifecycle (`Created → Running → Shutdown`),
-  frame timekeeping, `tracing`-based logging, `thiserror`-based error handling
-- Windowed runtime driven by the **winit** event loop, plus a headless mode
-  for tests/CI (`WindowMode::Headless`)
-- `automata-input`: per-frame keyboard/mouse state (`pressed` /
-  `just_pressed` / scroll / cursor / modifiers)
-- `automata-renderer`: **wgpu** device, surface, and frame presentation
-  (clear color) with transient surface-error recovery
-- Frame pacing via `ControlFlow::WaitUntil` + configurable `target_fps`
-- Testing infrastructure: unit, integration, and doc tests; CI enforces
-  fmt, Clippy (`-D warnings`), tests, and docs
+- Rust workspace: `automata-core` (lifecycle, fixed-timestep loop),
+  `automata-scene` (hecs ECS, events, resources), `automata-renderer`
+  (wgpu 2D/3D), `automata-input` (keyboard/mouse/gamepad, action mapping),
+  `automata-physics` (Rapier 2D/3D, raycasts, character controllers),
+  `automata-python` (PyO3 bindings)
+- Python API: decorator, procedural, and OOP (subclassing) styles —
+  see [`docs/api.md`](docs/api.md) and [`examples/python/`](examples/python)
+- CI enforces fmt, Clippy (`-D warnings`), tests, docs, and the Python
+  test suite on every push
 
-Next up: **Phase 3 — Rendering Foundation** (shaders, buffers, textures,
-materials, cameras, 2D/3D rendering).
+## Building
+
+```console
+python scripts/build.py            # engine + Python wheel + install
+python scripts/build.py --all      # also run gates and tests
+```
+
+Requires a Rust toolchain, Python 3.11+, and (on Linux) `patchelf` for
+wheel repair.
+
 
 ## Quickstart
 
@@ -54,16 +60,16 @@ automata/
 ├── build.md                # Project specification (read this first)
 ├── crates/
 │   ├── automata-core/      # Engine core: lifecycle, time, window runtime
-│   ├── automata-input/     # Input event collection and state
-│   └── automata-renderer/  # wgpu device, surface, presentation
+│   ├── automata-scene/     # ECS scene graph, events, resources
+│   ├── automata-renderer/  # wgpu device, surface, presentation
+│   ├── automata-input/     # Keyboard/mouse/gamepad state, action mapping
+│   ├── automata-physics/   # Rapier 2D/3D worlds, raycasts, controllers
+│   └── automata-python/    # PyO3 bindings + the `automata` package
 ├── docs/                   # Architecture, development, and API documentation
-├── scripts/                # Development environment helpers
+├── examples/python/        # Runnable example games (headless-capable)
+├── scripts/                # build.py (one-shot build) and env helpers
 └── tests/                  # (Cross-crate integration tests, when needed)
 ```
-
-The remaining subsystem crates (`automata-scene`, `automata-physics`, …) and
-the `python/` package are introduced in later phases, once their boundaries
-become meaningful (see `build.md` section 9).
 
 ## License
 
