@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/automata-logo.png" alt="AUTOMATA — dark white sci-fi" width="480">
+</p>
+
 # AUTOMATA
 
 **A general-purpose 2D & 3D game engine for independent game development.**
