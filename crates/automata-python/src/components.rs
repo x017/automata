@@ -407,7 +407,7 @@ fn parse_obj(source: &str) -> Result<MeshData, String> {
             "v" => {
                 let values = words
                     .take(3)
-                    .map(|value| value.parse::<f32>())
+                    .map(str::parse::<f32>)
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|_| format!("line {line_number}: invalid vertex position"))?;
                 if values.len() != 3 || values.iter().any(|value| !value.is_finite()) {
@@ -420,7 +420,7 @@ fn parse_obj(source: &str) -> Result<MeshData, String> {
             "vn" => {
                 let values = words
                     .take(3)
-                    .map(|value| value.parse::<f32>())
+                    .map(str::parse::<f32>)
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|_| format!("line {line_number}: invalid vertex normal"))?;
                 if values.len() != 3 || values.iter().any(|value| !value.is_finite()) {
@@ -433,7 +433,7 @@ fn parse_obj(source: &str) -> Result<MeshData, String> {
             "vt" => {
                 let values = words
                     .take(2)
-                    .map(|value| value.parse::<f32>())
+                    .map(str::parse::<f32>)
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|_| format!("line {line_number}: invalid texture coordinate"))?;
                 if values.len() != 2 || values.iter().any(|value| !value.is_finite()) {
@@ -640,10 +640,10 @@ mod tests {
 
         assert_eq!(mesh.vertices.len(), 6);
         assert_eq!(mesh.indices, vec![0, 1, 2, 3, 4, 5]);
-        assert!(mesh
-            .vertices
-            .iter()
-            .all(|vertex| vertex.normal == [0.0, 0.0, 1.0]));
+        let normals_are_unit_z = mesh.vertices.iter().all(|vertex| {
+            glam::Vec3::from(vertex.normal).abs_diff_eq(glam::Vec3::Z, 1e-6)
+        });
+        assert!(normals_are_unit_z);
         assert_eq!(mesh.vertices[0].uv, [0.0, 0.0]);
         assert_eq!(mesh.vertices[5].uv, [0.0, 1.0]);
     }
