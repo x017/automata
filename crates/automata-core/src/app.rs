@@ -103,17 +103,45 @@ impl WorldState {
         &mut self.physics2d
     }
 
+    /// The 3D physics world, read-only (for frame snapshots).
+    #[must_use]
+    pub fn physics3d_ref(&self) -> &automata_physics::PhysicsWorld3D {
+        &self.physics3d
+    }
+
+    /// The 2D physics world, read-only.
+    #[must_use]
+    pub fn physics2d_ref(&self) -> &automata_physics::PhysicsWorld2D {
+        &self.physics2d
+    }
+
+    /// The physics worlds and scene, split-borrowed for frame views.
+    #[doc(hidden)]
+    pub fn physics_parts(
+        &mut self,
+    ) -> (
+        &mut automata_physics::PhysicsWorld3D,
+        &mut automata_physics::PhysicsWorld2D,
+        &mut Scene,
+    ) {
+        (&mut self.physics3d, &mut self.physics2d, &mut self.scene)
+    }
+
     /// Step both physics worlds at the fixed timestep until `delta` seconds
     /// of accumulated frame time are consumed. Collision and contact-force
     /// events are pushed onto the event queue.
     pub(crate) fn step_physics(&mut self, delta: f32, timestep: f32) {
+        const MAX_STEPS: u32 = 4;
         if timestep <= 0.0 {
             return;
         }
         self.physics_accumulator += delta;
-        // Cap catch-up steps so a long hitch can't spiral.
-        const MAX_STEPS: u32 = 4;
+        // Run whole fixed steps; the remainder carries over. Guarantee at
+        // least one step per frame so a fast loop never starves physics.
         let mut steps = 0;
+        if self.physics_accumulator < timestep {
+            self.physics_accumulator += timestep;
+        }
         while self.physics_accumulator >= timestep && steps < MAX_STEPS {
             self.physics_accumulator -= timestep;
             steps += 1;
@@ -206,6 +234,18 @@ impl<'a> AppContext<'a> {
     #[must_use]
     pub fn gamepads(&self) -> &automata_input::Gamepads {
         self.gamepads
+    }
+
+    /// The engine's world state (scene, events, resources, physics worlds).
+    #[must_use]
+    pub fn world_state(&self) -> &WorldState {
+        self.world
+    }
+
+    /// The engine's world state, mutably.
+    #[must_use]
+    pub fn world_state_mut(&mut self) -> &mut WorldState {
+        self.world
     }
 
     /// The 3D physics world: raycasts, impulses, queries. Stepping happens

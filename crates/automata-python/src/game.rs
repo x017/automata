@@ -107,6 +107,8 @@ impl PyGame {
 
         let quit: crate::context::QuitFlag = Rc::new(Cell::new(false));
         let writes: WriteQueue = Rc::new(RefCell::new(FrameWrites::default()));
+        let physics_queue: crate::physics::PhysicsQueue =
+            Rc::new(RefCell::new(crate::physics::PhysicsFrame::default()));
         let outbox: EventOutbox = Rc::new(RefCell::new(Vec::new()));
         let resources = Rc::clone(&self.resources);
         let mut update_error: Option<PyErr> = None;
@@ -117,6 +119,7 @@ impl PyGame {
                 update,
                 &quit,
                 &writes,
+                &physics_queue,
                 &outbox,
                 &resources,
                 &mut update_error,
@@ -148,10 +151,27 @@ fn run_python_frame(
     update: &Bound<'_, PyAny>,
     quit: &crate::context::QuitFlag,
     writes: &WriteQueue,
+    physics_queue: &crate::physics::PhysicsQueue,
     outbox: &EventOutbox,
     resources: &ResourceStore,
     update_error: &mut Option<PyErr>,
 ) {
+    let (physics, physics2d) = {
+        let world = ctx.world_state();
+        let scene_world = world.scene().world();
+        (
+            crate::physics::PyPhysics::snapshot(
+                world.physics3d_ref(),
+                scene_world,
+                Rc::clone(physics_queue),
+            ),
+            crate::physics::PyPhysics2D::snapshot(
+                world.physics2d_ref(),
+                scene_world,
+                Rc::clone(physics_queue),
+            ),
+        )
+    };
     let frame = FrameContext::new(
         FrameTime {
             delta: ctx.time().delta().as_secs_f64(),
@@ -163,6 +183,8 @@ fn run_python_frame(
         PyEvents::snapshot(ctx.events(), Rc::clone(outbox)),
         PyResources::new(Rc::clone(resources)),
         Rc::clone(quit),
+        physics,
+        physics2d,
     );
 
     let call_result = update.call1((frame,));
@@ -170,6 +192,10 @@ fn run_python_frame(
     // Writes recorded by the callback are applied even when it raised, so
     // error-recovery paths see a consistent world.
     apply_writes(ctx.scene(), writes);
+    {
+        let (w3, w2, _) = ctx.world_state_mut().physics_parts();
+        crate::physics::apply_physics_ops(w3, w2, physics_queue);
+    }
     PyEvents::flush(ctx.events(), outbox);
 
     if let Err(err) = call_result {

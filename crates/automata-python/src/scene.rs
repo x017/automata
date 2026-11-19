@@ -146,6 +146,21 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
             StagedComponent::Camera2D(c) => {
                 let _ = scene.world_mut().insert_one(id, *c);
             }
+            StagedComponent::RigidBody(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
+            StagedComponent::Collider3D(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
+            StagedComponent::Collider2D(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
+            StagedComponent::CharacterController(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
+            StagedComponent::CharacterVelocity(c) => {
+                let _ = scene.world_mut().insert_one(id, *c);
+            }
         }
     }
     id
@@ -303,6 +318,11 @@ impl EntityView {
             writes,
         }
     }
+
+    /// The entity's bit representation (for the physics views).
+    pub(crate) fn id_bits(&self) -> u64 {
+        self.id
+    }
 }
 
 #[pymethods]
@@ -371,7 +391,7 @@ fn extract_transform(obj: &Bound<'_, PyAny>) -> PyResult<Transform> {
 }
 
 /// Reconstructs an entity id from its bit representation.
-fn entity_from_bits(bits: u64) -> PyResult<EntityId> {
+pub(crate) fn entity_from_bits(bits: u64) -> PyResult<EntityId> {
     EntityId::from_bits(bits)
         .ok_or_else(|| PyValueError::new_err(format!("invalid entity id {bits}")))
 }

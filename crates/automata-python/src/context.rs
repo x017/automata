@@ -260,6 +260,12 @@ pub struct FrameContext {
     /// Event read view and send buffer.
     #[pyo3(get)]
     pub events: crate::events::PyEvents,
+    /// 3D physics queries (raycasts, impulses, grounded).
+    #[pyo3(get)]
+    pub physics: crate::physics::PyPhysics,
+    /// 2D physics queries.
+    #[pyo3(get)]
+    pub physics2d: crate::physics::PyPhysics2D,
     /// Named Python-object storage.
     #[pyo3(get)]
     pub resources: PyResources,
@@ -268,6 +274,7 @@ pub struct FrameContext {
 
 impl FrameContext {
     /// Assembles the frame context from its parts.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         time: FrameTime,
         input: PyInput,
@@ -275,12 +282,16 @@ impl FrameContext {
         events: crate::events::PyEvents,
         resources: PyResources,
         quit: QuitFlag,
+        physics: crate::physics::PyPhysics,
+        physics2d: crate::physics::PyPhysics2D,
     ) -> Self {
         Self {
             time,
             input,
             scene,
             events,
+            physics,
+            physics2d,
             resources,
             quit,
         }

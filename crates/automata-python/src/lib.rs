@@ -21,6 +21,8 @@ mod error;
 mod events;
 mod game;
 mod keys;
+mod physics;
+mod physics_components;
 mod scene;
 
 use pyo3::prelude::*;
@@ -48,5 +50,12 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<context::PyModifiers>()?;
     m.add_class::<context::PyResources>()?;
     m.add_class::<events::PyEvents>()?;
+    m.add_class::<physics::PyPhysics>()?;
+    m.add_class::<physics::PyPhysics2D>()?;
+    m.add_class::<physics_components::PyRigidBody>()?;
+    m.add_class::<physics_components::PyCollider3D>()?;
+    m.add_class::<physics_components::PyCollider2D>()?;
+    m.add_class::<physics_components::PyCharacterController>()?;
+    m.add_class::<physics_components::PyCharacterVelocity>()?;
     Ok(())
 }

@@ -6,12 +6,12 @@
 //!   per-frame snapshot; [`Gamepads`] does the same for gamepads. The main
 //!   loop feeds them events between frames and clears them after each
 //!   update.
-//! - **Action mapping.** [`ActionMap`] binds named actions ("jump") and
-//!   axes ("move_x") to physical controls so game code is device-independent
+//! - **Action mapping.** [`ActionMap`] binds named actions (`jump`) and
+//!   axes (`move_x`) to physical controls so game code is device-independent
 //!   and controls are remappable at runtime.
 //!
 //! Gamepad and action events flow onto the engine's event stream as
-//! [`GamepadEvent`]s; keyboard/mouse stay poll-based (pressed/just_pressed).
+//! [`GamepadEvent`]s; keyboard/mouse stay poll-based (`pressed`/`just_pressed`).
 //!
 //! The keyboard/mouse key types are currently re-exports of `winit`'s
 //! well-established W3C-based enums; call sites should always refer to them

@@ -43,16 +43,19 @@ pub enum Binding {
 
 impl Binding {
     /// A keyboard key binding.
+    #[must_use]
     pub fn key(key: KeyCode) -> Self {
         Self::Key(key)
     }
 
     /// A mouse button binding.
+    #[must_use]
     pub fn mouse(button: MouseButton) -> Self {
         Self::MouseButton(button)
     }
 
     /// A gamepad button binding.
+    #[must_use]
     pub fn gamepad_button(button: GamepadButton) -> Self {
         Self::GamepadButton(button)
     }
@@ -79,6 +82,7 @@ pub enum AxisBinding {
 
 impl AxisBinding {
     /// The left stick X axis.
+    #[must_use]
     pub fn left_stick_x() -> Self {
         Self::GamepadAxis {
             axis: GamepadAxis::LeftStickX,
@@ -87,6 +91,7 @@ impl AxisBinding {
     }
 
     /// The left stick Y axis.
+    #[must_use]
     pub fn left_stick_y() -> Self {
         Self::GamepadAxis {
             axis: GamepadAxis::LeftStickY,
@@ -95,6 +100,7 @@ impl AxisBinding {
     }
 
     /// The right stick X axis.
+    #[must_use]
     pub fn right_stick_x() -> Self {
         Self::GamepadAxis {
             axis: GamepadAxis::RightStickX,
@@ -103,6 +109,7 @@ impl AxisBinding {
     }
 
     /// The right stick Y axis.
+    #[must_use]
     pub fn right_stick_y() -> Self {
         Self::GamepadAxis {
             axis: GamepadAxis::RightStickY,
@@ -111,6 +118,7 @@ impl AxisBinding {
     }
 
     /// WASD-style: two keys forming an axis.
+    #[must_use]
     pub fn key_pair(negative: KeyCode, positive: KeyCode) -> Self {
         Self::ButtonPair {
             negative: Binding::Key(negative),
@@ -119,6 +127,7 @@ impl AxisBinding {
     }
 
     /// A gamepad axis with a custom scale.
+    #[must_use]
     pub fn gamepad_axis(axis: GamepadAxis, scale: f32) -> Self {
         Self::GamepadAxis { axis, scale }
     }
@@ -136,6 +145,7 @@ pub struct ActionMap {
 
 impl ActionMap {
     /// An empty action map.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -165,8 +175,9 @@ impl ActionMap {
     }
 
     /// The bindings for an action.
+    #[must_use]
     pub fn bindings(&self, action: &str) -> &[Binding] {
-        self.actions.get(action).map(Vec::as_slice).unwrap_or(&[])
+        self.actions.get(action).map_or(&[], Vec::as_slice)
     }
 
     /// All action names currently bound.
@@ -175,13 +186,15 @@ impl ActionMap {
     }
 
     /// Is any binding for `action` currently active?
+    #[must_use]
     pub fn pressed(&self, action: &str, input: &InputState, gamepads: &Gamepads) -> bool {
         self.bindings(action)
             .iter()
-            .any(|b| binding_active(b, input, gamepads))
+            .any(|b| binding_active(*b, input, gamepads))
     }
 
     /// Did any binding for `action` become active this frame?
+    #[must_use]
     pub fn just_pressed(&self, action: &str, input: &InputState, gamepads: &Gamepads) -> bool {
         // Axis crossings and gamepad buttons don't have a just-pressed edge
         // in the device state; keyboard/mouse do. For gamepad buttons, fall
@@ -196,19 +209,21 @@ impl ActionMap {
     }
 
     /// Current value of a named axis, -1.0..=1.0.
+    #[must_use]
     pub fn axis(&self, name: &str, input: &InputState, gamepads: &Gamepads) -> f32 {
         match self.axes.get(name) {
             Some(AxisBinding::GamepadAxis { axis, scale }) => gamepads.axis_any(*axis) * scale,
             Some(AxisBinding::ButtonPair { negative, positive }) => {
-                let neg = binding_active(negative, input, gamepads) as i8;
-                let pos = binding_active(positive, input, gamepads) as i8;
-                (pos - neg) as f32
+                let neg = i8::from(binding_active(*negative, input, gamepads));
+                let pos = i8::from(binding_active(*positive, input, gamepads));
+                f32::from(pos - neg)
             }
             None => 0.0,
         }
     }
 
     /// Convenience: a 2D move vector from two named axes.
+    #[must_use]
     pub fn axis_pair(
         &self,
         x: &str,
@@ -220,13 +235,13 @@ impl ActionMap {
     }
 }
 
-fn binding_active(binding: &Binding, input: &InputState, gamepads: &Gamepads) -> bool {
+fn binding_active(binding: Binding, input: &InputState, gamepads: &Gamepads) -> bool {
     match binding {
-        Binding::Key(key) => input.pressed(*key),
-        Binding::MouseButton(button) => input.button_pressed(*button),
-        Binding::GamepadButton(button) => gamepads.pressed_any(*button),
-        Binding::GamepadAxisPositive(axis) => gamepads.axis_any(*axis) >= AXIS_THRESHOLD,
-        Binding::GamepadAxisNegative(axis) => gamepads.axis_any(*axis) <= -AXIS_THRESHOLD,
+        Binding::Key(key) => input.pressed(key),
+        Binding::MouseButton(button) => input.button_pressed(button),
+        Binding::GamepadButton(button) => gamepads.pressed_any(button),
+        Binding::GamepadAxisPositive(axis) => gamepads.axis_any(axis) >= AXIS_THRESHOLD,
+        Binding::GamepadAxisNegative(axis) => gamepads.axis_any(axis) <= -AXIS_THRESHOLD,
     }
 }
 

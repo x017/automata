@@ -291,3 +291,141 @@ def test_run_without_any_callback_raises():
     game = make_game()
     with pytest.raises(TypeError, match="no update callback"):
         game.run()
+
+
+# -- Phase 6: physics -------------------------------------------------------
+
+
+def test_physics_components_exist():
+    body = at.RigidBody.dynamic()
+    assert body.body_type == "dynamic"
+    collider = at.Collider3D.ball(0.5).density(2.0).sensor(True)
+    assert "Ball" in repr(collider)
+    c2d = at.Collider2D.cuboid(1.0, 2.0)
+    assert "Cuboid" in repr(c2d)
+    controller = at.CharacterController(snap_to_ground=0.4)
+    assert "Normal" in repr(controller)
+    vel = at.CharacterVelocity((1.0, 2.0, 3.0))
+    assert vel.velocity == (1.0, 2.0, 3.0)
+
+
+def test_scene_spawns_physics_components():
+    scene = at.Scene().add(
+        at.Entity("ball")
+        .add(at.Transform(position=(0.0, 5.0, 0.0)))
+        .add(at.RigidBody.dynamic())
+        .add(at.Collider3D.ball(0.5))
+    )
+    assert len(scene) == 1
+
+
+def test_physics_gravity_moves_body():
+    game = at.Game(headless=True)
+    game.load_scene(
+        at.Scene().add(
+            at.Entity("ball")
+            .add(at.Transform(position=(0.0, 5.0, 0.0)))
+            .add(at.RigidBody.dynamic())
+            .add(at.Collider3D.ball(0.5))
+        )
+    )
+    positions = []
+
+    @game.update
+    def track(ctx):
+        ball = ctx.scene["ball"]
+        positions.append(ball.transform.position[1])
+
+    game.run(max_frames=30)
+    # Ball falls under gravity (y decreases over 30 frames).
+    assert positions[-1] < positions[0]
+    assert positions[-1] < 5.0
+
+
+def test_physics_body_count():
+    game = at.Game(headless=True)
+    game.load_scene(
+        at.Scene().add(
+            at.Entity("ball")
+            .add(at.Transform(position=(0.0, 5.0, 0.0)))
+            .add(at.RigidBody.dynamic())
+            .add(at.Collider3D.ball(0.5))
+        )
+    )
+    counts = []
+
+    @game.update
+    def track(ctx):
+        counts.append(ctx.physics.body_count())
+
+    game.run(max_frames=3)
+    assert counts[-1] == 1
+
+
+def test_physics_collision_events():
+    game = at.Game(headless=True)
+    game.load_scene(
+        at.Scene()
+        .add(
+            at.Entity("floor")
+            .add(at.Transform(position=(0.0, 0.0, 0.0)))
+            .add(at.RigidBody.fixed())
+            .add(at.Collider3D.cuboid(20.0, 1.0, 20.0))
+        )
+        .add(
+            at.Entity("ball")
+            .add(at.Transform(position=(0.0, 1.05, 0.0)))
+            .add(at.RigidBody.dynamic())
+            .add(at.Collider3D.ball(0.5))
+        )
+    )
+    hit = []
+
+    @game.update
+    def track(ctx):
+        y = ctx.scene["ball"].transform.position[1]
+        hit.append(y)
+
+    game.run(max_frames=60)
+    # Ball rests on the floor (y ≈ 1.0: floor top 0.5 + ball radius 0.5).
+    assert 0.8 < hit[-1] < 1.3
+
+
+def test_physics_impulse():
+    game = at.Game(headless=True)
+    game.load_scene(
+        at.Scene().add(
+            at.Entity("ball")
+            .add(at.Transform(position=(0.0, 50.0, 0.0)))
+            .add(at.RigidBody("dynamic", gravity_scale=0.0))
+            .add(at.Collider3D.ball(0.5))
+        )
+    )
+    xs = []
+
+    @game.update
+    def push(ctx):
+        ball = ctx.scene["ball"]
+        if ctx.time.frame == 1:
+            ctx.physics.apply_impulse(ball.id, (5.0, 0.0, 0.0))
+        xs.append(ball.transform.position[0])
+
+    game.run(max_frames=20)
+    assert xs[-1] > 0.5, f"impulse should move the ball +x, got {xs[-1]}"
+
+
+def test_physics_views_present_on_context():
+    game = at.Game(headless=True)
+    seen = {}
+
+    @game.update
+    def check(ctx):
+        seen["has_physics"] = hasattr(ctx, "physics")
+        seen["has_physics2d"] = hasattr(ctx, "physics2d")
+        seen["gravity"] = ctx.physics.gravity()
+        ctx.quit()
+
+    game.run()
+    assert seen["has_physics"]
+    assert seen["has_physics2d"]
+    assert abs(seen["gravity"][1] - (-9.81)) < 1e-4

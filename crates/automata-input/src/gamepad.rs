@@ -61,7 +61,7 @@ impl std::fmt::Debug for Gamepads {
         f.debug_struct("Gamepads")
             .field("connected", &self.connected.len())
             .field("pending_events", &self.events.len())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -73,7 +73,12 @@ impl Default for Gamepads {
 
 impl Gamepads {
     /// Initialise gamepad support. On platforms or sandboxes without
-    /// gamepad devices this yields an empty manager (no panic).
+    /// gamepad devices this yields an empty manager (no connected pads).
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the platform's gamepad backend fails to initialise
+    /// (never observed on Linux/Windows/macOS).
     #[must_use]
     pub fn new() -> Self {
         let gilrs = Gilrs::new().expect("gilrs init");
@@ -141,6 +146,7 @@ impl Gamepads {
     }
 
     /// The first connected gamepad, if any (convenience for single-player).
+    #[must_use]
     pub fn primary(&self) -> Option<GamepadId> {
         self.connected
             .iter()
@@ -149,21 +155,25 @@ impl Gamepads {
     }
 
     /// True if any gamepad is connected.
+    #[must_use]
     pub fn any_connected(&self) -> bool {
         !self.connected.is_empty()
     }
 
     /// Is `button` pressed on gamepad `id`?
+    #[must_use]
     pub fn pressed(&self, id: GamepadId, button: GamepadButton) -> bool {
         self.connected.contains(&id) && self.gilrs.gamepad(id).is_pressed(button)
     }
 
     /// Is `button` pressed on *any* connected gamepad?
+    #[must_use]
     pub fn pressed_any(&self, button: GamepadButton) -> bool {
         self.connected.iter().any(|&id| self.pressed(id, button))
     }
 
     /// Current value of `axis` on gamepad `id` (0.0 if disconnected).
+    #[must_use]
     pub fn axis(&self, id: GamepadId, axis: GamepadAxis) -> f32 {
         if !self.connected.contains(&id) {
             return 0.0;
@@ -172,11 +182,13 @@ impl Gamepads {
     }
 
     /// Current value of `axis` on the first connected gamepad, if any.
+    #[must_use]
     pub fn axis_any(&self, axis: GamepadAxis) -> f32 {
-        self.primary().map(|id| self.axis(id, axis)).unwrap_or(0.0)
+        self.primary().map_or(0.0, |id| self.axis(id, axis))
     }
 
     /// Left stick position on gamepad `id`.
+    #[must_use]
     pub fn left_stick(&self, id: GamepadId) -> (f32, f32) {
         (
             self.axis(id, GamepadAxis::LeftStickX),
@@ -185,6 +197,7 @@ impl Gamepads {
     }
 
     /// Right stick position on gamepad `id`.
+    #[must_use]
     pub fn right_stick(&self, id: GamepadId) -> (f32, f32) {
         (
             self.axis(id, GamepadAxis::RightStickX),
@@ -208,6 +221,6 @@ mod tests {
     #[test]
     fn events_start_empty() {
         let mut gamepads = Gamepads::new();
-        assert!(gamepads.drain_events().is_empty());
+        assert_eq!(gamepads.drain_events().len(), 0);
     }
 }

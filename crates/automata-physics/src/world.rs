@@ -31,11 +31,13 @@ pub struct RayFilter {
 
 impl RayFilter {
     /// A filter that hits everything.
+    #[must_use]
     pub fn everything() -> Self {
         Self::default()
     }
 
     /// A filter that skips sensors.
+    #[must_use]
     pub fn no_sensors() -> Self {
         Self {
             exclude_sensors: true,
@@ -78,5 +80,5 @@ pub(crate) fn entity_to_user_data(entity: Entity) -> u128 {
 }
 
 pub(crate) fn user_data_to_entity(bits: u128) -> Option<Entity> {
-    Entity::from_bits(bits as u64)
+    Entity::from_bits(u64::try_from(bits).ok()?)
 }

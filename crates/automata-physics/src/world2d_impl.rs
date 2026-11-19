@@ -1,4 +1,4 @@
-//! 2D physics world implementation (Rapier2D).
+//! 2D physics world implementation (`Rapier2D`).
 //!
 //! Positions use X/Y; rotation is the angle around Z. Everything else
 //! mirrors the 3D world.
@@ -56,7 +56,7 @@ impl std::fmt::Debug for PhysicsWorld2D {
             .field("bodies", &self.entity_bodies.len())
             .field("colliders", &self.entity_colliders.len())
             .field("controllers", &self.controllers.len())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -74,6 +74,7 @@ impl PhysicsWorld2D {
     }
 
     /// An empty 2D world with the given gravity (X/Y are used).
+    #[must_use]
     pub fn with_gravity(gravity: Vec3) -> Self {
         Self {
             gravity,
@@ -97,6 +98,7 @@ impl PhysicsWorld2D {
     }
 
     /// The current gravity vector.
+    #[must_use]
     pub fn gravity(&self) -> Vec3 {
         self.gravity
     }
@@ -107,11 +109,13 @@ impl PhysicsWorld2D {
     }
 
     /// Number of rigid bodies currently tracked.
+    #[must_use]
     pub fn body_count(&self) -> usize {
         self.entity_bodies.len()
     }
 
     /// Number of colliders currently tracked.
+    #[must_use]
     pub fn collider_count(&self) -> usize {
         self.entity_colliders.len()
     }
@@ -132,14 +136,17 @@ impl PhysicsWorld2D {
 
     fn spawn_missing(&mut self, scene: &mut SceneWorld) {
         let mut to_spawn = Vec::new();
-        for (entity, body, transform) in scene
-            .query::<(hecs::Entity, &RigidBody, Option<&Transform>)>()
-            .iter()
-        {
-            if !body.enabled || self.entity_bodies.contains_key(&entity) {
+        let mut bodies_query = scene.query::<(hecs::Entity, &RigidBody, Option<&Transform>)>();
+        for (entity, body, transform) in &mut bodies_query {
+            // 2D world only owns entities that carry a 2D collider; 3D
+            // entities (Collider3D or no collider) belong to the 3D world.
+            if !body.enabled
+                || self.entity_bodies.contains_key(&entity)
+                || scene.get::<&Collider2D>(entity).is_err()
+            {
                 continue;
             }
-            let collider = scene.get::<&Collider2D>(entity).ok().map(|c| c.clone());
+            let collider = scene.get::<&Collider2D>(entity).ok().map(|c| (*c).clone());
             to_spawn.push((entity, body.clone(), transform.copied(), collider));
         }
 
@@ -206,10 +213,8 @@ impl PhysicsWorld2D {
 
     fn update_existing(&mut self, scene: &mut SceneWorld) {
         let mut updates = Vec::new();
-        for (entity, body, transform) in scene
-            .query::<(hecs::Entity, &RigidBody, Option<&Transform>)>()
-            .iter()
-        {
+        let mut bodies_query = scene.query::<(hecs::Entity, &RigidBody, Option<&Transform>)>();
+        for (entity, body, transform) in &mut bodies_query {
             if !body.enabled {
                 continue;
             }
@@ -236,7 +241,7 @@ impl PhysicsWorld2D {
 
     fn despawn_removed(&mut self, scene: &mut SceneWorld) {
         let mut to_remove = Vec::new();
-        for (entity, _) in self.entity_bodies.iter() {
+        for entity in self.entity_bodies.keys() {
             if scene.get::<&RigidBody>(*entity).is_err() {
                 to_remove.push(*entity);
             }
@@ -270,7 +275,7 @@ impl PhysicsWorld2D {
     /// and before [`step`](Self::step).
     pub fn move_characters(&mut self, scene: &mut SceneWorld, dt: f32) {
         let mut configs = Vec::new();
-        for (entity, config) in scene.query::<(hecs::Entity, &CharacterController)>().iter() {
+        for (entity, config) in &mut scene.query::<(hecs::Entity, &CharacterController)>() {
             configs.push((entity, config.clone()));
         }
         for (entity, config) in configs {
@@ -280,7 +285,7 @@ impl PhysicsWorld2D {
         }
 
         let mut moves = Vec::new();
-        for (entity, velocity) in scene.query::<(hecs::Entity, &CharacterVelocity)>().iter() {
+        for (entity, velocity) in &mut scene.query::<(hecs::Entity, &CharacterVelocity)>() {
             if self.controllers.contains_key(&entity) {
                 moves.push((entity, velocity.velocity));
             }
@@ -312,7 +317,7 @@ impl PhysicsWorld2D {
         let Some(collider) = self.colliders.get(collider_handle) else {
             return CharacterMove::default();
         };
-        let character_shape = collider.shape().clone();
+        let character_shape = collider.shared_shape().clone();
         let character_pos = *collider.position();
 
         let query = self.broad_phase.as_query_pipeline(
@@ -355,8 +360,10 @@ impl PhysicsWorld2D {
     /// Step the simulation by `dt` seconds and write transforms back.
     pub fn step(&mut self, scene: &mut SceneWorld, dt: f32) -> PhysicsTick {
         self.last_dt = dt;
-        let mut params = IntegrationParameters::default();
-        params.dt = dt;
+        let params = IntegrationParameters {
+            dt,
+            ..IntegrationParameters::default()
+        };
 
         let (collision_send, collision_recv) = std::sync::mpsc::channel();
         let (force_send, force_recv) = std::sync::mpsc::channel();
@@ -422,7 +429,7 @@ impl PhysicsWorld2D {
     }
 
     fn write_back_transforms(&mut self, scene: &mut SceneWorld) {
-        for (handle, entity) in self.body_entities.iter() {
+        for (handle, entity) in &self.body_entities {
             let Some(body) = self.bodies.get(*handle) else {
                 continue;
             };
@@ -439,12 +446,12 @@ impl PhysicsWorld2D {
     }
 
     /// Current linear velocity of an entity's body (zero if none).
+    #[must_use]
     pub fn velocity(&self, entity: Entity) -> Vec3 {
         self.entity_bodies
             .get(&entity)
             .and_then(|h| self.bodies.get(*h))
-            .map(|b| Vec3::new(b.linvel().x, b.linvel().y, 0.0))
-            .unwrap_or(Vec3::ZERO)
+            .map_or(Vec3::ZERO, |b| Vec3::new(b.linvel().x, b.linvel().y, 0.0))
     }
 
     /// Apply an impulse to a dynamic body's centre of mass.
@@ -476,11 +483,13 @@ impl PhysicsWorld2D {
 
     /// True if the entity's character controller was grounded after the last
     /// [`move_characters`](Self::move_characters) call.
+    #[must_use]
     pub fn grounded(&self, entity: Entity) -> bool {
         self.grounded.get(&entity).copied().unwrap_or(false)
     }
 
     /// Cast a ray and return the closest hit, if any.
+    #[must_use]
     pub fn cast_ray(
         &self,
         origin: Vec3,
@@ -492,12 +501,7 @@ impl PhysicsWorld2D {
         if filter.exclude_sensors {
             query_filter.flags |= QueryFilterFlags::EXCLUDE_SENSORS;
         }
-        let predicate = |handle, _: &_| {
-            filter
-                .exclude_entity
-                .map(|ex| self.entity_for_collider(handle) != Some(ex))
-                .unwrap_or(true)
-        };
+        let predicate = |handle, _: &_| filter.exclude_entity != self.entity_for_collider(handle);
         query_filter = query_filter.predicate(&predicate);
         let query = self.broad_phase.as_query_pipeline(
             self.narrow_phase.query_dispatcher(),
@@ -524,6 +528,7 @@ impl PhysicsWorld2D {
 
     /// Shape-cast: sweep a shape from `origin` along `direction` and report
     /// the first impact.
+    #[must_use]
     pub fn cast_shape(
         &self,
         shape: Shape2D,
@@ -532,11 +537,15 @@ impl PhysicsWorld2D {
         max_toi: f32,
         filter: &RayFilter,
     ) -> Option<RayHit> {
+        let mut query_filter = QueryFilter::default();
+        if filter.exclude_sensors {
+            query_filter.flags |= QueryFilterFlags::EXCLUDE_SENSORS;
+        }
         let query = self.broad_phase.as_query_pipeline(
             self.narrow_phase.query_dispatcher(),
             &self.bodies,
             &self.colliders,
-            QueryFilter::default(),
+            query_filter,
         );
         let shape: r2::geometry::SharedShape = match shape {
             Shape2D::Ball { radius } => r2::geometry::SharedShape::ball(radius),

@@ -1,4 +1,4 @@
-//! 3D physics world implementation (Rapier3D).
+//! 3D physics world implementation (`Rapier3D`).
 
 use std::collections::HashMap;
 
@@ -12,7 +12,7 @@ use r3::dynamics::{
 use r3::geometry::{
     BroadPhaseBvh, ColliderBuilder, ColliderHandle, ColliderSet, CollisionEvent, NarrowPhase,
 };
-use r3::math::{Pose, Rotation, Vector};
+use r3::math::{Pose, Vector};
 use r3::pipeline::{
     ActiveEvents, ChannelEventCollector, PhysicsPipeline, QueryFilter, QueryFilterFlags,
 };
@@ -58,7 +58,7 @@ impl std::fmt::Debug for PhysicsWorld3D {
             .field("bodies", &self.entity_bodies.len())
             .field("colliders", &self.entity_colliders.len())
             .field("controllers", &self.controllers.len())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -76,6 +76,7 @@ impl PhysicsWorld3D {
     }
 
     /// An empty 3D world with the given gravity (in m/s²).
+    #[must_use]
     pub fn with_gravity(gravity: Vec3) -> Self {
         Self {
             gravity,
@@ -99,6 +100,7 @@ impl PhysicsWorld3D {
     }
 
     /// The current gravity vector.
+    #[must_use]
     pub fn gravity(&self) -> Vec3 {
         self.gravity
     }
@@ -109,11 +111,13 @@ impl PhysicsWorld3D {
     }
 
     /// Number of rigid bodies currently tracked.
+    #[must_use]
     pub fn body_count(&self) -> usize {
         self.entity_bodies.len()
     }
 
     /// Number of colliders currently tracked.
+    #[must_use]
     pub fn collider_count(&self) -> usize {
         self.entity_colliders.len()
     }
@@ -134,14 +138,17 @@ impl PhysicsWorld3D {
 
     fn spawn_missing(&mut self, scene: &mut SceneWorld) {
         let mut to_spawn = Vec::new();
-        for (entity, body, transform) in scene
-            .query::<(hecs::Entity, &RigidBody, Option<&Transform>)>()
-            .iter()
-        {
-            if !body.enabled || self.entity_bodies.contains_key(&entity) {
+        let mut bodies_query = scene.query::<(hecs::Entity, &RigidBody, Option<&Transform>)>();
+        for (entity, body, transform) in &mut bodies_query {
+            // 3D owns entities with a 3D collider or none; a 2D collider
+            // routes the entity to the 2D world instead.
+            if !body.enabled
+                || self.entity_bodies.contains_key(&entity)
+                || scene.get::<&crate::Collider2D>(entity).is_ok()
+            {
                 continue;
             }
-            let collider = scene.get::<&Collider3D>(entity).ok().map(|c| c.clone());
+            let collider = scene.get::<&Collider3D>(entity).ok().map(|c| (*c).clone());
             to_spawn.push((entity, body.clone(), transform.copied(), collider));
         }
 
@@ -207,10 +214,8 @@ impl PhysicsWorld3D {
 
     fn update_existing(&mut self, scene: &mut SceneWorld) {
         let mut updates = Vec::new();
-        for (entity, body, transform) in scene
-            .query::<(hecs::Entity, &RigidBody, Option<&Transform>)>()
-            .iter()
-        {
+        let mut bodies_query = scene.query::<(hecs::Entity, &RigidBody, Option<&Transform>)>();
+        for (entity, body, transform) in &mut bodies_query {
             if !body.enabled {
                 continue;
             }
@@ -245,7 +250,7 @@ impl PhysicsWorld3D {
 
     fn despawn_removed(&mut self, scene: &mut SceneWorld) {
         let mut to_remove = Vec::new();
-        for (entity, _) in self.entity_bodies.iter() {
+        for entity in self.entity_bodies.keys() {
             if scene.get::<&RigidBody>(*entity).is_err() {
                 to_remove.push(*entity);
             }
@@ -280,7 +285,7 @@ impl PhysicsWorld3D {
     pub fn move_characters(&mut self, scene: &mut SceneWorld, dt: f32) {
         // Sync controller configs.
         let mut configs = Vec::new();
-        for (entity, config) in scene.query::<(hecs::Entity, &CharacterController)>().iter() {
+        for (entity, config) in &mut scene.query::<(hecs::Entity, &CharacterController)>() {
             configs.push((entity, config.clone()));
         }
         for (entity, config) in configs {
@@ -290,7 +295,7 @@ impl PhysicsWorld3D {
         }
 
         let mut moves = Vec::new();
-        for (entity, velocity) in scene.query::<(hecs::Entity, &CharacterVelocity)>().iter() {
+        for (entity, velocity) in &mut scene.query::<(hecs::Entity, &CharacterVelocity)>() {
             if self.controllers.contains_key(&entity) {
                 moves.push((entity, velocity.velocity));
             }
@@ -322,7 +327,7 @@ impl PhysicsWorld3D {
         let Some(collider) = self.colliders.get(collider_handle) else {
             return CharacterMove::default();
         };
-        let character_shape = collider.shape().clone();
+        let character_shape = collider.shared_shape().clone();
         let character_pos = *collider.position();
 
         let query = self.broad_phase.as_query_pipeline(
@@ -379,8 +384,10 @@ impl PhysicsWorld3D {
     /// Step the simulation by `dt` seconds and write transforms back.
     pub fn step(&mut self, scene: &mut SceneWorld, dt: f32) -> PhysicsTick {
         self.last_dt = dt;
-        let mut params = IntegrationParameters::default();
-        params.dt = dt;
+        let params = IntegrationParameters {
+            dt,
+            ..IntegrationParameters::default()
+        };
 
         let (collision_send, collision_recv) = std::sync::mpsc::channel();
         let (force_send, force_recv) = std::sync::mpsc::channel();
@@ -450,7 +457,7 @@ impl PhysicsWorld3D {
     }
 
     fn write_back_transforms(&mut self, scene: &mut SceneWorld) {
-        for (handle, entity) in self.body_entities.iter() {
+        for (handle, entity) in &self.body_entities {
             let Some(body) = self.bodies.get(*handle) else {
                 continue;
             };
@@ -467,12 +474,14 @@ impl PhysicsWorld3D {
     }
 
     /// Current linear velocity of an entity's body (zero if none).
+    #[must_use]
     pub fn velocity(&self, entity: Entity) -> Vec3 {
         self.entity_bodies
             .get(&entity)
             .and_then(|h| self.bodies.get(*h))
-            .map(|b| Vec3::new(b.linvel().x, b.linvel().y, b.linvel().z))
-            .unwrap_or(Vec3::ZERO)
+            .map_or(Vec3::ZERO, |b| {
+                Vec3::new(b.linvel().x, b.linvel().y, b.linvel().z)
+            })
     }
 
     /// Apply an impulse to a dynamic body's centre of mass.
@@ -504,11 +513,13 @@ impl PhysicsWorld3D {
 
     /// True if the entity's character controller was grounded after the last
     /// [`move_characters`](Self::move_characters) call.
+    #[must_use]
     pub fn grounded(&self, entity: Entity) -> bool {
         self.grounded.get(&entity).copied().unwrap_or(false)
     }
 
     /// Cast a ray and return the closest hit, if any.
+    #[must_use]
     pub fn cast_ray(
         &self,
         origin: Vec3,
@@ -520,12 +531,7 @@ impl PhysicsWorld3D {
         if filter.exclude_sensors {
             query_filter.flags |= QueryFilterFlags::EXCLUDE_SENSORS;
         }
-        let predicate = |handle, _: &_| {
-            filter
-                .exclude_entity
-                .map(|ex| self.entity_for_collider(handle) != Some(ex))
-                .unwrap_or(true)
-        };
+        let predicate = |handle, _: &_| filter.exclude_entity != self.entity_for_collider(handle);
         query_filter = query_filter.predicate(&predicate);
         let query = self.broad_phase.as_query_pipeline(
             self.narrow_phase.query_dispatcher(),
@@ -552,6 +558,7 @@ impl PhysicsWorld3D {
 
     /// Shape-cast: sweep a shape from `origin` along `direction` and report
     /// the first impact.
+    #[must_use]
     pub fn cast_shape(
         &self,
         shape: Shape3D,
@@ -560,11 +567,15 @@ impl PhysicsWorld3D {
         max_toi: f32,
         filter: &RayFilter,
     ) -> Option<RayHit> {
+        let mut query_filter = QueryFilter::default();
+        if filter.exclude_sensors {
+            query_filter.flags |= QueryFilterFlags::EXCLUDE_SENSORS;
+        }
         let query = self.broad_phase.as_query_pipeline(
             self.narrow_phase.query_dispatcher(),
             &self.bodies,
             &self.colliders,
-            QueryFilter::default(),
+            query_filter,
         );
         let shape: r3::geometry::SharedShape = match shape {
             Shape3D::Ball { radius } => r3::geometry::SharedShape::ball(radius),

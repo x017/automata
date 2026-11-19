@@ -204,6 +204,16 @@ pub enum StagedComponent {
     Camera3D(Camera3D),
     /// Orthographic camera.
     Camera2D(Camera2D),
+    /// Physics rigid body.
+    RigidBody(automata_physics::RigidBody),
+    /// 3D physics collider.
+    Collider3D(automata_physics::Collider3D),
+    /// 2D physics collider.
+    Collider2D(automata_physics::Collider2D),
+    /// Character controller.
+    CharacterController(automata_physics::CharacterController),
+    /// Character velocity.
+    CharacterVelocity(automata_physics::CharacterVelocity),
 }
 
 /// Extracts a staged component from an arbitrary Python object, raising a
@@ -218,9 +228,25 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(c) = obj.cast::<PyCamera2D>() {
         return Ok(StagedComponent::Camera2D(c.get().inner()));
     }
+    if let Ok(c) = obj.cast::<crate::physics_components::PyRigidBody>() {
+        return Ok(StagedComponent::RigidBody(c.get().inner()));
+    }
+    if let Ok(c) = obj.cast::<crate::physics_components::PyCollider3D>() {
+        return Ok(StagedComponent::Collider3D(c.get().inner()));
+    }
+    if let Ok(c) = obj.cast::<crate::physics_components::PyCollider2D>() {
+        return Ok(StagedComponent::Collider2D(c.get().inner()));
+    }
+    if let Ok(c) = obj.cast::<crate::physics_components::PyCharacterController>() {
+        return Ok(StagedComponent::CharacterController(c.get().inner()));
+    }
+    if let Ok(c) = obj.cast::<crate::physics_components::PyCharacterVelocity>() {
+        return Ok(StagedComponent::CharacterVelocity(c.borrow().inner()));
+    }
     let typename = obj.get_type().name()?.to_string();
     Err(PyTypeError::new_err(format!(
-        "unsupported component type {typename}; expected Transform, Camera3D, or Camera2D"
+        "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
+         RigidBody, Collider3D, Collider2D, CharacterController, or CharacterVelocity"
     )))
 }
 
@@ -242,8 +268,12 @@ mod tests {
             (2.0, 2.0, 2.0),
         );
         assert_eq!(t.position(), (1.0, 2.0, 3.0));
-        let (_, ry, _) = t.rotation_euler();
-        assert!((ry.abs() - std::f32::consts::PI).abs() < 1e-5);
+        // The euler round-trip may decompose π-rotations differently across
+        // glam versions; verify the quaternion itself instead.
+        let (rx, ry, rz) = t.rotation_euler();
+        let q = glam::Quat::from_euler(glam::EulerRot::XYZ, rx, ry, rz);
+        let orig = glam::Quat::from_rotation_y(std::f32::consts::PI);
+        assert!(q.abs_diff_eq(orig, 1e-4) || q.abs_diff_eq(-orig, 1e-4));
         assert_eq!(t.scale(), (2.0, 2.0, 2.0));
     }
 

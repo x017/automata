@@ -176,6 +176,7 @@ version = "0.1.0"
 dependencies = [
  "automata-core",
  "automata-input",
+ "automata-physics",
  "automata-renderer",
  "automata-scene",
  "glam 0.33.12",

@@ -10,7 +10,7 @@
 //! - Add a [`RigidBody`] (and optionally a [`Collider2D`]/[`Collider3D`]) to
 //!   an entity to make it physical.
 //! - The engine syncs the world from the scene, steps it at the fixed
-//!   timestep, and writes the resulting [`Transform`]s back.
+//!   timestep, and writes the resulting [`automata_scene::Transform`]s back.
 //! - Collision events arrive on the event bus as [`PhysicsEvent`]; contact
 //!   forces as [`ContactForce`].
 //! - Queries ([`PhysicsWorld3D::cast_ray`], [`PhysicsWorld3D::cast_shape`])

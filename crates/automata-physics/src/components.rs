@@ -3,11 +3,11 @@
 //! Components describe *intent*: [`RigidBody`] marks an entity for the
 //! physics world, [`Collider`] gives it a shape, and
 //! [`CharacterController`] makes the engine move a kinematic body with
-//! slide/slope/autostep logic. The [`World`](crate::world::World)
+//! slide/slope/autostep logic. The [`PhysicsWorld3D`](crate::PhysicsWorld3D)
 //! synchronises them with Rapier at the start of every fixed step.
 //!
 //! Units are metres and seconds; positions come straight from the entity's
-//! [`Transform`], so everything scales with the fixed timestep.
+//! [`automata_scene::Transform`], so everything scales with the fixed timestep.
 
 use glam::{Vec2, Vec3};
 
@@ -41,7 +41,7 @@ pub enum CharacterMode {
 /// Component: attach a rigid body to an entity.
 ///
 /// The body's pose is driven from (dynamic) or by (kinematic) the entity's
-/// [`Transform`]. Pair with a [`Collider`] on the same entity to make it
+/// [`automata_scene::Transform`]. Pair with a [`Collider`] on the same entity to make it
 /// collide; a body without a collider still exists but cannot be hit.
 ///
 /// ```rust
@@ -78,11 +78,13 @@ impl Default for RigidBody {
 
 impl RigidBody {
     /// A free-moving body (affected by gravity).
+    #[must_use]
     pub fn dynamic() -> Self {
         Self::default()
     }
 
     /// An immovable body (floors, walls).
+    #[must_use]
     pub fn fixed() -> Self {
         Self {
             body_type: BodyType::Static,
@@ -91,6 +93,7 @@ impl RigidBody {
     }
 
     /// A kinematic body driven by velocity (moving platforms).
+    #[must_use]
     pub fn kinematic_velocity() -> Self {
         Self {
             body_type: BodyType::KinematicVelocity,
@@ -99,6 +102,7 @@ impl RigidBody {
     }
 
     /// A kinematic body driven by its transform.
+    #[must_use]
     pub fn kinematic_position() -> Self {
         Self {
             body_type: BodyType::KinematicPosition,
@@ -135,7 +139,7 @@ impl RigidBody {
     }
 }
 
-/// A 2D collision shape (used by [`Collider2D`](crate::Collider2D)).
+/// A 2D collision shape (used by [`Collider2D`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Shape2D {
     /// Circle with the given radius.
@@ -157,7 +161,7 @@ pub enum Shape2D {
     },
 }
 
-/// A 3D collision shape (used by [`Collider3D`](crate::Collider3D)).
+/// A 3D collision shape (used by [`Collider3D`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Shape3D {
     /// Sphere with the given radius.
@@ -262,11 +266,13 @@ impl<S> Collider<S> {
 
 impl Collider2D {
     /// A circular collider.
+    #[must_use]
     pub fn ball(radius: f32) -> Self {
         Self::new(Shape2D::Ball { radius })
     }
 
     /// A box collider with the given full extents.
+    #[must_use]
     pub fn cuboid(x: f32, y: f32) -> Self {
         Self::new(Shape2D::Cuboid {
             extents: Vec2::new(x, y),
@@ -274,6 +280,7 @@ impl Collider2D {
     }
 
     /// A capsule collider with the given half-height and radius.
+    #[must_use]
     pub fn capsule(half_height: f32, radius: f32) -> Self {
         Self::new(Shape2D::Capsule {
             half_height,
@@ -284,11 +291,13 @@ impl Collider2D {
 
 impl Collider3D {
     /// A spherical collider.
+    #[must_use]
     pub fn ball(radius: f32) -> Self {
         Self::new(Shape3D::Ball { radius })
     }
 
     /// A box collider with the given full extents.
+    #[must_use]
     pub fn cuboid(x: f32, y: f32, z: f32) -> Self {
         Self::new(Shape3D::Cuboid {
             extents: Vec3::new(x, y, z),
@@ -296,6 +305,7 @@ impl Collider3D {
     }
 
     /// A capsule collider with the given half-height and radius.
+    #[must_use]
     pub fn capsule(half_height: f32, radius: f32) -> Self {
         Self::new(Shape3D::Capsule {
             half_height,
@@ -308,7 +318,7 @@ impl Collider3D {
 ///
 /// Every physics step the controller computes a collision-resolved movement
 /// from the [`CharacterVelocity`] you set and writes the result back into the
-/// entity's [`Transform`]. Requires a [`RigidBody`] of type
+/// entity's [`automata_scene::Transform`]. Requires a [`RigidBody`] of type
 /// [`BodyType::KinematicVelocity`] (or [`BodyType::KinematicPosition`]) and
 /// a [`Collider`] on the same entity.
 ///
@@ -352,6 +362,7 @@ impl Default for CharacterController {
 
 impl CharacterController {
     /// A controller with sensible humanoid defaults.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -409,7 +420,7 @@ impl CharacterController {
 /// Component: velocity applied to a kinematic character controller.
 ///
 /// Set this from your game logic; the physics world consumes it, resolves
-/// collisions, and writes the result to the [`Transform`]. The value is
+/// collisions, and writes the result to the [`automata_scene::Transform`]. The value is
 /// *not* cleared automatically — set it every frame.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CharacterVelocity {
@@ -419,6 +430,7 @@ pub struct CharacterVelocity {
 
 impl CharacterVelocity {
     /// Velocity of `v` metres per second.
+    #[must_use]
     pub fn new(velocity: Vec3) -> Self {
         Self { velocity }
     }
