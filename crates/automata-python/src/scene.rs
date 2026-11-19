@@ -175,6 +175,9 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
             StagedComponent::MeshVisual(c) => {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }
+            StagedComponent::DirectionalLight(c) => {
+                let _ = scene.world_mut().insert_one(id, *c);
+            }
         }
     }
     id

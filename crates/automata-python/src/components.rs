@@ -3,7 +3,7 @@
 //! scene loads.
 
 use automata_renderer::{Camera2D, Camera3D};
-use automata_scene::Transform;
+use automata_scene::{DirectionalLight, Transform};
 use glam::{EulerRot, Quat, Vec2, Vec3};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -159,6 +159,83 @@ impl PyCamera3D {
     }
 }
 
+/// The scene's directional sun: parallel light rays plus ambient fill.
+///
+/// Attach it to any entity; the first entity carrying one lights the frame.
+/// With `shadows=True` (the default) the sun casts shadow-mapped shadows.
+///
+/// ```python
+/// scene.add(at.Entity("sun").add(at.DirectionalLight(
+///     direction=(-0.4, -1.0, -0.3), color=(1.0, 0.95, 0.85), ambient=0.35)))
+/// ```
+#[pyclass(name = "DirectionalLight", module = "automata._core", frozen)]
+#[derive(Debug, Clone, Copy)]
+pub struct PyDirectionalLight {
+    inner: DirectionalLight,
+}
+
+#[pymethods]
+impl PyDirectionalLight {
+    /// Creates a sun shining along `direction`.
+    #[new]
+    #[pyo3(signature = (direction=(-0.5, -1.0, -0.35), color=(1.0, 1.0, 1.0), ambient=0.3, shadows=true))]
+    fn new(
+        direction: (f32, f32, f32),
+        color: (f32, f32, f32),
+        ambient: f32,
+        shadows: bool,
+    ) -> Self {
+        Self {
+            inner: DirectionalLight {
+                direction: vec3_of(direction),
+                color: [color.0, color.1, color.2],
+                ambient,
+                shadows,
+            },
+        }
+    }
+
+    /// The direction the light travels.
+    #[getter]
+    fn direction(&self) -> (f32, f32, f32) {
+        tuple_of(self.inner.direction)
+    }
+
+    /// The light color (linear RGB).
+    #[getter]
+    fn color(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.color;
+        (r, g, b)
+    }
+
+    /// The ambient light fraction.
+    #[getter]
+    fn ambient(&self) -> f32 {
+        self.inner.ambient
+    }
+
+    /// Whether the light casts shadows.
+    #[getter]
+    fn shadows(&self) -> bool {
+        self.inner.shadows
+    }
+
+    fn __repr__(&self) -> String {
+        let d = self.inner.direction;
+        format!(
+            "DirectionalLight(direction=({:.2}, {:.2}, {:.2}), ambient={:.2}, shadows={})",
+            d.x, d.y, d.z, self.inner.ambient, self.inner.shadows
+        )
+    }
+}
+
+impl PyDirectionalLight {
+    /// The engine component value.
+    pub fn inner(&self) -> DirectionalLight {
+        self.inner
+    }
+}
+
 /// An orthographic 2D camera. The first entity carrying one becomes the
 /// frame's 2D camera.
 #[pyclass(name = "Camera2D", module = "automata._core", frozen)]
@@ -280,6 +357,8 @@ pub enum StagedComponent {
     CharacterVelocity(automata_physics::CharacterVelocity),
     /// Primitive mesh visual.
     MeshVisual(automata_scene::MeshVisual),
+    /// Directional sun light.
+    DirectionalLight(DirectionalLight),
 }
 
 /// Extracts a staged component from an arbitrary Python object, raising a
@@ -312,11 +391,14 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(m) = obj.cast::<PyMeshRenderer>() {
         return Ok(StagedComponent::MeshVisual(m.get().inner()));
     }
+    if let Ok(l) = obj.cast::<PyDirectionalLight>() {
+        return Ok(StagedComponent::DirectionalLight(l.get().inner()));
+    }
     let typename = obj.get_type().name()?.to_string();
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
-         or MeshRenderer"
+         MeshRenderer, or DirectionalLight"
     )))
 }
 

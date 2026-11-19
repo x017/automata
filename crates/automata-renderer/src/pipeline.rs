@@ -10,6 +10,11 @@ use crate::SPRITE_VERTEX_CAPACITY;
 pub(crate) const SPRITE_SHADER: &str = include_str!("shaders/sprite.wgsl");
 /// WGSL source of the 3D mesh shader.
 pub(crate) const MESH_SHADER: &str = include_str!("shaders/mesh.wgsl");
+/// WGSL source of the depth-only shadow pass shader.
+pub(crate) const SHADOW_SHADER: &str = include_str!("shaders/shadow.wgsl");
+
+/// Depth texture format of the shadow map (sampled as `texture_depth_2d`).
+pub(crate) const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// Alpha-blended color target state for the given surface format.
 fn blend_target(format: wgpu::TextureFormat) -> [Option<wgpu::ColorTargetState>; 1] {
@@ -34,15 +39,24 @@ pub(crate) struct PipelineShared {
     pub texture_layout: wgpu::BindGroupLayout,
     pub material_layout: wgpu::BindGroupLayout,
     pub model_layout: wgpu::BindGroupLayout,
+    pub light_layout: wgpu::BindGroupLayout,
+    pub shadow_light_layout: wgpu::BindGroupLayout,
     pub sprite_shader: wgpu::ShaderModule,
     pub mesh_shader: wgpu::ShaderModule,
+    pub shadow_shader: wgpu::ShaderModule,
 }
 
 impl PipelineShared {
     pub(crate) fn new(device: &wgpu::Device) -> Self {
+        // The camera uniform carries the view-projection (vertex stage) and
+        // the world-space camera position (fragment specular), so both
+        // stages need visibility.
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("camera"),
-            entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX)],
+            entries: &[uniform_entry(
+                0,
+                wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+            )],
         });
         let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("texture"),
@@ -91,14 +105,46 @@ impl PipelineShared {
             label: Some("model"),
             entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX)],
         });
+        // Mesh lighting: sun uniform + shadow map + comparison sampler.
+        let light_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("light"),
+            entries: &[
+                uniform_entry(0, wgpu::ShaderStages::FRAGMENT),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+            ],
+        });
+        // The shadow pass needs only the light-space transform (vertex).
+        let shadow_light_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("shadow light"),
+                entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX)],
+            });
 
         Self {
             camera_layout,
             texture_layout,
             material_layout,
             model_layout,
+            light_layout,
+            shadow_light_layout,
             sprite_shader: shader_module(device, "sprite", SPRITE_SHADER),
             mesh_shader: shader_module(device, "mesh", MESH_SHADER),
+            shadow_shader: shader_module(device, "shadow", SHADOW_SHADER),
         }
     }
 }
@@ -175,6 +221,7 @@ pub(crate) fn create_mesh_pipeline(
             Some(&shared.camera_layout),
             Some(&shared.model_layout),
             Some(&shared.material_layout),
+            Some(&shared.light_layout),
         ],
         immediate_size: 0,
     });
@@ -216,6 +263,60 @@ pub(crate) fn create_mesh_pipeline(
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &blend_target(format),
         }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// Creates the depth-only pipeline that renders meshes into the shadow map.
+///
+/// Front faces are culled (back faces are rasterized), which pushes
+/// shadow-map depth slightly away from the light and reduces acne.
+pub(crate) fn create_shadow_pipeline(
+    device: &wgpu::Device,
+    shared: &PipelineShared,
+) -> wgpu::RenderPipeline {
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("shadow"),
+        bind_group_layouts: &[
+            Some(&shared.shadow_light_layout),
+            Some(&shared.model_layout),
+        ],
+        immediate_size: 0,
+    });
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("shadow"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shared.shadow_shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![
+                    0 => Float32x3,
+                    1 => Float32x3,
+                    2 => Float32x2
+                ],
+            })],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: Some(wgpu::Face::Front),
+            front_face: wgpu::FrontFace::Ccw,
+            ..wgpu::PrimitiveState::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: SHADOW_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        fragment: None,
         multiview_mask: None,
         cache: None,
     })
@@ -305,6 +406,11 @@ mod tests {
     #[test]
     fn mesh_wgsl_is_valid() {
         validate_wgsl("mesh", MESH_SHADER).unwrap();
+    }
+
+    #[test]
+    fn shadow_wgsl_is_valid() {
+        validate_wgsl("shadow", SHADOW_SHADER).unwrap();
     }
 
     #[test]

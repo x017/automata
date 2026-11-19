@@ -46,6 +46,11 @@ game.load_scene(
         .add(at.Camera3D(position=(0.0, 4.0, 10.0), target=(0.0, 1.0, 0.0)))
     )
     .add(
+        at.Entity("sun").add(
+            at.DirectionalLight(direction=(-0.45, -1.0, -0.3), ambient=0.35, shadows=True)
+        )
+    )
+    .add(
         at.Entity("floor")
         .add(at.Transform(position=(0.0, 0.0, 0.0), scale=(40.0, 1.0, 40.0)))
         .add(at.MeshRenderer.cube(size=1.0, color=(0.35, 0.37, 0.42, 1.0)))

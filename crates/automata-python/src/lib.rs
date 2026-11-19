@@ -66,5 +66,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<physics_components::PyCharacterController>()?;
     m.add_class::<physics_components::PyCharacterVelocity>()?;
     m.add_class::<components::PyMeshRenderer>()?;
+    m.add_class::<components::PyDirectionalLight>()?;
     Ok(())
 }

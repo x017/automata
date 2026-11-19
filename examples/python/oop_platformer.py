@@ -35,6 +35,21 @@ PLATFORM_SIZE = (2.4, 0.35, 2.0)
 COINS = [(x, y + 0.9) for (x, y) in PLATFORMS] + [(-2.0, 1.1), (13.5, 1.1)]
 
 
+class Sun(at.Entity):
+    """Warm afternoon sunlight with shadows."""
+
+    def __init__(self):
+        super().__init__("sun")
+        self.add(
+            at.DirectionalLight(
+                direction=(-0.45, -1.0, -0.3),
+                color=(1.0, 0.96, 0.88),
+                ambient=0.35,
+                shadows=True,
+            )
+        )
+
+
 class Camera(at.Entity):
     def __init__(self):
         super().__init__("camera")
@@ -97,6 +112,7 @@ class Level(at.Scene):
     def __init__(self):
         super().__init__()
         self.add(Camera())
+        self.add(Sun())
         self.add(Ground())
         self.add(Player())
         self.add(Crate(position=(6.0, 1.0, 0.0)))

@@ -100,6 +100,7 @@ components are mutable (`t.position = (1, 2, 0)`), and scene views support
 | `Transform(position, rotation_euler, scale)` | Local transform; angles in radians (XYZ order) |
 | `Camera3D(position, target, fov)` / `Camera2D(center, half_height)` | Frame cameras (first entity wins) |
 | `MeshRenderer` | `MeshRenderer.cube(size=…, color=…)` / `.quad(…)` — plain-data visuals; the windowed loop materializes them on the GPU, headless runs ignore them |
+| `DirectionalLight` | `DirectionalLight(direction=…, color=…, ambient=…, shadows=True)` — the scene's sun; the first entity carrying one lights the frame with Blinn-Phong shading and shadow-mapped shadows |
 | `FrameContext` (`ctx` in the callback) | `time`, `input`, `scene`, `events`, `resources`, `quit()` |
 | `ctx.time` | `delta` / `elapsed` (seconds), `frame` (1-based frame number) |
 | `ctx.input` | `pressed` / `just_pressed` / `just_released(key)`, `mouse_*` variants, `cursor`, `scroll`, `modifiers`, `gamepads` |

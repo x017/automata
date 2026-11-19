@@ -8,14 +8,18 @@ use wgpu::util::DeviceExt;
 use crate::camera;
 use crate::draw::{DrawList, MeshDraw, Sprite};
 use crate::error::Result;
+use crate::light::LightUniform;
 use crate::material::{Material, MaterialInner};
 use crate::mesh::{Mesh, MeshData, MeshInner};
 use crate::pipeline::{self, PipelineShared, SpriteVertex};
 use crate::texture::{Texture, TextureInner};
-use crate::RenderContext;
+use crate::{RenderContext, Sun};
 
 /// Depth buffer format used by the mesh pass.
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
+
+/// Side length of the square shadow map, in texels.
+pub(crate) const SHADOW_MAP_SIZE: u32 = 2048;
 
 /// Where a frame is rendered: the window surface or an offscreen texture.
 enum FrameTarget {
@@ -23,6 +27,17 @@ enum FrameTarget {
     Surface(wgpu::SurfaceTexture),
     /// Offscreen: a regular texture view owned by the caller.
     Offscreen(wgpu::TextureView),
+}
+
+/// Per-frame GPU resources derived from a draw list.
+struct PreparedFrame {
+    camera_2d_bind: wgpu::BindGroup,
+    camera_3d_bind: wgpu::BindGroup,
+    model_bind_groups: Vec<wgpu::BindGroup>,
+    sprite_runs: Vec<SpriteRun>,
+    light_bind: wgpu::BindGroup,
+    light_view_proj: glam::Mat4,
+    render_shadows: bool,
 }
 
 /// A complete renderer: GPU context, pipelines, and resource factories.
@@ -35,9 +50,12 @@ pub struct Renderer {
     shared: PipelineShared,
     sprite_pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
+    shadow_pipeline: wgpu::RenderPipeline,
     sprite_batch: SpriteBatch,
     white_texture: Texture,
     depth_texture: Option<wgpu::Texture>,
+    shadow_texture: wgpu::Texture,
+    shadow_sampler: wgpu::Sampler,
 }
 
 impl Renderer {
@@ -67,15 +85,20 @@ impl Renderer {
             wgpu::FilterMode::Linear,
         );
         let depth_texture = Some(create_depth_texture(device, size));
+        let shadow_pipeline = pipeline::create_shadow_pipeline(device, &shared);
+        let (shadow_texture, shadow_sampler) = create_shadow_resources(device);
 
         Ok(Self {
             ctx,
             shared,
             sprite_pipeline,
             mesh_pipeline,
+            shadow_pipeline,
             sprite_batch,
             white_texture,
             depth_texture,
+            shadow_texture,
+            shadow_sampler,
         })
     }
 
@@ -102,15 +125,20 @@ impl Renderer {
             wgpu::FilterMode::Linear,
         );
         let depth_texture = Some(create_depth_texture(device, size));
+        let shadow_pipeline = pipeline::create_shadow_pipeline(device, &shared);
+        let (shadow_texture, shadow_sampler) = create_shadow_resources(device);
 
         Ok(Self {
             ctx,
             shared,
             sprite_pipeline,
             mesh_pipeline,
+            shadow_pipeline,
             sprite_batch,
             white_texture,
             depth_texture,
+            shadow_texture,
+            shadow_sampler,
         })
     }
 
@@ -163,6 +191,11 @@ impl Renderer {
                 vertex_buffer,
                 index_buffer,
                 index_count: u32::try_from(data.indices.len()).expect("mesh index count fits u32"),
+                bounding_radius: data
+                    .vertices
+                    .iter()
+                    .map(|v| glam::Vec3::from(v.position).length())
+                    .fold(0.0_f32, f32::max),
             }),
         }
     }
@@ -273,11 +306,16 @@ impl Renderer {
         self.execute_frame(draw, FrameTarget::Offscreen(view));
     }
 
-    /// Builds a camera bind group from a view-projection matrix.
-    fn camera_bind_group(&self, view_proj: glam::Mat4) -> wgpu::BindGroup {
+    /// Builds a camera bind group from a view-projection matrix and the
+    /// camera's world position (used for specular highlights).
+    fn camera_bind_group(&self, view_proj: glam::Mat4, view_pos: glam::Vec3) -> wgpu::BindGroup {
+        let mut contents = [0.0_f32; 20];
+        contents[..16].copy_from_slice(&view_proj.to_cols_array());
+        contents[16..19].copy_from_slice(&view_pos.to_array());
+        contents[19] = 1.0;
         self.uniform_bind_group(
             Some("camera"),
-            &view_proj.to_cols_array(),
+            bytemuck::cast_slice(&contents),
             &self.shared.camera_layout,
         )
     }
@@ -286,13 +324,13 @@ impl Renderer {
     fn uniform_bind_group(
         &self,
         label: Option<&str>,
-        contents: &[f32],
+        contents: &[u8],
         layout: &wgpu::BindGroupLayout,
     ) -> wgpu::BindGroup {
         let device = self.ctx.device();
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label,
-            contents: bytemuck::cast_slice(contents),
+            contents,
             usage: wgpu::BufferUsages::UNIFORM,
         });
         device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -306,44 +344,38 @@ impl Renderer {
     }
 
     /// Renders the frame into `target`, then presents if it's the surface.
+    /// Renders the frame into `target`, then presents if it's the surface.
     fn execute_frame(&mut self, draw: &DrawList, target: FrameTarget) {
-        let device = self.ctx.device();
-        let queue = self.ctx.queue();
         let viewport = {
             let s = self.ctx.size();
             (s.0.max(1), s.1.max(1))
         };
+        let mut encoder =
+            self.ctx
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("frame"),
+                });
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("frame"),
-        });
+        let shadow_view = self
+            .shadow_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let prepared = self.prepare_frame(draw, viewport, &shadow_view);
 
-        let camera_2d_bind = self.camera_bind_group(draw.camera_2d.map_or_else(
-            || camera::screen_space_camera(viewport),
-            |c| c.view_proj(viewport),
-        ));
-        let camera_3d_bind =
-            self.camera_bind_group(draw.camera_3d.unwrap_or_default().view_proj(viewport));
+        // --- Shadow pass: depth from the sun's view, for shadow mapping ---
+        if prepared.render_shadows {
+            self.record_shadow_pass(
+                &mut encoder,
+                draw,
+                &prepared.model_bind_groups,
+                &shadow_view,
+                prepared.light_view_proj,
+            );
+        }
 
-        // Batch sprites by texture.
-        let sprite_runs = batch_sprites(&draw.sprites);
-        self.sprite_batch.write(queue, &draw.sprites);
-
-        // Pre-create per-mesh model bind groups.
-        let model_bind_groups: Vec<wgpu::BindGroup> = draw
-            .meshes
-            .iter()
-            .map(|m| {
-                self.uniform_bind_group(
-                    Some("model"),
-                    &m.model.to_cols_array(),
-                    &self.shared.model_layout,
-                )
-            })
-            .collect();
-
-        // Render. The view borrows the surface texture only for the scope of
-        // the pass; present() re-acquires it by value afterwards.
+        // --- Main pass: meshes (depth-tested, lit), then sprites ---
+        // The view borrows the surface texture only for the scope of the
+        // pass; present() re-acquires it by value afterwards.
         {
             let view = match &target {
                 FrameTarget::Surface(texture) => texture
@@ -380,27 +412,26 @@ impl Renderer {
                 ..wgpu::RenderPassDescriptor::default()
             });
 
-            // --- 3D meshes, depth tested ---
             if !draw.meshes.is_empty() {
                 pass.set_pipeline(&self.mesh_pipeline);
-                pass.set_bind_group(0, &camera_3d_bind, &[]);
-                for (mesh_draw, model_bind) in draw.meshes.iter().zip(&model_bind_groups) {
+                pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
+                pass.set_bind_group(3, &prepared.light_bind, &[]);
+                for (mesh_draw, model_bind) in draw.meshes.iter().zip(&prepared.model_bind_groups) {
                     Self::record_mesh(&mut pass, mesh_draw, model_bind);
                 }
             }
 
-            // --- 2D sprites, batched by texture ---
             if !draw.sprites.is_empty() {
                 pass.set_pipeline(&self.sprite_pipeline);
-                pass.set_bind_group(0, &camera_2d_bind, &[]);
+                pass.set_bind_group(0, &prepared.camera_2d_bind, &[]);
                 pass.set_vertex_buffer(0, self.sprite_batch.vertex_buffer.slice(..));
                 pass.set_index_buffer(
                     self.sprite_batch.index_buffer.slice(..),
                     wgpu::IndexFormat::Uint16,
                 );
-                for run in &sprite_runs {
+                for run in &prepared.sprite_runs {
                     let texture_bind = self.sprite_batch.texture_bind_group(
-                        device,
+                        self.ctx.device(),
                         &self.shared.texture_layout,
                         &run.texture,
                     );
@@ -412,12 +443,149 @@ impl Renderer {
             }
         }
 
-        queue.submit([encoder.finish()]);
+        self.ctx.queue().submit([encoder.finish()]);
         match target {
             FrameTarget::Surface(texture) => self.ctx.present(texture),
             FrameTarget::Offscreen(_) => {
                 let _ = self.ctx.device().poll(wgpu::PollType::wait_indefinitely());
             }
+        }
+    }
+
+    /// Builds the frame's GPU resources from the draw list: camera, model,
+    /// and light bind groups, the sprite batch, and the sun's shadow setup.
+    fn prepare_frame(
+        &mut self,
+        draw: &DrawList,
+        viewport: (u32, u32),
+        shadow_view: &wgpu::TextureView,
+    ) -> PreparedFrame {
+        let camera_2d_bind = self.camera_bind_group(
+            draw.camera_2d.map_or_else(
+                || camera::screen_space_camera(viewport),
+                |c| c.view_proj(viewport),
+            ),
+            glam::Vec3::ZERO,
+        );
+        let camera_3d = draw.camera_3d.unwrap_or_default();
+        let camera_3d_bind =
+            self.camera_bind_group(camera_3d.view_proj(viewport), camera_3d.position);
+
+        let sprite_runs = batch_sprites(&draw.sprites);
+        self.sprite_batch.write(self.ctx.queue(), &draw.sprites);
+
+        // Per-mesh model bind groups (shared by the shadow and main passes).
+        let model_bind_groups = draw
+            .meshes
+            .iter()
+            .map(|m| {
+                self.uniform_bind_group(
+                    Some("model"),
+                    bytemuck::cast_slice(&m.model.to_cols_array()),
+                    &self.shared.model_layout,
+                )
+            })
+            .collect();
+
+        // Sunlight: the draw list's sun, or a default shadowless light.
+        let sun = draw.sun.unwrap_or_default();
+        let light_view_proj = light_view_proj(draw, &sun);
+        let render_shadows = sun.shadows && !draw.meshes.is_empty();
+        let light_bind = self.light_bind_group(&sun, light_view_proj, render_shadows, shadow_view);
+
+        PreparedFrame {
+            camera_2d_bind,
+            camera_3d_bind,
+            model_bind_groups,
+            sprite_runs,
+            light_bind,
+            light_view_proj,
+            render_shadows,
+        }
+    }
+
+    /// Builds the frame's light bind group (sun uniform + shadow map +
+    /// comparison sampler). `render_shadows` gates shadow sampling in the
+    /// shader — when false the shadow map is bound but never read.
+    fn light_bind_group(
+        &self,
+        sun: &Sun,
+        light_view_proj: glam::Mat4,
+        render_shadows: bool,
+        shadow_view: &wgpu::TextureView,
+    ) -> wgpu::BindGroup {
+        let device = self.ctx.device();
+        let light_uniform = LightUniform::new(
+            &Sun {
+                shadows: render_shadows,
+                ..*sun
+            },
+            light_view_proj,
+            1.0 / SHADOW_MAP_SIZE as f32,
+        );
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("light"),
+            contents: bytemuck::bytes_of(&light_uniform),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("light"),
+            layout: &self.shared.light_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
+                },
+            ],
+        })
+    }
+
+    /// Records the depth-only shadow pass: every mesh drawn from the sun's
+    /// viewpoint into the shadow map.
+    fn record_shadow_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        draw: &DrawList,
+        model_bind_groups: &[wgpu::BindGroup],
+        shadow_view: &wgpu::TextureView,
+        light_view_proj: glam::Mat4,
+    ) {
+        let light_vp_bind = self.uniform_bind_group(
+            Some("shadow light"),
+            bytemuck::cast_slice(&light_view_proj.to_cols_array()),
+            &self.shared.shadow_light_layout,
+        );
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("shadow"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: shadow_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..wgpu::RenderPassDescriptor::default()
+        });
+        pass.set_pipeline(&self.shadow_pipeline);
+        pass.set_bind_group(0, &light_vp_bind, &[]);
+        for (mesh_draw, model_bind) in draw.meshes.iter().zip(model_bind_groups) {
+            pass.set_bind_group(1, model_bind, &[]);
+            pass.set_vertex_buffer(0, mesh_draw.mesh.inner.vertex_buffer.slice(..));
+            pass.set_index_buffer(
+                mesh_draw.mesh.inner.index_buffer.slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
+            pass.draw_indexed(0..mesh_draw.mesh.inner.index_count, 0, 0..1);
         }
     }
 
@@ -456,6 +624,62 @@ fn create_depth_texture(device: &wgpu::Device, size: (u32, u32)) -> wgpu::Textur
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     })
+}
+
+/// The shadow map depth texture and its comparison sampler.
+fn create_shadow_resources(device: &wgpu::Device) -> (wgpu::Texture, wgpu::Sampler) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("shadow map"),
+        size: wgpu::Extent3d {
+            width: SHADOW_MAP_SIZE,
+            height: SHADOW_MAP_SIZE,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: pipeline::SHADOW_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("shadow comparison"),
+        compare: Some(wgpu::CompareFunction::LessEqual),
+        ..wgpu::SamplerDescriptor::default()
+    });
+    (texture, sampler)
+}
+
+/// The sun's view-projection matrix, fit around the frame's meshes so the
+/// shadow map covers the visible scene.
+fn light_view_proj(draw: &DrawList, sun: &Sun) -> glam::Mat4 {
+    use glam::camera::rh::{proj::directx, view};
+
+    if draw.meshes.is_empty() {
+        return glam::Mat4::IDENTITY;
+    }
+    // World-space AABB over the meshes' bounding spheres.
+    let mut min = glam::Vec3::splat(f32::MAX);
+    let mut max = glam::Vec3::splat(f32::MIN);
+    for mesh_draw in &draw.meshes {
+        let (scale, _, center) = mesh_draw.model.to_scale_rotation_translation();
+        let radius = mesh_draw.mesh.inner.bounding_radius * scale.max_element();
+        min = min.min(center - glam::Vec3::splat(radius));
+        max = max.max(center + glam::Vec3::splat(radius));
+    }
+    let center = (min + max) * 0.5;
+    let radius = ((max - min) * 0.5).length().max(1.0) * 1.1; // 10% margin
+
+    let direction = sun.normalized_direction();
+    let up = if direction.y.abs() > 0.95 {
+        glam::Vec3::Z
+    } else {
+        glam::Vec3::Y
+    };
+    let eye = center - direction * (radius + 5.0);
+    let view = view::look_at_mat4(eye, center, up);
+    let proj = directx::orthographic(-radius, radius, -radius, radius, 0.1, radius * 2.0 + 10.0);
+    proj * view
 }
 
 /// One contiguous run of sprites sharing a texture.
@@ -745,6 +969,70 @@ mod tests {
         assert!(
             center[0] > 200 && center[1] < 60,
             "expected red sprite at center, got {center:?}"
+        );
+    }
+
+    /// Renders the shadow test scene with the given sun, returning the
+    /// average pixel luminance.
+    fn shadow_scene_luminance(renderer: &mut Renderer, sun: crate::Sun) -> f32 {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let ground_mat = renderer.create_material([0.8, 0.8, 0.8, 1.0], None);
+        let block_mat = renderer.create_material([1.0, 1.0, 1.0, 1.0], None);
+
+        let mut draw = DrawList::new();
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 6.0, 4.0),
+            glam::Vec3::ZERO,
+        ));
+        draw.set_sun(sun);
+        // Wide flat ground, with a tall blocker casting a shadow onto it.
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_scale(glam::Vec3::new(20.0, 0.2, 20.0)),
+            &ground_mat,
+        );
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::splat(2.0),
+                glam::Quat::IDENTITY,
+                glam::Vec3::new(0.0, 1.6, 0.0),
+            ),
+            &block_mat,
+        );
+        renderer.render_offscreen(&draw, &target);
+
+        let pixels = read_pixels(renderer, &target, size);
+        let sum: u64 = pixels
+            .chunks_exact(4)
+            .map(|p| u64::from(p[0]) + u64::from(p[1]) + u64::from(p[2]))
+            .sum();
+        sum as f32 / (pixels.len() / 4) as f32
+    }
+
+    #[test]
+    fn offscreen_shadow_darkens_occluded_ground() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping shadow render test");
+            return;
+        };
+
+        let sun = crate::Sun::new(glam::Vec3::new(-0.35, -1.0, -0.2));
+        let lit = shadow_scene_luminance(&mut renderer, sun);
+        let shadowed = shadow_scene_luminance(
+            &mut renderer,
+            crate::Sun {
+                shadows: true,
+                ..sun
+            },
+        );
+
+        assert!(
+            shadowed < lit * 0.97,
+            "shadowed scene should be darker: lit={lit}, shadowed={shadowed}"
         );
     }
 }

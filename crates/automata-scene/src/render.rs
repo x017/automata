@@ -5,9 +5,11 @@
 //! entities; [`record_draw_list`] walks the world once per frame and emits
 //! draw commands using each entity's [`GlobalTransform`]. The first entity
 //! carrying a [`Camera3D`] or [`Camera2D`] component becomes the frame's
-//! camera.
+//! camera, and the first [`DirectionalLight`] becomes the frame's sun.
 
-use automata_renderer::{Camera2D, Camera3D, DrawList, Material, Mesh, MeshData, Sprite, Texture};
+use automata_renderer::{
+    Camera2D, Camera3D, DrawList, Material, Mesh, MeshData, Sprite, Sun, Texture,
+};
 use glam::{EulerRot, Vec2};
 
 use crate::scene::SceneWorld;
@@ -27,6 +29,52 @@ impl MeshRenderer {
     #[must_use]
     pub fn new(mesh: Mesh, material: Material) -> Self {
         Self { mesh, material }
+    }
+}
+
+/// The scene's directional sun: parallel light rays plus ambient fill.
+///
+/// The first entity carrying one becomes the frame's light in
+/// [`record_draw_list`]. Enable `shadows` for shadow-mapped sunlight.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DirectionalLight {
+    /// The direction the light travels (normalized on use).
+    pub direction: glam::Vec3,
+    /// Light color (linear RGB).
+    pub color: [f32; 3],
+    /// Ambient light fraction, 0.0..=1.0.
+    pub ambient: f32,
+    /// Whether this light casts shadows.
+    pub shadows: bool,
+}
+
+impl DirectionalLight {
+    /// Creates a light shining along `direction`, with shadows on.
+    #[must_use]
+    pub fn new(direction: glam::Vec3) -> Self {
+        Self {
+            direction,
+            color: [1.0, 1.0, 1.0],
+            ambient: 0.3,
+            shadows: true,
+        }
+    }
+}
+
+impl Default for DirectionalLight {
+    fn default() -> Self {
+        Self::new(glam::Vec3::new(-0.5, -1.0, -0.35))
+    }
+}
+
+impl From<DirectionalLight> for Sun {
+    fn from(light: DirectionalLight) -> Self {
+        Sun {
+            direction: light.direction,
+            color: light.color,
+            ambient: light.ambient,
+            shadows: light.shadows,
+        }
     }
 }
 
@@ -94,6 +142,10 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
     }
     if let Some(camera) = (&mut world.query::<&Camera2D>()).into_iter().next() {
         draw.set_camera_2d(*camera);
+    }
+    // Lighting: the first entity with a directional light becomes the sun.
+    if let Some(light) = (&mut world.query::<&DirectionalLight>()).into_iter().next() {
+        draw.set_sun((*light).into());
     }
 
     for (renderer, global) in &mut world.query::<(&MeshRenderer, &GlobalTransform)>() {
@@ -242,5 +294,31 @@ mod tests {
         record_draw_list(scene.world(), &mut draw);
         assert_eq!(draw.sprite_count(), 0);
         assert_eq!(draw.mesh_count(), 0);
+    }
+
+    #[test]
+    fn directional_light_component_sets_the_frame_sun() {
+        let mut scene = Scene::new();
+        let light = DirectionalLight {
+            direction: Vec3::new(0.0, -1.0, 0.0),
+            color: [1.0, 0.9, 0.8],
+            ambient: 0.4,
+            shadows: true,
+        };
+        scene.spawn((light,));
+
+        let mut draw = DrawList::new();
+        record_draw_list(scene.world(), &mut draw);
+
+        let sun = draw.sun().expect("light should set the frame sun");
+        assert_eq!(sun.direction, Vec3::new(0.0, -1.0, 0.0));
+        assert_eq!(sun.color, [1.0, 0.9, 0.8]);
+        assert!(sun.shadows);
+
+        // No light entity -> no sun override on the draw list.
+        let empty = Scene::new();
+        let mut draw = DrawList::new();
+        record_draw_list(empty.world(), &mut draw);
+        assert!(draw.sun().is_none());
     }
 }

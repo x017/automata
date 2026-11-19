@@ -888,3 +888,30 @@ def test_action_map_axis_bindings_stack():
     assert controls.axis_names() == ["move_x"]
     controls.unbind_axis("move_x")
     assert controls.axis_names() == []
+
+
+def test_directional_light_component():
+    light = at.DirectionalLight(
+        direction=(0.0, -1.0, 0.0), color=(1.0, 0.9, 0.8), ambient=0.4, shadows=True
+    )
+    assert light.direction == (0.0, -1.0, 0.0)
+    assert light.color[0] == pytest.approx(1.0)
+    assert light.color[1] == pytest.approx(0.9)
+    assert light.ambient == pytest.approx(0.4)
+    assert light.shadows is True
+
+    # Defaults: shadows on, white light.
+    default = at.DirectionalLight()
+    assert default.shadows is True
+
+    # Stages and runs headless (light is inert without a GPU).
+    game = make_game()
+    game.load_scene(at.Scene().add(at.Entity("sun").add(light)))
+    seen = {}
+
+    def update(ctx):
+        seen["names"] = ctx.scene.names()
+        ctx.quit()
+
+    assert game.run(update) >= 1
+    assert seen["names"] == ["sun"]

@@ -127,6 +127,9 @@ pub(crate) struct MeshInner {
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
     pub index_count: u32,
+    /// Radius of the sphere around the origin containing all vertices;
+    /// used to fit the shadow map around the scene.
+    pub bounding_radius: f32,
 }
 
 #[cfg(test)]

@@ -97,6 +97,25 @@ class MeshRenderer:
         cls, size: float = 1.0, color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
     ) -> MeshRenderer: ...
 
+class DirectionalLight:
+    """The scene's directional sun: parallel light rays plus ambient fill.
+
+    Attach to any entity; the first entity carrying one lights the frame.
+    Shadows are shadow-mapped and on by default.
+    """
+
+    direction: Vec3
+    color: tuple[float, float, float]
+    ambient: float
+    shadows: bool
+    def __init__(
+        self,
+        direction: Vec3 = (-0.5, -1.0, -0.35),
+        color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        ambient: float = 0.3,
+        shadows: bool = True,
+    ) -> None: ...
+
 class Entity:
     """A game object builder: attach components, then add it to a Scene."""
 
