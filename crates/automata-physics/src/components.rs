@@ -12,7 +12,9 @@
 use glam::{Vec2, Vec3};
 
 /// How a rigid body responds to forces and collisions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub enum BodyType {
     /// Affected by gravity and collisions; moves freely.
     #[default]
@@ -27,7 +29,9 @@ pub enum BodyType {
 }
 
 /// How a [`CharacterController`] interacts with the world.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub enum CharacterMode {
     /// Collides with the world and receives collision events.
     #[default]
@@ -50,7 +54,7 @@ pub enum CharacterMode {
 ///     .gravity_scale(0.5)
 ///     .linear_damping(0.2);
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RigidBody {
     /// How the body moves.
     pub body_type: BodyType,
@@ -140,7 +144,7 @@ impl RigidBody {
 }
 
 /// A 2D collision shape (used by [`Collider2D`]).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Shape2D {
     /// Circle with the given radius.
     Ball {
@@ -162,7 +166,7 @@ pub enum Shape2D {
 }
 
 /// A 3D collision shape (used by [`Collider3D`]).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Shape3D {
     /// Sphere with the given radius.
     Ball {
@@ -194,7 +198,7 @@ pub enum Shape3D {
 /// # use automata_physics::prelude::*;
 /// let trigger = Collider3D::ball(1.0).sensor(true).density(0.0);
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Collider<S> {
     /// The collider's shape.
     pub shape: S,
@@ -328,7 +332,7 @@ impl Collider3D {
 ///     .max_slope_climb_angle(0.8)
 ///     .snap_to_ground(0.4);
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CharacterController {
     /// Whether the character collides and/or reports events.
     pub mode: CharacterMode,
@@ -422,7 +426,7 @@ impl CharacterController {
 /// Set this from your game logic; the physics world consumes it, resolves
 /// collisions, and writes the result to the [`automata_scene::Transform`]. The value is
 /// *not* cleared automatically — set it every frame.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct CharacterVelocity {
     /// Desired velocity in metres per second.
     pub velocity: Vec3,

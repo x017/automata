@@ -8,7 +8,16 @@ use glam::Vec3;
 ///
 /// The memory layout matches the mesh pipeline's vertex buffer layout.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    bytemuck::Pod,
+    bytemuck::Zeroable,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct Vertex {
     /// Position in model space.
     pub position: [f32; 3],
@@ -32,7 +41,7 @@ impl Vertex {
 
 /// CPU-side mesh geometry, ready to upload via
 /// [`Renderer::create_mesh`](crate::Renderer::create_mesh).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MeshData {
     /// Vertex data.
     pub vertices: Vec<Vertex>,

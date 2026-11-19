@@ -12,7 +12,7 @@ use glam::{Mat4, Vec2, Vec3};
 /// The view is centered on [`Self::center`] and spans
 /// `2 × half_height` world units vertically; the horizontal span follows the
 /// viewport's aspect ratio. World space has +Y up.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Camera2D {
     /// Center of the view in world units.
     pub center: Vec2,
@@ -48,7 +48,7 @@ impl Camera2D {
 }
 
 /// A 3D perspective camera.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Camera3D {
     /// Camera position in world space.
     pub position: Vec3,

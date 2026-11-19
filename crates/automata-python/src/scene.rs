@@ -123,6 +123,41 @@ impl PyScene {
     fn __len__(&self) -> usize {
         self.entities.len()
     }
+
+    /// Serializes the staged scene to RON text (the scene-file format).
+    fn to_ron(&self) -> PyResult<String> {
+        crate::serialize::scene_to_ron(&self.entities)
+            .map_err(|err| pyo3::exceptions::PyValueError::new_err(err.to_string()))
+    }
+
+    /// Writes the staged scene to `path` as a RON scene file.
+    fn save(&self, path: &str) -> PyResult<()> {
+        let text = self.to_ron()?;
+        std::fs::write(path, text)
+            .map_err(|err| pyo3::exceptions::PyIOError::new_err(err.to_string()))
+    }
+
+    /// Parses a staged scene from RON text.
+    ///
+    /// Raises `ValueError` for malformed files or files written by a newer
+    /// engine version.
+    #[classmethod]
+    fn from_ron(_cls: &Bound<'_, pyo3::types::PyType>, text: &str) -> PyResult<Self> {
+        let entities = crate::serialize::scene_from_ron(text)
+            .map_err(|err| pyo3::exceptions::PyValueError::new_err(err.to_string()))?;
+        Ok(Self { entities })
+    }
+
+    /// Loads a staged scene from a RON scene file at `path`.
+    ///
+    /// Raises `ValueError` for malformed files and `IOError` for unreadable
+    /// paths.
+    #[classmethod]
+    fn load(cls: &Bound<'_, pyo3::types::PyType>, path: &str) -> PyResult<Self> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|err| pyo3::exceptions::PyIOError::new_err(err.to_string()))?;
+        Self::from_ron(cls, &text)
+    }
 }
 
 impl PyScene {

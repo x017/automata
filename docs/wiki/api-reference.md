@@ -44,10 +44,21 @@ Class attributes mirror every constructor option; kwargs win over them.
 scene = at.Scene().add(entity)     # chainable
 len(scene)  scene.entity_count
 
+scene.to_ron() -> str              # staged scene -> RON text
+scene.save(path)                   # write the RON scene file
+at.Scene.from_ron(text) -> Scene   # ValueError on bad/newer files
+at.Scene.load(path) -> Scene       # IOError on missing files
+
+game.scene_to_ron() -> str         # the LIVE world (post-physics) -> RON
+game.save_scene(path)              # same, straight to disk
+
 entity = at.Entity(name=None)      # name optional, used for ctx.scene lookup
 entity.add(component)              # chainable; TypeError for unknown types
 entity.name                        # get/set
 ```
+
+See [Guide: Scene Files](guides/scene-files.md) for the format and its
+durability rules.
 
 `at.Component` — the union of everything `add` accepts (for annotations).
 

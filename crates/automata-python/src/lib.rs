@@ -26,6 +26,7 @@ mod keys;
 mod physics;
 mod physics_components;
 mod scene;
+mod serialize;
 
 use pyo3::prelude::*;
 

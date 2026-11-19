@@ -36,7 +36,7 @@ impl MeshRenderer {
 ///
 /// The first entity carrying one becomes the frame's light in
 /// [`record_draw_list`]. Enable `shadows` for shadow-mapped sunlight.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DirectionalLight {
     /// The direction the light travels (normalized on use).
     pub direction: glam::Vec3,
@@ -174,12 +174,33 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
 /// The engine's windowed loop materializes it into a real [`MeshRenderer`]
 /// on the first frame via [`materialize_visuals`]; headless runs leave it
 /// untouched. The entity's [`crate::Transform`] scale sizes the primitive.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MeshVisual {
+    /// Which primitive (or custom geometry) `data` holds. Kept alongside
+    /// the baked mesh so scene files can record `Cube(size: 1.0)` instead
+    /// of 24 raw vertices.
+    pub kind: MeshVisualKind,
     /// The primitive's geometry.
     pub data: MeshData,
     /// Flat base color, RGBA.
     pub color: [f32; 4],
+}
+
+/// The geometry source a [`MeshVisual`] was built from.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum MeshVisualKind {
+    /// `MeshData::cube(size)`.
+    Cube {
+        /// Side length before scaling.
+        size: f32,
+    },
+    /// `MeshData::quad(size)`.
+    Quad {
+        /// Side length before scaling.
+        size: f32,
+    },
+    /// Hand-built geometry, stored verbatim.
+    Custom,
 }
 
 impl MeshVisual {
@@ -187,6 +208,7 @@ impl MeshVisual {
     #[must_use]
     pub fn cube(size: f32, color: [f32; 4]) -> Self {
         Self {
+            kind: MeshVisualKind::Cube { size },
             data: MeshData::cube(size),
             color,
         }
@@ -197,6 +219,7 @@ impl MeshVisual {
     #[must_use]
     pub fn quad(size: f32, color: [f32; 4]) -> Self {
         Self {
+            kind: MeshVisualKind::Quad { size },
             data: MeshData::quad(size),
             color,
         }
@@ -232,6 +255,7 @@ pub fn materialize_visuals(
                 continue;
             };
             MeshVisual {
+                kind: visual.kind.clone(),
                 data: visual.data.clone(),
                 color: visual.color,
             }

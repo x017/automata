@@ -14,12 +14,14 @@ pub mod config;
 mod driver;
 pub mod error;
 pub mod logging;
+pub mod scene_file;
 pub mod time;
 pub mod window;
 
 pub use app::{AppContext, AppState, Application, WorldState};
 pub use config::EngineConfig;
 pub use error::{Error, Result};
+pub use scene_file::{EntityData, SceneFile, SceneFileError, TransformData, SCENE_FILE_VERSION};
 pub use time::Time;
 pub use window::{WindowConfig, WindowMode};
 

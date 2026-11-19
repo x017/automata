@@ -54,6 +54,7 @@ Hello().run()
 | Structure a big game with classes | [Guide: OOP Style](guides/oop-style.md) |
 | Test my game headlessly in CI | [Guide: Testing](guides/testing.md) |
 | Organize a project past one file | [Guide: Project Structure](guides/project-structure.md) |
+| Save and load scenes as files | [Guide: Scene Files](guides/scene-files.md) |
 
 ## The two rules of the frame model
 

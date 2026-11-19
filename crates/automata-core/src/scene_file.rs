@@ -1,0 +1,369 @@
+//! Scene files: the RON authoring format for worlds.
+//!
+//! A [`SceneFile`] is plain, versioned data — the on-disk representation a
+//! game (or the Oberon editor) saves and loads. Two tolerances keep files
+//! durable across engine versions: unknown fields are ignored, and missing
+//! fields fall back to defaults, so older engines read newer files and vice
+//! versa as far as the overlapping fields allow. [`SCENE_FILE_VERSION`]
+//! exists for the day a truly breaking change arrives.
+//!
+//! Transforms are stored as Euler angles (radians, XYZ order) because scene
+//! files are hand-edited; quaternions would round-trip bit-exactly but read
+//! as opaque noise. The Euler round-trip drift is far below f32 visual
+//! significance.
+
+use automata_renderer::{Camera2D, Camera3D, MeshData};
+use automata_scene::{DirectionalLight, MeshVisual, MeshVisualKind, Name, SceneWorld, Transform};
+use glam::EulerRot;
+use serde::{Deserialize, Serialize};
+
+/// The current scene file format version.
+pub const SCENE_FILE_VERSION: u32 = 1;
+
+/// Scene file loading and saving failures.
+#[derive(Debug, thiserror::Error)]
+pub enum SceneFileError {
+    /// The RON text is malformed (carries line/column information).
+    #[error("invalid scene file: {0}")]
+    Parse(#[from] ron::error::SpannedError),
+    /// The file was written by a newer engine than this one.
+    #[error("scene file version {0} is newer than supported version {SCENE_FILE_VERSION}")]
+    UnsupportedVersion(u32),
+    /// Serialization failed (not reachable with the current schema's types).
+    #[error("scene serialization failed: {0}")]
+    Serialize(#[from] ron::Error),
+}
+
+/// A serialized scene: a version header plus one record per entity.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SceneFile {
+    /// Format version; loading rejects files newer than the engine.
+    pub version: u32,
+    /// Every entity in the scene.
+    #[serde(default)]
+    pub entities: Vec<EntityData>,
+}
+
+/// One entity's authoring data: an optional name plus at most one of each
+/// component. Absent components are simply `None` and omitted from the RON.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct EntityData {
+    /// The entity's name, used for `ctx.scene` lookups.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Local transform (stored as Euler angles for hand-editing).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform: Option<TransformData>,
+    /// Perspective camera.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera_3d: Option<Camera3D>,
+    /// Orthographic 2D camera.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera_2d: Option<Camera2D>,
+    /// Directional sun light.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directional_light: Option<DirectionalLight>,
+    /// Primitive mesh visual.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_visual: Option<MeshVisualData>,
+    /// Rigid body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rigid_body: Option<automata_physics::RigidBody>,
+    /// 3D collider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collider_3d: Option<automata_physics::Collider3D>,
+    /// 2D collider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collider_2d: Option<automata_physics::Collider2D>,
+    /// Character controller.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub character_controller: Option<automata_physics::CharacterController>,
+    /// Character velocity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub character_velocity: Option<automata_physics::CharacterVelocity>,
+}
+
+/// Human-editable transform: position, Euler rotation (XYZ, radians), scale.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TransformData {
+    /// Translation.
+    pub position: [f32; 3],
+    /// Euler angles `(x, y, z)` in radians, applied in XYZ order.
+    pub rotation_euler: [f32; 3],
+    /// Scale per axis.
+    pub scale: [f32; 3],
+}
+
+impl From<Transform> for TransformData {
+    fn from(t: Transform) -> Self {
+        Self {
+            position: t.position.into(),
+            rotation_euler: t.rotation.to_euler(EulerRot::XYZ).into(),
+            scale: t.scale.into(),
+        }
+    }
+}
+
+impl From<TransformData> for Transform {
+    fn from(d: TransformData) -> Self {
+        Self {
+            position: d.position.into(),
+            rotation: glam::Quat::from_euler(
+                EulerRot::XYZ,
+                d.rotation_euler[0],
+                d.rotation_euler[1],
+                d.rotation_euler[2],
+            ),
+            scale: d.scale.into(),
+        }
+    }
+}
+
+/// The serializable form of a [`MeshVisual`]: a primitive tag plus color,
+/// with custom geometry stored verbatim.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeshVisualData {
+    /// Which primitive (or custom geometry) to build.
+    pub primitive: PrimitiveData,
+    /// Flat base color, RGBA.
+    pub color: [f32; 4],
+}
+
+/// Primitive geometry descriptors compact enough to hand-edit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PrimitiveData {
+    /// A cube of `size` units a side.
+    Cube {
+        /// Side length before scaling.
+        size: f32,
+    },
+    /// A quad of `size` units a side, facing +Z.
+    Quad {
+        /// Side length before scaling.
+        size: f32,
+    },
+    /// Hand-built geometry, stored as raw vertices and indices.
+    Custom {
+        /// The full vertex/index data.
+        mesh: MeshData,
+    },
+}
+
+impl From<&MeshVisual> for MeshVisualData {
+    fn from(visual: &MeshVisual) -> Self {
+        let primitive = match &visual.kind {
+            MeshVisualKind::Cube { size } => PrimitiveData::Cube { size: *size },
+            MeshVisualKind::Quad { size } => PrimitiveData::Quad { size: *size },
+            MeshVisualKind::Custom => PrimitiveData::Custom {
+                mesh: visual.data.clone(),
+            },
+        };
+        Self {
+            primitive,
+            color: visual.color,
+        }
+    }
+}
+
+impl From<&MeshVisualData> for MeshVisual {
+    fn from(data: &MeshVisualData) -> Self {
+        let (kind, mesh) = match &data.primitive {
+            PrimitiveData::Cube { size } => {
+                (MeshVisualKind::Cube { size: *size }, MeshData::cube(*size))
+            }
+            PrimitiveData::Quad { size } => {
+                (MeshVisualKind::Quad { size: *size }, MeshData::quad(*size))
+            }
+            PrimitiveData::Custom { mesh } => (MeshVisualKind::Custom, mesh.clone()),
+        };
+        Self {
+            kind,
+            data: mesh,
+            color: data.color,
+        }
+    }
+}
+
+impl SceneFile {
+    /// Captures every entity in a live world.
+    #[must_use]
+    pub fn from_world(world: &SceneWorld) -> Self {
+        let mut entities = Vec::with_capacity(world.len() as usize);
+        for eref in world {
+            let mut data = EntityData::default();
+            if let Some(name) = eref.get::<&Name>() {
+                data.name = Some(name.0.clone());
+            }
+            if let Some(transform) = eref.get::<&Transform>() {
+                data.transform = Some(TransformData::from(*transform));
+            }
+            if let Some(camera) = eref.get::<&Camera3D>() {
+                data.camera_3d = Some(*camera);
+            }
+            if let Some(camera) = eref.get::<&Camera2D>() {
+                data.camera_2d = Some(*camera);
+            }
+            if let Some(light) = eref.get::<&DirectionalLight>() {
+                data.directional_light = Some(*light);
+            }
+            if let Some(visual) = eref.get::<&MeshVisual>() {
+                data.mesh_visual = Some(MeshVisualData::from(&*visual));
+            }
+            if let Some(body) = eref.get::<&automata_physics::RigidBody>() {
+                data.rigid_body = Some((*body).clone());
+            }
+            if let Some(collider) = eref.get::<&automata_physics::Collider3D>() {
+                data.collider_3d = Some((*collider).clone());
+            }
+            if let Some(collider) = eref.get::<&automata_physics::Collider2D>() {
+                data.collider_2d = Some((*collider).clone());
+            }
+            if let Some(controller) = eref.get::<&automata_physics::CharacterController>() {
+                data.character_controller = Some((*controller).clone());
+            }
+            if let Some(velocity) = eref.get::<&automata_physics::CharacterVelocity>() {
+                data.character_velocity = Some(*velocity);
+            }
+            entities.push(data);
+        }
+        Self {
+            version: SCENE_FILE_VERSION,
+            entities,
+        }
+    }
+
+    /// Pretty-printed RON with two-space indentation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneFileError::Serialize`] on failure (not reachable with
+    /// the current schema's types).
+    pub fn to_ron(&self) -> Result<String, SceneFileError> {
+        Ok(ron::ser::to_string_pretty(
+            self,
+            ron::ser::PrettyConfig::default(),
+        )?)
+    }
+
+    /// Parses a scene file, rejecting files newer than this engine.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneFileError::Parse`] for malformed RON and
+    /// [`SceneFileError::UnsupportedVersion`] when `version` is newer than
+    /// [`SCENE_FILE_VERSION`].
+    pub fn from_ron(text: &str) -> Result<Self, SceneFileError> {
+        let file: Self = ron::de::from_str(text)?;
+        if file.version > SCENE_FILE_VERSION {
+            return Err(SceneFileError::UnsupportedVersion(file.version));
+        }
+        Ok(file)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use automata_physics::{CharacterController, CharacterVelocity, Collider3D, RigidBody};
+    use automata_scene::{Name, Scene};
+
+    fn kitchen_sink_world() -> automata_scene::Scene {
+        let mut scene = Scene::new();
+        let world = scene.world_mut();
+        world.spawn((
+            Name("player".into()),
+            Transform {
+                position: glam::Vec3::new(-4.0, 1.4, 0.0),
+                rotation: glam::Quat::from_euler(EulerRot::XYZ, 0.0, 0.7, 0.0),
+                scale: glam::Vec3::ONE,
+            },
+            MeshVisual::cube(0.9, [0.95, 0.45, 0.15, 1.0]),
+            RigidBody::kinematic_velocity(),
+            Collider3D::capsule(0.5, 0.4),
+            CharacterController::new().snap_to_ground(0.5),
+            CharacterVelocity::default(),
+        ));
+        world.spawn((
+            Name("sun".into()),
+            DirectionalLight {
+                direction: glam::Vec3::new(-0.45, -1.0, -0.3),
+                color: [1.0, 0.96, 0.88],
+                ambient: 0.35,
+                shadows: true,
+            },
+        ));
+        world.spawn((Camera3D::new(
+            glam::Vec3::new(0.0, 2.0, 6.0),
+            glam::Vec3::ZERO,
+        ),));
+        world.spawn((Name("lonely".into()),));
+        scene
+    }
+
+    #[test]
+    fn empty_world_round_trips() {
+        let scene = Scene::new();
+        let file = SceneFile::from_world(scene.world());
+        let text = file.to_ron().expect("serialize");
+        assert!(text.contains("version: 1"));
+        let back = SceneFile::from_ron(&text).expect("parse");
+        assert_eq!(back, file);
+    }
+
+    #[test]
+    fn kitchen_sink_round_trips() {
+        let scene = kitchen_sink_world();
+        let file = SceneFile::from_world(scene.world());
+        assert_eq!(file.entities.len(), 4);
+        let text = file.to_ron().expect("serialize");
+        let back = SceneFile::from_ron(&text).expect("parse");
+        assert_eq!(back, file);
+
+        let player = file
+            .entities
+            .iter()
+            .find(|e| e.name.as_deref() == Some("player"))
+            .expect("player present");
+        let transform = player.transform.expect("transform present");
+        assert_eq!(transform.position, [-4.0, 1.4, 0.0]);
+        assert!((transform.rotation_euler[1] - 0.7).abs() < 1e-5);
+        assert_eq!(
+            player.mesh_visual.as_ref().expect("visual").primitive,
+            PrimitiveData::Cube { size: 0.9 }
+        );
+        assert!(player.rigid_body.is_some());
+        assert!(player.character_controller.is_some());
+    }
+
+    #[test]
+    fn ron_output_is_human_readable() {
+        let scene = kitchen_sink_world();
+        let text = SceneFile::from_world(scene.world())
+            .to_ron()
+            .expect("serialize");
+        assert!(text.contains("name: Some(\"player\")"), "{text}");
+        assert!(text.contains("Cube"), "{text}");
+        assert!(text.contains("rotation_euler"), "{text}");
+    }
+
+    #[test]
+    fn from_ron_rejects_garbage() {
+        assert!(SceneFile::from_ron("this is not ron").is_err());
+    }
+
+    #[test]
+    fn from_ron_rejects_newer_versions() {
+        let text = "SceneFile(version: 99, entities: [])";
+        assert!(SceneFile::from_ron(text).is_err());
+    }
+
+    #[test]
+    fn missing_fields_default_and_unknown_fields_are_ignored() {
+        // A minimal file: entities present, everything else absent.
+        let text = "SceneFile(version: 1, entities: [(name: Some(\"crate\"))])";
+        let file = SceneFile::from_ron(text).expect("parse");
+        assert_eq!(file.entities.len(), 1);
+        assert_eq!(file.entities[0].name.as_deref(), Some("crate"));
+        assert!(file.entities[0].transform.is_none());
+    }
+}

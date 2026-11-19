@@ -173,6 +173,25 @@ impl PyGame {
     fn quit(&mut self) {
         self.app.request_quit();
     }
+
+    /// Serializes the live world — the scene as it currently stands, not as
+    /// it was staged — to RON text.
+    ///
+    /// For Oberon this is the save path: physics has run, transforms have
+    /// moved, and the file captures the world as it is now.
+    fn scene_to_ron(&self) -> PyResult<String> {
+        let file =
+            automata_core::scene_file::SceneFile::from_world(self.app.world().scene().world());
+        file.to_ron()
+            .map_err(|err| pyo3::exceptions::PyValueError::new_err(err.to_string()))
+    }
+
+    /// Saves the live world to `path` as a RON scene file.
+    fn save_scene(&self, path: &str) -> PyResult<()> {
+        let text = self.scene_to_ron()?;
+        std::fs::write(path, text)
+            .map_err(|err| pyo3::exceptions::PyIOError::new_err(err.to_string()))
+    }
 }
 
 /// Runs one frame's Python update and applies the buffered writes.

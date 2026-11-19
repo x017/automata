@@ -967,3 +967,134 @@ def test_graphics_quality_as_oop_class_attribute():
         graphics = at.GraphicsQuality.LOW
 
     assert Chill().state == "created"
+
+
+# ---------------------------------------------------------------------------
+# Scene files (RON serialization)
+# ---------------------------------------------------------------------------
+
+
+def _kitchen_sink_scene():
+    return (
+        at.Scene()
+        .add(at.Entity("cam").add(at.Camera3D(position=(0, 2, 6), target=(0, 0, 0))))
+        .add(
+            at.Entity("crate")
+            .add(at.Transform(position=(0, 5, 0)))
+            .add(at.MeshRenderer.cube(size=0.8, color=(0.72, 0.52, 0.30, 1.0)))
+            .add(at.RigidBody.dynamic())
+            .add(at.Collider3D.cuboid(0.8, 0.8, 0.8).restitution(0.3))
+        )
+        .add(
+            at.Entity("player")
+            .add(at.Transform(position=(-4, 1.4, 0)))
+            .add(at.RigidBody.kinematic_velocity())
+            .add(at.Collider3D.capsule(0.5, 0.4))
+            .add(at.CharacterController(snap_to_ground=0.5))
+            .add(at.CharacterVelocity())
+        )
+        .add(
+            at.Entity("sun").add(
+                at.DirectionalLight(direction=(-0.45, -1.0, -0.3), ambient=0.35, shadows=True)
+            )
+        )
+        .add(at.Entity("flat").add(at.Camera2D(center=(0, 0), half_height=5.0)))
+        .add(
+            at.Entity("paper")
+            .add(at.Collider2D.ball(0.5))
+            .add(at.MeshRenderer.quad(size=2.0))
+        )
+    )
+
+
+def test_scene_ron_round_trip_staged():
+    scene = _kitchen_sink_scene()
+    text = scene.to_ron()
+    assert "version: 1" in text
+    assert 'name: Some("crate")' in text
+
+    loaded = at.Scene.from_ron(text)
+    assert len(loaded) == len(scene) == 6
+
+    # Behavior, not just data: the loaded scene runs and answers lookups.
+    seen = {}
+
+    def probe(ctx):
+        seen["names"] = ctx.scene.names()
+        ctx.quit()
+
+    game = at.Game(headless=True)
+    game.load_scene(loaded)
+    game.run(probe, max_frames=4)
+    assert {"cam", "crate", "player", "sun", "flat", "paper"} <= set(seen["names"])
+
+
+def test_scene_save_and_load_files(tmp_path):
+    path = tmp_path / "level.ron"
+    _kitchen_sink_scene().save(str(path))
+    text = path.read_text()
+    assert "primitive: Cube" in text
+
+    loaded = at.Scene.load(str(path))
+    assert len(loaded) == 6
+
+
+def test_scene_from_ron_rejects_garbage_and_newer_versions():
+    with pytest.raises(ValueError):
+        at.Scene.from_ron("definitely not ron")
+    with pytest.raises(ValueError):
+        at.Scene.from_ron("(version: 99, entities: [])")
+
+
+def test_scene_load_missing_file_raises(tmp_path):
+    with pytest.raises(IOError):
+        at.Scene.load(str(tmp_path / "nope.ron"))
+
+
+def test_game_save_scene_captures_the_live_world(tmp_path):
+    # A dynamic crate falls; the saved file must hold its *moved* transform.
+    game = at.Game(headless=True)
+    game.load_scene(
+        at.Scene()
+        .add(
+            at.Entity("floor")
+            .add(at.Transform(scale=(20, 1, 20)))
+            .add(at.RigidBody.fixed())
+            .add(at.Collider3D.cuboid(20, 1, 20))
+        )
+        .add(
+            at.Entity("crate")
+            .add(at.Transform(position=(0, 5, 0)))
+            .add(at.RigidBody.dynamic())
+            .add(at.Collider3D.cuboid(0.8, 0.8, 0.8).restitution(0.3))
+        )
+    )
+    game.run(lambda ctx: None, max_frames=240)
+
+    path = tmp_path / "live.ron"
+    game.save_scene(str(path))
+    text = path.read_text()
+    assert 'name: Some("crate")' in text
+
+    # The crate rests at y ~ 0.9 — the file records that, not the staged y=5.
+    assert "position: (0.0, 5.0, 0.0)" not in text
+
+    # Behavioral proof: the saved file loads and the crate starts at rest.
+    game2 = at.Game(headless=True)
+    game2.load_scene(at.Scene.load(str(path)))
+    seen = {}
+
+    def probe(ctx):
+        seen["y"] = ctx.scene["crate"].transform.position[1]
+        ctx.quit()
+
+    frames = game2.run(probe, max_frames=4)
+    assert frames >= 1
+    assert seen["y"] == pytest.approx(0.9, abs=0.15)
+
+
+def test_game_scene_to_ron_matches_save_scene(tmp_path):
+    game = at.Game(headless=True)
+    game.load_scene(at.Scene().add(at.Entity("marker").add(at.Transform(position=(1, 2, 3)))))
+    game.run(lambda ctx: None, max_frames=1)
+    assert 'name: Some("marker")' in game.scene_to_ron()
