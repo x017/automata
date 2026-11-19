@@ -78,6 +78,55 @@ impl PyEntity {
         Ok(slf)
     }
 
+    /// The staged components as fresh Python objects, for editors that need
+    /// to inspect a scene's contents (Oberon). Each call rebuilds the list.
+    fn components(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        use crate::components::{
+            PyCamera2D, PyCamera3D, PyDirectionalLight, PyMeshRenderer, PyTransform,
+        };
+        use crate::physics_components::{
+            PyCharacterController, PyCharacterVelocity, PyCollider2D, PyCollider3D, PyRigidBody,
+        };
+        self.staged
+            .components
+            .iter()
+            .map(|c| {
+                Ok(match c {
+                    StagedComponent::Transform(v) => {
+                        Py::new(py, PyTransform::from_inner(*v))?.into_any()
+                    }
+                    StagedComponent::Camera3D(v) => {
+                        Py::new(py, PyCamera3D::from_inner(*v))?.into_any()
+                    }
+                    StagedComponent::Camera2D(v) => {
+                        Py::new(py, PyCamera2D::from_inner(*v))?.into_any()
+                    }
+                    StagedComponent::RigidBody(v) => {
+                        Py::new(py, PyRigidBody::from_inner(v.clone()))?.into_any()
+                    }
+                    StagedComponent::Collider3D(v) => {
+                        Py::new(py, PyCollider3D::from_inner(v.clone()))?.into_any()
+                    }
+                    StagedComponent::Collider2D(v) => {
+                        Py::new(py, PyCollider2D::from_inner(v.clone()))?.into_any()
+                    }
+                    StagedComponent::CharacterController(v) => {
+                        Py::new(py, PyCharacterController::from_inner(v.clone()))?.into_any()
+                    }
+                    StagedComponent::CharacterVelocity(v) => {
+                        Py::new(py, PyCharacterVelocity::from_inner(*v))?.into_any()
+                    }
+                    StagedComponent::MeshVisual(v) => {
+                        Py::new(py, PyMeshRenderer::from_inner(v.clone()))?.into_any()
+                    }
+                    StagedComponent::DirectionalLight(v) => {
+                        Py::new(py, PyDirectionalLight::from_inner(*v))?.into_any()
+                    }
+                })
+            })
+            .collect()
+    }
+
     fn __repr__(&self) -> String {
         match &self.staged.name {
             Some(name) => format!(
@@ -124,6 +173,17 @@ impl PyScene {
         self.entities.len()
     }
 
+    /// The staged entities as fresh `Entity` objects, for editors that need
+    /// to walk a loaded scene (Oberon). Order matches the scene file.
+    fn entities(&self) -> Vec<PyEntity> {
+        self.entities
+            .iter()
+            .map(|staged| PyEntity {
+                staged: staged.clone(),
+            })
+            .collect()
+    }
+
     /// Serializes the staged scene to RON text (the scene-file format).
     fn to_ron(&self) -> PyResult<String> {
         crate::serialize::scene_to_ron(&self.entities)
@@ -161,8 +221,9 @@ impl PyScene {
 }
 
 impl PyScene {
-    /// The staged entities.
-    pub fn entities(&self) -> &[StagedEntity] {
+    /// The staged entities (Rust-side accessor; the Python-visible method
+    /// is [`PyScene::entities`]).
+    pub fn staged_entities(&self) -> &[StagedEntity] {
         &self.entities
     }
 }

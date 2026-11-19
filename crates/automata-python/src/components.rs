@@ -234,6 +234,11 @@ impl PyDirectionalLight {
     pub fn inner(&self) -> DirectionalLight {
         self.inner
     }
+
+    /// Wraps an engine light for Python (used by scene enumeration).
+    pub fn from_inner(inner: DirectionalLight) -> Self {
+        Self { inner }
+    }
 }
 
 /// An orthographic 2D camera. The first entity carrying one becomes the
@@ -273,6 +278,11 @@ impl PyCamera2D {
     /// The engine component value.
     pub fn inner(&self) -> Camera2D {
         self.inner
+    }
+
+    /// Wraps an engine camera for Python (used by scene enumeration).
+    pub fn from_inner(inner: Camera2D) -> Self {
+        Self { inner }
     }
 }
 
@@ -332,6 +342,17 @@ impl PyMeshRenderer {
     /// The engine component value.
     pub(crate) fn inner(&self) -> automata_scene::MeshVisual {
         self.inner.clone()
+    }
+
+    /// Wraps an engine mesh visual for Python, deriving the kind label from
+    /// the visual's shape (used by scene enumeration).
+    pub fn from_inner(inner: automata_scene::MeshVisual) -> Self {
+        let kind = match inner.kind {
+            automata_scene::MeshVisualKind::Cube { .. } => "cube",
+            automata_scene::MeshVisualKind::Quad { .. } => "quad",
+            automata_scene::MeshVisualKind::Custom => "custom",
+        };
+        Self { inner, kind }
     }
 }
 

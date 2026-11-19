@@ -25,6 +25,11 @@ impl PyRigidBody {
     pub(crate) fn inner(&self) -> automata_physics::RigidBody {
         self.inner.clone()
     }
+
+    /// Wraps an engine rigid body for Python (used by scene enumeration).
+    pub fn from_inner(inner: automata_physics::RigidBody) -> Self {
+        Self { inner }
+    }
 }
 
 #[pymethods]
@@ -120,6 +125,11 @@ impl PyCollider3D {
     pub(crate) fn inner(&self) -> automata_physics::Collider3D {
         self.inner.clone()
     }
+
+    /// Wraps an engine collider for Python (used by scene enumeration).
+    pub fn from_inner(inner: automata_physics::Collider3D) -> Self {
+        Self { inner }
+    }
 }
 
 #[pymethods]
@@ -191,6 +201,11 @@ pub struct PyCollider2D {
 impl PyCollider2D {
     pub(crate) fn inner(&self) -> automata_physics::Collider2D {
         self.inner.clone()
+    }
+
+    /// Wraps an engine collider for Python (used by scene enumeration).
+    pub fn from_inner(inner: automata_physics::Collider2D) -> Self {
+        Self { inner }
     }
 }
 
@@ -275,6 +290,11 @@ impl PyCharacterController {
     pub(crate) fn inner(&self) -> automata_physics::CharacterController {
         self.inner.clone()
     }
+
+    /// Wraps an engine controller for Python (used by scene enumeration).
+    pub fn from_inner(inner: automata_physics::CharacterController) -> Self {
+        Self { inner }
+    }
 }
 
 #[pymethods]
@@ -331,6 +351,11 @@ pub struct PyCharacterVelocity {
 impl PyCharacterVelocity {
     pub(crate) fn inner(&self) -> automata_physics::CharacterVelocity {
         self.inner
+    }
+
+    /// Wraps an engine velocity for Python (used by scene enumeration).
+    pub fn from_inner(inner: automata_physics::CharacterVelocity) -> Self {
+        Self { inner }
     }
 }
 

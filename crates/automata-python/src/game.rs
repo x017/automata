@@ -119,7 +119,7 @@ impl PyGame {
     /// May be called before `run`, or from inside the update callback to
     /// switch scenes (applied immediately).
     fn load_scene(&mut self, scene: &PyScene) {
-        load_staged(self.app.world_mut().scene_mut(), scene.entities());
+        load_staged(self.app.world_mut().scene_mut(), scene.staged_entities());
     }
 
     /// Runs the main loop, calling `update(ctx)` once per frame.
