@@ -15,11 +15,13 @@
 //!   cross into Python, so context objects that escape the callback are
 //!   stale but harmless.
 
+mod actions;
 mod components;
 mod context;
 mod error;
 mod events;
 mod game;
+mod gamepads;
 mod keys;
 mod physics;
 mod physics_components;
@@ -50,6 +52,12 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<context::PyModifiers>()?;
     m.add_class::<context::PyResources>()?;
     m.add_class::<events::PyEvents>()?;
+    m.add_class::<gamepads::PyGamepads>()?;
+    m.add_class::<gamepads::PyGamepad>()?;
+    m.add_class::<gamepads::PyGamepadEvent>()?;
+    m.add_class::<actions::PyActionMap>()?;
+    m.add_class::<actions::PyBinding>()?;
+    m.add_class::<actions::PyAxisBinding>()?;
     m.add_class::<physics::PyPhysics>()?;
     m.add_class::<physics::PyPhysics2D>()?;
     m.add_class::<physics_components::PyRigidBody>()?;

@@ -172,13 +172,16 @@ fn run_python_frame(
             ),
         )
     };
+    let gamepad_events = crate::gamepads::PyGamepadEvent::convert_all(
+        ctx.events().read::<automata_input::GamepadEvent>().cloned(),
+    );
     let frame = FrameContext::new(
         FrameTime {
             delta: ctx.time().delta().as_secs_f64(),
             elapsed: ctx.time().elapsed_seconds(),
             frame: ctx.time().frame_count(),
         },
-        PyInput::snapshot(ctx.input()),
+        PyInput::snapshot(ctx.input(), ctx.gamepads(), gamepad_events),
         SceneView::snapshot(ctx.scene(), Rc::clone(writes)),
         PyEvents::snapshot(ctx.events(), Rc::clone(outbox)),
         PyResources::new(Rc::clone(resources)),

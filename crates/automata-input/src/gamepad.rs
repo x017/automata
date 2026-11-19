@@ -160,6 +160,14 @@ impl Gamepads {
         !self.connected.is_empty()
     }
 
+    /// Human-readable name of a connected gamepad, if any.
+    #[must_use]
+    pub fn name(&self, id: GamepadId) -> Option<String> {
+        self.connected
+            .contains(&id)
+            .then(|| self.gilrs.gamepad(id).name().to_string())
+    }
+
     /// Is `button` pressed on gamepad `id`?
     #[must_use]
     pub fn pressed(&self, id: GamepadId, button: GamepadButton) -> bool {

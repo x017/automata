@@ -9,10 +9,11 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use automata_input::InputState;
+use automata_input::{Gamepads, InputState};
 use pyo3::exceptions::PyKeyError;
 use pyo3::prelude::*;
 
+use crate::gamepads::{PyGamepadEvent, PyGamepads};
 use crate::keys;
 use crate::scene::SceneView;
 
@@ -52,20 +53,21 @@ pub struct PyModifiers {
     pub super_key: bool,
 }
 
-/// Keyboard and mouse state at the start of the frame.
+/// Keyboard, mouse, and gamepad state at the start of the frame.
 ///
 /// Keys are addressed by lowercase `snake_case` names (`"w"`, `"arrow_left"`,
 /// `"f1"`, `"space"`, `"escape"`, ...); mouse buttons by `"left"`,
-/// `"right"`, `"middle"`, `"back"`, `"forward"`.
+/// `"right"`, `"middle"`, `"back"`, `"forward"`. Gamepads live under
+/// [`gamepads`](PyInput::gamepads).
 #[pyclass(name = "Input", module = "automata._core", frozen)]
 #[derive(Debug, Clone, Default)]
 pub struct PyInput {
-    pressed: HashSet<&'static str>,
-    just_pressed: HashSet<&'static str>,
-    just_released: HashSet<&'static str>,
-    buttons_pressed: HashSet<&'static str>,
-    buttons_just_pressed: HashSet<&'static str>,
-    buttons_just_released: HashSet<&'static str>,
+    pub(crate) pressed: HashSet<&'static str>,
+    pub(crate) just_pressed: HashSet<&'static str>,
+    pub(crate) just_released: HashSet<&'static str>,
+    pub(crate) buttons_pressed: HashSet<&'static str>,
+    pub(crate) buttons_just_pressed: HashSet<&'static str>,
+    pub(crate) buttons_just_released: HashSet<&'static str>,
     /// Cursor position in logical pixels, or `None` when the cursor is
     /// outside the window (or in headless mode).
     #[pyo3(get)]
@@ -76,11 +78,18 @@ pub struct PyInput {
     /// Modifier key state.
     #[pyo3(get)]
     pub modifiers: PyModifiers,
+    /// Gamepad state and events.
+    #[pyo3(get)]
+    pub gamepads: PyGamepads,
 }
 
 impl PyInput {
-    /// Snapshots an engine input state.
-    pub fn snapshot(input: &InputState) -> Self {
+    /// Snapshots an engine input state and the gamepad state.
+    pub fn snapshot(
+        input: &InputState,
+        gamepads: &Gamepads,
+        gamepad_events: Vec<PyGamepadEvent>,
+    ) -> Self {
         let modifiers = input.modifiers();
         let mut snapshot = Self {
             cursor: input.cursor_position(),
@@ -91,6 +100,7 @@ impl PyInput {
                 alt: modifiers.alt_key(),
                 super_key: modifiers.super_key(),
             },
+            gamepads: PyGamepads::snapshot(gamepads, gamepad_events),
             ..Self::default()
         };
         for (name, code) in keys::all_keys() {
@@ -116,6 +126,40 @@ impl PyInput {
             }
         }
         snapshot
+    }
+}
+
+impl PyInput {
+    /// Whether a key is held, by name. Internal: action-map evaluation.
+    pub(crate) fn has_key_pressed(&self, name: &str) -> bool {
+        self.pressed.contains(name)
+    }
+
+    /// Whether a key was pressed this frame, by name. Internal.
+    pub(crate) fn has_key_just_pressed(&self, name: &str) -> bool {
+        self.just_pressed.contains(name)
+    }
+
+    /// Whether a mouse button is held, by name. Internal.
+    pub(crate) fn has_button_pressed(&self, name: &str) -> bool {
+        self.buttons_pressed.contains(name)
+    }
+
+    /// Whether a mouse button was pressed this frame, by name. Internal.
+    pub(crate) fn has_button_just_pressed(&self, name: &str) -> bool {
+        self.buttons_just_pressed.contains(name)
+    }
+
+    /// Marks a key as held. Test-only: snapshot construction for unit tests.
+    #[cfg(test)]
+    pub(crate) fn press_key_for_test(&mut self, name: &'static str) {
+        self.pressed.insert(name);
+    }
+
+    /// Marks a key as newly pressed this frame. Test-only.
+    #[cfg(test)]
+    pub(crate) fn press_key_just_for_test(&mut self, name: &'static str) {
+        self.just_pressed.insert(name);
     }
 }
 

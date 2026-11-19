@@ -56,7 +56,9 @@ components are mutable (`t.position = (1, 2, 0)`), and scene views support
 | `Camera3D(position, target, fov)` / `Camera2D(center, half_height)` | Frame cameras (first entity wins) |
 | `FrameContext` (`ctx` in the callback) | `time`, `input`, `scene`, `events`, `resources`, `quit()` |
 | `ctx.time` | `delta` / `elapsed` (seconds), `frame` (1-based frame number) |
-| `ctx.input` | `pressed` / `just_pressed` / `just_released(key)`, `mouse_*` variants, `cursor`, `scroll`, `modifiers` |
+| `ctx.input` | `pressed` / `just_pressed` / `just_released(key)`, `mouse_*` variants, `cursor`, `scroll`, `modifiers`, `gamepads` |
+| `ctx.input.gamepads` | Connected pads: `ids()`, `get(id)`, `primary()`, `len()`, iteration; state: `pressed(id, btn)` / `pressed_any(btn)`, `axis(id, ax)` / `axis_any(ax)`; `pad.left_stick()` / `right_stick()`; `events` — this frame's gamepad events |
+| `ActionMap` / `Binding` / `AxisBinding` | Action-based input: `map.bind("jump", Binding.key("space"))`, `map.bind_axis("move_x", AxisBinding.key_pair("a", "d"))`, then `map.pressed("jump", ctx.input)` / `map.axis("move_x", ctx.input)`; `rebind` / `unbind` for remapping |
 | `ctx.scene` | `find(name)`, `["name"]`, `spawn(entity)`, `despawn(id)`, `entity_count`, `names()`, iteration; `EntityView.transform` get/set, attribute writes via `TransformRef` |
 | `ctx.events` | `send(name, payload)` / `read(name)` — buffered: sent events are readable the next frame, then expire |
 | `ctx.resources` | Immediate `set` / `get` / `remove` of arbitrary Python objects, keyed by name |
@@ -171,6 +173,12 @@ Generated docs: `cargo doc --workspace --no-deps --open`.
 
 - Keyboard/mouse state: `ctx.input.pressed(key)` / `just_pressed` /
   `just_released`, plus mouse buttons, cursor, scroll, modifiers.
-- Gamepads (gilrs): connection events, button/axis state.
-- Action mapping (Rust-side `ActionMap`): named actions and axes bound to
-  any device, remappable at runtime.
+- Gamepads (gilrs): `ctx.input.gamepads` — connected pads by id
+  (`ids`, `get`, `primary`), button/axis state (`pressed`, `pressed_any`,
+  `axis`, `axis_any`), sticks (`pad.left_stick()`), and this frame's
+  connection/button/axis events (`gamepads.events`).
+- Action mapping: `automata.ActionMap` binds named actions and axes to any
+  device (`Binding.key` / `mouse` / `gamepad_button` / axis thresholds,
+  `AxisBinding.gamepad_axis` / `key_pair` / `button_pair`), evaluates
+  against `ctx.input`, and is remappable at runtime (`bind`, `rebind`,
+  `unbind`). Game code never touches raw device ids.

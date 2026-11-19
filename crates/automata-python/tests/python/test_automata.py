@@ -429,3 +429,172 @@ def test_physics_views_present_on_context():
     assert seen["has_physics"]
     assert seen["has_physics2d"]
     assert abs(seen["gravity"][1] - (-9.81)) < 1e-4
+
+
+# -- Phase 6: gamepads and action mapping -----------------------------------
+
+
+def test_gamepads_view_present_and_empty_headless():
+    game = make_game()
+    seen = {}
+
+    def update(ctx):
+        pads = ctx.input.gamepads
+        seen["len"] = len(pads)
+        seen["ids"] = pads.ids()
+        seen["iter"] = list(pads)
+        seen["any"] = pads.any_connected()
+        seen["primary"] = pads.primary()
+        seen["events"] = pads.events
+        seen["pressed_any"] = pads.pressed_any("south")
+        seen["axis_any"] = pads.axis_any("left_stick_x")
+        seen["axis_missing_pad"] = pads.axis(99, "left_stick_x")
+        seen["get_missing"] = pads.get(99)
+        ctx.quit()
+
+    game.run(update)
+    # CI sandboxes have no gamepad hardware.
+    assert seen["len"] == 0
+    assert seen["ids"] == []
+    assert seen["iter"] == []
+    assert seen["any"] is False
+    assert seen["primary"] is None
+    assert seen["events"] == []
+    assert seen["pressed_any"] is False
+    assert seen["axis_any"] == 0.0
+    assert seen["axis_missing_pad"] == 0.0
+    assert seen["get_missing"] is None
+
+
+def test_gamepad_unknown_control_names_raise():
+    game = make_game()
+    errors = {}
+
+    def update(ctx):
+        pads = ctx.input.gamepads
+        for label, call in {
+            "button": lambda: pads.pressed_any("not_a_button"),
+            "axis": lambda: pads.axis_any("not_an_axis"),
+            "pad_button": lambda: pads.pressed(0, "not_a_button"),
+        }.items():
+            try:
+                call()
+            except KeyError:
+                errors[label] = True
+        ctx.quit()
+
+    game.run(update)
+    assert errors == {"button": True, "axis": True, "pad_button": True}
+
+
+def test_binding_constructors_validate_names():
+    assert at.Binding.key("space").kind == "key"
+    assert at.Binding.mouse("left").kind == "mouse"
+    assert at.Binding.gamepad_button("south").kind == "gamepad_button"
+    assert at.Binding.gamepad_axis_positive("left_z").kind == "gamepad_axis_positive"
+    assert at.Binding.gamepad_axis_negative("left_stick_y").kind == (
+        "gamepad_axis_negative"
+    )
+    assert "space" in repr(at.Binding.key("space"))
+
+    with pytest.raises(KeyError):
+        at.Binding.key("not_a_key")
+    with pytest.raises(KeyError):
+        at.Binding.mouse("not_a_button")
+    with pytest.raises(KeyError):
+        at.Binding.gamepad_button("not_a_button")
+    with pytest.raises(KeyError):
+        at.Binding.gamepad_axis_positive("not_an_axis")
+
+
+def test_axis_binding_constructors():
+    axis = at.AxisBinding.gamepad_axis("left_stick_x", 2.0)
+    assert axis.kind == "gamepad_axis"
+    assert axis.name == "left_stick_x"
+    assert axis.scale == 2.0
+    assert axis.negative is None
+
+    default_scale = at.AxisBinding.gamepad_axis("right_stick_y")
+    assert default_scale.scale == 1.0
+
+    pair = at.AxisBinding.key_pair("a", "d")
+    assert pair.kind == "button_pair"
+    assert pair.negative.kind == "key" and pair.negative.name == "a"
+    assert pair.positive.name == "d"
+
+    mixed = at.AxisBinding.button_pair(
+        at.Binding.key("s"), at.Binding.gamepad_button("north")
+    )
+    assert mixed.positive.kind == "gamepad_button"
+
+    with pytest.raises(KeyError):
+        at.AxisBinding.gamepad_axis("not_an_axis")
+    with pytest.raises(KeyError):
+        at.AxisBinding.key_pair("a", "not_a_key")
+
+
+def test_action_map_bookkeeping():
+    actions = at.ActionMap()
+    assert len(actions) == 0
+    assert "jump" not in actions
+
+    actions.bind("jump", at.Binding.key("space"))
+    actions.bind("jump", at.Binding.gamepad_button("south"))
+    assert len(actions) == 1
+    assert "jump" in actions
+    assert actions.actions() == ["jump"]
+    bound = actions.bindings("jump")
+    assert [b.kind for b in bound] == ["key", "gamepad_button"]
+
+    actions.rebind("jump", [at.Binding.key("enter")])
+    assert [b.name for b in actions.bindings("jump")] == ["enter"]
+
+    actions.bind_axis("move_x", at.AxisBinding.key_pair("a", "d"))
+    assert actions.axis_names() == ["move_x"]
+
+    actions.unbind("jump")
+    assert len(actions) == 0
+    assert actions.bindings("jump") == []
+
+
+def test_action_map_evaluates_against_frame_input():
+    game = make_game()
+    actions = at.ActionMap()
+    actions.bind("jump", at.Binding.key("space"))
+    actions.bind("jump", at.Binding.gamepad_button("south"))
+    actions.bind_axis("move_x", at.AxisBinding.key_pair("a", "d"))
+    seen = {}
+
+    def update(ctx):
+        # Headless mode has no devices, so nothing is active; this still
+        # exercises the full evaluation path against the frame snapshot.
+        seen["pressed"] = actions.pressed("jump", ctx.input)
+        seen["just"] = actions.just_pressed("jump", ctx.input)
+        seen["unbound"] = actions.pressed("fire", ctx.input)
+        seen["axis"] = actions.axis("move_x", ctx.input)
+        seen["axis_unbound"] = actions.axis("move_y", ctx.input)
+        seen["pair"] = actions.axis_pair("move_x", "move_y", ctx.input)
+        ctx.quit()
+
+    game.run(update)
+    assert seen["pressed"] is False
+    assert seen["just"] is False
+    assert seen["unbound"] is False
+    assert seen["axis"] == 0.0
+    assert seen["axis_unbound"] == 0.0
+    assert seen["pair"] == (0.0, 0.0)
+
+
+def test_action_map_survives_across_frames():
+    game = make_game()
+    actions = at.ActionMap()
+    actions.bind("quit", at.Binding.key("escape"))
+    frames = []
+
+    def update(ctx):
+        frames.append(ctx.time.frame)
+        # The map is plain Python-visible state, usable every frame.
+        assert "quit" in actions
+
+    game.run(update, max_frames=5)
+    assert frames == [1, 2, 3, 4, 5]

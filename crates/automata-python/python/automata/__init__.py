@@ -42,6 +42,9 @@ Conventions:
 
 from . import _core
 from ._core import (
+    ActionMap,
+    AxisBinding,
+    Binding,
     Camera2D,
     Camera3D,
     CharacterController,
@@ -54,6 +57,9 @@ from ._core import (
     Events,
     FrameContext,
     FrameTime,
+    Gamepad,
+    GamepadEvent,
+    Gamepads,
     Input,
     Modifiers,
     Physics,
@@ -68,6 +74,9 @@ from ._core import (
 )
 
 __all__ = [
+    "ActionMap",
+    "AxisBinding",
+    "Binding",
     "Camera2D",
     "Camera3D",
     "CharacterController",
@@ -81,6 +90,9 @@ __all__ = [
     "FrameContext",
     "FrameTime",
     "Game",
+    "Gamepad",
+    "GamepadEvent",
+    "Gamepads",
     "Input",
     "Modifiers",
     "Physics",
