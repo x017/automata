@@ -78,6 +78,25 @@ class Camera2D:
     @property
     def half_height(self) -> float: ...
 
+class MeshRenderer:
+    """A built-in primitive mesh with a flat color, rendered in 3D.
+
+    Plain data — the engine materializes it on the GPU in windowed mode;
+    headless runs ignore it. The entity's Transform scale sizes the
+    primitive.
+    """
+
+    kind: str
+    color: tuple[float, float, float, float]
+    @classmethod
+    def cube(
+        cls, size: float = 1.0, color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
+    ) -> MeshRenderer: ...
+    @classmethod
+    def quad(
+        cls, size: float = 1.0, color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
+    ) -> MeshRenderer: ...
+
 class Entity:
     """A game object builder: attach components, then add it to a Scene."""
 

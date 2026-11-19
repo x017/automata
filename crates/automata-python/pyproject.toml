@@ -8,6 +8,8 @@ name = "automata-engine"
 description = "AUTOMATA game engine — Python bindings"
 requires-python = ">=3.10"
 license = { text = "MIT OR Apache-2.0" }
+# Version lives in Cargo.toml; maturin reads it from there.
+dynamic = ["version"]
 
 [tool.maturin]
 # The importable package is `automata`; the native module is `automata._core`.

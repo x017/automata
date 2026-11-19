@@ -194,6 +194,65 @@ impl PyCamera2D {
     }
 }
 
+/// A built-in primitive mesh with a flat color, rendered in 3D.
+///
+/// This is a plain-data visual: no GPU handles cross into Python. The
+/// engine's windowed loop materializes it on the first frame; in headless
+/// mode it is inert. The entity's `Transform` scale sizes the primitive.
+#[pyclass(name = "MeshRenderer", module = "automata._core", frozen)]
+#[derive(Debug, Clone)]
+pub struct PyMeshRenderer {
+    inner: automata_scene::MeshVisual,
+    kind: &'static str,
+}
+
+#[pymethods]
+impl PyMeshRenderer {
+    /// A cube centered on the entity, `size` units on a side before scaling.
+    #[classmethod]
+    #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0)))]
+    fn cube(_cls: &Bound<'_, pyo3::types::PyType>, size: f32, color: (f32, f32, f32, f32)) -> Self {
+        Self {
+            inner: automata_scene::MeshVisual::cube(size, color.into()),
+            kind: "cube",
+        }
+    }
+
+    /// A quad centered on the entity, facing +Z, `size` units on a side
+    /// before scaling.
+    #[classmethod]
+    #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0)))]
+    fn quad(_cls: &Bound<'_, pyo3::types::PyType>, size: f32, color: (f32, f32, f32, f32)) -> Self {
+        Self {
+            inner: automata_scene::MeshVisual::quad(size, color.into()),
+            kind: "quad",
+        }
+    }
+
+    /// The primitive kind: "cube" or "quad".
+    #[getter]
+    fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    /// The flat RGBA color.
+    #[getter]
+    fn color(&self) -> (f32, f32, f32, f32) {
+        self.inner.color.into()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("MeshRenderer.{}(color={:?})", self.kind, self.inner.color)
+    }
+}
+
+impl PyMeshRenderer {
+    /// The engine component value.
+    pub(crate) fn inner(&self) -> automata_scene::MeshVisual {
+        self.inner.clone()
+    }
+}
+
 /// A component staged on a Python-side entity, ready to be inserted into
 /// the ECS world.
 #[derive(Debug, Clone)]
@@ -214,6 +273,8 @@ pub enum StagedComponent {
     CharacterController(automata_physics::CharacterController),
     /// Character velocity.
     CharacterVelocity(automata_physics::CharacterVelocity),
+    /// Primitive mesh visual.
+    MeshVisual(automata_scene::MeshVisual),
 }
 
 /// Extracts a staged component from an arbitrary Python object, raising a
@@ -243,10 +304,14 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(c) = obj.cast::<crate::physics_components::PyCharacterVelocity>() {
         return Ok(StagedComponent::CharacterVelocity(c.borrow().inner()));
     }
+    if let Ok(m) = obj.cast::<PyMeshRenderer>() {
+        return Ok(StagedComponent::MeshVisual(m.get().inner()));
+    }
     let typename = obj.get_type().name()?.to_string();
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
-         RigidBody, Collider3D, Collider2D, CharacterController, or CharacterVelocity"
+         RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
+         or MeshRenderer"
     )))
 }
 

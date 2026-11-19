@@ -806,3 +806,42 @@ def test_game_subclass_with_own_constructor_params():
     assert game.difficulty == "hard"
     frames = game.run(lambda ctx: ctx.quit())
     assert frames == 1
+
+
+# -- Rendering components -----------------------------------------------------
+
+
+def test_mesh_renderer_component_builders():
+    cube = at.MeshRenderer.cube(size=2.0, color=(0.9, 0.6, 0.2, 1.0))
+    assert cube.kind == "cube"
+    # Colors are stored as f32 engine-side.
+    assert all(abs(a - b) < 1e-6 for a, b in zip(cube.color, (0.9, 0.6, 0.2, 1.0)))
+    assert "cube" in repr(cube)
+
+    quad = at.MeshRenderer.quad()
+    assert quad.kind == "quad"
+    assert quad.color == (1.0, 1.0, 1.0, 1.0)  # white default
+
+
+def test_mesh_renderer_stages_and_runs_headless():
+    # Headless mode has no GPU: visuals are inert but must not break the
+    # loop, the scene, or physics.
+    game = make_game()
+    scene = (
+        at.Scene()
+        .add(at.Entity("camera").add(at.Camera3D(position=(0, 2, 8), target=(0, 0, 0))))
+        .add(
+            at.Entity("cube")
+            .add(at.Transform(position=(0.0, 1.0, 0.0)))
+            .add(at.MeshRenderer.cube(color=(0.9, 0.6, 0.2, 1.0)))
+        )
+    )
+    game.load_scene(scene)
+    seen = {}
+
+    def update(ctx):
+        seen["names"] = ctx.scene.names()
+        ctx.quit()
+
+    game.run(update)
+    assert sorted(seen["names"]) == ["camera", "cube"]

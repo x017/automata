@@ -7,7 +7,7 @@
 //! carrying a [`Camera3D`] or [`Camera2D`] component becomes the frame's
 //! camera.
 
-use automata_renderer::{Camera2D, Camera3D, DrawList, Material, Mesh, Sprite, Texture};
+use automata_renderer::{Camera2D, Camera3D, DrawList, Material, Mesh, MeshData, Sprite, Texture};
 use glam::{EulerRot, Vec2};
 
 use crate::scene::SceneWorld;
@@ -114,11 +114,107 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
     }
 }
 
+/// A plain-data request to render a built-in primitive mesh with a flat
+/// color.
+///
+/// Unlike [`MeshRenderer`], this component carries no GPU handles, so
+/// games (and scripting bindings) can stage it before a renderer exists.
+/// The engine's windowed loop materializes it into a real [`MeshRenderer`]
+/// on the first frame via [`materialize_visuals`]; headless runs leave it
+/// untouched. The entity's [`crate::Transform`] scale sizes the primitive.
+#[derive(Debug, Clone)]
+pub struct MeshVisual {
+    /// The primitive's geometry.
+    pub data: MeshData,
+    /// Flat base color, RGBA.
+    pub color: [f32; 4],
+}
+
+impl MeshVisual {
+    /// A cube centered on the entity, `size` units on a side before scaling.
+    #[must_use]
+    pub fn cube(size: f32, color: [f32; 4]) -> Self {
+        Self {
+            data: MeshData::cube(size),
+            color,
+        }
+    }
+
+    /// A quad centered on the entity, facing +Z, `size` units on a side
+    /// before scaling.
+    #[must_use]
+    pub fn quad(size: f32, color: [f32; 4]) -> Self {
+        Self {
+            data: MeshData::quad(size),
+            color,
+        }
+    }
+}
+
+/// Entities carrying a [`MeshVisual`] that has not been materialized yet
+/// (no [`MeshRenderer`] attached).
+fn pending_visuals(world: &SceneWorld) -> Vec<hecs::Entity> {
+    world
+        .query::<hecs::Entity>()
+        .iter()
+        .filter(|&entity| {
+            world.get::<&MeshVisual>(entity).is_ok() && world.get::<&MeshRenderer>(entity).is_err()
+        })
+        .collect()
+}
+
+/// Materializes every pending [`MeshVisual`] into a GPU-backed
+/// [`MeshRenderer`]. Called once per frame by the windowed loop before
+/// [`record_draw_list`]; returns how many visuals were materialized.
+pub fn materialize_visuals(
+    world: &mut SceneWorld,
+    renderer: &automata_renderer::Renderer,
+) -> usize {
+    let mut materialized = 0;
+    for entity in pending_visuals(world) {
+        // Scope the hecs Ref borrow: it has a Drop impl, so without the
+        // block it would live until the end of the loop body and conflict
+        // with the mutable insert below.
+        let visual = {
+            let Ok(visual) = world.get::<&MeshVisual>(entity) else {
+                continue;
+            };
+            MeshVisual {
+                data: visual.data.clone(),
+                color: visual.color,
+            }
+        };
+        let mesh = renderer.create_mesh(&visual.data);
+        let material = renderer.create_material(visual.color, None);
+        if world
+            .insert_one(entity, MeshRenderer::new(mesh, material))
+            .is_ok()
+        {
+            materialized += 1;
+        }
+    }
+    materialized
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scene::Scene;
     use glam::Vec3;
+
+    #[test]
+    fn pending_visuals_lists_only_unmaterialized_visual_entities() {
+        let mut scene = Scene::new();
+        let visual = scene.spawn((MeshVisual::cube(1.0, [1.0, 0.0, 0.0, 1.0]),));
+        let _camera = scene.spawn((Camera3D::new(Vec3::ZERO, Vec3::Z),));
+
+        assert_eq!(pending_visuals(scene.world()), vec![visual]);
+
+        // Despawned entities drop out of the pending list.
+        scene.despawn(visual).unwrap();
+        let pending_after = pending_visuals(scene.world());
+        assert_eq!(pending_after, [] as [hecs::Entity; 0]);
+    }
 
     #[test]
     fn camera_components_set_the_frame_cameras() {

@@ -125,8 +125,13 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
         self.input.end_frame();
 
         // Built-in scene systems (transform propagation) and the
-        // scene-to-renderer bridge run after the game update.
+        // scene-to-renderer bridge run after the game update. Plain-data
+        // MeshVisual components become GPU-backed MeshRenderers here, the
+        // first frame a renderer is available.
         self.world.scene_mut().update();
+        if let Some(renderer) = &self.renderer {
+            automata_scene::materialize_visuals(self.world.scene_mut().world_mut(), renderer);
+        }
         automata_scene::record_draw_list(self.world.scene().world(), &mut self.draw);
 
         if *self.quit_requested {

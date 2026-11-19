@@ -13,14 +13,15 @@ Shows the Phase 6 surface working together:
 
 Run after building the bindings:
 
-    maturin build --manifest-path crates/automata-python/Cargo.toml
-    pip install target/wheels/automata_engine-*.whl
-    python examples/python/physics_playground.py
+    python examples/python/physics_playground.py              # opens a window
+    python examples/python/physics_playground.py --headless   # no window (CI)
 
 Headless mode has no devices, so the demo adds an "attract mode" autopilot
 when no control is active — with a window, WASD/arrows/gamepad drive the
 same code path.
 """
+
+import sys
 
 import automata as at
 
@@ -28,25 +29,35 @@ WALK_SPEED = 3.0
 GRAVITY = 12.0
 JUMP_SPEED = 6.0
 
-game = at.Game(title="physics playground", headless=True, target_fps=60)
+HEADLESS = "--headless" in sys.argv
+
+game = at.Game(title="physics playground", headless=HEADLESS, target_fps=60)
+game.headless_flag = HEADLESS  # consulted by the attract-mode check below
 
 game.load_scene(
     at.Scene()
     .add(
+        at.Entity("camera")
+        .add(at.Camera3D(position=(0.0, 4.0, 10.0), target=(0.0, 1.0, 0.0)))
+    )
+    .add(
         at.Entity("floor")
-        .add(at.Transform(position=(0.0, 0.0, 0.0)))
+        .add(at.Transform(position=(0.0, 0.0, 0.0), scale=(40.0, 1.0, 40.0)))
+        .add(at.MeshRenderer.cube(size=1.0, color=(0.35, 0.37, 0.42, 1.0)))
         .add(at.RigidBody.fixed())
-        .add(at.Collider3D.cuboid(20.0, 0.5, 20.0))
+        .add(at.Collider3D.cuboid(40.0, 1.0, 40.0))
     )
     .add(
         at.Entity("ball")
         .add(at.Transform(position=(2.5, 6.0, 0.0)))
+        .add(at.MeshRenderer.cube(size=1.0, color=(0.85, 0.3, 0.3, 1.0)))
         .add(at.RigidBody.dynamic())
         .add(at.Collider3D.ball(0.5).restitution(0.3))
     )
     .add(
         at.Entity("player")
         .add(at.Transform(position=(-3.0, 1.4, 0.0)))
+        .add(at.MeshRenderer.cube(size=0.9, color=(0.9, 0.6, 0.2, 1.0)))
         .add(at.RigidBody.kinematic_velocity())
         .add(at.Collider3D.capsule(0.5, 0.4))
         .add(at.CharacterController(snap_to_ground=0.5))
@@ -75,7 +86,7 @@ def tick(ctx):
 
     dx = controls.axis("move_x", ctx.input)
     jumping = controls.just_pressed("jump", ctx.input)
-    if dx == 0.0 and not jumping and not ctx.input.gamepads.any_connected():
+    if game.headless_flag and dx == 0.0 and not jumping:
         dx = state_autopilot(ctx)  # attract mode for headless runs
 
     grounded = ctx.physics.grounded(player)
@@ -119,5 +130,5 @@ def state_autopilot(ctx):
     return state["autopilot"]
 
 
-frames = game.run(max_frames=360)
+frames = game.run(max_frames=360 if HEADLESS else None)
 print(f"playground finished after {frames} frames; state={game.state}")

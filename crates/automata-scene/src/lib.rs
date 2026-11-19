@@ -26,7 +26,7 @@ mod transform;
 
 pub use events::Events;
 pub use handle::{Assets, Handle};
-pub use render::{record_draw_list, MeshRenderer, SpriteRenderer};
+pub use render::{materialize_visuals, record_draw_list, MeshRenderer, MeshVisual, SpriteRenderer};
 pub use resources::Resources;
 pub use scene::{EntityId, Name, Scene, SceneWorld};
 pub use transform::{propagate_transforms, GlobalTransform, Parent, Transform};
