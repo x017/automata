@@ -57,6 +57,23 @@ Run the test suite:
 cargo test --workspace
 ```
 
+## Play the FPS example
+
+`examples/python/oop_fps.py` is a small playable first-person shooter built
+with the engine's object-oriented `Game` / `Scene` / `Entity` API. It includes
+an enclosed collision-tested arena, a primitive-model rifle, hitscan shooting,
+robot waves, a geometric HUD, and original synthesized WAV effects.
+
+```console
+python examples/python/oop_fps.py
+```
+
+Use **WASD** to move, **mouse or arrow keys** to look, **Space** to jump,
+**left mouse or F** to fire, **R** to reload, and **Escape** to quit. To
+exercise the game loop without a window, add `--headless`. Real device audio
+is optional; install the bindings with `--features audio-cpal` to enable it
+(the game remains playable with the silent backend).
+
 ## Repository layout
 
 ```text
