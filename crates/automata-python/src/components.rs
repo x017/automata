@@ -636,11 +636,7 @@ mod tests {
 
         assert_eq!(mesh.vertices.len(), 6);
         assert_eq!(mesh.indices, vec![0, 1, 2, 3, 4, 5]);
-        assert!(
-            mesh.vertices
-                .iter()
-                .all(|vertex| vertex.normal == [0.0, 0.0, 1.0])
-        );
+        assert!(mesh.vertices.iter().all(|vertex| vertex.normal == [0.0, 0.0, 1.0]));
         assert_eq!(mesh.vertices[0].uv, [0.0, 0.0]);
         assert_eq!(mesh.vertices[5].uv, [0.0, 1.0]);
     }

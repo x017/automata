@@ -244,8 +244,7 @@ impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
                 button: MouseButton::Left,
                 ..
             } if self.window_config.capture_cursor && !self.cursor_captured => {
-                self.input
-                    .handle_mouse_button(MouseButton::Left, ElementState::Pressed);
+                self.input.handle_mouse_button(MouseButton::Left, ElementState::Pressed);
                 if let Some(window) = &self.window {
                     self.cursor_captured = set_cursor_capture(window, true);
                 }
