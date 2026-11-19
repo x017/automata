@@ -5,7 +5,9 @@ Welcome to the AUTOMATA documentation wiki — the complete guide to making
 
 AUTOMATA is **code-first**: games are ordinary Python programs. There is no
 editor to learn and no project file format — you write a `Game`, stage
-`Entity` objects into a `Scene`, and react to input every frame.
+`Entity` objects into a `Scene`, and react to input every frame. (A visual
+editor — **Oberon** — is planned as a separate desktop app; the engine
+itself stays code-first.)
 
 ```python
 import automata as at
