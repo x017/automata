@@ -127,6 +127,7 @@ class Platformer(at.Game):
     headless = "--headless" in sys.argv  # window by default; flag for CI
     target_fps = 60
     clear_color = SKY
+    graphics = at.GraphicsQuality.HIGH
 
     def on_start(self):
         self.load_scene(Level())
@@ -135,12 +136,16 @@ class Platformer(at.Game):
         self.coins = {f"coin_{i}": (x, y) for i, (x, y) in enumerate(COINS)}
         self.cam_x, self.cam_y = -4.0, 3.0
         self.controls = at.ActionMap()
-        self.controls.bind("jump", at.Binding.key("space"))
-        self.controls.bind("jump", at.Binding.gamepad_button("south"))
+        self.controls.bind("jump", at.Binding.key(at.Key.SPACE))
+        self.controls.bind("jump", at.Binding.gamepad_button(at.GamepadButton.SOUTH))
         # Multiple bindings stack: WASD, arrows, and gamepad all drive move_x.
-        self.controls.bind_axis("move_x", at.AxisBinding.key_pair("a", "d"))
-        self.controls.bind_axis("move_x", at.AxisBinding.key_pair("arrow_left", "arrow_right"))
-        self.controls.bind_axis("move_x", at.AxisBinding.gamepad_axis("left_stick_x"))
+        self.controls.bind_axis("move_x", at.AxisBinding.key_pair(at.Key.A, at.Key.D))
+        self.controls.bind_axis(
+            "move_x", at.AxisBinding.key_pair(at.Key.ARROW_LEFT, at.Key.ARROW_RIGHT)
+        )
+        self.controls.bind_axis(
+            "move_x", at.AxisBinding.gamepad_axis(at.GamepadAxis.LEFT_STICK_X)
+        )
 
     def on_update(self, ctx):
         player = ctx.scene["player"]
@@ -177,7 +182,7 @@ class Platformer(at.Game):
                 self.score += 1
                 ctx.events.send("coin_pickup", {"score": self.score, "total": len(COINS)})
 
-        if ctx.input.just_pressed("escape"):
+        if ctx.input.just_pressed(at.Key.ESCAPE):
             ctx.quit()
 
     def on_coin_pickup(self, payload):

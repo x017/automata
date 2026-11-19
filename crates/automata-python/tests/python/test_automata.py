@@ -915,3 +915,55 @@ def test_directional_light_component():
 
     assert game.run(update) >= 1
     assert seen["names"] == ["sun"]
+
+
+def test_input_enums_are_str_and_autocomplete_friendly():
+    # Members ARE strings: plain-string API keeps working, enums add
+    # autocomplete and typo safety.
+    assert isinstance(at.Key.SPACE, str)
+    assert at.Key.SPACE == "space"
+    assert at.GamepadButton.SOUTH == "south"
+    assert at.GamepadAxis.LEFT_STICK_X == "left_stick_x"
+    assert at.MouseButton.LEFT == "left"
+
+
+def test_every_key_enum_member_is_known_to_the_engine():
+    # Drift guard: enums.py must mirror the native key table exactly.
+    for key in at.Key:
+        binding = at.Binding.key(key)  # raises KeyError if unknown
+        assert binding.name == key.value
+
+
+def test_every_gamepad_enum_member_is_known_to_the_engine():
+    for button in at.GamepadButton:
+        assert at.Binding.gamepad_button(button).name == button.value
+    for axis in at.GamepadAxis:
+        assert at.AxisBinding.gamepad_axis(axis).name == axis.value
+    for button in at.MouseButton:
+        assert at.Binding.mouse(button).name == button.value
+
+
+def test_enums_work_in_action_maps():
+    controls = at.ActionMap()
+    controls.bind("jump", at.Binding.key(at.Key.SPACE))
+    controls.bind_axis("move_x", at.AxisBinding.key_pair(at.Key.A, at.Key.D))
+    assert "jump" in controls
+    assert controls.axis_names() == ["move_x"]
+
+
+def test_graphics_quality_option():
+    for quality in at.GraphicsQuality:
+        game = at.Game(headless=True, graphics=quality)
+        assert game.state == "created"
+    # Plain strings work too.
+    at.Game(headless=True, graphics="low")
+    with pytest.raises(ValueError):
+        at.Game(headless=True, graphics="extreme")
+
+
+def test_graphics_quality_as_oop_class_attribute():
+    class Chill(at.Game):
+        headless = True
+        graphics = at.GraphicsQuality.LOW
+
+    assert Chill().state == "created"

@@ -13,13 +13,10 @@ use crate::material::{Material, MaterialInner};
 use crate::mesh::{Mesh, MeshData, MeshInner};
 use crate::pipeline::{self, PipelineShared, SpriteVertex};
 use crate::texture::{Texture, TextureInner};
-use crate::{RenderContext, Sun};
+use crate::{GraphicsQuality, RenderContext, Sun};
 
 /// Depth buffer format used by the mesh pass.
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
-
-/// Side length of the square shadow map, in texels.
-pub(crate) const SHADOW_MAP_SIZE: u32 = 2048;
 
 /// Where a frame is rendered: the window surface or an offscreen texture.
 enum FrameTarget {
@@ -56,6 +53,8 @@ pub struct Renderer {
     depth_texture: Option<wgpu::Texture>,
     shadow_texture: wgpu::Texture,
     shadow_sampler: wgpu::Sampler,
+    shadow_map_size: u32,
+    shadows_enabled: bool,
 }
 
 impl Renderer {
@@ -69,6 +68,7 @@ impl Renderer {
         surface_target: impl Into<wgpu::SurfaceTarget<'static>>,
         size: (u32, u32),
         vsync: bool,
+        quality: GraphicsQuality,
     ) -> Result<Self> {
         let ctx = RenderContext::new(surface_target, size, vsync).await?;
         let device = ctx.device();
@@ -86,7 +86,8 @@ impl Renderer {
         );
         let depth_texture = Some(create_depth_texture(device, size));
         let shadow_pipeline = pipeline::create_shadow_pipeline(device, &shared);
-        let (shadow_texture, shadow_sampler) = create_shadow_resources(device);
+        let (shadow_texture, shadow_sampler) =
+            create_shadow_resources(device, quality.shadow_map_size());
 
         Ok(Self {
             ctx,
@@ -99,6 +100,8 @@ impl Renderer {
             depth_texture,
             shadow_texture,
             shadow_sampler,
+            shadow_map_size: quality.shadow_map_size(),
+            shadows_enabled: quality.shadows_enabled(),
         })
     }
 
@@ -110,6 +113,17 @@ impl Renderer {
     ///
     /// Returns an error if no suitable GPU adapter or device is available.
     pub async fn new_offscreen(size: (u32, u32)) -> Result<Self> {
+        Self::new_offscreen_with_quality(size, GraphicsQuality::default()).await
+    }
+
+    /// Creates an offscreen renderer with an explicit quality preset.
+    ///
+    /// # Errors
+    /// Returns an error if no suitable GPU adapter or device is available.
+    pub async fn new_offscreen_with_quality(
+        size: (u32, u32),
+        quality: GraphicsQuality,
+    ) -> Result<Self> {
         let ctx = RenderContext::new_offscreen(size).await?;
         let device = ctx.device();
         let shared = PipelineShared::new(device);
@@ -126,7 +140,8 @@ impl Renderer {
         );
         let depth_texture = Some(create_depth_texture(device, size));
         let shadow_pipeline = pipeline::create_shadow_pipeline(device, &shared);
-        let (shadow_texture, shadow_sampler) = create_shadow_resources(device);
+        let (shadow_texture, shadow_sampler) =
+            create_shadow_resources(device, quality.shadow_map_size());
 
         Ok(Self {
             ctx,
@@ -139,6 +154,8 @@ impl Renderer {
             depth_texture,
             shadow_texture,
             shadow_sampler,
+            shadow_map_size: quality.shadow_map_size(),
+            shadows_enabled: quality.shadows_enabled(),
         })
     }
 
@@ -490,7 +507,7 @@ impl Renderer {
         // Sunlight: the draw list's sun, or a default shadowless light.
         let sun = draw.sun.unwrap_or_default();
         let light_view_proj = light_view_proj(draw, &sun);
-        let render_shadows = sun.shadows && !draw.meshes.is_empty();
+        let render_shadows = sun.shadows && self.shadows_enabled && !draw.meshes.is_empty();
         let light_bind = self.light_bind_group(&sun, light_view_proj, render_shadows, shadow_view);
 
         PreparedFrame {
@@ -521,7 +538,7 @@ impl Renderer {
                 ..*sun
             },
             light_view_proj,
-            1.0 / SHADOW_MAP_SIZE as f32,
+            1.0 / self.shadow_map_size as f32,
         );
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("light"),
@@ -627,12 +644,12 @@ fn create_depth_texture(device: &wgpu::Device, size: (u32, u32)) -> wgpu::Textur
 }
 
 /// The shadow map depth texture and its comparison sampler.
-fn create_shadow_resources(device: &wgpu::Device) -> (wgpu::Texture, wgpu::Sampler) {
+fn create_shadow_resources(device: &wgpu::Device, size: u32) -> (wgpu::Texture, wgpu::Sampler) {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("shadow map"),
         size: wgpu::Extent3d {
-            width: SHADOW_MAP_SIZE,
-            height: SHADOW_MAP_SIZE,
+            width: size.max(1),
+            height: size.max(1),
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,

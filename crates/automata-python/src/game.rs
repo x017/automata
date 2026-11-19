@@ -36,8 +36,10 @@ impl PyGame {
     ///
     /// `clear_color=(r, g, b, a)` sets the color the window is cleared to
     /// each frame (components 0.0..=1.0); the default is a very dark blue.
+    /// `graphics` is a quality preset: `"low"` (no shadows), `"medium"`,
+    /// `"high"` (default), or `"ultra"`.
     #[new]
-    #[pyo3(signature = (title="AUTOMATA", resolution=(1280, 720), headless=false, resizable=true, vsync=true, log_filter=None, target_fps=None, clear_color=None))]
+    #[pyo3(signature = (title="AUTOMATA", resolution=(1280, 720), headless=false, resizable=true, vsync=true, log_filter=None, target_fps=None, clear_color=None, graphics=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         title: &str,
@@ -48,6 +50,7 @@ impl PyGame {
         log_filter: Option<&str>,
         target_fps: Option<u32>,
         clear_color: Option<(f64, f64, f64, f64)>,
+        graphics: Option<&str>,
     ) -> PyResult<Self> {
         if target_fps == Some(0) {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -79,6 +82,20 @@ impl PyGame {
                 }
             }
             config.clear_color = automata_renderer::Color { r, g, b, a };
+        }
+        if let Some(quality) = graphics {
+            config.graphics_quality = match quality {
+                "low" => automata_renderer::GraphicsQuality::Low,
+                "medium" => automata_renderer::GraphicsQuality::Medium,
+                "high" => automata_renderer::GraphicsQuality::High,
+                "ultra" => automata_renderer::GraphicsQuality::Ultra,
+                other => {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "unknown graphics quality {other:?}; \
+                         expected \"low\", \"medium\", \"high\", or \"ultra\""
+                    )));
+                }
+            };
         }
         Ok(Self {
             app: Application::new(config),

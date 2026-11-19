@@ -43,6 +43,11 @@ pub struct EngineConfig {
     /// Ignored in headless mode (no surface is ever drawn).
     pub clear_color: automata_renderer::Color,
 
+    /// Graphics quality preset (shadow resolution, effects toggles).
+    ///
+    /// Defaults to high; `low` disables shadows.
+    pub graphics_quality: automata_renderer::GraphicsQuality,
+
     /// Fixed physics timestep, in seconds (default 1/60).
     ///
     /// The physics world steps at this rate regardless of frame rate: the
@@ -78,6 +83,7 @@ impl Default for EngineConfig {
                 b: 0.04,
                 a: 1.0,
             },
+            graphics_quality: automata_renderer::GraphicsQuality::default(),
             physics_timestep: Some(1.0 / 60.0),
         }
     }

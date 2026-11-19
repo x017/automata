@@ -95,7 +95,8 @@ components are mutable (`t.position = (1, 2, 0)`), and scene views support
 
 | Item | Purpose |
 |---|---|
-| `Game(title, resolution, headless, resizable, vsync, log_filter, target_fps, clear_color)` | Owns the engine; `run(update=None, max_frames=None)` drives the loop, `load_scene(scene)` replaces the scene, `quit()` requests shutdown, `state` reports the lifecycle; `@game.update` and `@game.on_event(name)` register callbacks; `clear_color=(r, g, b, a)` sets the window background (default very dark blue) |
+| `Game(title, resolution, headless, resizable, vsync, log_filter, target_fps, clear_color, graphics)` | Owns the engine; `run(update=None, max_frames=None)` drives the loop, `load_scene(scene)` replaces the scene, `quit()` requests shutdown, `state` reports the lifecycle; `@game.update` and `@game.on_event(name)` register callbacks; `clear_color=(r, g, b, a)` sets the window background (default very dark blue); `graphics=GraphicsQuality.HIGH` picks a quality preset (`LOW` disables shadows) |
+| `Key` / `MouseButton` / `GamepadButton` / `GamepadAxis` / `GraphicsQuality` | Typed `str` enums for every bindable input and quality preset — `Binding.key(Key.SPACE)`, `AxisBinding.key_pair(Key.A, Key.D)`; plain strings (`"space"`) keep working everywhere |
 | `Scene` / `Entity(name)` | Scene staging: `entity.add(component)`, `scene.add(entity)` |
 | `Transform(position, rotation_euler, scale)` | Local transform; angles in radians (XYZ order) |
 | `Camera3D(position, target, fov)` / `Camera2D(center, half_height)` | Frame cameras (first entity wins) |

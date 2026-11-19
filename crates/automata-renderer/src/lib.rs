@@ -17,6 +17,7 @@ mod light;
 mod material;
 mod mesh;
 mod pipeline;
+mod quality;
 mod renderer;
 mod texture;
 
@@ -27,6 +28,7 @@ pub use error::{Error, Result};
 pub use light::Sun;
 pub use material::Material;
 pub use mesh::{Mesh, MeshData, Vertex};
+pub use quality::GraphicsQuality;
 pub use renderer::Renderer;
 pub use texture::Texture;
 

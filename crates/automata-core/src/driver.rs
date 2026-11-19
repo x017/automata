@@ -181,6 +181,7 @@ impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
                 window.clone(),
                 (size.width, size.height),
                 self.window_config.vsync,
+                self.config.graphics_quality,
             ))?;
             Ok((window, renderer))
         })();

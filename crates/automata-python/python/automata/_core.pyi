@@ -448,6 +448,7 @@ class Game:
         log_filter: Optional[str] = None,
         target_fps: Optional[int] = None,
         clear_color: Optional[tuple[float, float, float, float]] = None,
+        graphics: Optional[str] = None,
     ) -> None: ...
     @property
     def state(self) -> str: ...

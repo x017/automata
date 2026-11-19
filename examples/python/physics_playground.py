@@ -78,10 +78,10 @@ game.load_scene(
 # Genre-independent controls: keyboard keys, gamepad buttons and sticks all
 # feed the same named actions/axes.
 controls = at.ActionMap()
-controls.bind("jump", at.Binding.key("space"))
-controls.bind("jump", at.Binding.gamepad_button("south"))
-controls.bind_axis("move_x", at.AxisBinding.key_pair("a", "d"))
-controls.bind_axis("move_x", at.AxisBinding.gamepad_axis("left_stick_x"))
+controls.bind("jump", at.Binding.key(at.Key.SPACE))
+controls.bind("jump", at.Binding.gamepad_button(at.GamepadButton.SOUTH))
+controls.bind_axis("move_x", at.AxisBinding.key_pair(at.Key.A, at.Key.D))
+controls.bind_axis("move_x", at.AxisBinding.gamepad_axis(at.GamepadAxis.LEFT_STICK_X))
 
 state = {"vy": 0.0, "ray_key": None, "autopilot": 1.0}
 
