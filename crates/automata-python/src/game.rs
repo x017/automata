@@ -41,7 +41,7 @@ impl PyGame {
     /// hides the mouse pointer for first-person games; focus loss releases it.
     #[new]
     #[pyo3(signature = (title="AUTOMATA", resolution=(1280, 720), headless=false, resizable=true, vsync=true, log_filter=None, target_fps=None, clear_color=None, graphics=None, capture_cursor=false))]
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
     fn new(
         title: &str,
         resolution: (u32, u32),
