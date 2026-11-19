@@ -46,21 +46,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Format
-        run: |
-          cargo fmt --all
-          git diff --binary -- . ':!.github/workflows/ci.yml' > /tmp/rustfmt.diff
-          python3 -c 'import base64, pathlib; print("::error title=RUSTFMT_DIFF::" + base64.b64encode(pathlib.Path("/tmp/rustfmt.diff").read_bytes()).decode())'
-          cargo fmt --all -- --check
+        run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: |
-          set +e
-          cargo clippy --workspace --all-targets --features automata-python/audio-cpal -- -D warnings > /tmp/clippy.log 2>&1
-          result=$?
-          if [ "$result" -ne 0 ]; then
-            python3 -c 'import base64, pathlib; data=pathlib.Path("/tmp/clippy.log").read_bytes()[-12000:]; print("::error title=CLIPPY_LOG::" + base64.b64encode(data).decode())'
-          fi
-          exit "$result"
+        run: cargo clippy --workspace --all-targets --features automata-python/audio-cpal -- -D warnings
 
       - name: Tests (CPU + device)
         run: cargo test --workspace --all-targets --features automata-python/audio-cpal -- --skip offscreen 2>&1 | tee /tmp/cpu-test.log
@@ -128,14 +117,7 @@ jobs:
         run: pip install maturin pytest
 
       - name: Build the automata wheel
-        run: |
-          set +e
-          maturin build --release --manifest-path crates/automata-python/Cargo.toml --features audio-cpal > /tmp/wheel-build.log 2>&1
-          result=$?
-          if [ "$result" -ne 0 ]; then
-            python3 -c 'import base64, pathlib; data=pathlib.Path("/tmp/wheel-build.log").read_bytes()[-12000:]; print("::error title=WHEEL_BUILD_LOG::" + base64.b64encode(data).decode())'
-          fi
-          exit "$result"
+        run: maturin build --release --manifest-path crates/automata-python/Cargo.toml --features audio-cpal
 
       - name: Install the wheel
         run: pip install target/wheels/automata_engine-*.whl
