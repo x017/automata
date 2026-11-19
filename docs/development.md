@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Rust stable (MSRV: **1.85**), with `rustfmt` and `clippy`
+- Rust stable (MSRV: **1.86**), with `rustfmt` and `clippy`
 - Python 3 (from Phase 5 onward)
 
 Standard setup via [rustup](https://rustup.rs):
@@ -78,7 +78,7 @@ embeds Python fails locally. Workarounds baked into the workflow:
 
 ## Coding conventions
 
-- **Edition 2021**, MSRV 1.85 (bumped deliberately, not casually).
+- **Edition 2021**, MSRV 1.86 (bumped deliberately, not casually).
 - **No `unsafe`** in engine crates — enforced workspace-wide.
 - **Document every public item.** `missing_docs` is a workspace lint and CI
   denies warnings. Document why, not just what.

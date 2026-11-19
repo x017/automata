@@ -9,7 +9,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.86"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/x017/automata"
 
@@ -19,6 +19,7 @@ repository = "https://github.com/x017/automata"
 # Engine crates
 automata-core = { path = "crates/automata-core" }
 automata-input = { path = "crates/automata-input" }
+automata-physics = { path = "crates/automata-physics" }
 automata-renderer = { path = "crates/automata-renderer" }
 automata-scene = { path = "crates/automata-scene" }
 
@@ -35,6 +36,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 naga = { version = "30", default-features = false }
 hecs = "0.11"
 pyo3 = "0.30"
+rapier2d = "0.36"
+rapier3d = "0.36"
+gilrs = "0.11"
 
 [workspace.lints.rust]
 # The engine forbids unsafe code in its own crates; dependencies that need

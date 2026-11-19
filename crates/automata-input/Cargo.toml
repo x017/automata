@@ -13,3 +13,4 @@ workspace = true
 
 [dependencies]
 winit.workspace = true
+gilrs.workspace = true
