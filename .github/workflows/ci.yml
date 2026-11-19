@@ -51,9 +51,12 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Tests (CPU + device)
-        run: cargo test --workspace --all-targets -- --skip offscreen
+        run: cargo test --workspace --all-targets -- --skip offscreen 2>&1 | tee /tmp/cpu-test.log
         env:
           WGPU_BACKEND: vulkan,gl
+          # automata-python's Rust test binaries link libpython from the
+          # setup-python toolcache; make it resolvable at runtime.
+          LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
 
       # Run GPU offscreen render tests separately so a software-adapter
       # quirk doesn't mask the CPU suite, and so its failure is isolated.
@@ -65,18 +68,19 @@ jobs:
           WGPU_BACKEND: vulkan,gl
 
       # The log-zip endpoint is unreachable from the dev sandbox; publish the
-      # GPU test output to a scratch branch on failure so it can be read via
-      # plain git. Only runs when the GPU tests failed.
-      - name: Publish GPU test log on failure
+      # test outputs to a scratch branch on failure so they can be read via
+      # plain git. Only runs when a test step failed.
+      - name: Publish test logs on failure
         if: failure()
         run: |
           git config user.email ci@localhost
           git config user.name "ci"
           git checkout --orphan ci-logs
           git rm -rf . > /dev/null 2>&1 || true
-          cp /tmp/gpu-test.log gpu-test.log
-          git add gpu-test.log
-          git commit -m "gpu test log $(date -u +%FT%TZ)"
+          cp /tmp/cpu-test.log cpu-test.log 2>/dev/null || true
+          cp /tmp/gpu-test.log gpu-test.log 2>/dev/null || true
+          git add -A
+          git commit -m "ci test logs $(date -u +%FT%TZ)"
           git push -f origin ci-logs
 
       - name: Documentation
