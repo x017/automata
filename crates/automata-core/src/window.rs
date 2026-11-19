@@ -34,6 +34,9 @@ pub struct WindowConfig {
 
     /// Synchronize presentation with the display's vertical blank (vsync).
     pub vsync: bool,
+
+    /// Capture and hide the pointer when the window is created.
+    pub capture_cursor: bool,
 }
 
 impl Default for WindowConfig {
@@ -42,6 +45,7 @@ impl Default for WindowConfig {
             size: (1280, 720),
             resizable: true,
             vsync: true,
+            capture_cursor: false,
         }
     }
 }
@@ -61,5 +65,6 @@ mod tests {
         assert_eq!(config.size, (1280, 720));
         assert!(config.resizable);
         assert!(config.vsync);
+        assert!(!config.capture_cursor);
     }
 }

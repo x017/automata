@@ -79,11 +79,10 @@ class Camera2D:
     def half_height(self) -> float: ...
 
 class MeshRenderer:
-    """A built-in primitive mesh with a flat color, rendered in 3D.
+    """A flat-colored 3D visual, built-in primitive or imported OBJ model.
 
     Plain data — the engine materializes it on the GPU in windowed mode;
-    headless runs ignore it. The entity's Transform scale sizes the
-    primitive.
+    headless runs ignore it. The entity's Transform scale sizes the mesh.
     """
 
     kind: str
@@ -95,6 +94,12 @@ class MeshRenderer:
     @classmethod
     def quad(
         cls, size: float = 1.0, color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
+    ) -> MeshRenderer: ...
+    @classmethod
+    def obj(
+        cls,
+        path: str,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
     ) -> MeshRenderer: ...
 
 class DirectionalLight:
@@ -166,6 +171,7 @@ class Input:
     """Keyboard, mouse, and gamepad state at the start of the frame."""
 
     cursor: Optional[tuple[float, float]]
+    mouse_delta: tuple[float, float]
     scroll: tuple[float, float]
     modifiers: Modifiers
     gamepads: Gamepads
@@ -463,6 +469,7 @@ class Game:
         target_fps: Optional[int] = None,
         clear_color: Optional[tuple[float, float, float, float]] = None,
         graphics: Optional[str] = None,
+        capture_cursor: bool = False,
     ) -> None: ...
     @property
     def state(self) -> str: ...

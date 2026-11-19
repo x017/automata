@@ -20,18 +20,44 @@ use std::time::{Duration, Instant};
 
 use automata_input::InputState;
 use automata_renderer::{DrawList, Renderer};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::WindowEvent;
+use winit::event::{DeviceEvent, ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::window::{Window, WindowId};
+use winit::window::{CursorGrabMode, Window, WindowId};
 
 use crate::app::{AppContext, WorldState};
 use crate::config::EngineConfig;
 use crate::error::{Error, Result};
 use crate::time::Time;
 use crate::window::WindowConfig;
+
+/// Captures or releases the pointer. Prefer a locked cursor for true relative
+/// motion, falling back to confinement on platforms that don't support lock.
+fn set_cursor_capture(window: &Window, capture: bool) -> bool {
+    if capture {
+        match window
+            .set_cursor_grab(CursorGrabMode::Locked)
+            .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+        {
+            Ok(()) => {
+                window.set_cursor_visible(false);
+                true
+            }
+            Err(error) => {
+                warn!(%error, "could not capture the window cursor");
+                false
+            }
+        }
+    } else {
+        if let Err(error) = window.set_cursor_grab(CursorGrabMode::None) {
+            warn!(%error, "could not release the window cursor");
+        }
+        window.set_cursor_visible(true);
+        false
+    }
+}
 
 /// Runs the windowed main loop to completion.
 ///
@@ -61,6 +87,7 @@ pub(super) fn run_windowed(
         gamepads: automata_input::Gamepads::new(),
         window: None,
         renderer: None,
+        cursor_captured: false,
         draw,
         update,
         last_frame_start: None,
@@ -87,6 +114,7 @@ struct WinitDriver<'a, F: FnMut(&mut AppContext<'_>)> {
     gamepads: automata_input::Gamepads,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
+    cursor_captured: bool,
     draw: DrawList,
     update: F,
     last_frame_start: Option<Instant>,
@@ -194,6 +222,8 @@ impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
                     height = window.inner_size().height,
                     "window and GPU context ready"
                 );
+                self.cursor_captured = self.window_config.capture_cursor
+                    && set_cursor_capture(&window, true);
                 self.window = Some(window);
                 self.renderer = Some(renderer);
                 // Kick off the frame cycle; ControlFlow::Wait is the default
@@ -209,6 +239,30 @@ impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } if self.window_config.capture_cursor && !self.cursor_captured => {
+                self.input
+                    .handle_mouse_button(MouseButton::Left, ElementState::Pressed);
+                if let Some(window) = &self.window {
+                    self.cursor_captured = set_cursor_capture(window, true);
+                }
+            }
+            WindowEvent::Focused(focused) => {
+                self.input.clear_mouse_delta();
+                if focused && self.window_config.capture_cursor && !self.cursor_captured {
+                    if let Some(window) = &self.window {
+                        self.cursor_captured = set_cursor_capture(window, true);
+                    }
+                } else if !focused && self.cursor_captured {
+                    if let Some(window) = &self.window {
+                        set_cursor_capture(window, false);
+                    }
+                    self.cursor_captured = false;
+                }
+            }
             WindowEvent::CloseRequested => {
                 info!("window close requested");
                 event_loop.exit();
@@ -230,6 +284,19 @@ impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
                 }
             }
             event => self.input.handle_window_event(&event),
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: DeviceEvent,
+    ) {
+        if self.cursor_captured {
+            if let DeviceEvent::MouseMotion { delta } = event {
+                self.input.handle_mouse_motion(delta.0, delta.1);
+            }
         }
     }
 

@@ -2,10 +2,10 @@
 //! [`crate::scene::PyEntity`] and materialized into ECS components when the
 //! scene loads.
 
-use automata_renderer::{Camera2D, Camera3D};
+use automata_renderer::{Camera2D, Camera3D, MeshData, Vertex};
 use automata_scene::{DirectionalLight, Transform};
 use glam::{EulerRot, Quat, Vec2, Vec3};
-use pyo3::exceptions::PyTypeError;
+use pyo3::exceptions::{PyIOError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 
 /// Converts a Python 3-tuple of floats to a `Vec3`.
@@ -311,7 +311,36 @@ impl PyMeshRenderer {
         }
     }
 
-    /// The primitive kind: "cube" or "quad".
+    /// Loads static geometry from a Wavefront OBJ file with a flat tint.
+    ///
+    /// Positions, normals, texture coordinates, and polygon faces are
+    /// supported. Material libraries and image textures are ignored; use
+    /// `color` as the model's flat material color. The OBJ is parsed while
+    /// staging the scene, so the file only needs to be available then.
+    #[classmethod]
+    #[pyo3(signature = (path, color=(1.0, 1.0, 1.0, 1.0)))]
+    fn obj(
+        _cls: &Bound<'_, pyo3::types::PyType>,
+        path: &str,
+        color: (f32, f32, f32, f32),
+    ) -> PyResult<Self> {
+        let source = std::fs::read_to_string(path).map_err(|error| {
+            PyIOError::new_err(format!("could not read OBJ model {path:?}: {error}"))
+        })?;
+        let data = parse_obj(&source).map_err(|error| {
+            PyValueError::new_err(format!("invalid OBJ model {path:?}: {error}"))
+        })?;
+        Ok(Self {
+            inner: automata_scene::MeshVisual {
+                kind: automata_scene::MeshVisualKind::Custom,
+                data,
+                color: color.into(),
+            },
+            kind: "obj",
+        })
+    }
+
+    /// The visual kind: "cube", "quad", or "obj".
     #[getter]
     fn kind(&self) -> &'static str {
         self.kind
@@ -333,6 +362,151 @@ impl PyMeshRenderer {
     pub(crate) fn inner(&self) -> automata_scene::MeshVisual {
         self.inner.clone()
     }
+}
+
+/// Resolves a Wavefront index, including the negative indices allowed by OBJ.
+fn obj_index(raw: &str, count: usize, line: usize, label: &str) -> Result<usize, String> {
+    let value = raw
+        .parse::<i64>()
+        .map_err(|_| format!("line {line}: invalid {label} index {raw:?}"))?;
+    let resolved = if value > 0 {
+        value - 1
+    } else {
+        i64::try_from(count).map_err(|_| format!("line {line}: too many {label} values"))? + value
+    };
+    if resolved < 0 || usize::try_from(resolved).is_none_or(|index| index >= count) {
+        return Err(format!("line {line}: {label} index {raw:?} is out of range"));
+    }
+    usize::try_from(resolved).map_err(|_| format!("line {line}: invalid {label} index {raw:?}"))
+}
+
+/// Parses the geometry subset of Wavefront OBJ into renderer-ready triangles.
+///
+/// Keep the grammar handling together so vertex pools and face references
+/// stay scoped to the same input file.
+#[allow(clippy::too_many_lines)]
+fn parse_obj(source: &str) -> Result<MeshData, String> {
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut normals: Vec<[f32; 3]> = Vec::new();
+    let mut uvs: Vec<[f32; 2]> = Vec::new();
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+
+    for (line_index, raw_line) in source.lines().enumerate() {
+        let line_number = line_index + 1;
+        let line = raw_line.split('#').next().unwrap_or_default().trim();
+        let mut words = line.split_whitespace();
+        let Some(kind) = words.next() else {
+            continue;
+        };
+        match kind {
+            "v" => {
+                let values = words
+                    .take(3)
+                    .map(|value| value.parse::<f32>())
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| format!("line {line_number}: invalid vertex position"))?;
+                if values.len() != 3 || values.iter().any(|value| !value.is_finite()) {
+                    return Err(format!(
+                        "line {line_number}: expected three finite vertex coordinates"
+                    ));
+                }
+                positions.push([values[0], values[1], values[2]]);
+            }
+            "vn" => {
+                let values = words
+                    .take(3)
+                    .map(|value| value.parse::<f32>())
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| format!("line {line_number}: invalid vertex normal"))?;
+                if values.len() != 3 || values.iter().any(|value| !value.is_finite()) {
+                    return Err(format!(
+                        "line {line_number}: expected three finite normal coordinates"
+                    ));
+                }
+                normals.push([values[0], values[1], values[2]]);
+            }
+            "vt" => {
+                let values = words
+                    .take(2)
+                    .map(|value| value.parse::<f32>())
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| format!("line {line_number}: invalid texture coordinate"))?;
+                if values.len() != 2 || values.iter().any(|value| !value.is_finite()) {
+                    return Err(format!(
+                        "line {line_number}: expected two finite texture coordinates"
+                    ));
+                }
+                uvs.push([values[0], values[1]]);
+            }
+            "f" => {
+                let mut face = Vec::new();
+                for reference in words {
+                    let fields: Vec<_> = reference.split('/').collect();
+                    if fields.len() > 3 || fields[0].is_empty() {
+                        return Err(format!(
+                            "line {line_number}: malformed face reference {reference:?}"
+                        ));
+                    }
+                    let position = obj_index(fields[0], positions.len(), line_number, "vertex")?;
+                    let uv = fields
+                        .get(1)
+                        .filter(|value| !value.is_empty())
+                        .map(|value| obj_index(value, uvs.len(), line_number, "texture"))
+                        .transpose()?;
+                    let normal = fields
+                        .get(2)
+                        .filter(|value| !value.is_empty())
+                        .map(|value| obj_index(value, normals.len(), line_number, "normal"))
+                        .transpose()?;
+                    face.push((position, uv, normal));
+                }
+                if face.len() < 3 {
+                    return Err(format!(
+                        "line {line_number}: a face needs at least three vertices"
+                    ));
+                }
+
+                // Fan-triangulate polygons and duplicate corners. This keeps
+                // flat-face normals correct without requiring index welding.
+                let anchor = face[0];
+                for edge in face[1..].windows(2) {
+                    let triangle = [anchor, edge[0], edge[1]];
+                    let a = glam::Vec3::from(positions[triangle[0].0]);
+                    let b = glam::Vec3::from(positions[triangle[1].0]);
+                    let c = glam::Vec3::from(positions[triangle[2].0]);
+                    let generated = (b - a).cross(c - a).normalize_or_zero();
+                    let generated = if generated.length_squared() <= f32::EPSILON {
+                        glam::Vec3::Y
+                    } else {
+                        generated
+                    };
+                    for (position, uv, normal) in triangle {
+                        let normal = normal.map_or(generated, |index| {
+                            glam::Vec3::from(normals[index]).normalize_or_zero()
+                        });
+                        let normal = if normal.length_squared() <= f32::EPSILON {
+                            generated
+                        } else {
+                            normal
+                        };
+                        let uv = uv.map_or([0.0, 0.0], |index| uvs[index]);
+                        let index = u32::try_from(vertices.len()).map_err(|_| {
+                            "OBJ model exceeds the renderer's vertex limit".to_owned()
+                        })?;
+                        vertices.push(Vertex::new(positions[position], normal.to_array(), uv));
+                        indices.push(index);
+                    }
+                }
+            }
+            _ => {} // groups, materials, smoothing hints and comments are metadata only
+        }
+    }
+
+    if vertices.is_empty() {
+        return Err("model contains no triangle faces".to_owned());
+    }
+    Ok(MeshData::new(vertices, indices))
 }
 
 /// A component staged on a Python-side entity, ready to be inserted into
@@ -442,5 +616,39 @@ mod tests {
         let c = PyCamera2D::new((5.0, 6.0), 50.0);
         assert_eq!(c.center(), (5.0, 6.0));
         assert_eq!(c.half_height(), 50.0);
+    }
+
+    #[test]
+    fn obj_parser_triangulates_faces_and_supports_negative_indices() {
+        let obj = concat!(
+            "v 0 0 0\n",
+            "v 1 0 0\n",
+            "v 1 1 0\n",
+            "v 0 1 0\n",
+            "vt 0 0\n",
+            "vt 1 0\n",
+            "vt 1 1\n",
+            "vt 0 1\n",
+            "vn 0 0 1\n",
+            "f -4/1/1 -3/2/1 -2/3/1 -1/4/1\n",
+        );
+        let mesh = parse_obj(obj).expect("valid quad OBJ");
+
+        assert_eq!(mesh.vertices.len(), 6);
+        assert_eq!(mesh.indices, vec![0, 1, 2, 3, 4, 5]);
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|vertex| vertex.normal == [0.0, 0.0, 1.0])
+        );
+        assert_eq!(mesh.vertices[0].uv, [0.0, 0.0]);
+        assert_eq!(mesh.vertices[5].uv, [0.0, 1.0]);
+    }
+
+    #[test]
+    fn obj_parser_rejects_out_of_range_face_indices() {
+        let error = parse_obj("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 9\n")
+            .expect_err("out-of-range face reference must fail");
+        assert!(error.contains("out of range"));
     }
 }

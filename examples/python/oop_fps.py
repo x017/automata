@@ -2,13 +2,13 @@
 """NEON BREACH — a small first-person shooter built with AUTOMATA's OOP API.
 
 A wave-based FPS prototype with a blockout arena, first-person movement,
-hitscan rifle, pursuing robot targets, a blocky weapon model, geometric HUD,
+hitscan rifle, downloaded low-poly weapon and enemy models, geometric HUD,
 and synthesized sound effects.
 
 Controls
 --------
 WASD          Move
-Mouse         Look around (when the window reports cursor motion)
+Mouse         Look around (captured and hidden while playing)
 Arrow keys    Look around (keyboard fallback)
 Space         Jump
 Left mouse/F  Fire
@@ -38,6 +38,7 @@ import automata as at
 
 ROOT = Path(__file__).resolve().parent
 SOUNDS = ROOT / "assets"
+MODELS = SOUNDS / "models"
 
 # A compact, deliberately low-poly palette for the whole arena.
 FLOOR = (0.12, 0.19, 0.27, 1.0)
@@ -52,7 +53,7 @@ RIFLE = (0.075, 0.095, 0.13, 1.0)
 PLAYER_SPEED = 5.4
 JUMP_SPEED = 6.5
 GRAVITY = 19.0
-STARTING_BOTS = [(-5.0, 1.0, -6.0), (0.0, 1.0, -6.5), (5.0, 1.0, -6.0)]
+STARTING_BOTS = [(-5.0, 0.825, -6.0), (0.0, 0.825, -6.5), (5.0, 0.825, -6.0)]
 
 
 def _cube(name, position, scale, color, *, body=None, collider=None):
@@ -104,59 +105,36 @@ class ArenaProp(at.Entity):
         self.add(at.Collider3D.cuboid(*scale))
 
 
-class BotPart(at.Entity):
-    """A decorative, non-physical piece of a blocky robot model."""
-
-    def __init__(self, name, position, scale, color):
-        super().__init__(name)
-        self.add(at.Transform(position=position, scale=scale))
-        self.add(at.MeshRenderer.cube(size=1.0, color=color))
-
-
 class Robot(at.Entity):
-    """One enemy robot: a kinematic target plus a few cube-model details."""
+    """A downloaded Kenney drone model driven by kinematic movement."""
 
     def __init__(self, name, position):
         super().__init__(name)
-        self.position = position
-        self.parts = []
-        self.add(at.Transform(position=position, scale=(0.72, 1.05, 0.48)))
-        self.add(at.MeshRenderer.cube(size=1.0, color=BOT_DARK))
+        self.add(at.Transform(position=position, scale=(1.8, 1.8, 1.8)))
+        self.add(at.MeshRenderer.obj(str(MODELS / "enemy-flying.obj"), color=BOT_RED))
         self.add(at.RigidBody.kinematic_position())
-        # Slightly taller than the visible torso so a level head-height shot
-        # still intersects the target's collider reliably.
-        self.add(at.Collider3D.cuboid(0.72, 1.35, 0.48))
-
-        x, y, z = position
-        self.parts.extend(
-            [
-                BotPart(f"{name}_head", (x, y + 0.75, z), (0.52, 0.42, 0.48), BOT_RED),
-                BotPart(f"{name}_visor", (x, y + 0.77, z - 0.25), (0.34, 0.10, 0.035), CYAN),
-                BotPart(f"{name}_shoulders", (x, y + 0.24, z), (1.02, 0.25, 0.55), BOT_RED),
-            ]
-        )
+        self.add(at.Collider3D.cuboid(2.2, 1.65, 1.45))
 
     def stage_into(self, scene):
-        """Add the complete robot archetype to a staged or live scene."""
+        """Add this robot to a staged or live scene."""
         scene.add(self)
-        for part in self.parts:
-            scene.add(part)
 
     def spawn_into(self, scene_view):
-        """Queue the complete archetype for spawning during an update."""
+        """Queue this robot for spawning during an update."""
         scene_view.spawn(self)
-        for part in self.parts:
-            scene_view.spawn(part)
 
 
 class RiflePiece(at.Entity):
-    """One primitive in the camera-relative low-poly rifle model."""
+    """A model or primitive attached to the first-person camera."""
 
-    def __init__(self, name, scale, color):
+    def __init__(self, name, scale, color, model_path=None):
         super().__init__(name)
         self.local_scale = scale
         self.add(at.Transform(scale=scale))
-        self.add(at.MeshRenderer.cube(size=1.0, color=color))
+        if model_path is None:
+            self.add(at.MeshRenderer.cube(size=1.0, color=color))
+        else:
+            self.add(at.MeshRenderer.obj(str(model_path), color=color))
 
 
 class Arena(at.Scene):
@@ -210,6 +188,7 @@ class NeonBreach(at.Game):
     title = "NEON BREACH — AUTOMATA FPS"
     resolution = (1280, 720)
     headless = "--headless" in sys.argv
+    capture_cursor = not headless
     target_fps = 60
     clear_color = (0.018, 0.035, 0.075, 1.0)
     graphics = at.GraphicsQuality.HIGH
@@ -236,17 +215,17 @@ class NeonBreach(at.Game):
         self.wave = 1
         self.wave_pause = 0.0
         self.score = 0
-        self.last_cursor = None
         self.ambient_sound = None
         self._audio_started = False
 
-        # Build a first-person rifle from simple 3D blocks.
+        # Load a downloaded, centered Kenney model for the first-person rifle.
         self.rifle_parts = [
-            RiflePiece("rifle_receiver", (0.24, 0.16, 0.46), RIFLE),
-            RiflePiece("rifle_barrel", (0.085, 0.075, 0.55), (0.16, 0.19, 0.23, 1.0)),
-            RiflePiece("rifle_rail", (0.10, 0.035, 0.42), AMBER),
-            RiflePiece("rifle_grip", (0.14, 0.25, 0.18), (0.12, 0.15, 0.19, 1.0)),
-            RiflePiece("rifle_sight", (0.065, 0.13, 0.07), CYAN),
+            RiflePiece(
+                "rifle_model",
+                (0.45, 0.45, 0.45),
+                (0.13, 0.17, 0.22, 1.0),
+                model_path=MODELS / "blaster-repeater.obj",
+            ),
             RiflePiece("muzzle_flash", (0.001, 0.001, 0.001), AMBER),
         ]
 
@@ -263,7 +242,7 @@ class NeonBreach(at.Game):
             level.add(piece)
         self.load_scene(level)
 
-        print("NEON BREACH | WASD move · mouse/arrows look · click/F fire · R reload · Space jump")
+        print("NEON BREACH | WASD move · captured mouse/arrows look · click/F fire · R reload · Space jump")
         print("Clear the robot wave. Use cover, aim for the red bots, and watch the ammo lamps.")
 
     def _start_audio(self, ctx):
@@ -304,7 +283,9 @@ class NeonBreach(at.Game):
             view.transform.scale = scale
 
     def _move_camera_and_weapon(self, ctx, camera_position, forward, right, up):
-        rotation = (self.pitch, self.yaw, 0.0)
+        # Engine/model local forward is -Z; positive camera yaw turns toward +X.
+        # Negate yaw for the model so the downloaded rifle points where shots go.
+        rotation = (self.pitch, -self.yaw, 0.0)
         camera = ctx.scene.find("camera")
         if camera is not None:
             camera.camera_3d = at.Camera3D(
@@ -317,12 +298,8 @@ class NeonBreach(at.Game):
         self.muzzle_timer = max(0.0, self.muzzle_timer - ctx.time.delta)
         gun_back = self.recoil
         local_poses = {
-            "rifle_receiver": (0.88 - gun_back, 0.34, -0.30),
-            "rifle_barrel": (1.28 - gun_back, 0.34, -0.245),
-            "rifle_rail": (0.93 - gun_back, 0.34, -0.20),
-            "rifle_grip": (0.70 - gun_back, 0.34, -0.49),
-            "rifle_sight": (0.98 - gun_back, 0.34, -0.10),
-            "muzzle_flash": (1.62 - gun_back, 0.34, -0.245),
+            "rifle_model": (0.86 - gun_back, 0.34, -0.30),
+            "muzzle_flash": (1.31 - gun_back, 0.34, -0.30),
         }
         for piece in self.rifle_parts:
             f, r, u = local_poses[piece.name]
@@ -349,7 +326,7 @@ class NeonBreach(at.Game):
             self._set_pose(ctx.scene.find(piece.name), pos, rotation, size)
 
     def _update_enemy_models(self, ctx, player_position, dt):
-        px, py, pz = player_position
+        px, _, pz = player_position
         id_to_enemy = {}
         for name, enemy in list(self.enemy_records.items()):
             view = ctx.scene.find(name)
@@ -367,7 +344,9 @@ class NeonBreach(at.Game):
                 ex += dx / max(distance, 0.001) * step
                 ez += dz / max(distance, 0.001) * step
                 view.transform.position = (ex, ey, ez)
-                view.transform.rotation_euler = (0.0, yaw, 0.0)
+            # Models use local -Z as forward; match their facing to the chase
+            # vector instead of making the drone orbit around the aim direction.
+            view.transform.rotation_euler = (0.0, -yaw, 0.0)
 
             enemy["attack"] = max(0.0, enemy["attack"] - dt)
             if distance < 1.75 and enemy["attack"] <= 0.0:
@@ -387,17 +366,6 @@ class NeonBreach(at.Game):
                         view_player.transform.position = (0.0, 0.98, 7.2)
                     print("REBOOT: suit restored; keep moving!")
 
-            # Follow the torso with the robot's head, visor and shoulder plate.
-            for suffix, offset in (("head", 0.75), ("visor", 0.77), ("shoulders", 0.24)):
-                part = ctx.scene.find(f"{name}_{suffix}")
-                if part is None or part.transform is None:
-                    continue
-                if suffix == "visor":
-                    front = (math.sin(yaw) * 0.255, 0.0, -math.cos(yaw) * 0.255)
-                else:
-                    front = (0.0, 0.0, 0.0)
-                part.transform.position = (ex + front[0], ey + offset, ez + front[2])
-                part.transform.rotation_euler = (0.0, yaw, 0.0)
         return id_to_enemy
 
     def _resolve_shots(self, ctx, id_to_enemy):
@@ -420,10 +388,6 @@ class NeonBreach(at.Game):
                 target = ctx.scene.find(name)
                 if target is not None:
                     target.despawn()
-                for suffix in ("head", "visor", "shoulders"):
-                    part = ctx.scene.find(f"{name}_{suffix}")
-                    if part is not None:
-                        part.despawn()
                 del self.enemy_records[name]
                 self.score += 100
                 print(f"BOT DOWN  +100  | score {self.score}")
@@ -437,7 +401,7 @@ class NeonBreach(at.Game):
     def _start_wave(self, ctx):
         self.wave += 1
         count = min(3 + self.wave - 1, 6)
-        positions = [(-7.0, 1.0, -6.0), (0.0, 1.0, -7.0), (7.0, 1.0, -6.0), (-7.0, 1.0, -1.0), (7.0, 1.0, -1.0), (0.0, 1.0, -3.0)]
+        positions = [(-7.0, 0.825, -6.0), (0.0, 0.825, -7.0), (7.0, 0.825, -6.0), (-7.0, 0.825, -1.0), (7.0, 0.825, -1.0), (0.0, 0.825, -3.0)]
         for index in range(count):
             name = f"enemy_{self.wave}_{index}"
             robot = Robot(name, positions[index])
@@ -457,20 +421,15 @@ class NeonBreach(at.Game):
         id_to_enemy = self._update_enemy_models(ctx, (px, py, pz), dt)
         self._resolve_shots(ctx, id_to_enemy)
 
-        # Mouse motion plus arrow-key look keeps the prototype playable even
-        # on window systems that don't provide relative mouse input.
-        cursor = ctx.input.cursor
-        if cursor is not None:
-            if self.last_cursor is not None:
-                self.yaw -= (cursor[0] - self.last_cursor[0]) * 0.0035
-                self.pitch -= (cursor[1] - self.last_cursor[1]) * 0.0035
-            self.last_cursor = cursor
-        else:
-            self.last_cursor = None
+        # Relative device motion works with the OS pointer locked to the
+        # window. Positive screen X moves the view to the right (positive yaw).
+        mouse_dx, mouse_dy = ctx.input.mouse_delta
+        self.yaw += mouse_dx * 0.0028
+        self.pitch -= mouse_dy * 0.0028
         look_x = float(ctx.input.pressed("arrow_right")) - float(ctx.input.pressed("arrow_left"))
         look_y = float(ctx.input.pressed("arrow_down")) - float(ctx.input.pressed("arrow_up"))
         self.yaw += look_x * 1.8 * dt
-        self.pitch += look_y * 1.4 * dt
+        self.pitch -= look_y * 1.4 * dt
         self.pitch = max(-1.15, min(1.15, self.pitch))
 
         # Character controller movement in camera-relative ground plane.
@@ -494,7 +453,6 @@ class NeonBreach(at.Game):
 
         # Camera sits at eye-height; the visual capsule stays out of frame.
         camera_position = (px, py + 0.54, pz)
-        forward, right, up = self._camera_basis()
 
         # Process reload and fire timers. Holding the trigger gives a simple
         # semi-automatic rifle with a short per-shot cadence.

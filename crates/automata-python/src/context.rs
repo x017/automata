@@ -72,6 +72,9 @@ pub struct PyInput {
     /// outside the window (or in headless mode).
     #[pyo3(get)]
     pub cursor: Option<(f64, f64)>,
+    /// Relative mouse movement accumulated this frame, in physical pixels.
+    #[pyo3(get)]
+    pub mouse_delta: (f64, f64),
     /// Scroll wheel delta accumulated during the frame.
     #[pyo3(get)]
     pub scroll: (f64, f64),
@@ -93,6 +96,7 @@ impl PyInput {
         let modifiers = input.modifiers();
         let mut snapshot = Self {
             cursor: input.cursor_position(),
+            mouse_delta: input.mouse_delta(),
             scroll: input.scroll_delta(),
             modifiers: PyModifiers {
                 shift: modifiers.shift_key(),

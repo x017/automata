@@ -37,9 +37,10 @@ impl PyGame {
     /// `clear_color=(r, g, b, a)` sets the color the window is cleared to
     /// each frame (components 0.0..=1.0); the default is a very dark blue.
     /// `graphics` is a quality preset: `"low"` (no shadows), `"medium"`,
-    /// `"high"` (default), or `"ultra"`.
+    /// `"high"` (default), or `"ultra"`. `capture_cursor=true` locks and
+    /// hides the mouse pointer for first-person games; focus loss releases it.
     #[new]
-    #[pyo3(signature = (title="AUTOMATA", resolution=(1280, 720), headless=false, resizable=true, vsync=true, log_filter=None, target_fps=None, clear_color=None, graphics=None))]
+    #[pyo3(signature = (title="AUTOMATA", resolution=(1280, 720), headless=false, resizable=true, vsync=true, log_filter=None, target_fps=None, clear_color=None, graphics=None, capture_cursor=false))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         title: &str,
@@ -51,6 +52,7 @@ impl PyGame {
         target_fps: Option<u32>,
         clear_color: Option<(f64, f64, f64, f64)>,
         graphics: Option<&str>,
+        capture_cursor: bool,
     ) -> PyResult<Self> {
         if target_fps == Some(0) {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -65,6 +67,7 @@ impl PyGame {
                     size: resolution,
                     resizable,
                     vsync,
+                    capture_cursor,
                 })
             },
             target_fps,

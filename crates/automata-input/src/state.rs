@@ -7,6 +7,8 @@ use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 
 /// A snapshot of keyboard and mouse input for the current frame.
 ///
+/// Relative mouse motion accumulates from device events while a window has
+/// captured the cursor; it is cleared alongside scroll input at frame end.
 /// `pressed`/`button_pressed` report held inputs; `just_pressed`/
 /// `just_released` report transitions since the previous frame and are
 /// cleared by [`InputState::end_frame`]. OS key repeat does not re-trigger
@@ -25,6 +27,7 @@ pub struct InputState {
     just_pressed_buttons: HashSet<MouseButton>,
     just_released_buttons: HashSet<MouseButton>,
     cursor_position: Option<(f64, f64)>,
+    mouse_delta: (f64, f64),
     scroll_delta: (f64, f64),
     modifiers: ModifiersState,
 }
@@ -110,6 +113,17 @@ impl InputState {
         self.cursor_position = Some((x, y));
     }
 
+    /// Accumulates relative mouse motion in physical pixels for this frame.
+    pub fn handle_mouse_motion(&mut self, delta_x: f64, delta_y: f64) {
+        self.mouse_delta.0 += delta_x;
+        self.mouse_delta.1 += delta_y;
+    }
+
+    /// Clears relative mouse motion, for example after a focus transition.
+    pub fn clear_mouse_delta(&mut self) {
+        self.mouse_delta = (0.0, 0.0);
+    }
+
     /// Accumulates scroll input. Line-based and pixel-based deltas are added
     /// as-is; consumers that care about units should normalize by preference.
     pub fn handle_scroll(&mut self, x: f64, y: f64) {
@@ -128,6 +142,7 @@ impl InputState {
         self.just_released_keys.clear();
         self.just_pressed_buttons.clear();
         self.just_released_buttons.clear();
+        self.mouse_delta = (0.0, 0.0);
         self.scroll_delta = (0.0, 0.0);
     }
 
@@ -175,6 +190,12 @@ impl InputState {
     #[must_use]
     pub fn cursor_position(&self) -> Option<(f64, f64)> {
         self.cursor_position
+    }
+
+    /// Relative mouse motion accumulated since the previous frame, in pixels.
+    #[must_use]
+    pub fn mouse_delta(&self) -> (f64, f64) {
+        self.mouse_delta
     }
 
     /// The scroll delta accumulated since the previous frame.
@@ -237,6 +258,9 @@ mod tests {
         let mut input = InputState::new();
         input.handle_key(KeyCode::ShiftLeft, ElementState::Pressed);
         input.handle_mouse_button(MouseButton::Left, ElementState::Pressed);
+        input.handle_mouse_motion(4.0, -3.0);
+        input.handle_mouse_motion(-1.0, 1.0);
+        assert_eq!(input.mouse_delta(), (3.0, -2.0));
         input.handle_scroll(1.0, -2.0);
         input.end_frame();
 
@@ -247,6 +271,7 @@ mod tests {
         );
         assert!(!input.just_pressed(KeyCode::ShiftLeft));
         assert!(!input.button_just_pressed(MouseButton::Left));
+        assert_eq!(input.mouse_delta(), (0.0, 0.0));
         assert_eq!(input.scroll_delta(), (0.0, 0.0));
     }
 

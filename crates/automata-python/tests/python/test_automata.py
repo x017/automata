@@ -19,13 +19,16 @@ def test_version_exposed():
 def test_headless_run_counts_frames():
     game = make_game()
     calls = []
+    mouse_deltas = []
 
     def update(ctx):
         calls.append(ctx.time.frame)
+        mouse_deltas.append(ctx.input.mouse_delta)
 
     frames = game.run(update, max_frames=30)
     assert frames == 30
     assert calls == list(range(1, 31))
+    assert mouse_deltas == [(0.0, 0.0)] * 30
     assert game.state == "shutdown"
 
 
@@ -823,6 +826,23 @@ def test_mesh_renderer_component_builders():
     assert quad.color == (1.0, 1.0, 1.0, 1.0)  # white default
 
 
+def test_mesh_renderer_obj_loads_static_geometry(tmp_path):
+    model = tmp_path / "triangle.obj"
+    model.write_text(
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\n"
+        "vt 0 0\nvt 1 0\nvt 0 1\n"
+        "f 1/1 2/2 3/3\n",
+        encoding="utf-8",
+    )
+    renderer = at.MeshRenderer.obj(str(model), color=(0.8, 0.2, 0.1, 1.0))
+    assert renderer.kind == "obj"
+    assert renderer.color == pytest.approx((0.8, 0.2, 0.1, 1.0))
+
+    game = make_game()
+    game.load_scene(at.Scene().add(at.Entity("triangle").add(renderer)))
+    game.run(lambda ctx: ctx.quit())
+
+
 def test_mesh_renderer_stages_and_runs_headless():
     # Headless mode has no GPU: visuals are inert but must not break the
     # loop, the scene, or physics.
@@ -847,9 +867,10 @@ def test_mesh_renderer_stages_and_runs_headless():
     assert sorted(seen["names"]) == ["camera", "cube"]
 
 
-def test_game_clear_color_option():
-    game = at.Game(headless=True, clear_color=(0.5, 0.6, 0.7, 1.0))
+def test_game_clear_color_and_cursor_options():
+    game = at.Game(headless=True, clear_color=(0.5, 0.6, 0.7, 1.0), capture_cursor=True)
     assert game.state == "created"
+    assert game.run(lambda ctx: ctx.quit()) == 1
     with pytest.raises(ValueError):
         at.Game(headless=True, clear_color=(2.0, 0.0, 0.0, 1.0))
 

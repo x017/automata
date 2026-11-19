@@ -61,8 +61,9 @@ cargo test --workspace
 
 `examples/python/oop_fps.py` is a small playable first-person shooter built
 with the engine's object-oriented `Game` / `Scene` / `Entity` API. It includes
-an enclosed collision-tested arena, a primitive-model rifle, hitscan shooting,
-robot waves, a geometric HUD, and original synthesized WAV effects.
+an enclosed collision-tested arena, downloaded CC0 Kenney rifle and enemy
+models, hitscan shooting, robot waves, a geometric HUD, and original
+synthesized WAV effects. The example uses captured/hidden relative mouse input.
 
 ```console
 python examples/python/oop_fps.py

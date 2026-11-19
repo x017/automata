@@ -278,6 +278,7 @@ class Game(_core.Game):
     headless: Optional[bool] = None
     resizable: Optional[bool] = None
     vsync: Optional[bool] = None
+    capture_cursor: Optional[bool] = None
     log_filter: Optional[str] = None
     target_fps: Optional[int] = None
     clear_color: Optional[Tuple[float, float, float, float]] = None
@@ -289,6 +290,7 @@ class Game(_core.Game):
         "headless",
         "resizable",
         "vsync",
+        "capture_cursor",
         "log_filter",
         "target_fps",
         "clear_color",

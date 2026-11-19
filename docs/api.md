@@ -95,16 +95,16 @@ components are mutable (`t.position = (1, 2, 0)`), and scene views support
 
 | Item | Purpose |
 |---|---|
-| `Game(title, resolution, headless, resizable, vsync, log_filter, target_fps, clear_color, graphics)` | Owns the engine; `run(update=None, max_frames=None)` drives the loop, `load_scene(scene)` replaces the scene, `quit()` requests shutdown, `state` reports the lifecycle; `@game.update` and `@game.on_event(name)` register callbacks; `clear_color=(r, g, b, a)` sets the window background (default very dark blue); `graphics=GraphicsQuality.HIGH` picks a quality preset (`LOW` disables shadows) |
+| `Game(title, resolution, headless, resizable, vsync, log_filter, target_fps, clear_color, graphics, capture_cursor)` | Owns the engine; `run(update=None, max_frames=None)` drives the loop, `load_scene(scene)` replaces the scene, `quit()` requests shutdown, `state` reports the lifecycle; `@game.update` and `@game.on_event(name)` register callbacks; `clear_color=(r, g, b, a)` sets the window background (default very dark blue); `graphics=GraphicsQuality.HIGH` picks a quality preset (`LOW` disables shadows); `capture_cursor=True` locks/hides the pointer and releases it on focus loss |
 | `Key` / `MouseButton` / `GamepadButton` / `GamepadAxis` / `GraphicsQuality` | Typed `str` enums for every bindable input and quality preset — `Binding.key(Key.SPACE)`, `AxisBinding.key_pair(Key.A, Key.D)`; plain strings (`"space"`) keep working everywhere |
 | `Scene` / `Entity(name)` | Scene staging: `entity.add(component)`, `scene.add(entity)` |
 | `Transform(position, rotation_euler, scale)` | Local transform; angles in radians (XYZ order) |
 | `Camera3D(position, target, fov)` / `Camera2D(center, half_height)` | Frame cameras (first entity wins) |
-| `MeshRenderer` | `MeshRenderer.cube(size=…, color=…)` / `.quad(…)` — plain-data visuals; the windowed loop materializes them on the GPU, headless runs ignore them |
+| `MeshRenderer` | `MeshRenderer.cube(size=…, color=…)` / `.quad(…)` / `.obj(path, color=…)` — plain-data visuals; OBJ geometry loads while staging and uploads to the GPU in windowed mode. OBJ materials/textures use the flat tint; headless runs ignore visuals |
 | `DirectionalLight` | `DirectionalLight(direction=…, color=…, ambient=…, shadows=True)` — the scene's sun; the first entity carrying one lights the frame with Blinn-Phong shading and shadow-mapped shadows |
 | `FrameContext` (`ctx` in the callback) | `time`, `input`, `scene`, `events`, `resources`, `quit()` |
 | `ctx.time` | `delta` / `elapsed` (seconds), `frame` (1-based frame number) |
-| `ctx.input` | `pressed` / `just_pressed` / `just_released(key)`, `mouse_*` variants, `cursor`, `scroll`, `modifiers`, `gamepads` |
+| `ctx.input` | `pressed` / `just_pressed` / `just_released(key)`, `mouse_*` variants, absolute `cursor`, relative `mouse_delta` (pixels per frame while captured), `scroll`, `modifiers`, `gamepads` |
 | `ctx.input.gamepads` | Connected pads: `ids()`, `get(id)`, `primary()`, `len()`, iteration; state: `pressed(id, btn)` / `pressed_any(btn)`, `axis(id, ax)` / `axis_any(ax)`; `pad.left_stick()` / `right_stick()`; `events` — this frame's gamepad events |
 | `ActionMap` / `Binding` / `AxisBinding` | Action-based input: `map.bind("jump", Binding.key("space"))`, `map.bind_axis("move_x", AxisBinding.key_pair("a", "d"))`, then `map.pressed("jump", ctx.input)` / `map.axis("move_x", ctx.input)`; repeated `bind`/`bind_axis` calls stack (WASD + arrows + stick can share one axis; values sum, clamped to -1..1); `rebind` / `unbind` / `unbind_axis` for remapping |
 | `ctx.scene` | `find(name)`, `["name"]`, `spawn(entity)`, `despawn(id)`, `entity_count`, `names()`, iteration; `EntityView.transform` get/set (attribute writes via `TransformRef`), `EntityView.character_velocity` get/set (per-frame drive for character controllers), `EntityView.camera_3d` get/set (follow cameras: assign a fresh `Camera3D` each frame) |
@@ -148,10 +148,10 @@ Type stubs for editors ship in `automata/_core.pyi`.
 | `AppState` | Lifecycle state enum |
 | `AppContext` | Per-frame context: `time()`, `input()`, `request_quit()` |
 | `EngineConfig` | Title, version, log filter, frame pacing, window mode |
-| `WindowMode` / `WindowConfig` | Windowed (default) vs headless; size, resizable, vsync |
+| `WindowMode` / `WindowConfig` | Windowed (default) vs headless; size, resizable, vsync, optional captured/hidden pointer |
 | `Time` | Frame delta, elapsed time, frame count |
 | `Error` / `Result` | Core error enum and result alias |
-| `InputState` | Per-frame keyboard/mouse state: `pressed`, `just_pressed`, `just_released`, buttons, cursor, scroll, modifiers |
+| `InputState` | Per-frame keyboard/mouse state: `pressed`, `just_pressed`, `just_released`, buttons, cursor, relative mouse delta, scroll, modifiers |
 | `RenderContext` | wgpu device/queue/surface; `resize`, `render_clear` |
 | `logging::init` | One-time `tracing` subscriber installation |
 
@@ -222,7 +222,9 @@ Generated docs: `cargo doc --workspace --no-deps --open`.
 ### Input model
 
 - Keyboard/mouse state: `ctx.input.pressed(key)` / `just_pressed` /
-  `just_released`, plus mouse buttons, cursor, scroll, modifiers.
+  `just_released`, plus mouse buttons, cursor, relative `mouse_delta`, scroll,
+  and modifiers. `Game(capture_cursor=True)` locks/hides the pointer for FPS
+  controls and releases it while the window is unfocused.
 - Gamepads (gilrs): `ctx.input.gamepads` — connected pads by id
   (`ids`, `get`, `primary`), button/axis state (`pressed`, `pressed_any`,
   `axis`, `axis_any`), sticks (`pad.left_stick()`), and this frame's
