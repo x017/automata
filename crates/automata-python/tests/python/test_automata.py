@@ -598,3 +598,72 @@ def test_action_map_survives_across_frames():
 
     game.run(update, max_frames=5)
     assert frames == [1, 2, 3, 4, 5]
+
+
+def test_character_controller_driven_per_frame():
+    game = make_game()
+    scene = at.Scene()
+    scene.add(
+        at.Entity("floor")
+        .add(at.Transform(position=(0.0, 0.0, 0.0)))
+        .add(at.RigidBody.fixed())
+        .add(at.Collider3D.cuboid(10.0, 0.5, 10.0))
+    )
+    scene.add(
+        at.Entity("player")
+        .add(at.Transform(position=(0.0, 2.0, 0.0)))
+        .add(at.RigidBody.kinematic_velocity())
+        .add(at.Collider3D.capsule(0.5, 0.4))
+        .add(at.CharacterController())
+        .add(at.CharacterVelocity())
+    )
+    game.load_scene(scene)
+
+    actions = at.ActionMap()
+    actions.bind_axis("move_x", at.AxisBinding.key_pair("a", "d"))
+    seen = {}
+
+    def update(ctx):
+        player = ctx.scene["player"]
+        dx = actions.axis("move_x", ctx.input)
+        # Headless has no devices (dx == 0); add a constant walk speed plus
+        # a gravity-ish fall so the controller exercises both axes.
+        player.character_velocity = (dx + 1.0, -3.0, 0.0)
+        seen.setdefault("start", player.transform.position)
+        seen["end"] = player.transform.position
+        seen["grounded"] = ctx.physics.grounded(player)
+        seen["readback"] = player.character_velocity
+
+    game.run(update, max_frames=90)
+    sx, sy, _ = seen["start"]
+    ex, ey, _ = seen["end"]
+    assert ex > sx + 0.5, f"expected the character to walk +x, got {sx} -> {ex}"
+    assert ey < 1.5, f"expected the character to land, got y={ey}"
+    assert seen["grounded"] is True
+    assert seen["readback"] == (1.0, -3.0, 0.0)
+
+
+def test_character_velocity_setter_validates():
+    game = make_game()
+    scene = at.Scene().add(
+        at.Entity("player")
+        .add(at.RigidBody.kinematic_velocity())
+        .add(at.Collider3D.ball(0.5))
+        .add(at.CharacterController())
+        .add(at.CharacterVelocity())
+    )
+    game.load_scene(scene)
+    seen = {}
+
+    def update(ctx):
+        player = ctx.scene["player"]
+        player.character_velocity = at.CharacterVelocity((0.0, 1.0, 0.0))
+        seen["via_component"] = True
+        try:
+            player.character_velocity = "not a velocity"
+        except TypeError:
+            seen["bad_type"] = True
+        ctx.quit()
+
+    game.run(update)
+    assert seen == {"via_component": True, "bad_type": True}

@@ -59,7 +59,7 @@ components are mutable (`t.position = (1, 2, 0)`), and scene views support
 | `ctx.input` | `pressed` / `just_pressed` / `just_released(key)`, `mouse_*` variants, `cursor`, `scroll`, `modifiers`, `gamepads` |
 | `ctx.input.gamepads` | Connected pads: `ids()`, `get(id)`, `primary()`, `len()`, iteration; state: `pressed(id, btn)` / `pressed_any(btn)`, `axis(id, ax)` / `axis_any(ax)`; `pad.left_stick()` / `right_stick()`; `events` — this frame's gamepad events |
 | `ActionMap` / `Binding` / `AxisBinding` | Action-based input: `map.bind("jump", Binding.key("space"))`, `map.bind_axis("move_x", AxisBinding.key_pair("a", "d"))`, then `map.pressed("jump", ctx.input)` / `map.axis("move_x", ctx.input)`; `rebind` / `unbind` for remapping |
-| `ctx.scene` | `find(name)`, `["name"]`, `spawn(entity)`, `despawn(id)`, `entity_count`, `names()`, iteration; `EntityView.transform` get/set, attribute writes via `TransformRef` |
+| `ctx.scene` | `find(name)`, `["name"]`, `spawn(entity)`, `despawn(id)`, `entity_count`, `names()`, iteration; `EntityView.transform` get/set (attribute writes via `TransformRef`), `EntityView.character_velocity` get/set (per-frame drive for character controllers) |
 | `ctx.events` | `send(name, payload)` / `read(name)` — buffered: sent events are readable the next frame, then expire |
 | `ctx.resources` | Immediate `set` / `get` / `remove` of arbitrary Python objects, keyed by name |
 | `ctx.physics` (3D) | `cast_ray(origin, dir, max_distance, exclude)` → result key (read next frame via `ray_result(key)`), `apply_impulse` / `apply_force` / `set_velocity(entity, vec)`, `velocity(entity)`, `grounded(entity)`, `gravity()` / `set_gravity(vec)`, `body_count()` |
@@ -165,7 +165,9 @@ Generated docs: `cargo doc --workspace --no-deps --open`.
   and contact-force events arrive on the event bus.
 - Kinematic character controllers (`CharacterController` +
   `CharacterVelocity`) move with slide/slope/autostep/snap-to-ground logic;
-  `ctx.physics.grounded(entity)` reports ground contact.
+  `ctx.physics.grounded(entity)` reports ground contact. Drive a character
+  per frame with `view.character_velocity = (vx, vy, vz)` (buffered like
+  transform writes); game code composes gravity/jumps into the velocity.
 - Scripts never see Rapier: the engine owns the simulation and exposes
   queries/mutations through the frame context only.
 

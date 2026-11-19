@@ -342,8 +342,13 @@ impl PhysicsWorld2D {
             transform.position += actual;
         }
         if let Some(body) = self.bodies.get_mut(body_handle) {
+            // Teleport immediately: `set_next_kinematic_translation` only
+            // affects KinematicPositionBased bodies, but characters may be
+            // KinematicVelocityBased — those must follow the resolved move
+            // too, or the collider stays behind while the scene transform
+            // walks on.
             let pos = body.translation();
-            body.set_next_kinematic_translation(Vector::new(pos.x + actual.x, pos.y + actual.y));
+            body.set_translation(Vector::new(pos.x + actual.x, pos.y + actual.y), false);
         }
 
         CharacterMove {

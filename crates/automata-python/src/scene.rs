@@ -13,6 +13,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use automata_physics::CharacterVelocity;
 use automata_scene::{EntityId, Name, Scene, Transform};
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -174,6 +175,8 @@ pub struct FrameWrites {
     /// writes compose: the entry starts as the entity's snapshot transform
     /// and each write updates one field.
     pub transforms: HashMap<u64, Transform>,
+    /// Pending character-controller velocities, keyed by entity bits.
+    pub character_velocities: HashMap<u64, CharacterVelocity>,
     /// Entities to spawn.
     pub spawns: Vec<StagedEntity>,
     /// Entities to despawn (recursively).
@@ -196,6 +199,11 @@ pub fn apply_writes(scene: &mut Scene, writes: &WriteQueue) {
             }
         }
     }
+    for (bits, velocity) in drained.character_velocities {
+        if let Some(entity) = EntityId::from_bits(bits) {
+            let _ = scene.world_mut().insert_one(entity, velocity);
+        }
+    }
     for staged in drained.spawns {
         spawn_staged(scene, &staged);
     }
@@ -212,6 +220,7 @@ struct EntitySnapshot {
     id: EntityId,
     name: Option<String>,
     transform: Option<Transform>,
+    character_velocity: Option<CharacterVelocity>,
 }
 
 /// Read access to the scene during the update callback.
@@ -232,12 +241,18 @@ impl SceneView {
     pub fn snapshot(scene: &Scene, writes: WriteQueue) -> Self {
         let snapshot = scene
             .world()
-            .query::<(EntityId, Option<&Name>, Option<&Transform>)>()
+            .query::<(
+                EntityId,
+                Option<&Name>,
+                Option<&Transform>,
+                Option<&CharacterVelocity>,
+            )>()
             .iter()
-            .map(|(id, name, transform)| EntitySnapshot {
+            .map(|(id, name, transform, velocity)| EntitySnapshot {
                 id,
                 name: name.map(|n| n.0.clone()),
                 transform: transform.copied(),
+                character_velocity: velocity.copied(),
             })
             .collect();
         Self { snapshot, writes }
@@ -306,6 +321,7 @@ pub struct EntityView {
     id: u64,
     name: Option<String>,
     transform: Option<Transform>,
+    character_velocity: Option<CharacterVelocity>,
     writes: WriteQueue,
 }
 
@@ -315,6 +331,7 @@ impl EntityView {
             id: snapshot.id.to_bits().get(),
             name: snapshot.name.clone(),
             transform: snapshot.transform,
+            character_velocity: snapshot.character_velocity,
             writes,
         }
     }
@@ -358,6 +375,37 @@ impl EntityView {
             .borrow_mut()
             .transforms
             .insert(self.id, transform);
+        Ok(())
+    }
+
+    /// The entity's character-controller velocity at the start of the
+    /// frame, or `None` when the entity has no `CharacterVelocity`.
+    #[getter]
+    fn character_velocity(&self) -> Option<(f32, f32, f32)> {
+        self.character_velocity
+            .map(|v| (v.velocity.x, v.velocity.y, v.velocity.z))
+    }
+
+    /// Queues a character-controller velocity for the entity (applied after
+    /// the callback returns). Accepts a `(vx, vy, vz)` tuple or a
+    /// `CharacterVelocity`. This is the per-frame drive input for kinematic
+    /// characters: set it every frame from the action map.
+    #[setter]
+    fn set_character_velocity(&self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        let velocity = if let Ok(tuple) = value.extract::<(f32, f32, f32)>() {
+            CharacterVelocity::new(glam::Vec3::new(tuple.0, tuple.1, tuple.2))
+        } else if let Ok(c) = value.cast::<crate::physics_components::PyCharacterVelocity>() {
+            c.borrow().inner()
+        } else {
+            let typename = value.get_type().name()?.to_string();
+            return Err(PyTypeError::new_err(format!(
+                "expected a (vx, vy, vz) tuple or CharacterVelocity, got {typename}"
+            )));
+        };
+        self.writes
+            .borrow_mut()
+            .character_velocities
+            .insert(self.id, velocity);
         Ok(())
     }
 

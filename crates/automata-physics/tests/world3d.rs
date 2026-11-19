@@ -241,6 +241,42 @@ fn character_controller_walks_and_stays_grounded() {
 }
 
 #[test]
+fn velocity_based_character_collider_follows_the_move() {
+    // KinematicVelocityBased characters: the collider must follow the
+    // resolved controller move, or it stays at spawn while the scene
+    // transform walks on (regression: character fell through the floor).
+    let mut scene = SceneWorld::new();
+    let _floor = scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        RigidBody::fixed(),
+        Collider3D::cuboid(40.0, 1.0, 40.0),
+    ));
+    let character = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 2.0, 0.0)),
+        RigidBody::kinematic_velocity(),
+        Collider3D::capsule(0.5, 0.4),
+        CharacterController::new().snap_to_ground(0.5),
+        CharacterVelocity::new(Vec3::new(1.0, -3.0, 0.0)),
+    ));
+
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 90);
+
+    let pos = position(&scene, character);
+    assert!(pos.x > 0.5, "character should walk +x, x = {}", pos.x);
+    // Capsule feet at y - 0.9; floor top 0.5 → rest at y = 1.4.
+    assert!(
+        (1.3..=1.6).contains(&pos.y),
+        "character should land on the floor, y = {}",
+        pos.y
+    );
+    assert!(
+        physics.grounded(character),
+        "character should be grounded after landing"
+    );
+}
+
+#[test]
 fn despawned_entity_leaves_physics_world() {
     let mut scene = SceneWorld::new();
     let ball = scene.spawn((
