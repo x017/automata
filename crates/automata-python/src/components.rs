@@ -152,6 +152,11 @@ impl PyCamera3D {
     pub fn inner(&self) -> Camera3D {
         self.inner
     }
+
+    /// Wraps an engine camera value.
+    pub fn from_inner(inner: Camera3D) -> Self {
+        Self { inner }
+    }
 }
 
 /// An orthographic 2D camera. The first entity carrying one becomes the

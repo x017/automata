@@ -37,6 +37,12 @@ pub struct EngineConfig {
     /// input events — the mode tests, CI, and headless tooling should use.
     pub window_mode: WindowMode,
 
+    /// The color the window is cleared to before each frame is drawn.
+    ///
+    /// Defaults to a very dark blue; set a sky color for daytime scenes.
+    /// Ignored in headless mode (no surface is ever drawn).
+    pub clear_color: automata_renderer::Color,
+
     /// Fixed physics timestep, in seconds (default 1/60).
     ///
     /// The physics world steps at this rate regardless of frame rate: the
@@ -66,6 +72,12 @@ impl Default for EngineConfig {
             log_filter: DEFAULT_LOG_FILTER.to_owned(),
             target_fps: Some(60),
             window_mode: WindowMode::default(),
+            clear_color: automata_renderer::Color {
+                r: 0.02,
+                g: 0.02,
+                b: 0.04,
+                a: 1.0,
+            },
             physics_timestep: Some(1.0 / 60.0),
         }
     }

@@ -33,8 +33,11 @@ pub struct PyGame {
 impl PyGame {
     /// Creates a game. With `headless=True` no window or GPU is created —
     /// the loop is sleep-paced; useful for tests, CI, and tooling.
+    ///
+    /// `clear_color=(r, g, b, a)` sets the color the window is cleared to
+    /// each frame (components 0.0..=1.0); the default is a very dark blue.
     #[new]
-    #[pyo3(signature = (title="AUTOMATA", resolution=(1280, 720), headless=false, resizable=true, vsync=true, log_filter=None, target_fps=None))]
+    #[pyo3(signature = (title="AUTOMATA", resolution=(1280, 720), headless=false, resizable=true, vsync=true, log_filter=None, target_fps=None, clear_color=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         title: &str,
@@ -44,6 +47,7 @@ impl PyGame {
         vsync: bool,
         log_filter: Option<&str>,
         target_fps: Option<u32>,
+        clear_color: Option<(f64, f64, f64, f64)>,
     ) -> PyResult<Self> {
         if target_fps == Some(0) {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -65,6 +69,16 @@ impl PyGame {
         };
         if let Some(filter) = log_filter {
             filter.clone_into(&mut config.log_filter);
+        }
+        if let Some((r, g, b, a)) = clear_color {
+            for component in [r, g, b, a] {
+                if !(0.0..=1.0).contains(&component) {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "clear_color components must be in 0.0..=1.0",
+                    ));
+                }
+            }
+            config.clear_color = automata_renderer::Color { r, g, b, a };
         }
         Ok(Self {
             app: Application::new(config),

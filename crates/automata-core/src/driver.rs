@@ -48,6 +48,9 @@ pub(super) fn run_windowed(
     info!("creating event loop");
     let event_loop = EventLoop::new().map_err(Error::EventLoop)?;
 
+    let mut draw = DrawList::new();
+    draw.set_clear_color(config.clear_color);
+
     let mut driver = WinitDriver {
         config,
         window_config,
@@ -58,7 +61,7 @@ pub(super) fn run_windowed(
         gamepads: automata_input::Gamepads::new(),
         window: None,
         renderer: None,
-        draw: DrawList::new(),
+        draw,
         update,
         last_frame_start: None,
         next_frame_deadline: None,

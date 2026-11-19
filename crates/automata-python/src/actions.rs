@@ -340,7 +340,7 @@ impl PyAxisBinding {
 #[derive(Debug, Default)]
 pub struct PyActionMap {
     actions: HashMap<String, Vec<PyBinding>>,
-    axes: HashMap<String, PyAxisBinding>,
+    axes: HashMap<String, Vec<PyAxisBinding>>,
 }
 
 #[pymethods]
@@ -357,10 +357,19 @@ impl PyActionMap {
         self.bind_inner(action, binding.clone());
     }
 
-    /// Binds a named analog axis, replacing any previous binding.
+    /// Binds a named analog axis (stacking with existing bindings).
+    ///
+    /// Multiple bindings for one axis — a WASD pair, an arrow-key pair,
+    /// and a gamepad stick — are summed and clamped to -1.0..=1.0, so
+    /// every bound device can drive it.
     #[allow(clippy::needless_pass_by_value)] // pyo3 extraction needs owned PyRef
     fn bind_axis(&mut self, name: &str, axis: PyRef<'_, PyAxisBinding>) {
         self.bind_axis_inner(name, axis.clone());
+    }
+
+    /// Removes all bindings for the axis `name`.
+    fn unbind_axis(&mut self, name: &str) {
+        self.axes.remove(name);
     }
 
     /// Replaces an action's bindings (for control-remapping UIs).
@@ -407,8 +416,17 @@ impl PyActionMap {
     }
 
     /// Current value of a named axis, -1.0..=1.0 (0.0 when unbound).
+    ///
+    /// All bindings stacked under `name` contribute; the sum is clamped.
     fn axis(&self, name: &str, input: &PyInput) -> f32 {
-        self.axes.get(name).map_or(0.0, |axis| axis.value(input))
+        let value: f32 = self
+            .axes
+            .get(name)
+            .into_iter()
+            .flatten()
+            .map(|axis| axis.value(input))
+            .sum();
+        value.clamp(-1.0, 1.0)
     }
 
     /// Convenience: a 2D move vector from two named axes.
@@ -437,7 +455,7 @@ impl PyActionMap {
 
     /// `bind_axis` on plain Rust data.
     pub(crate) fn bind_axis_inner(&mut self, name: &str, axis: PyAxisBinding) {
-        self.axes.insert(name.to_owned(), axis);
+        self.axes.entry(name.to_owned()).or_default().push(axis);
     }
 
     /// `rebind` on plain Rust data.
@@ -518,6 +536,45 @@ mod tests {
         let idle = PyInput::default();
         assert_eq!(map.axis("move_x", &idle), 0.0);
         assert_eq!(map.axis("unbound", &idle), 0.0);
+    }
+
+    #[test]
+    fn axis_bindings_stack_and_clamp() {
+        let mut map = PyActionMap::new();
+        // A WASD pair and an arrow-key pair under one name both drive it.
+        map.bind_axis_inner(
+            "move_x",
+            PyAxisBinding {
+                kind: AxisKind::ButtonPair {
+                    negative: key("a"),
+                    positive: key("d"),
+                },
+            },
+        );
+        map.bind_axis_inner(
+            "move_x",
+            PyAxisBinding {
+                kind: AxisKind::ButtonPair {
+                    negative: key("arrow_left"),
+                    positive: key("arrow_right"),
+                },
+            },
+        );
+        assert_eq!(map.axis_names(), vec!["move_x".to_owned()]);
+
+        // Two positives sum to 2 and clamp to 1.
+        let both = input_with(&["d", "arrow_right"], &[], Vec::new());
+        assert_eq!(map.axis("move_x", &both), 1.0);
+
+        let arrows = input_with(&["arrow_right"], &[], Vec::new());
+        assert_eq!(map.axis("move_x", &arrows), 1.0);
+
+        let opposing = input_with(&["a", "arrow_right"], &[], Vec::new());
+        assert_eq!(map.axis("move_x", &opposing), 0.0);
+
+        map.unbind_axis("move_x");
+        assert_eq!(map.axis("move_x", &arrows), 0.0);
+        assert_eq!(map.axis_names(), Vec::<String>::new());
     }
 
     #[test]

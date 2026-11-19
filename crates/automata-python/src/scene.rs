@@ -14,11 +14,12 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use automata_physics::CharacterVelocity;
+use automata_renderer::Camera3D;
 use automata_scene::{EntityId, Name, Scene, Transform};
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 
-use crate::components::{extract_component, PyTransform, StagedComponent};
+use crate::components::{extract_component, PyCamera3D, PyTransform, StagedComponent};
 
 /// A staged entity: a name plus the components to insert.
 #[derive(Debug, Clone, Default)]
@@ -189,6 +190,8 @@ pub struct FrameWrites {
     pub transforms: HashMap<u64, Transform>,
     /// Pending character-controller velocities, keyed by entity bits.
     pub character_velocities: HashMap<u64, CharacterVelocity>,
+    /// Pending 3D camera replacements, keyed by entity bits.
+    pub cameras_3d: HashMap<u64, Camera3D>,
     /// Entities to spawn.
     pub spawns: Vec<StagedEntity>,
     /// Entities to despawn (recursively).
@@ -216,6 +219,11 @@ pub fn apply_writes(scene: &mut Scene, writes: &WriteQueue) {
             let _ = scene.world_mut().insert_one(entity, velocity);
         }
     }
+    for (bits, camera) in drained.cameras_3d {
+        if let Some(entity) = EntityId::from_bits(bits) {
+            let _ = scene.world_mut().insert_one(entity, camera);
+        }
+    }
     for staged in drained.spawns {
         spawn_staged(scene, &staged);
     }
@@ -233,6 +241,7 @@ struct EntitySnapshot {
     name: Option<String>,
     transform: Option<Transform>,
     character_velocity: Option<CharacterVelocity>,
+    camera_3d: Option<Camera3D>,
 }
 
 /// Read access to the scene during the update callback.
@@ -258,13 +267,15 @@ impl SceneView {
                 Option<&Name>,
                 Option<&Transform>,
                 Option<&CharacterVelocity>,
+                Option<&Camera3D>,
             )>()
             .iter()
-            .map(|(id, name, transform, velocity)| EntitySnapshot {
+            .map(|(id, name, transform, velocity, camera)| EntitySnapshot {
                 id,
                 name: name.map(|n| n.0.clone()),
                 transform: transform.copied(),
                 character_velocity: velocity.copied(),
+                camera_3d: camera.copied(),
             })
             .collect();
         Self { snapshot, writes }
@@ -334,6 +345,7 @@ pub struct EntityView {
     name: Option<String>,
     transform: Option<Transform>,
     character_velocity: Option<CharacterVelocity>,
+    camera_3d: Option<Camera3D>,
     writes: WriteQueue,
 }
 
@@ -344,6 +356,7 @@ impl EntityView {
             name: snapshot.name.clone(),
             transform: snapshot.transform,
             character_velocity: snapshot.character_velocity,
+            camera_3d: snapshot.camera_3d,
             writes,
         }
     }
@@ -418,6 +431,30 @@ impl EntityView {
             .borrow_mut()
             .character_velocities
             .insert(self.id, velocity);
+        Ok(())
+    }
+
+    /// The entity's 3D camera at the start of the frame, or `None` when
+    /// the entity has no `Camera3D`.
+    #[getter]
+    fn camera_3d(&self) -> Option<PyCamera3D> {
+        self.camera_3d.map(PyCamera3D::from_inner)
+    }
+
+    /// Queues a new 3D camera for the entity (applied after the callback
+    /// returns). Accepts a `Camera3D`; this is how follow cameras move:
+    /// set it every frame from the followed entity's position.
+    #[setter]
+    fn set_camera_3d(&self, camera: &Bound<'_, PyAny>) -> PyResult<()> {
+        let camera = if let Ok(c) = camera.cast::<PyCamera3D>() {
+            c.borrow().inner()
+        } else {
+            let typename = camera.get_type().name()?.to_string();
+            return Err(PyTypeError::new_err(format!(
+                "expected a Camera3D, got {typename}"
+            )));
+        };
+        self.writes.borrow_mut().cameras_3d.insert(self.id, camera);
         Ok(())
     }
 

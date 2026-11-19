@@ -95,7 +95,7 @@ components are mutable (`t.position = (1, 2, 0)`), and scene views support
 
 | Item | Purpose |
 |---|---|
-| `Game(title, resolution, headless, resizable, vsync, log_filter, target_fps)` | Owns the engine; `run(update=None, max_frames=None)` drives the loop, `load_scene(scene)` replaces the scene, `quit()` requests shutdown, `state` reports the lifecycle; `@game.update` and `@game.on_event(name)` register callbacks |
+| `Game(title, resolution, headless, resizable, vsync, log_filter, target_fps, clear_color)` | Owns the engine; `run(update=None, max_frames=None)` drives the loop, `load_scene(scene)` replaces the scene, `quit()` requests shutdown, `state` reports the lifecycle; `@game.update` and `@game.on_event(name)` register callbacks; `clear_color=(r, g, b, a)` sets the window background (default very dark blue) |
 | `Scene` / `Entity(name)` | Scene staging: `entity.add(component)`, `scene.add(entity)` |
 | `Transform(position, rotation_euler, scale)` | Local transform; angles in radians (XYZ order) |
 | `Camera3D(position, target, fov)` / `Camera2D(center, half_height)` | Frame cameras (first entity wins) |
@@ -104,8 +104,8 @@ components are mutable (`t.position = (1, 2, 0)`), and scene views support
 | `ctx.time` | `delta` / `elapsed` (seconds), `frame` (1-based frame number) |
 | `ctx.input` | `pressed` / `just_pressed` / `just_released(key)`, `mouse_*` variants, `cursor`, `scroll`, `modifiers`, `gamepads` |
 | `ctx.input.gamepads` | Connected pads: `ids()`, `get(id)`, `primary()`, `len()`, iteration; state: `pressed(id, btn)` / `pressed_any(btn)`, `axis(id, ax)` / `axis_any(ax)`; `pad.left_stick()` / `right_stick()`; `events` — this frame's gamepad events |
-| `ActionMap` / `Binding` / `AxisBinding` | Action-based input: `map.bind("jump", Binding.key("space"))`, `map.bind_axis("move_x", AxisBinding.key_pair("a", "d"))`, then `map.pressed("jump", ctx.input)` / `map.axis("move_x", ctx.input)`; `rebind` / `unbind` for remapping |
-| `ctx.scene` | `find(name)`, `["name"]`, `spawn(entity)`, `despawn(id)`, `entity_count`, `names()`, iteration; `EntityView.transform` get/set (attribute writes via `TransformRef`), `EntityView.character_velocity` get/set (per-frame drive for character controllers) |
+| `ActionMap` / `Binding` / `AxisBinding` | Action-based input: `map.bind("jump", Binding.key("space"))`, `map.bind_axis("move_x", AxisBinding.key_pair("a", "d"))`, then `map.pressed("jump", ctx.input)` / `map.axis("move_x", ctx.input)`; repeated `bind`/`bind_axis` calls stack (WASD + arrows + stick can share one axis; values sum, clamped to -1..1); `rebind` / `unbind` / `unbind_axis` for remapping |
+| `ctx.scene` | `find(name)`, `["name"]`, `spawn(entity)`, `despawn(id)`, `entity_count`, `names()`, iteration; `EntityView.transform` get/set (attribute writes via `TransformRef`), `EntityView.character_velocity` get/set (per-frame drive for character controllers), `EntityView.camera_3d` get/set (follow cameras: assign a fresh `Camera3D` each frame) |
 | `ctx.events` | `send(name, payload)` / `read(name)` — buffered: sent events are readable the next frame, then expire |
 | `ctx.resources` | Immediate `set` / `get` / `remove` of arbitrary Python objects, keyed by name |
 | `ctx.physics` (3D) | `cast_ray(origin, dir, max_distance, exclude)` → result key (read next frame via `ray_result(key)`), `apply_impulse` / `apply_force` / `set_velocity(entity, vec)`, `velocity(entity)`, `grounded(entity)`, `gravity()` / `set_gravity(vec)`, `body_count()` |

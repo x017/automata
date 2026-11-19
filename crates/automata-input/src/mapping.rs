@@ -140,7 +140,7 @@ const AXIS_THRESHOLD: f32 = 0.5;
 #[derive(Debug, Default)]
 pub struct ActionMap {
     actions: HashMap<String, Vec<Binding>>,
-    axes: HashMap<String, AxisBinding>,
+    axes: HashMap<String, Vec<AxisBinding>>,
 }
 
 impl ActionMap {
@@ -156,9 +156,19 @@ impl ActionMap {
         self
     }
 
-    /// Bind a named analog axis.
+    /// Bind a named analog axis (stacking with existing bindings).
+    ///
+    /// Multiple bindings for one axis — say a WASD key pair, an arrow-key
+    /// pair, and a gamepad stick — are summed and clamped to -1.0..=1.0,
+    /// so every bound device can drive the axis.
     pub fn bind_axis(&mut self, name: impl Into<String>, axis: AxisBinding) -> &mut Self {
-        self.axes.insert(name.into(), axis);
+        self.axes.entry(name.into()).or_default().push(axis);
+        self
+    }
+
+    /// Remove all bindings for the axis `name`.
+    pub fn unbind_axis(&mut self, name: &str) -> &mut Self {
+        self.axes.remove(name);
         self
     }
 
@@ -185,6 +195,11 @@ impl ActionMap {
         self.actions.keys().map(String::as_str)
     }
 
+    /// All axis names currently bound.
+    pub fn axis_names(&self) -> impl Iterator<Item = &str> {
+        self.axes.keys().map(String::as_str)
+    }
+
     /// Is any binding for `action` currently active?
     #[must_use]
     pub fn pressed(&self, action: &str, input: &InputState, gamepads: &Gamepads) -> bool {
@@ -209,17 +224,25 @@ impl ActionMap {
     }
 
     /// Current value of a named axis, -1.0..=1.0.
+    ///
+    /// All bindings stacked under `name` contribute; the sum is clamped.
     #[must_use]
     pub fn axis(&self, name: &str, input: &InputState, gamepads: &Gamepads) -> f32 {
-        match self.axes.get(name) {
-            Some(AxisBinding::GamepadAxis { axis, scale }) => gamepads.axis_any(*axis) * scale,
-            Some(AxisBinding::ButtonPair { negative, positive }) => {
-                let neg = i8::from(binding_active(*negative, input, gamepads));
-                let pos = i8::from(binding_active(*positive, input, gamepads));
-                f32::from(pos - neg)
-            }
-            None => 0.0,
-        }
+        let value: f32 = self
+            .axes
+            .get(name)
+            .into_iter()
+            .flatten()
+            .map(|binding| match binding {
+                AxisBinding::GamepadAxis { axis, scale } => gamepads.axis_any(*axis) * scale,
+                AxisBinding::ButtonPair { negative, positive } => {
+                    let neg = i8::from(binding_active(*negative, input, gamepads));
+                    let pos = i8::from(binding_active(*positive, input, gamepads));
+                    f32::from(pos - neg)
+                }
+            })
+            .sum();
+        value.clamp(-1.0, 1.0)
     }
 
     /// Convenience: a 2D move vector from two named axes.
@@ -291,6 +314,39 @@ mod tests {
 
         input.handle_key(KeyCode::KeyA, crate::ElementState::Pressed);
         assert_eq!(map.axis("move_x", &input, &gamepads), 0.0);
+    }
+
+    #[test]
+    fn axis_bindings_stack_and_clamp() {
+        let mut input = InputState::new();
+        input.handle_key(KeyCode::KeyD, crate::ElementState::Pressed);
+        input.handle_key(KeyCode::ArrowRight, crate::ElementState::Pressed);
+
+        let mut map = ActionMap::new();
+        // WASD pair, then an arrow-key pair: both must drive the axis.
+        map.bind_axis(
+            "move_x",
+            AxisBinding::key_pair(KeyCode::KeyA, KeyCode::KeyD),
+        );
+        map.bind_axis(
+            "move_x",
+            AxisBinding::key_pair(KeyCode::ArrowLeft, KeyCode::ArrowRight),
+        );
+        let gamepads = Gamepads::new();
+
+        assert_eq!(map.axis_names().count(), 1);
+        // Two positives sum to 2 and clamp to 1.
+        assert_eq!(map.axis("move_x", &input, &gamepads), 1.0);
+
+        input.handle_key(KeyCode::KeyD, crate::ElementState::Released);
+        assert_eq!(map.axis("move_x", &input, &gamepads), 1.0);
+
+        input.handle_key(KeyCode::KeyA, crate::ElementState::Pressed);
+        assert_eq!(map.axis("move_x", &input, &gamepads), 0.0);
+
+        map.unbind_axis("move_x");
+        assert_eq!(map.axis("move_x", &input, &gamepads), 0.0);
+        assert_eq!(map.axis_names().count(), 0);
     }
 
     #[test]

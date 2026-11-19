@@ -845,3 +845,46 @@ def test_mesh_renderer_stages_and_runs_headless():
 
     game.run(update)
     assert sorted(seen["names"]) == ["camera", "cube"]
+
+
+def test_game_clear_color_option():
+    game = at.Game(headless=True, clear_color=(0.5, 0.6, 0.7, 1.0))
+    assert game.state == "created"
+    with pytest.raises(ValueError):
+        at.Game(headless=True, clear_color=(2.0, 0.0, 0.0, 1.0))
+
+
+def test_camera_3d_read_write_via_entity_view():
+    game = make_game()
+    game.load_scene(
+        at.Scene().add(
+            at.Entity("cam").add(at.Camera3D(position=(0, 0, 8), target=(0, 0, 0)))
+        )
+    )
+    observed = {}
+
+    def update(ctx):
+        cam = ctx.scene["cam"]
+        if ctx.time.frame == 1:
+            assert cam.camera_3d is not None
+            assert cam.camera_3d.position == (0.0, 0.0, 8.0)
+            cam.camera_3d = at.Camera3D(position=(1, 2, 3), target=(0, 1, 0), fov=45.0)
+        elif ctx.time.frame == 3:
+            observed["position"] = cam.camera_3d.position
+            observed["target"] = cam.camera_3d.target
+            observed["fov"] = cam.camera_3d.fov
+            ctx.quit()
+
+    game.run(update)
+    assert observed["position"] == (1.0, 2.0, 3.0)
+    assert observed["target"] == (0.0, 1.0, 0.0)
+    assert observed["fov"] == pytest.approx(45.0)
+
+
+def test_action_map_axis_bindings_stack():
+    controls = at.ActionMap()
+    controls.bind_axis("move_x", at.AxisBinding.key_pair("a", "d"))
+    controls.bind_axis("move_x", at.AxisBinding.key_pair("arrow_left", "arrow_right"))
+    assert controls.axis_names() == ["move_x"]
+    controls.unbind_axis("move_x")
+    assert controls.axis_names() == []

@@ -31,7 +31,12 @@ JUMP_SPEED = 6.0
 
 HEADLESS = "--headless" in sys.argv
 
-game = at.Game(title="physics playground", headless=HEADLESS, target_fps=60)
+game = at.Game(
+    title="physics playground",
+    headless=HEADLESS,
+    target_fps=60,
+    clear_color=(0.55, 0.78, 0.95, 1.0),  # sky blue
+)
 game.headless_flag = HEADLESS  # consulted by the attract-mode check below
 
 game.load_scene(

@@ -235,6 +235,7 @@ class Game(_core.Game):
     vsync = None
     log_filter = None
     target_fps = None
+    clear_color = None
 
     _CONFIG_KEYS = (
         "title",
@@ -244,6 +245,7 @@ class Game(_core.Game):
         "vsync",
         "log_filter",
         "target_fps",
+        "clear_color",
     )
 
     def __new__(cls, **kwargs):
