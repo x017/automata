@@ -60,6 +60,12 @@ components are mutable (`t.position = (1, 2, 0)`), and scene views support
 | `ctx.scene` | `find(name)`, `["name"]`, `spawn(entity)`, `despawn(id)`, `entity_count`, `names()`, iteration; `EntityView.transform` get/set, attribute writes via `TransformRef` |
 | `ctx.events` | `send(name, payload)` / `read(name)` — buffered: sent events are readable the next frame, then expire |
 | `ctx.resources` | Immediate `set` / `get` / `remove` of arbitrary Python objects, keyed by name |
+| `ctx.physics` (3D) | `cast_ray(origin, dir, max_distance, exclude)` → result key (read next frame via `ray_result(key)`), `apply_impulse` / `apply_force` / `set_velocity(entity, vec)`, `velocity(entity)`, `grounded(entity)`, `gravity()` / `set_gravity(vec)`, `body_count()` |
+| `ctx.physics2d` | `apply_impulse(entity, vec2)`, `grounded(entity)`, `body_count()` |
+| `RigidBody` | `RigidBody.dynamic() / .fixed() / .kinematic_velocity() / .kinematic_position()`, or `RigidBody(type, gravity_scale=…, linear_damping=…)` |
+| `Collider3D` / `Collider2D` | `.ball(r)`, `.cuboid(x, y[, z])`, `.capsule(half_height, r)`, chainable `.sensor()/.density()/.friction()/.restitution()` |
+| `CharacterController` | `CharacterController(mode=…, max_slope_climb_angle=…, autostep=…, snap_to_ground=…)` — kinematic body mover |
+| `CharacterVelocity` | `CharacterVelocity((vx, vy, vz))` — set `.velocity` each frame to drive the controller |
 | `automata.Error` | Engine failures; exceptions raised by `update` propagate unchanged |
 
 ### Ownership and consistency rules
@@ -142,3 +148,29 @@ fn main() -> Result<()> {
 | `MeshRenderer` / `SpriteRenderer` / `record_draw_list` | Scene-to-renderer bridge |
 
 Generated docs: `cargo doc --workspace --no-deps --open`.
+
+## Phase 6 — Physics and Input
+
+### Physics model
+
+- Attach a `RigidBody` plus a `Collider3D` (3D) or `Collider2D` (2D) to an
+  entity to make it physical. The engine syncs the physics world from the
+  scene, steps it at a fixed timestep (`EngineConfig::physics_timestep`,
+  default 1/60 s), and writes resulting transforms back.
+- Entities with a 2D collider live in the 2D world; those with a 3D
+  collider (or none) live in the 3D world. A single scene can mix both.
+- Collision events (`PhysicsEvent::{CollisionStarted, CollisionStopped}`)
+  and contact-force events arrive on the event bus.
+- Kinematic character controllers (`CharacterController` +
+  `CharacterVelocity`) move with slide/slope/autostep/snap-to-ground logic;
+  `ctx.physics.grounded(entity)` reports ground contact.
+- Scripts never see Rapier: the engine owns the simulation and exposes
+  queries/mutations through the frame context only.
+
+### Input model
+
+- Keyboard/mouse state: `ctx.input.pressed(key)` / `just_pressed` /
+  `just_released`, plus mouse buttons, cursor, scroll, modifiers.
+- Gamepads (gilrs): connection events, button/axis state.
+- Action mapping (Rust-side `ActionMap`): named actions and axes bound to
+  any device, remappable at runtime.
