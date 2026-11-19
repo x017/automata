@@ -23,7 +23,9 @@ fn tuple_of(v: Vec3) -> (f32, f32, f32) {
 /// Rotation is exposed as Euler angles in radians, applied in XYZ order.
 /// For parented entities the values are local; the engine computes the
 /// world-space transform every frame.
-#[pyclass(name = "Transform", module = "automata._core", frozen)]
+///
+/// Properties are mutable: `t.position = (1, 2, 0)`.
+#[pyclass(name = "Transform", module = "automata._core")]
 #[derive(Debug, Clone, Copy)]
 pub struct PyTransform {
     inner: Transform,
@@ -55,6 +57,11 @@ impl PyTransform {
         tuple_of(self.inner.position)
     }
 
+    #[setter]
+    fn set_position(&mut self, position: (f32, f32, f32)) {
+        self.inner.position = vec3_of(position);
+    }
+
     /// The rotation as Euler angles `(x, y, z)` in radians.
     #[getter]
     fn rotation_euler(&self) -> (f32, f32, f32) {
@@ -62,10 +69,26 @@ impl PyTransform {
         (x, y, z)
     }
 
+    #[setter]
+    fn set_rotation_euler(&mut self, rotation: (f32, f32, f32)) {
+        let (x, y, z) = rotation;
+        self.inner.rotation = Quat::from_euler(EulerRot::XYZ, x, y, z);
+    }
+
     /// The `(x, y, z)` scale relative to the parent.
     #[getter]
     fn scale(&self) -> (f32, f32, f32) {
         tuple_of(self.inner.scale)
+    }
+
+    #[setter]
+    fn set_scale(&mut self, scale: (f32, f32, f32)) {
+        self.inner.scale = vec3_of(scale);
+    }
+
+    /// A detached copy of this transform.
+    fn copy(&self) -> Self {
+        *self
     }
 
     fn __repr__(&self) -> String {
@@ -187,7 +210,7 @@ pub enum StagedComponent {
 /// `TypeError` listing the supported types when it matches none.
 pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(t) = obj.cast::<PyTransform>() {
-        return Ok(StagedComponent::Transform(t.get().inner()));
+        return Ok(StagedComponent::Transform(t.borrow().inner()));
     }
     if let Ok(c) = obj.cast::<PyCamera3D>() {
         return Ok(StagedComponent::Camera3D(c.get().inner()));

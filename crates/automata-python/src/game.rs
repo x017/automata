@@ -11,7 +11,7 @@ use pyo3::prelude::*;
 use crate::context::{FrameContext, FrameTime, PyInput, PyResources, ResourceStore};
 use crate::error::{core_error, AutomataError};
 use crate::events::{EventOutbox, PyEvents};
-use crate::scene::{apply_commands, load_staged, CommandQueue, PyScene, SceneView};
+use crate::scene::{apply_writes, load_staged, FrameWrites, PyScene, SceneView, WriteQueue};
 
 /// The application: owns the engine, the loaded scene, and the main loop.
 ///
@@ -23,7 +23,7 @@ use crate::scene::{apply_commands, load_staged, CommandQueue, PyScene, SceneView
 ///
 /// A game runs once: after `run` returns, the engine is shut down and a
 /// second `run` raises `automata.Error`.
-#[pyclass(name = "Game", unsendable, module = "automata._core")]
+#[pyclass(name = "Game", unsendable, module = "automata._core", subclass)]
 pub struct PyGame {
     app: Application,
     resources: ResourceStore,
@@ -106,7 +106,7 @@ impl PyGame {
         }
 
         let quit: crate::context::QuitFlag = Rc::new(Cell::new(false));
-        let commands: CommandQueue = Rc::new(RefCell::new(Vec::new()));
+        let writes: WriteQueue = Rc::new(RefCell::new(FrameWrites::default()));
         let outbox: EventOutbox = Rc::new(RefCell::new(Vec::new()));
         let resources = Rc::clone(&self.resources);
         let mut update_error: Option<PyErr> = None;
@@ -116,7 +116,7 @@ impl PyGame {
                 ctx,
                 update,
                 &quit,
-                &commands,
+                &writes,
                 &outbox,
                 &resources,
                 &mut update_error,
@@ -147,7 +147,7 @@ fn run_python_frame(
     ctx: &mut AppContext<'_>,
     update: &Bound<'_, PyAny>,
     quit: &crate::context::QuitFlag,
-    commands: &CommandQueue,
+    writes: &WriteQueue,
     outbox: &EventOutbox,
     resources: &ResourceStore,
     update_error: &mut Option<PyErr>,
@@ -159,7 +159,7 @@ fn run_python_frame(
             frame: ctx.time().frame_count(),
         },
         PyInput::snapshot(ctx.input()),
-        SceneView::snapshot(ctx.scene(), Rc::clone(commands)),
+        SceneView::snapshot(ctx.scene(), Rc::clone(writes)),
         PyEvents::snapshot(ctx.events(), Rc::clone(outbox)),
         PyResources::new(Rc::clone(resources)),
         Rc::clone(quit),
@@ -169,7 +169,7 @@ fn run_python_frame(
 
     // Writes recorded by the callback are applied even when it raised, so
     // error-recovery paths see a consistent world.
-    apply_commands(ctx.scene(), commands);
+    apply_writes(ctx.scene(), writes);
     PyEvents::flush(ctx.events(), outbox);
 
     if let Err(err) = call_result {

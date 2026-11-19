@@ -38,6 +38,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<scene::PyEntity>()?;
     m.add_class::<scene::SceneView>()?;
     m.add_class::<scene::EntityView>()?;
+    m.add_class::<scene::TransformRef>()?;
     m.add_class::<components::PyTransform>()?;
     m.add_class::<components::PyCamera3D>()?;
     m.add_class::<components::PyCamera2D>()?;
