@@ -13,6 +13,8 @@
 //! [`WindowMode::Windowed`] and by a sleep-paced headless loop in
 //! [`WindowMode::Headless`]; the public API is identical either way.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -26,6 +28,9 @@ use crate::error::{Error, Result};
 use crate::logging;
 use crate::time::Time;
 use crate::window::WindowMode;
+
+/// Shared handle to the audio engine, cloned into per-frame views.
+pub type SharedAudio = Rc<RefCell<automata_audio::AudioEngine>>;
 
 /// Lifecycle state of an [`Application`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +57,7 @@ pub struct WorldState {
     physics3d: automata_physics::PhysicsWorld3D,
     physics2d: automata_physics::PhysicsWorld2D,
     physics_accumulator: f32,
+    audio: SharedAudio,
 }
 
 impl WorldState {
@@ -113,6 +119,25 @@ impl WorldState {
     #[must_use]
     pub fn physics2d_ref(&self) -> &automata_physics::PhysicsWorld2D {
         &self.physics2d
+    }
+
+    /// The audio engine, read-only.
+    #[must_use]
+    pub fn audio(&self) -> std::cell::Ref<'_, automata_audio::AudioEngine> {
+        self.audio.borrow()
+    }
+
+    /// The shared audio handle, cloned for per-frame views.
+    #[must_use]
+    pub fn audio_handle(&self) -> SharedAudio {
+        Rc::clone(&self.audio)
+    }
+
+    /// Advances the audio engine by one frame. On the silent (default)
+    /// backend this drives deterministic playback advancement; with the `cpal`
+    /// feature the device backend advances itself and this is a no-op.
+    pub(crate) fn pump_audio(&mut self, delta_seconds: f64) {
+        self.audio.borrow_mut().pump_frame(delta_seconds);
     }
 
     /// The physics worlds and scene, split-borrowed for frame views.
@@ -259,6 +284,15 @@ impl<'a> AppContext<'a> {
     #[must_use]
     pub fn physics2d(&mut self) -> &mut automata_physics::PhysicsWorld2D {
         self.world.physics2d()
+    }
+
+    /// The audio engine: play and control sounds.
+    ///
+    /// Returns the shared handle; borrow it to operate (e.g.
+    /// `ctx.audio().borrow_mut().play(...)`).
+    #[must_use]
+    pub fn audio(&mut self) -> SharedAudio {
+        self.world.audio_handle()
     }
 
     /// The frame's draw list: record sprites and meshes here.
@@ -466,6 +500,7 @@ impl Application {
             if let Some(timestep) = self.config.physics_timestep {
                 self.world.step_physics(delta.as_secs_f32(), timestep);
             }
+            self.world.pump_audio(delta.as_secs_f64());
 
             update(&mut AppContext::new(
                 &self.time,

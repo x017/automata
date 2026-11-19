@@ -225,6 +225,7 @@ fn run_python_frame(
     let gamepad_events = crate::gamepads::PyGamepadEvent::convert_all(
         ctx.events().read::<automata_input::GamepadEvent>().cloned(),
     );
+    let audio = crate::audio::PyAudio::new(ctx.audio());
     let frame = FrameContext::new(
         FrameTime {
             delta: ctx.time().delta().as_secs_f64(),
@@ -238,6 +239,7 @@ fn run_python_frame(
         Rc::clone(quit),
         physics,
         physics2d,
+        audio,
     );
 
     let call_result = update.call1((frame,));

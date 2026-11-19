@@ -11,7 +11,14 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# Real audio output via cpal (ALSA on Linux). Off by default so headless runs,
+# CI, and machines without audio hardware build with the silent backend.
+# Enabled transitively by `automata-python/audio-cpal`.
+cpal = ["automata-audio/cpal"]
+
 [dependencies]
+automata-audio = { path = "../automata-audio", default-features = false }
 automata-input.workspace = true
 automata-physics.workspace = true
 automata-renderer.workspace = true

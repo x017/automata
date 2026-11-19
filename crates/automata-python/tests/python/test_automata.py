@@ -1098,3 +1098,156 @@ def test_game_scene_to_ron_matches_save_scene(tmp_path):
     game.load_scene(at.Scene().add(at.Entity("marker").add(at.Transform(position=(1, 2, 3)))))
     game.run(lambda ctx: None, max_frames=1)
     assert 'name: Some("marker")' in game.scene_to_ron()
+
+
+# --- audio -----------------------------------------------------------------
+
+
+def _write_wav(path, seconds=0.5, freq=440.0):
+    """Write a minimal 44.1 kHz mono PCM WAV of a sine tone."""
+    import math
+    import struct
+
+    sample_rate = 44100
+    n = int(seconds * sample_rate)
+    frames = bytearray()
+    for i in range(n):
+        s = int(math.sin(2.0 * math.pi * freq * i / sample_rate) * 32767)
+        frames += struct.pack("<h", s)
+    data_len = len(frames)
+    with open(path, "wb") as f:
+        f.write(b"RIFF")
+        f.write(struct.pack("<I", 36 + data_len))
+        f.write(b"WAVEfmt ")
+        f.write(struct.pack("<IHHIIHH", 16, 1, 1, sample_rate, sample_rate * 2, 2, 16))
+        f.write(b"data")
+        f.write(struct.pack("<I", data_len))
+        f.write(frames)
+
+
+def test_audio_play_and_query(tmp_path):
+    wav = tmp_path / "tone.wav"
+    _write_wav(wav)
+    game = make_game()
+    seen = {}
+
+    def update(ctx):
+        sid = ctx.audio.play(str(wav))
+        seen["id"] = sid
+        seen["is_playing"] = ctx.audio.is_playing(sid)
+        seen["count"] = ctx.audio.sound_count()
+        ctx.quit()
+
+    game.run(update, max_frames=2)
+    assert seen["id"] >= 1
+    assert seen["is_playing"] is True
+    assert seen["count"] == 1
+
+
+def test_audio_missing_file_raises(tmp_path):
+    game = make_game()
+    errors = []
+
+    def update(ctx):
+        try:
+            ctx.audio.play(str(tmp_path / "nope.wav"))
+        except ValueError:
+            errors.append("value")
+        ctx.quit()
+
+    game.run(update, max_frames=1)
+    assert errors == ["value"]
+
+
+def test_audio_position_advances_headless(tmp_path):
+    wav = tmp_path / "tone.wav"
+    _write_wav(wav, seconds=2.0)
+    game = make_game()
+    positions = {}
+    sid = {}
+
+    def update(ctx):
+        if ctx.time.frame == 1:
+            sid["id"] = ctx.audio.play(str(wav))
+            positions["start"] = ctx.audio.position(sid["id"])
+        if ctx.time.frame == 30:
+            positions["later"] = ctx.audio.position(sid["id"])
+            ctx.quit()
+
+    game.run(update, max_frames=40)
+    assert positions["start"] == 0.0
+    # The silent backend advances deterministically with the frame loop.
+    assert positions["later"] > positions["start"]
+
+
+def test_audio_pause_resume_stop(tmp_path):
+    wav = tmp_path / "tone.wav"
+    _write_wav(wav, seconds=2.0)
+    game = make_game()
+    states = {}
+    sid = {}
+
+    def update(ctx):
+        if ctx.time.frame == 1:
+            sid["id"] = ctx.audio.play(str(wav))
+        elif ctx.time.frame == 2:
+            ctx.audio.pause(sid["id"])
+            states["paused"] = ctx.audio.is_playing(sid["id"])
+        elif ctx.time.frame == 3:
+            states["paused_now"] = ctx.audio.is_playing(sid["id"])
+            ctx.audio.resume(sid["id"])
+        elif ctx.time.frame == 4:
+            states["resumed"] = ctx.audio.is_playing(sid["id"])
+            ctx.audio.stop(sid["id"])
+        elif ctx.time.frame == 5:
+            states["after_stop_count"] = ctx.audio.sound_count()
+            states["after_stop_pos"] = ctx.audio.position(sid["id"])
+            ctx.quit()
+
+    game.run(update, max_frames=6)
+    # pause issues a fade; on the same frame it may still report playing...
+    # by the next frame it is paused.
+    assert states["paused_now"] is False
+    assert states["resumed"] is True
+    assert states["after_stop_count"] == 0
+    assert states["after_stop_pos"] is None
+
+
+def test_audio_unknown_id_raises(tmp_path):
+    game = make_game()
+    errors = []
+
+    def update(ctx):
+        for op in ("pause", "resume", "seek_to"):
+            try:
+                getattr(ctx.audio, op)(999, 0.5) if op == "seek_to" else getattr(ctx.audio, op)(999)
+            except KeyError:
+                errors.append(op)
+        ctx.quit()
+
+    game.run(update, max_frames=1)
+    assert errors == ["pause", "resume", "seek_to"]
+
+
+def test_audio_master_volume_and_loop(tmp_path):
+    wav = tmp_path / "tone.wav"
+    _write_wav(wav, seconds=1.0)
+    game = make_game()
+    seen = {}
+
+    def update(ctx):
+        if ctx.time.frame == 1:
+            ctx.audio.set_master_volume(0.5)
+            sid = ctx.audio.play(str(wav), loop_=True, volume=0.8, panning=-0.5)
+            seen["id"] = sid
+        if ctx.time.frame == 3:
+            # looping sound is still playing past the (short) duration window
+            seen["playing"] = ctx.audio.is_playing(seen["id"])
+            ctx.audio.stop_all()
+        if ctx.time.frame == 4:
+            seen["count"] = ctx.audio.sound_count()
+            ctx.quit()
+
+    game.run(update, max_frames=5)
+    assert seen["playing"] is True
+    assert seen["count"] == 0

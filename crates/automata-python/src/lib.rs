@@ -16,6 +16,7 @@
 //!   stale but harmless.
 
 mod actions;
+mod audio;
 mod components;
 mod context;
 mod error;
@@ -53,6 +54,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<context::PyModifiers>()?;
     m.add_class::<context::PyResources>()?;
     m.add_class::<events::PyEvents>()?;
+    m.add_class::<audio::PyAudio>()?;
     m.add_class::<gamepads::PyGamepads>()?;
     m.add_class::<gamepads::PyGamepad>()?;
     m.add_class::<gamepads::PyGamepadEvent>()?;

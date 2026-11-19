@@ -310,6 +310,9 @@ pub struct FrameContext {
     /// 2D physics queries.
     #[pyo3(get)]
     pub physics2d: crate::physics::PyPhysics2D,
+    /// Audio playback and control.
+    #[pyo3(get)]
+    pub audio: crate::audio::PyAudio,
     /// Named Python-object storage.
     #[pyo3(get)]
     pub resources: PyResources,
@@ -328,6 +331,7 @@ impl FrameContext {
         quit: QuitFlag,
         physics: crate::physics::PyPhysics,
         physics2d: crate::physics::PyPhysics2D,
+        audio: crate::audio::PyAudio,
     ) -> Self {
         Self {
             time,
@@ -336,6 +340,7 @@ impl FrameContext {
             events,
             physics,
             physics2d,
+            audio,
             resources,
             quit,
         }

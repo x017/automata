@@ -18,7 +18,7 @@ pub mod scene_file;
 pub mod time;
 pub mod window;
 
-pub use app::{AppContext, AppState, Application, WorldState};
+pub use app::{AppContext, AppState, Application, SharedAudio, WorldState};
 pub use config::EngineConfig;
 pub use error::{Error, Result};
 pub use scene_file::{EntityData, SceneFile, SceneFileError, TransformData, SCENE_FILE_VERSION};

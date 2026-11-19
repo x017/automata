@@ -114,6 +114,7 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
         if let Some(timestep) = self.config.physics_timestep {
             self.world.step_physics(delta.as_secs_f32(), timestep);
         }
+        self.world.pump_audio(delta.as_secs_f64());
 
         let renderer_ref = self.renderer.as_ref();
         (self.update)(&mut AppContext::new(

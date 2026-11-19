@@ -12,10 +12,14 @@ publish = false
 workspace = true
 
 [features]
-default = ["cpal"]
+# `cpal` selects the real device backend. It is opt-in (off by default) so
+# headless runs, CI, and machines without audio hardware build and run with
+# the silent backend and no native dependencies (no ALSA on Linux). Consumers
+# opt in with `--features automata-audio/cpal`; the Python wheel exposes the
+# same switch as `automata-python/audio-cpal`.
+default = []
 cpal = ["kira/cpal"]
 
 [dependencies]
 kira.workspace = true
 thiserror.workspace = true
-tracing.workspace = true

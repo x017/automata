@@ -1,6 +1,488 @@
-//! AUTOMATA audio: mixing and playback via kira.
+//! AUTOMATA audio: mixing and playback via [kira](https://github.com/tesselode/kira).
 //!
-//! Two backends exist: a real device backend (`cpal` feature) and a silent
-//! backend that advances playheads without touching audio hardware — used
-//! for headless runs, CI, and machines with no output device. Full
-//! implementation lands with the vendored kira dependency.
+//! One [`AudioEngine`] owns the kira [`AudioManager`]. Games call
+//! [`AudioEngine::play`] to start a sound and receive an id they can use to
+//! control it (pause, resume, stop, fade, seek). The engine picks its backend
+//! at compile time via the `cpal` cargo feature:
+//!
+//! - **`cpal` on** — real device output through `cpal` (ALSA on Linux). This is
+//!   the engine's `automata-audio/cpal` opt-in feature.
+//! - **`cpal` off** (the default) — a *silent* backend: no audio hardware is
+//!   touched and no sound is produced, but playback positions and states still
+//!   advance deterministically. This is what headless runs, CI, and machines
+//!   with no output device use, so game code paths stay identical everywhere.
+//!
+//! The silent backend is pumped by the frame loop
+//! ([`AudioEngine::pump_frame`]), keeping playback queries deterministic
+//! without an audio thread.
+//!
+//! Volume is expressed as a linear amplitude (`1.0` = unity gain, `0.0` =
+//! silence) at the engine boundary and converted to decibels internally.
+
+use std::collections::HashMap;
+use std::fmt;
+use std::time::Duration;
+
+use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
+use kira::sound::PlaybackState;
+use kira::{AudioManager, AudioManagerSettings, Decibels, Tween};
+
+/// Errors raised by the audio engine.
+#[derive(Debug, thiserror::Error)]
+pub enum AudioError {
+    /// The audio file could not be read or decoded.
+    #[error("could not load audio file {path:?}: {source}")]
+    Load {
+        /// The path that failed to load.
+        path: String,
+        /// The underlying decoder/IO error.
+        source: kira::sound::FromFileError,
+    },
+    /// The sound could not be started (the sound capacity was reached).
+    #[error("could not play the sound: {0}")]
+    Play(String),
+    /// A sound id was not found (it may have already been stopped).
+    #[error("no such sound id: {0}")]
+    UnknownSound(u64),
+}
+
+/// How a sound is currently playing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SoundStatus {
+    /// Playing (or fading in/out but still advancing).
+    Playing,
+    /// Paused.
+    Paused,
+    /// Stopped (terminal; the id cannot be reused).
+    Stopped,
+}
+
+impl From<PlaybackState> for SoundStatus {
+    fn from(state: PlaybackState) -> Self {
+        match state {
+            PlaybackState::Playing
+            | PlaybackState::Pausing
+            | PlaybackState::Resuming
+            | PlaybackState::WaitingToResume => Self::Playing,
+            PlaybackState::Paused => Self::Paused,
+            PlaybackState::Stopping | PlaybackState::Stopped => Self::Stopped,
+        }
+    }
+}
+
+/// Converts a linear amplitude (0.0..) to kira decibels.
+#[allow(clippy::cast_possible_truncation)] // volume fits comfortably in f32
+fn linear_to_decibels(volume: f64) -> Decibels {
+    let volume = volume.max(0.0) as f32;
+    if volume <= f32::EPSILON {
+        return Decibels::SILENCE;
+    }
+    Decibels(20.0 * volume.log10())
+}
+
+/// Clamps a stereo panning value into kira's `-1.0..=1.0` range.
+#[allow(clippy::cast_possible_truncation)] // panning fits comfortably in f32
+fn clamp_panning(panning: f64) -> f32 {
+    (panning as f32).clamp(-1.0, 1.0)
+}
+
+fn tween_of(seconds: f64) -> Tween {
+    Tween {
+        duration: Duration::from_secs_f64(seconds.max(0.0)),
+        ..Tween::default()
+    }
+}
+
+/// Options for [`AudioEngine::play`].
+#[derive(Debug, Clone, Copy)]
+pub struct PlayOptions<'a> {
+    /// Path to the audio file.
+    pub path: &'a str,
+    /// Linear volume (`1.0` = unity).
+    pub volume: f64,
+    /// Whether to loop the whole sound.
+    pub looped: bool,
+    /// Playback rate (speed and pitch multiplier; `1.0` = normal).
+    pub playback_rate: f64,
+    /// Stereo panning in `-1.0..=1.0` (`0.0` = center).
+    pub panning: f64,
+}
+
+impl<'a> PlayOptions<'a> {
+    /// Options that play `path` once at full volume, centered.
+    #[must_use]
+    pub fn once(path: &'a str) -> Self {
+        Self {
+            path,
+            volume: 1.0,
+            looped: false,
+            playback_rate: 1.0,
+            panning: 0.0,
+        }
+    }
+}
+
+/// The engine's audio system. Owns the kira manager and every live sound.
+pub struct AudioEngine {
+    manager: AudioManager<kira::DefaultBackend>,
+    /// Live sounds keyed by id.
+    sounds: HashMap<u64, StaticSoundHandle>,
+    /// Next sound id.
+    next_id: u64,
+    /// Sample rate the (silent) backend runs at; drives the frame pump.
+    sample_rate: u32,
+}
+
+impl fmt::Debug for AudioEngine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AudioEngine")
+            .field("sounds", &self.sounds.len())
+            .field("sample_rate", &self.sample_rate)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Default for AudioEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AudioEngine {
+    /// Creates the audio engine with a default configuration.
+    ///
+    /// With the `cpal` feature this opens the default output device; otherwise
+    /// it starts the silent backend at 44 100 Hz.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::with_sample_rate(44_100)
+    }
+
+    /// Creates the audio engine, overriding the (silent-backend) sample rate.
+    ///
+    /// The sample rate only drives the silent backend's deterministic
+    /// advancement; a real device reports its own rate.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the audio manager cannot be created (e.g. the `cpal` backend
+    /// fails to open an output device).
+    #[must_use]
+    pub fn with_sample_rate(sample_rate: u32) -> Self {
+        let manager = AudioManager::<kira::DefaultBackend>::new(Self::settings(sample_rate))
+            .expect("failed to create the audio manager");
+        Self {
+            manager,
+            sounds: HashMap::new(),
+            next_id: 1,
+            sample_rate,
+        }
+    }
+
+    #[cfg(feature = "cpal")]
+    fn settings(_sample_rate: u32) -> AudioManagerSettings<kira::DefaultBackend> {
+        // The cpal backend opens the device itself; its settings are defaulted.
+        AudioManagerSettings::default()
+    }
+
+    #[cfg(not(feature = "cpal"))]
+    fn settings(sample_rate: u32) -> AudioManagerSettings<kira::DefaultBackend> {
+        AudioManagerSettings {
+            backend_settings: kira::backend::mock::MockBackendSettings { sample_rate },
+            ..AudioManagerSettings::default()
+        }
+    }
+
+    /// Advances the silent backend by one frame's worth of audio.
+    ///
+    /// Only meaningful without the `cpal` feature (where the backend is a
+    /// mock); with a real device this is a no-op. The frame loop calls this
+    /// once per frame so playback positions advance deterministically.
+    pub fn pump_frame(&mut self, delta_seconds: f64) {
+        self.pump(delta_seconds);
+    }
+
+    #[cfg(not(feature = "cpal"))]
+    fn pump(&mut self, delta_seconds: f64) {
+        if delta_seconds <= 0.0 {
+            return;
+        }
+        let backend = self.manager.backend_mut();
+        // The renderer processes in fixed buffers of `internal_buffer_size`
+        // (128 by default). Step in whole buffers to cover `delta_seconds`.
+        let buffer = 128.0_f64;
+        let frames = delta_seconds * f64::from(self.sample_rate);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        // `frames` is positive and far below usize range for any real frame.
+        let steps = ((frames / buffer).ceil().max(1.0)) as usize;
+        for _ in 0..steps {
+            backend.on_start_processing();
+            backend.process();
+        }
+    }
+
+    #[cfg(feature = "cpal")]
+    fn pump(&mut self, _delta_seconds: f64) {}
+
+    /// Loads a sound file and starts playing it.
+    ///
+    /// Returns the id of the new sound for later control.
+    ///
+    /// # Errors
+    ///
+    /// [`AudioError::Load`] if the file cannot be read or decoded, or
+    /// [`AudioError::Play`] if the sound capacity was reached.
+    pub fn play(&mut self, options: PlayOptions<'_>) -> Result<u64, AudioError> {
+        let PlayOptions {
+            path,
+            volume,
+            looped,
+            playback_rate,
+            panning,
+        } = options;
+        let mut data = StaticSoundData::from_file(path)
+            .map_err(|source| AudioError::Load {
+                path: path.to_owned(),
+                source,
+            })?
+            .volume(linear_to_decibels(volume))
+            .playback_rate(playback_rate)
+            .panning(clamp_panning(panning));
+        if looped {
+            data = data.loop_region(..);
+        }
+        let handle = self
+            .manager
+            .play(data)
+            .map_err(|err| AudioError::Play(format!("{err}")))?;
+        let id = self.next_id;
+        self.next_id += 1;
+        self.sounds.insert(id, handle);
+        Ok(id)
+    }
+
+    /// Returns a controller for a live sound.
+    ///
+    /// # Errors
+    ///
+    /// [`AudioError::UnknownSound`] if `id` is not a live sound.
+    pub fn sound(&mut self, id: u64) -> Result<Sound<'_>, AudioError> {
+        let handle = self
+            .sounds
+            .get_mut(&id)
+            .ok_or(AudioError::UnknownSound(id))?;
+        Ok(Sound { handle })
+    }
+
+    /// The status of a sound, or `None` if `id` is unknown.
+    #[must_use]
+    pub fn status(&self, id: u64) -> Option<SoundStatus> {
+        self.sounds.get(&id).map(|h| SoundStatus::from(h.state()))
+    }
+
+    /// The playback position (seconds) of a sound, or `None` if unknown.
+    #[must_use]
+    pub fn position(&self, id: u64) -> Option<f64> {
+        self.sounds.get(&id).map(StaticSoundHandle::position)
+    }
+
+    /// Stops and forgets a sound. Unknown ids are ignored.
+    pub fn stop(&mut self, id: u64, fade_out_seconds: f64) {
+        if let Some(mut handle) = self.sounds.remove(&id) {
+            handle.stop(tween_of(fade_out_seconds));
+        }
+    }
+
+    /// Sets the master volume (linear amplitude; `1.0` = unity).
+    pub fn set_master_volume(&mut self, volume: f64, fade_seconds: f64) {
+        let db = linear_to_decibels(volume);
+        self.manager
+            .main_track()
+            .set_volume(db, tween_of(fade_seconds));
+    }
+
+    /// Stops every live sound and clears the registry.
+    pub fn stop_all(&mut self, fade_out_seconds: f64) {
+        let tween = tween_of(fade_out_seconds);
+        for (_, mut handle) in self.sounds.drain() {
+            handle.stop(tween);
+        }
+    }
+
+    /// Number of live sounds (playing or paused).
+    #[must_use]
+    pub fn sound_count(&self) -> usize {
+        self.sounds.len()
+    }
+}
+
+/// A controller for one live sound, borrowed from the [`AudioEngine`].
+pub struct Sound<'a> {
+    handle: &'a mut StaticSoundHandle,
+}
+
+impl Sound<'_> {
+    /// Pauses the sound.
+    pub fn pause(&mut self, fade_seconds: f64) {
+        self.handle.pause(tween_of(fade_seconds));
+    }
+
+    /// Resumes a paused sound.
+    pub fn resume(&mut self, fade_seconds: f64) {
+        self.handle.resume(tween_of(fade_seconds));
+    }
+
+    /// Seeks to `position` seconds.
+    pub fn seek_to(&mut self, position: f64) {
+        self.handle.seek_to(position);
+    }
+
+    /// Sets the sound's volume (linear amplitude).
+    pub fn set_volume(&mut self, volume: f64, fade_seconds: f64) {
+        self.handle
+            .set_volume(linear_to_decibels(volume), tween_of(fade_seconds));
+    }
+
+    /// Sets the playback rate (speed and pitch multiplier).
+    pub fn set_playback_rate(&mut self, rate: f64, fade_seconds: f64) {
+        self.handle.set_playback_rate(rate, tween_of(fade_seconds));
+    }
+
+    /// Sets stereo panning in `-1.0..=1.0`.
+    pub fn set_panning(&mut self, panning: f64, fade_seconds: f64) {
+        self.handle
+            .set_panning(clamp_panning(panning), tween_of(fade_seconds));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Writes a minimal 44 100 Hz mono PCM WAV of a sine tone.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn write_wav(path: &std::path::Path, seconds: f64, freq: f64) {
+        let sample_rate = 44_100u32;
+        let n = (seconds * f64::from(sample_rate)) as usize;
+        let mut data = Vec::with_capacity(n * 2);
+        for i in 0..n {
+            let t = i as f64 / f64::from(sample_rate);
+            let sample = (2.0 * std::f64::consts::PI * freq * t).sin();
+            let s = (sample * f64::from(i16::MAX)) as i16;
+            data.extend_from_slice(&s.to_le_bytes());
+        }
+        let data_len = data.len() as u32;
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes()); // PCM chunk size
+        wav.extend_from_slice(&1u16.to_le_bytes()); // PCM format
+        wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+        wav.extend_from_slice(&sample_rate.to_le_bytes());
+        wav.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // byte rate
+        wav.extend_from_slice(&2u16.to_le_bytes()); // block align
+        wav.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        wav.extend_from_slice(&data);
+        std::fs::write(path, wav).unwrap();
+    }
+
+    fn engine() -> AudioEngine {
+        AudioEngine::with_sample_rate(44_100)
+    }
+
+    #[test]
+    fn play_assigns_incrementing_ids() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("automata_audio_ids.wav");
+        write_wav(&path, 0.1, 440.0);
+        let mut engine = engine();
+        let a = engine
+            .play(PlayOptions::once(path.to_str().unwrap()))
+            .unwrap();
+        let b = engine
+            .play(PlayOptions::once(path.to_str().unwrap()))
+            .unwrap();
+        assert_ne!(a, b);
+        assert_eq!(engine.sound_count(), 2);
+    }
+
+    #[test]
+    fn missing_file_errors() {
+        let mut engine = engine();
+        let err = engine
+            .play(PlayOptions::once("definitely/not/a/real/file.wav"))
+            .unwrap_err();
+        assert!(matches!(err, AudioError::Load { .. }));
+    }
+
+    #[test]
+    fn silent_backend_advances_position() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("automata_audio_advance.wav");
+        write_wav(&path, 1.0, 440.0);
+        let mut engine = engine();
+        let id = engine
+            .play(PlayOptions::once(path.to_str().unwrap()))
+            .unwrap();
+        assert_eq!(engine.status(id), Some(SoundStatus::Playing));
+        // Pump ~0.5 s of audio; the position should move forward.
+        for _ in 0..30 {
+            engine.pump_frame(1.0 / 60.0);
+        }
+        let pos = engine.position(id).unwrap();
+        assert!(pos > 0.05, "expected position to advance, got {pos}");
+    }
+
+    #[test]
+    fn stop_and_unknown_sound() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("automata_audio_stop.wav");
+        write_wav(&path, 0.5, 440.0);
+        let mut engine = engine();
+        let id = engine
+            .play(PlayOptions::once(path.to_str().unwrap()))
+            .unwrap();
+        engine.stop(id, 0.0);
+        assert_eq!(engine.status(id), None);
+        assert!(engine.sound(id).is_err());
+        // Stopping an unknown id is a no-op.
+        engine.stop(999, 0.0);
+    }
+
+    #[test]
+    fn pause_and_resume() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("automata_audio_pause.wav");
+        write_wav(&path, 1.0, 440.0);
+        let mut engine = engine();
+        let id = engine
+            .play(PlayOptions::once(path.to_str().unwrap()))
+            .unwrap();
+        engine.sound(id).unwrap().pause(0.0);
+        engine.pump_frame(1.0 / 60.0);
+        assert_eq!(engine.status(id), Some(SoundStatus::Paused));
+        engine.sound(id).unwrap().resume(0.0);
+        engine.pump_frame(1.0 / 60.0);
+        assert_eq!(engine.status(id), Some(SoundStatus::Playing));
+    }
+
+    #[test]
+    fn stop_all_clears_registry() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("automata_audio_stop_all.wav");
+        write_wav(&path, 0.5, 440.0);
+        let mut engine = engine();
+        engine
+            .play(PlayOptions::once(path.to_str().unwrap()))
+            .unwrap();
+        engine
+            .play(PlayOptions::once(path.to_str().unwrap()))
+            .unwrap();
+        assert_eq!(engine.sound_count(), 2);
+        engine.stop_all(0.0);
+        assert_eq!(engine.sound_count(), 0);
+    }
+}

@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 default = []
 # Real audio output via cpal. Off by default so headless sandboxes (no ALSA
 # headers) build cleanly; scripts/build.py and CI enable it explicitly.
-audio-cpal = ["automata-audio/cpal"]
+audio-cpal = ["automata-core/cpal"]
 
 [dependencies]
 automata-core = { workspace = true }
