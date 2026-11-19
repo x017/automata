@@ -266,7 +266,7 @@ is the alternative.)*
 | M0 | RON scene save/load: serde on components, `Scene.save/load/to_ron/from_ron`, version field, tests, wiki chapter | engine |
 | M1 | `game.step(dt)` + `game.render_frame(size)` (offscreen RGBA readback to Python) | engine |
 | M2 | Component read-model + writable mesh color / light / collider params | engine |
-| M3 | Oberon skeleton: nexa window, dark-white theme, live viewport, hierarchy, transform inspector | oberon |
+| M3 | Oberon skeleton: nexa window, dark-white theme, live viewport, hierarchy, transform inspector. (Viewport path already proven: ~970 fps headless at 720p.) Bonus: `render_to_png` gives Oberon deterministic CI tests from day one. | oberon |
 | M4 | Click-select via ray, drag-move, spawn/delete | oberon |
 | M5 | Play/pause/step with snapshot-restore, console panel | oberon |
 | M6 | Save/load scenes from the UI; project folder model | oberon |
@@ -277,12 +277,16 @@ files, photo mode, debug cameras). M3+ live in the Oberon app.
 
 ## 11. Risks & open questions
 
-- **nexa image-widget throughput** for a per-frame ~3.5 MB RGBA buffer
-  (1280×720×4). nexa's rasterizer is CPU-based, so the frame is a memcpy
-  budget, not a texture upload: ~3.5 MB/frame at 60 Hz ≈ 210 MB/s, well
-  inside modern memory bandwidth. M3 smoke-tests the real path before any
-  other Oberon work; the fallback is the engine's existing windowed mode
-  in a separate native window (zero readback, less integrated feel).
+- ~~nexa image-widget throughput~~ — **measured and resolved
+  (2026-11-19).** `image_create(w, h, rgba_bytes)` takes automata's exact
+  readback format; `SoftwareRenderer(threads=4)` + manual `ctx.frame()`
+  ran **~970 fps** at 1280×720 with the worst-case path (destroy+create
+  the full texture every frame), pixel-verified via `render_to_png`.
+  Gotcha recorded for M3: `ui.run(headless=True)` *paces* frames (idle
+  semantics) — throughput benchmarks must drive `ctx.frame()` manually.
+  Escape hatch, if ever needed: nexa's `CustomRenderer`/`DrawData` lets an
+  external wgpu renderer composite the UI (zero-copy direction). The
+  separate-window fallback remains available but is not needed.
 - **GIL contention** between nexa's loop and a stepped frame. MVP runs
   everything on the UI thread (a small scene steps in well under a frame
   budget); a worker-thread mode is the upgrade path.
