@@ -11,23 +11,24 @@ use automata_scene::Events;
 use pyo3::prelude::*;
 
 /// The engine-side event record: a name plus a Python payload.
+#[derive(Debug)]
 pub struct PyEvent {
     /// The event name.
     pub name: String,
     /// The payload object.
-    pub payload: PyObject,
+    pub payload: Py<PyAny>,
 }
 
 /// Event access during the update callback.
 ///
-/// `read` observes events sent in the current and previous frame; `send`
-/// buffers the event and publishes it right after the callback returns
-/// (visible to readers in the *next* frame).
+/// `read` observes events sent in earlier frames. `send` buffers the event
+/// and publishes it right after the callback returns, so it becomes
+/// readable in the *next* frame and expires after the frame that follows.
 #[pyclass(name = "Events", unsendable, module = "automata._core")]
 #[derive(Debug, Clone)]
 pub struct PyEvents {
     /// `(name, payload)` pairs readable this frame.
-    readable: Rc<Vec<(String, PyObject)>>,
+    readable: Rc<Vec<(String, Py<PyAny>)>>,
     /// Buffered outgoing events.
     outbox: EventOutbox,
 }
@@ -58,7 +59,7 @@ impl PyEvents {
 /// Clones a payload reference. Payloads are cloned inside the frame
 /// callback where the GIL is held, so plain `clone_ref` is unavailable;
 /// `Python::attach` is cheap in that context.
-fn clone_payload(payload: &PyObject) -> PyObject {
+fn clone_payload(payload: &Py<PyAny>) -> Py<PyAny> {
     Python::attach(|py| payload.clone_ref(py))
 }
 
@@ -66,7 +67,7 @@ fn clone_payload(payload: &PyObject) -> PyObject {
 impl PyEvents {
     /// Sends a named event with an arbitrary payload (default `None`).
     #[pyo3(signature = (name, payload=None))]
-    fn send(&self, py: Python<'_>, name: &str, payload: Option<PyObject>) {
+    fn send(&self, py: Python<'_>, name: &str, payload: Option<Py<PyAny>>) {
         let payload = payload.unwrap_or_else(|| py.None());
         self.outbox.borrow_mut().push(PyEvent {
             name: name.to_owned(),
@@ -76,7 +77,7 @@ impl PyEvents {
 
     /// The payloads of all readable events with the given name, oldest
     /// first.
-    fn read(&self, py: Python<'_>, name: &str) -> Vec<PyObject> {
+    fn read(&self, py: Python<'_>, name: &str) -> Vec<Py<PyAny>> {
         self.readable
             .iter()
             .filter(|(n, _)| n == name)

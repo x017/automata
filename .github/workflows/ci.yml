@@ -16,6 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Complete CPython (with libpython) for the pyo3 build: automata-python
+      # links it in its test binaries.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -74,3 +81,35 @@ jobs:
 
       - name: Documentation
         run: cargo doc --workspace --no-deps
+
+  python:
+    name: Python bindings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Python build tools
+        run: pip install maturin pytest
+
+      - name: Build the automata wheel
+        run: maturin build --release --manifest-path crates/automata-python/Cargo.toml
+
+      - name: Install the wheel
+        run: pip install target/wheels/automata_engine-*.whl
+
+      - name: Python tests
+        run: pytest crates/automata-python/tests/python
+
+      - name: Headless demo
+        run: python examples/python/headless_demo.py

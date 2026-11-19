@@ -35,6 +35,7 @@ impl PyGame {
     /// the loop is sleep-paced; useful for tests, CI, and tooling.
     #[new]
     #[pyo3(signature = (title="AUTOMATA", resolution=(1280, 720), headless=false, resizable=true, vsync=true, log_filter=None, target_fps=None))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         title: &str,
         resolution: (u32, u32),
@@ -43,28 +44,32 @@ impl PyGame {
         vsync: bool,
         log_filter: Option<&str>,
         target_fps: Option<u32>,
-    ) -> Self {
+    ) -> PyResult<Self> {
+        if target_fps == Some(0) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "target_fps must be positive; omit it to disable frame pacing",
+            ));
+        }
         let mut config = EngineConfig {
-            window: WindowConfig {
-                size: resolution,
-                resizable,
-                vsync,
-            },
             window_mode: if headless {
                 WindowMode::Headless
             } else {
-                WindowMode::default()
+                WindowMode::Windowed(WindowConfig {
+                    size: resolution,
+                    resizable,
+                    vsync,
+                })
             },
             target_fps,
             ..EngineConfig::new(title)
         };
         if let Some(filter) = log_filter {
-            config.log_filter = filter.to_owned();
+            filter.clone_into(&mut config.log_filter);
         }
-        Self {
+        Ok(Self {
             app: Application::new(config),
             resources: Rc::new(RefCell::new(HashMap::new())),
-        }
+        })
     }
 
     /// The engine's lifecycle state: `"created"`, `"running"`, or
@@ -93,7 +98,7 @@ impl PyGame {
     /// Engine failures raise `automata.Error`; exceptions raised by
     /// `update` stop the loop and propagate unchanged.
     #[pyo3(signature = (update, max_frames=None))]
-    fn run(&mut self, update: PyObject, max_frames: Option<u64>) -> PyResult<u64> {
+    fn run(&mut self, update: &Bound<'_, PyAny>, max_frames: Option<u64>) -> PyResult<u64> {
         if self.app.state() == automata_core::AppState::Shutdown {
             return Err(AutomataError::new_err(
                 "this game has already shut down; create a new Game to run again",
@@ -107,27 +112,22 @@ impl PyGame {
         let mut update_error: Option<PyErr> = None;
 
         let run_result = self.app.run(|ctx| {
-            if let Some(limit) = max_frames {
-                if ctx.time().frame_count() >= limit {
-                    ctx.request_quit();
-                    return;
-                }
-            }
             run_python_frame(
                 ctx,
-                &update,
+                update,
                 &quit,
                 &commands,
                 &outbox,
                 &resources,
                 &mut update_error,
             );
-            if quit.get() || update_error.is_some() {
+            let hit_limit = max_frames.is_some_and(|limit| ctx.time().frame_count() >= limit);
+            if quit.get() || update_error.is_some() || hit_limit {
                 ctx.request_quit();
             }
         });
 
-        run_result.map_err(core_error)?;
+        run_result.map_err(|err| core_error(&err))?;
         if let Some(err) = update_error {
             return Err(err);
         }
@@ -145,7 +145,7 @@ impl PyGame {
 #[allow(clippy::too_many_arguments)]
 fn run_python_frame(
     ctx: &mut AppContext<'_>,
-    update: &PyObject,
+    update: &Bound<'_, PyAny>,
     quit: &crate::context::QuitFlag,
     commands: &CommandQueue,
     outbox: &EventOutbox,
@@ -165,7 +165,7 @@ fn run_python_frame(
         Rc::clone(quit),
     );
 
-    let call_result = Python::attach(|py| update.call1(py, (frame,)));
+    let call_result = update.call1((frame,));
 
     // Writes recorded by the callback are applied even when it raised, so
     // error-recovery paths see a consistent world.

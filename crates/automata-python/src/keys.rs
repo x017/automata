@@ -1,8 +1,8 @@
 //! String names for keyboard keys and mouse buttons.
 //!
-//! Python games refer to keys by lowercase snake_case names (`"a"`,
+//! Python games refer to keys by lowercase `snake_case` names (`"a"`,
 //! `"arrow_left"`, `"f1"`, ...). This module maps those names to winit's
-//! physical key codes (the layout-independent values [`InputState`] uses)
+//! physical key codes (the layout-independent values `InputState` uses)
 //! and back, for the per-frame input snapshot.
 
 use automata_input::{KeyCode, MouseButton};
@@ -132,11 +132,6 @@ pub fn key_from_name(name: &str) -> Option<KeyCode> {
     KEYS.iter().find(|(n, _)| *n == name).map(|(_, code)| *code)
 }
 
-/// The canonical name of a key code, if it has one.
-pub fn key_name(code: KeyCode) -> Option<&'static str> {
-    KEYS.iter().find(|(_, c)| *c == code).map(|(name, _)| *name)
-}
-
 /// Resolves a mouse button name.
 pub fn button_from_name(name: &str) -> Option<MouseButton> {
     BUTTONS
@@ -145,28 +140,25 @@ pub fn button_from_name(name: &str) -> Option<MouseButton> {
         .map(|(_, button)| *button)
 }
 
-/// The canonical name of a mouse button, if it has one.
-pub fn button_name(button: MouseButton) -> Option<&'static str> {
-    BUTTONS
-        .iter()
-        .find(|(_, b)| *b == button)
-        .map(|(name, _)| *name)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn table_entries_round_trip() {
-        for (name, code) in KEYS {
-            assert_eq!(key_from_name(name), Some(*code));
-            assert_eq!(key_name(*code), Some(*name));
+        for (name, code) in all_keys() {
+            assert_eq!(key_from_name(name), Some(code));
         }
-        for (name, button) in BUTTONS {
-            assert_eq!(button_from_name(name), Some(*button));
-            assert_eq!(button_name(*button), Some(*name));
+        for (name, button) in all_buttons() {
+            assert_eq!(button_from_name(name), Some(button));
         }
+    }
+
+    #[test]
+    fn names_and_codes_are_unique() {
+        let names: Vec<_> = all_keys().map(|(name, _)| name).collect();
+        let unique: std::collections::HashSet<_> = names.iter().collect();
+        assert_eq!(names.len(), unique.len(), "key names must be unique");
     }
 
     #[test]

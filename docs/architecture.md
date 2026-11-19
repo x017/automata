@@ -30,11 +30,11 @@ worlds.
 | `automata-core` | ✅ Phase 1–2 | Application lifecycle, main loop, timekeeping, logging, error types, windowed/headless runtime |
 | `automata-input` | ✅ Phase 2 | Input event collection, keyboard/mouse state |
 | `automata-renderer` | ✅ Phase 2 (context) | wgpu device, surface, frame presentation; drawing in Phase 3 |
-| `automata-scene` | Phase 4 | Scenes, entities, ECS, transforms |
+| `automata-scene` | ✅ Phase 4 | Scenes, entities, ECS, transforms |
 | `automata-physics` | Phase 6 | Rapier 2D/3D integration |
 | `automata-audio` | Phase 7 | Kira-based audio |
 | `automata-assets` | Phase 7 | Resource loading, caching, handles |
-| `automata-python` | Phase 5 | PyO3 bindings and Python API |
+| `automata-python` | ✅ Phase 5 | PyO3 bindings and Python API |
 
 New crates are introduced only when a subsystem boundary becomes meaningful —
 not ahead of time.
@@ -80,6 +80,25 @@ sources):
 - `RenderPassColorAttachment` requires a `depth_slice` field
 
 Phase 3 adds shaders, buffers, textures, materials, and cameras here.
+
+## Python bridge (Phase 5)
+
+`automata-python` wraps the engine in the `automata` Python package (PyO3,
+maturin-built). The design keeps the FFI boundary free of live borrows:
+
+- `Game` owns the `Application`. `run(update)` borrows it for the whole
+  loop; each frame the driver builds a `FrameContext` from **owned
+  snapshots** (time, input, scene) plus **shared write buffers** (scene
+  commands, outgoing events, quit flag).
+- The Python callback sees start-of-frame state; its writes are applied
+  immediately after it returns and become visible the next frame. A context
+  object that escapes its callback holds stale owned data — no dangling
+  references are possible, and no `unsafe` is required.
+- Rust errors surface as `automata.Error`; exceptions raised by the Python
+  callback stop the loop and propagate unchanged to the caller of `run`.
+- The crate sets `unsafe_code = "deny"` instead of the workspace-wide
+  `forbid`: PyO3 macro expansions contain `unsafe impl` blocks that a
+  `forbid` cannot tolerate. Hand-written binding code contains no unsafe.
 
 ## Cross-cutting conventions
 

@@ -52,6 +52,30 @@ cargo doc --workspace --no-deps --open
 
 All of the above run in CI and must stay green.
 
+### Python bindings
+
+The `automata-python` crate builds the `automata` Python package with
+[maturin](https://www.maturin.rs):
+
+```console
+python3 -m venv .venv
+.venv/bin/pip install maturin pytest
+.venv/bin/maturin build --manifest-path crates/automata-python/Cargo.toml
+.venv/bin/pip install target/wheels/automata_engine-*.whl
+.venv/bin/python -m pytest crates/automata-python/tests/python
+.venv/bin/python examples/python/headless_demo.py
+```
+
+**Sandbox note:** the sandbox has no `libpython`, so linking any target that
+embeds Python fails locally. Workarounds baked into the workflow:
+
+- Build/clippy the bindings with `PYO3_BUILD_EXTENSION_MODULE=1` (this is
+  what maturin sets; it skips the libpython link).
+- Run `cargo test --workspace --exclude automata-python` locally; the
+  crate's Rust unit tests link libpython and therefore run on CI only.
+- Python-side behavior is covered locally by the pytest suite against the
+  maturin-built wheel, which links without libpython by design.
+
 ## Coding conventions
 
 - **Edition 2021**, MSRV 1.85 (bumped deliberately, not casually).

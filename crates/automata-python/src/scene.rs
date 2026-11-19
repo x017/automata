@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use automata_scene::{EntityId, Name, Scene, Transform};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 
 use crate::components::{extract_component, PyTransform, StagedComponent};
@@ -310,12 +310,16 @@ impl EntityView {
     /// Queues a new local transform for the entity (applied after the
     /// callback returns).
     #[setter]
-    fn set_transform(&self, transform: PyTransform) -> PyResult<()> {
+    fn set_transform(&self, transform: &Bound<'_, PyAny>) -> PyResult<()> {
         let entity = entity_from_bits(self.id)?;
-        self.commands.borrow_mut().push(SceneCommand::SetTransform {
-            entity,
-            transform: transform.inner(),
-        });
+        let transform = transform
+            .cast::<PyTransform>()
+            .map_err(|_| PyTypeError::new_err("expected a Transform"))?
+            .get()
+            .inner();
+        self.commands
+            .borrow_mut()
+            .push(SceneCommand::SetTransform { entity, transform });
         Ok(())
     }
 

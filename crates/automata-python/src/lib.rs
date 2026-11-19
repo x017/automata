@@ -6,7 +6,7 @@
 //!
 //! Ownership rules across the boundary:
 //!
-//! - [`PyGame`](game::PyGame) owns the engine. `Game.run(update)` borrows
+//! - `Game` owns the engine. `Game.run(update)` borrows
 //!   the game for the whole loop; nested `run` calls raise.
 //! - `Scene`/`Entity` are plain-data staging objects; `load_scene` copies
 //!   them into the ECS world.
@@ -26,6 +26,7 @@ mod scene;
 use pyo3::prelude::*;
 
 /// The native extension module imported as `automata._core`.
+#[allow(clippy::used_underscore_items)] // the Python module path dictates the name
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -43,6 +44,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<context::FrameContext>()?;
     m.add_class::<context::FrameTime>()?;
     m.add_class::<context::PyInput>()?;
+    m.add_class::<context::PyModifiers>()?;
     m.add_class::<context::PyResources>()?;
     m.add_class::<events::PyEvents>()?;
     Ok(())

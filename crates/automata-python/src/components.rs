@@ -186,18 +186,18 @@ pub enum StagedComponent {
 /// Extracts a staged component from an arbitrary Python object, raising a
 /// `TypeError` listing the supported types when it matches none.
 pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
-    if let Ok(t) = obj.downcast::<PyTransform>() {
+    if let Ok(t) = obj.cast::<PyTransform>() {
         return Ok(StagedComponent::Transform(t.get().inner()));
     }
-    if let Ok(c) = obj.downcast::<PyCamera3D>() {
+    if let Ok(c) = obj.cast::<PyCamera3D>() {
         return Ok(StagedComponent::Camera3D(c.get().inner()));
     }
-    if let Ok(c) = obj.downcast::<PyCamera2D>() {
+    if let Ok(c) = obj.cast::<PyCamera2D>() {
         return Ok(StagedComponent::Camera2D(c.get().inner()));
     }
+    let typename = obj.get_type().name()?.to_string();
     Err(PyTypeError::new_err(format!(
-        "unsupported component type {!r}; expected Transform, Camera3D, or Camera2D",
-        obj.get_type().name()?
+        "unsupported component type {typename}; expected Transform, Camera3D, or Camera2D"
     )))
 }
 

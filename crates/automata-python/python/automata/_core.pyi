@@ -77,15 +77,20 @@ class FrameTime:
     elapsed: float
     frame: int
 
+class Modifiers:
+    """Modifier key state at the start of the frame."""
+
+    shift: bool
+    ctrl: bool
+    alt: bool
+    super_key: bool
+
 class Input:
     """Keyboard and mouse state at the start of the frame."""
 
     cursor: Optional[tuple[float, float]]
     scroll: tuple[float, float]
-    shift: bool
-    ctrl: bool
-    alt: bool
-    super_key: bool
+    modifiers: Modifiers
     def pressed(self, key: str) -> bool: ...
     def just_pressed(self, key: str) -> bool: ...
     def just_released(self, key: str) -> bool: ...

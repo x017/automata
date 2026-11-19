@@ -14,7 +14,7 @@ use pyo3::exceptions::PyKeyError;
 use pyo3::prelude::*;
 
 use crate::keys;
-use crate::scene::{CommandQueue, SceneView};
+use crate::scene::SceneView;
 
 /// Frame timing information.
 #[pyclass(name = "FrameTime", module = "automata._core", frozen)]
@@ -31,9 +31,30 @@ pub struct FrameTime {
     pub frame: u64,
 }
 
+/// Modifier key state at the start of the frame.
+///
+/// Four independent flags are the natural representation here.
+#[allow(clippy::struct_excessive_bools)]
+#[pyclass(name = "Modifiers", module = "automata._core", frozen)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PyModifiers {
+    /// Whether any shift key is held.
+    #[pyo3(get)]
+    pub shift: bool,
+    /// Whether any control key is held.
+    #[pyo3(get)]
+    pub ctrl: bool,
+    /// Whether any alt key is held.
+    #[pyo3(get)]
+    pub alt: bool,
+    /// Whether any super (logo) key is held.
+    #[pyo3(get)]
+    pub super_key: bool,
+}
+
 /// Keyboard and mouse state at the start of the frame.
 ///
-/// Keys are addressed by lowercase snake_case names (`"w"`, `"arrow_left"`,
+/// Keys are addressed by lowercase `snake_case` names (`"w"`, `"arrow_left"`,
 /// `"f1"`, `"space"`, `"escape"`, ...); mouse buttons by `"left"`,
 /// `"right"`, `"middle"`, `"back"`, `"forward"`.
 #[pyclass(name = "Input", module = "automata._core", frozen)]
@@ -52,30 +73,24 @@ pub struct PyInput {
     /// Scroll wheel delta accumulated during the frame.
     #[pyo3(get)]
     pub scroll: (f64, f64),
-    /// Whether any shift key is held.
+    /// Modifier key state.
     #[pyo3(get)]
-    pub shift: bool,
-    /// Whether any control key is held.
-    #[pyo3(get)]
-    pub ctrl: bool,
-    /// Whether any alt key is held.
-    #[pyo3(get)]
-    pub alt: bool,
-    /// Whether any super (logo) key is held.
-    #[pyo3(get)]
-    pub super_key: bool,
+    pub modifiers: PyModifiers,
 }
 
 impl PyInput {
     /// Snapshots an engine input state.
     pub fn snapshot(input: &InputState) -> Self {
+        let modifiers = input.modifiers();
         let mut snapshot = Self {
             cursor: input.cursor_position(),
             scroll: input.scroll_delta(),
-            shift: input.modifiers().shift_key(),
-            ctrl: input.modifiers().control_key(),
-            alt: input.modifiers().alt_key(),
-            super_key: input.modifiers().super_key(),
+            modifiers: PyModifiers {
+                shift: modifiers.shift_key(),
+                ctrl: modifiers.control_key(),
+                alt: modifiers.alt_key(),
+                super_key: modifiers.super_key(),
+            },
             ..Self::default()
         };
         for (name, code) in keys::all_keys() {
@@ -163,7 +178,7 @@ impl PyInput {
 
 /// Shared store for Python-level resources (arbitrary Python objects,
 /// keyed by name). Owned by the game; the per-frame view clones the handle.
-pub type ResourceStore = Rc<RefCell<HashMap<String, PyObject>>>;
+pub type ResourceStore = Rc<RefCell<HashMap<String, Py<PyAny>>>>;
 
 /// Named, game-owned storage for arbitrary Python objects.
 ///
@@ -185,12 +200,12 @@ impl PyResources {
 #[pymethods]
 impl PyResources {
     /// Stores a value under `name`, replacing any previous value.
-    fn set(&self, name: &str, value: PyObject) {
+    fn set(&self, name: &str, value: Py<PyAny>) {
         self.store.borrow_mut().insert(name.to_owned(), value);
     }
 
     /// The value stored under `name`, or `None`.
-    fn get(&self, py: Python<'_>, name: &str) -> Option<PyObject> {
+    fn get(&self, py: Python<'_>, name: &str) -> Option<Py<PyAny>> {
         self.store
             .borrow()
             .get(name)
@@ -198,7 +213,7 @@ impl PyResources {
     }
 
     /// Removes and returns the value stored under `name`, or `None`.
-    fn remove(&self, py: Python<'_>, name: &str) -> Option<PyObject> {
+    fn remove(&self, py: Python<'_>, name: &str) -> Option<Py<PyAny>> {
         let _ = py;
         self.store.borrow_mut().remove(name)
     }
