@@ -222,8 +222,8 @@ impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
                     height = window.inner_size().height,
                     "window and GPU context ready"
                 );
-                self.cursor_captured = self.window_config.capture_cursor
-                    && set_cursor_capture(&window, true);
+                self.cursor_captured =
+                    self.window_config.capture_cursor && set_cursor_capture(&window, true);
                 self.window = Some(window);
                 self.renderer = Some(renderer);
                 // Kick off the frame cycle; ControlFlow::Wait is the default
@@ -244,7 +244,8 @@ impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
                 button: MouseButton::Left,
                 ..
             } if self.window_config.capture_cursor && !self.cursor_captured => {
-                self.input.handle_mouse_button(MouseButton::Left, ElementState::Pressed);
+                self.input
+                    .handle_mouse_button(MouseButton::Left, ElementState::Pressed);
                 if let Some(window) = &self.window {
                     self.cursor_captured = set_cursor_capture(window, true);
                 }

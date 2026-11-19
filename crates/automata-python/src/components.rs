@@ -374,10 +374,14 @@ fn obj_index(raw: &str, count: usize, line: usize, label: &str) -> Result<usize,
     } else {
         i64::try_from(count).map_err(|_| format!("line {line}: too many {label} values"))? + value
     };
-    if resolved < 0 || usize::try_from(resolved).is_none_or(|index| index >= count) {
-        return Err(format!("line {line}: {label} index {raw:?} is out of range"));
+    let index = usize::try_from(resolved)
+        .map_err(|_| format!("line {line}: {label} index {raw:?} is out of range"))?;
+    if index >= count {
+        return Err(format!(
+            "line {line}: {label} index {raw:?} is out of range"
+        ));
     }
-    usize::try_from(resolved).map_err(|_| format!("line {line}: invalid {label} index {raw:?}"))
+    Ok(index)
 }
 
 /// Parses the geometry subset of Wavefront OBJ into renderer-ready triangles.
@@ -636,7 +640,10 @@ mod tests {
 
         assert_eq!(mesh.vertices.len(), 6);
         assert_eq!(mesh.indices, vec![0, 1, 2, 3, 4, 5]);
-        assert!(mesh.vertices.iter().all(|vertex| vertex.normal == [0.0, 0.0, 1.0]));
+        assert!(mesh
+            .vertices
+            .iter()
+            .all(|vertex| vertex.normal == [0.0, 0.0, 1.0]));
         assert_eq!(mesh.vertices[0].uv, [0.0, 0.0]);
         assert_eq!(mesh.vertices[5].uv, [0.0, 1.0]);
     }
