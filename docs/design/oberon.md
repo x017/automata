@@ -73,7 +73,15 @@ One tick of the nexa loop in edit mode:
 1. `game.step(dt)` — physics + buffered writes apply (game logic paused).
 2. `rgba = game.render_frame(viewport_size)` — offscreen wgpu render,
    read back to CPU bytes.
-3. nexa image widget displays `rgba`.
+3. A nexa image widget displays `rgba`.
+
+Why the viewport is an image feed and not GPU interop: nexa's core is a
+C99 immediate-mode UI with OpenGL 3.3 + a CPU software rasterizer, while
+automata renders through wgpu. Sharing GPU textures between those two
+stacks is not realistic; the RGBA handoff through CPU memory is simple,
+portable, and fast enough at editor scale (§11 has the numbers). The
+zero-readback fallback — the engine opening its own native window beside
+the Oberon window — stays available if the smoke test says otherwise.
 
 Why in-process, and not an editor/game subprocess pair:
 
@@ -158,7 +166,7 @@ rgba: bytes = game.render_frame((width, height))  # RGBA8, row-major
 
 Oberon feeds these bytes to a nexa image widget. 1280×720×4 bytes ≈
 3.5 MB/frame — trivial locally; the risk item is nexa's image-widget
-update cost (§8).
+update cost (§11).
 
 ### 4.4 Full component read-model + writable visuals
 
@@ -177,13 +185,18 @@ frame, exactly like gameplay writes.
 
 ## 5. Panels
 
-| Panel | Contents | Data source |
+| Panel | Contents | nexa building block |
 |---|---|---|
-| **Hierarchy** | entity tree (name, visibility glyph), add/remove/rename | `ctx.scene.names()` / `EntityView` walk |
-| **Viewport** | live offscreen render; editor camera; click-to-select; drag-to-move | `render_frame` + `physics.cast_ray` |
-| **Inspector** | selected entity's components as typed editors (vec3 fields, color swatch, enum dropdowns, checkboxes) | component read-model (§4.4) |
-| **Console** | engine logs + Python stdout/stderr from play mode | tracing subscriber → ring buffer |
-| **Project** (later) | scene files, scripts, assets in the project folder | filesystem |
+| **Hierarchy** | entity tree (name, visibility glyph), add/remove/rename | `tree_table` |
+| **Viewport** | live offscreen render; editor camera; click-to-select; drag-to-move | image widget + canvas overlay |
+| **Inspector** | selected entity's components as typed editors (vec3 fields, color swatch, enum dropdowns, checkboxes) | property-inspector component |
+| **Console** | engine logs + Python stdout/stderr from play mode | `LogBuffer` |
+| **Project** (later) | scene files, scripts, assets in the project folder | `file_browser` |
+
+Layout is a nexa `dockspace` — dockable, rearrangeable panels come free
+with the toolkit. Data flows from the engine side: hierarchy from
+`ctx.scene.names()` / `EntityView` walks, inspector from the component
+read-model (§4.4), selection rays from `physics.cast_ray`.
 
 Editor camera: a viewport-only fly/orbit camera (middle-drag orbit,
 scroll zoom, F-focus on selection). It overrides the render camera in edit
@@ -217,13 +230,12 @@ mode; the game's own `Camera3D` entity takes over in play mode.
   (post-MVP; the buffered-write model makes commands trivially
   representable).
 
-## 8. Hot reload
+## 8. Code changes during play
 
-v1 policy: **editing Python code restarts play mode.** Oberon watches the
-project's `.py` files; on save during play, it stops, restores the
-snapshot, re-imports the game module, and presses ▶ again. True state-
-preserving module reload is explicitly out of scope for v1 (Python makes
-it unreliable for class-shaped state; Unity domain-reloads too).
+**No hot reload — decided.** Oberon does not watch files. Code changes
+apply the manual way: stop (■) and play (▶) again. Stopping restores the
+pre-play snapshot (§6), so a stop/play cycle is a clean, complete reload
+of both code and scene.
 
 ## 9. Project & repo model
 
@@ -265,9 +277,12 @@ files, photo mode, debug cameras). M3+ live in the Oberon app.
 
 ## 11. Risks & open questions
 
-- **nexa image-widget throughput** for a per-frame 3.5 MB RGBA buffer.
-  Mitigation: confirm nexa's texture-update path early (M3 smoke test);
-  worst case, downscale the viewport or render at device-pixel scale.
+- **nexa image-widget throughput** for a per-frame ~3.5 MB RGBA buffer
+  (1280×720×4). nexa's rasterizer is CPU-based, so the frame is a memcpy
+  budget, not a texture upload: ~3.5 MB/frame at 60 Hz ≈ 210 MB/s, well
+  inside modern memory bandwidth. M3 smoke-tests the real path before any
+  other Oberon work; the fallback is the engine's existing windowed mode
+  in a separate native window (zero readback, less integrated feel).
 - **GIL contention** between nexa's loop and a stepped frame. MVP runs
   everything on the UI thread (a small scene steps in well under a frame
   budget); a worker-thread mode is the upgrade path.
