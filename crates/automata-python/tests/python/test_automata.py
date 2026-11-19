@@ -144,7 +144,7 @@ def test_input_snapshot_defaults_and_validation():
         game2.run(bad_key)
 
 
-def test_events_round_trip_with_two_frame_lifetime():
+def test_events_round_trip_next_frame_delivery():
     game = make_game()
     seen = []
 

@@ -22,8 +22,8 @@ pub struct PyEvent {
 /// Event access during the update callback.
 ///
 /// `read` observes events sent in earlier frames. `send` buffers the event
-/// and publishes it right after the callback returns, so it becomes
-/// readable in the *next* frame and expires after the frame that follows.
+/// and publishes it right after the callback returns, so it is readable
+/// throughout the *next* frame — exactly one frame — and then expires.
 #[pyclass(name = "Events", unsendable, module = "automata._core")]
 #[derive(Debug, Clone)]
 pub struct PyEvents {

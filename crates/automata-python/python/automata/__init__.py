@@ -56,6 +56,9 @@ Subclassing (OOP) style:
 
     MyGame().run()
 
+    `on_<event>` methods fire once per matching event; events are readable
+    on the frame after they're sent.
+
 `Entity` and `Scene` are subclassable too — build reusable archetypes and
 levels as classes (see docs/api.md and examples/python/oop_platformer.py).
 """
@@ -242,7 +245,7 @@ class Game(_core.Game):
                 if ctx.input.just_pressed("escape"):
                     ctx.quit()
 
-            def on_hit(self, payload):  # every readable "hit" event
+            def on_hit(self, payload):  # once per "hit" event
                 ...
 
         Platformer().run()
@@ -331,7 +334,8 @@ class Game(_core.Game):
         """Decorator registering a handler for events named `name`.
 
         Handlers receive the event payload and run right after the update
-        callback, once per readable event.
+        callback, once per matching event. Events are readable on the frame
+        after they're sent, then expire.
         """
 
         def decorator(fn: EventFn) -> EventFn:
