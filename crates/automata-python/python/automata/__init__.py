@@ -69,6 +69,7 @@ from . import _core
 from .enums import GamepadAxis, GamepadButton, GraphicsQuality, Key, MouseButton
 from ._core import (
     ActionMap,
+    Audio,
     AxisBinding,
     Binding,
     Camera2D,
@@ -187,6 +188,7 @@ class Scene(_core.Scene):
 
 __all__ = [
     "ActionMap",
+    "Audio",
     "AxisBinding",
     "Binding",
     "Camera2D",

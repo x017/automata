@@ -142,6 +142,7 @@ after the callback.
 | `ctx.resources` | `Resources`: `set/get/remove/clear/names`, `in`, `len` |
 | `ctx.physics` | 3D physics queries (below) |
 | `ctx.physics2d` | 2D physics queries |
+| `ctx.audio` | `Audio`: play and control sounds (below) |
 | `ctx.quit()` | ends the loop |
 
 ### SceneView / EntityView
@@ -203,6 +204,42 @@ ctx.physics.ray_result(key) -> (entity_id, point, normal, distance) | None
 
 `ctx.physics2d`: `apply_impulse(entity, (x, y))`, `grounded(entity)`,
 `body_count()`. Entities are `EntityView`s or integer ids.
+
+### Audio (ctx.audio)
+
+Plays and controls sounds. Unlike scene/physics writes, audio operations apply
+**immediately** and queries observe live state — including within the frame
+that issued them. `play` returns an integer sound id used by the other
+methods. Volume is a linear amplitude (`1.0` = full, `0.0` = silent).
+
+```python
+sid = ctx.audio.play("assets/jump.wav")          # -> sound id (int)
+ctx.audio.play("assets/music.ogg", volume=0.6, loop_=True)
+ctx.audio.play("assets/beep.wav", playback_rate=1.5, panning=-0.3)
+
+ctx.audio.stop(sid, fade_out=0.2)                # fade out over 0.2 s, then stop
+ctx.audio.stop_all(fade_out=0.0)                 # stop every sound
+ctx.audio.pause(sid) / ctx.audio.resume(sid)
+ctx.audio.seek_to(sid, 1.5)                      # seconds
+ctx.audio.set_volume(sid, 0.8, fade=0.1)
+ctx.audio.set_playback_rate(sid, 0.9)
+ctx.audio.set_panning(sid, 0.5)                  # -1.0 left .. 1.0 right
+ctx.audio.set_master_volume(0.7, fade=0.5)
+
+ctx.audio.is_playing(sid) -> bool
+ctx.audio.position(sid) -> float | None          # seconds; None if unknown
+ctx.audio.sound_count() -> int
+```
+
+Supported formats: WAV, OGG/Vorbis, MP3, FLAC, PCM. A missing or undecodable
+file raises `ValueError`; an unknown sound id raises `KeyError`.
+
+**Backend:** the default build runs a *silent* backend — no audio device is
+touched, no sound is produced, but playback positions and states still advance
+deterministically, so headless runs and CI exercise identical code paths. Real
+device output requires the `audio-cpal` build feature (`scripts/build.py`
+enables it automatically when ALSA headers are present). If a device build
+finds no output device, it falls back to silent rather than failing.
 
 ## Input mapping
 
