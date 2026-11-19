@@ -37,7 +37,7 @@ jobs:
           for i in 1 2 3; do
             sudo apt-get update && \
             sudo apt-get install -y --no-install-recommends \
-              libegl1 libgl1 mesa-vulkan-drivers libvulkan1 libudev-dev && break
+              libegl1 libgl1 mesa-vulkan-drivers libvulkan1 libudev-dev libasound2-dev && break
             echo "apt attempt $i failed; retrying in 10s"
             sleep 10
           done
@@ -49,10 +49,10 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --features automata-python/audio-cpal -- -D warnings
 
       - name: Tests (CPU + device)
-        run: cargo test --workspace --all-targets -- --skip offscreen 2>&1 | tee /tmp/cpu-test.log
+        run: cargo test --workspace --all-targets --features automata-python/audio-cpal -- --skip offscreen 2>&1 | tee /tmp/cpu-test.log
         env:
           WGPU_BACKEND: vulkan,gl
           # automata-python's Rust test binaries link libpython from the
@@ -108,7 +108,7 @@ jobs:
         run: |
           for i in 1 2 3; do
             sudo apt-get update && \
-            sudo apt-get install -y --no-install-recommends libudev-dev && break
+            sudo apt-get install -y --no-install-recommends libudev-dev libasound2-dev && break
             echo "apt attempt $i failed; retrying in 10s"
             sleep 10
           done
@@ -117,7 +117,7 @@ jobs:
         run: pip install maturin pytest
 
       - name: Build the automata wheel
-        run: maturin build --release --manifest-path crates/automata-python/Cargo.toml
+        run: maturin build --release --manifest-path crates/automata-python/Cargo.toml --features audio-cpal
 
       - name: Install the wheel
         run: pip install target/wheels/automata_engine-*.whl

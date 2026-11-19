@@ -94,6 +94,12 @@ def stage_python(release: bool) -> None:
              "--manifest-path", "crates/automata-python/Cargo.toml"]
     if release:
         build.append("--release")
+    # Real audio output (cpal) needs ALSA headers on Linux; without them the
+    # build falls back to the silent backend so headless boxes still work.
+    if sys.platform != "linux" or Path("/usr/include/alsa/asoundlib.h").exists():
+        build += ["--features", "audio-cpal"]
+    else:
+        print("note: no ALSA headers — building with the silent audio backend")
     run(build)
     wheels = sorted(
         glob.glob(str(ROOT / "target" / "wheels" / "automata_engine-*.whl")),

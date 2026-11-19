@@ -12,8 +12,15 @@ repository.workspace = true
 name = "automata_python"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = []
+# Real audio output via cpal. Off by default so headless sandboxes (no ALSA
+# headers) build cleanly; scripts/build.py and CI enable it explicitly.
+audio-cpal = ["automata-audio/cpal"]
+
 [dependencies]
 automata-core = { workspace = true }
+automata-audio = { path = "../automata-audio", default-features = false }
 automata-input = { workspace = true }
 automata-physics = { workspace = true }
 automata-renderer = { workspace = true }
