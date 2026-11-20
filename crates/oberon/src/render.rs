@@ -21,6 +21,13 @@ use crate::doc::Document;
 pub struct ViewportRenderer {
     renderer: Option<Renderer>,
     scene: Scene,
+    /// Reused offscreen render target (avoids a fresh GPU texture per frame).
+    target: Option<wgpu::Texture>,
+    /// Reused readback buffer (avoids a fresh allocation per frame).
+    frame: Vec<u8>,
+    /// The document change counter the GPU world was last built from. When it
+    /// matches the document's current counter, the world is reused as-is.
+    built_counter: Option<u64>,
 }
 
 impl Default for ViewportRenderer {
@@ -36,6 +43,9 @@ impl ViewportRenderer {
         Self {
             renderer: None,
             scene: Scene::new(),
+            target: None,
+            frame: Vec::new(),
+            built_counter: None,
         }
     }
 
@@ -48,26 +58,41 @@ impl ViewportRenderer {
         if self.renderer.is_none() {
             self.renderer = pollster::block_on(Renderer::new_offscreen((width, height))).ok();
         }
-        let mut frame = None;
+        let mut ok = false;
         if let Some(renderer) = &mut self.renderer {
             if renderer.size() != (width, height) {
                 renderer.resize(width, height);
+                self.target = None; // recreate the target at the new size
             }
-            // Build the live world from the document.
-            let file = doc.to_scene_file();
-            file.apply_to_world(self.scene.world_mut());
-            automata_scene::materialize_visuals(self.scene.world_mut(), renderer);
+            // Reuse the render target across frames (recreate only on resize).
+            let target = self
+                .target
+                .get_or_insert_with(|| renderer.create_render_target((width, height)));
+
+            // Rebuild the live world ONLY when the document changed. Rebuilding
+            // every frame cleared + respawned the ECS world and re-uploaded
+            // every mesh/material — the unbounded memory growth. On an
+            // unchanged frame we re-record the existing world.
+            let counter = doc.change_counter();
+            if self.built_counter != Some(counter) {
+                let file = doc.to_scene_file();
+                file.apply_to_world(self.scene.world_mut());
+                automata_scene::materialize_visuals(self.scene.world_mut(), renderer);
+                self.built_counter = Some(counter);
+            }
             let mut draw = DrawList::new();
             draw.set_clear_color(wgpu_color(0.05, 0.055, 0.07, 1.0));
             automata_scene::record_draw_list(self.scene.world(), &mut draw);
-            let target = renderer.create_render_target((width, height));
-            renderer.render_offscreen(&draw, &target);
-            frame = Some(renderer.read_texture_rgba(&target, (width, height)));
+            renderer.render_offscreen(&draw, target);
+            // Reuse the readback buffer (clobbered each frame, not grown).
+            renderer.read_texture_rgba_into(target, (width, height), &mut self.frame);
+            ok = true;
         }
-        match frame {
-            Some(f) => (f, width, height),
+        if ok {
+            (self.frame.clone(), width, height)
+        } else {
             // Software fallback: a wireframe projection of the scene.
-            None => (render_wireframe::render(doc, width, height), width, height),
+            (render_wireframe::render(doc, width, height), width, height)
         }
     }
 }

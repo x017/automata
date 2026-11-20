@@ -359,7 +359,21 @@ impl Renderer {
     /// their own window; not for per-frame game use.
     #[must_use]
     pub fn read_texture_rgba(&self, target: &wgpu::Texture, size: (u32, u32)) -> Vec<u8> {
-        read_texture_rgba(self, target, size)
+        let mut out = Vec::new();
+        self.read_texture_rgba_into(target, size, &mut out);
+        out
+    }
+
+    /// Like [`Renderer::read_texture_rgba`], but writes into a caller-provided
+    /// buffer (reused across frames) instead of allocating. `out` is resized
+    /// to exactly `width*height*4`.
+    pub fn read_texture_rgba_into(
+        &self,
+        target: &wgpu::Texture,
+        size: (u32, u32),
+        out: &mut Vec<u8>,
+    ) {
+        read_texture_rgba_into(self, target, size, out);
     }
 
     /// Blits a tightly packed RGBA8 image to the window surface and presents.
@@ -839,6 +853,10 @@ struct SpriteBatch {
 }
 
 impl SpriteBatch {
+    /// Maximum cached sprite-texture bind groups before the cache is cleared
+    /// and rebuilt. Prevents unbounded growth across a long editing session.
+    const BIND_GROUP_CACHE_LIMIT: usize = 512;
+
     fn new(device: &wgpu::Device) -> Self {
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("sprite vertices"),
@@ -876,7 +894,9 @@ impl SpriteBatch {
     }
 
     /// Returns (creating and caching if needed) the texture bind group for a
-    /// sprite run.
+    /// sprite run. The cache is bounded: past a threshold it is cleared and
+    /// rebuilt, so a long session cycling many textures can't grow it without
+    /// bound (cached entries are cheap to recreate).
     fn texture_bind_group(
         &self,
         device: &wgpu::Device,
@@ -885,6 +905,9 @@ impl SpriteBatch {
     ) -> wgpu::BindGroup {
         let id = texture.batch_id();
         let mut cache = self.bind_group_cache.borrow_mut();
+        if cache.len() >= Self::BIND_GROUP_CACHE_LIMIT {
+            cache.clear();
+        }
         cache
             .entry(id)
             .or_insert_with(|| {
@@ -914,8 +937,14 @@ impl SpriteBatch {
 fn _assert_texture_inner_fields(_: &TextureInner) {}
 
 /// Reads a render target texture back to the CPU as tightly packed RGBA8
-/// (row-major, top-left origin). Blocks until the GPU readback completes.
-fn read_texture_rgba(renderer: &Renderer, target: &wgpu::Texture, size: (u32, u32)) -> Vec<u8> {
+/// (row-major, top-left origin), appending into `out`. Blocks until the GPU
+/// readback completes. `out` is truncated to exactly `width*height*4`.
+fn read_texture_rgba_into(
+    renderer: &Renderer,
+    target: &wgpu::Texture,
+    size: (u32, u32),
+    out: &mut Vec<u8>,
+) {
     let device = renderer.context().device();
     let queue = renderer.context().queue();
     let bytes_per_row = 4 * size.0;
@@ -957,19 +986,21 @@ fn read_texture_rgba(renderer: &Renderer, target: &wgpu::Texture, size: (u32, u3
     });
     // Drive the device until the readback callback fires. `Poll` alone can
     // stall on some drivers; alternate Poll with a blocking Wait.
-    loop {
+    let data = loop {
         let _ = device.poll(wgpu::PollType::Poll);
         if let Ok(received) = rx.try_recv() {
-            return received.expect("readback failed");
+            break received.expect("readback failed");
         }
         let _ = device.poll(wgpu::PollType::Wait {
             submission_index: None,
             timeout: Some(std::time::Duration::from_millis(10)),
         });
         if let Ok(received) = rx.try_recv() {
-            return received.expect("readback failed");
+            break received.expect("readback failed");
         }
-    }
+    };
+    out.clear();
+    out.extend_from_slice(&data);
 }
 
 #[cfg(test)]
@@ -1011,7 +1042,7 @@ mod tests {
 
     /// Reads the full target texture back to CPU memory.
     fn read_pixels(renderer: &Renderer, target: &wgpu::Texture, size: (u32, u32)) -> Vec<u8> {
-        read_texture_rgba(renderer, target, size)
+        renderer.read_texture_rgba(target, size)
     }
 
     /// The center pixel of a rendered target.

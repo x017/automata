@@ -45,6 +45,11 @@ pub struct Document {
     dirty: bool,
     undo: Vec<String>,
     redo: Vec<String>,
+    /// Monotonic counter bumped on every structural edit. The viewport
+    /// compares it to rebuild the GPU world only when the scene changed,
+    /// instead of clearing + respawning the ECS world (and re-uploading every
+    /// mesh) every frame — which is what drove memory use up without bound.
+    change_counter: u64,
 }
 
 impl Default for Document {
@@ -65,6 +70,7 @@ impl Document {
             dirty: false,
             undo: Vec::new(),
             redo: Vec::new(),
+            change_counter: 0,
         }
     }
 
@@ -117,6 +123,21 @@ impl Document {
     #[must_use]
     pub fn dirty(&self) -> bool {
         self.dirty
+    }
+
+    /// A counter bumped on every structural edit (add/remove/component
+    /// change/undo/redo). Consumers that cache a derived scene (the viewport's
+    /// GPU world) compare it to know when to rebuild, so an unchanged frame
+    /// re-renders without touching the ECS world or re-uploading GPU meshes.
+    #[must_use]
+    pub fn change_counter(&self) -> u64 {
+        self.change_counter
+    }
+
+    /// Records a structural edit: bumps the change counter and marks dirty.
+    fn touch(&mut self) {
+        self.change_counter += 1;
+        self.dirty = true;
     }
 
     /// Finds an entity's index by id.
@@ -183,7 +204,7 @@ impl Document {
         };
         self.entities.push(EntityEntry { id, data });
         self.selected = Some(id);
-        self.dirty = true;
+        self.touch();
         self.entities.len() - 1
     }
 
@@ -197,7 +218,7 @@ impl Document {
         if self.selected == Some(id) {
             self.selected = None;
         }
-        self.dirty = true;
+        self.touch();
         true
     }
 
@@ -211,7 +232,7 @@ impl Document {
         };
         self.push_undo();
         self.entities[idx].data.name = Some(name.to_string());
-        self.dirty = true;
+        self.touch();
         true
     }
 
@@ -232,7 +253,7 @@ impl Document {
             },
             color: [1.0, 1.0, 1.0, 1.0],
         });
-        self.dirty = true;
+        self.touch();
         true
     }
 
@@ -247,7 +268,7 @@ impl Document {
         self.push_undo();
         self.entities[idx].data.directional_light =
             Some(automata_scene::DirectionalLight::default());
-        self.dirty = true;
+        self.touch();
         true
     }
 
@@ -264,7 +285,7 @@ impl Document {
             glam::Vec3::new(0.0, 2.0, 6.0),
             glam::Vec3::ZERO,
         ));
-        self.dirty = true;
+        self.touch();
         true
     }
 
@@ -278,7 +299,7 @@ impl Document {
         }
         self.push_undo();
         self.entities[idx].data.mesh_visual = None;
-        self.dirty = true;
+        self.touch();
         true
     }
 
@@ -292,7 +313,7 @@ impl Document {
         }
         self.push_undo();
         self.entities[idx].data.directional_light = None;
-        self.dirty = true;
+        self.touch();
         true
     }
 
@@ -315,7 +336,7 @@ impl Document {
         };
         self.redo.push(self.snapshot());
         self.restore(&ron);
-        self.dirty = true;
+        self.touch();
         true
     }
 
@@ -326,7 +347,7 @@ impl Document {
         };
         self.undo.push(self.snapshot());
         self.restore(&ron);
-        self.dirty = true;
+        self.touch();
         true
     }
 

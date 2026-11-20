@@ -181,7 +181,7 @@ impl EditorApp {
         }
 
         // 1) Draw the editor into the CPU pixmap and collect UI intents.
-        let (pixels, pw, ph, intents) = {
+        let intents = {
             let canvas = self.canvas.get_or_insert_with(|| Canvas::new(w, h));
             if canvas.size() != (w, h) {
                 canvas.resize(w, h);
@@ -199,25 +199,21 @@ impl EditorApp {
             // Render the live viewport, then composite the whole UI over it.
             let (vw, vh) = viewport_pixels(w, h);
             let (frame, fw, fh) = self.viewport.render(&self.doc, vw, vh);
-            let intents = self
-                .ui
-                .frame(canvas, &self.doc, pointer, Some((&frame, fw, fh)));
-
-            // Copy the pixels out so the canvas borrow ends before we apply
-            // intents (which mutate the document).
-            let (cw, ch) = canvas.size();
-            (canvas.pixels().to_vec(), cw, ch, intents)
+            self.ui
+                .frame(canvas, &self.doc, pointer, Some((&frame, fw, fh)))
         };
 
-        // 2) Apply intents (mutates the document / UI camera).
+        // 2) Apply intents (mutates the document / UI camera). Drawing already
+        //    captured this frame; intents take effect next frame.
         for intent in &intents {
             self.apply(intent);
         }
 
-        // 3) Present the UI pixmap through the engine surface.
-        if let Some(renderer) = &mut self.renderer {
-            renderer.blit_rgba_to_surface(&pixels, (pw, ph));
-        }
+        // 3) Present the UI pixmap straight from the canvas (no copy).
+        let (Some(renderer), Some(canvas)) = (&mut self.renderer, &self.canvas) else {
+            return;
+        };
+        renderer.blit_rgba_to_surface(canvas.pixels(), canvas.size());
 
         // Per-frame transient input is consumed.
         self.pressed_pending = false;
