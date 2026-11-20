@@ -37,8 +37,8 @@ from oberon.document import SceneDocument
 from oberon.runner import PlayModeRunner
 from oberon.viewport import Camera, render_document
 
-_LAYOUT = "h0.20([*Hierarchy,Console],h0.74([*Viewport],[Inspector]))"
-_VIEW_W, _VIEW_H = 720, 440
+_LAYOUT = "h0.16([*Hierarchy],h0.78([*Viewport,Console],[Inspector]))"
+_VIEW_W, _VIEW_H = 1024, 640
 
 
 def _color32(rgba) -> "nexa.Color":
@@ -221,6 +221,10 @@ class OberonApp:
             secs = ui.prop_float("Sim seconds", float(self.runner.seconds))
             if secs != self.runner.seconds:
                 self.runner.seconds = max(0.05, float(secs))
+            ui.separator()
+            zoom = ui.prop_float("Zoom", float(self.camera.distance))
+            if zoom != self.camera.distance:
+                self.camera.distance = max(1.0, min(200.0, float(zoom)))
             if self.runner.last_result:
                 ui.text(self.runner.last_result, fg=nexa.Token.TEXT_MUTED)
 
@@ -260,38 +264,52 @@ class OberonApp:
         with ui.dock_panel("Viewport", icon="view") as panel:
             if not panel:
                 return
-            fb = self._render()
+            fb = self._render(_VIEW_W, _VIEW_H)
             if self._tex is not None:
                 ui.image_destroy(self._tex)
             self._tex = ui.image_create(_VIEW_W, _VIEW_H, fb.to_bytes())
+            # `ui.image` displays the rendered frame. A zero-size `canvas`
+            # placed after it is an invisible input catcher (drag to orbit,
+            # Shift/right-drag to pan) — its own rect is 0x0 so it never
+            # covers the image, and its `mouse` is pointer-absolute.
             ui.image(self._tex, width=_VIEW_W, height=_VIEW_H)
-            self._viewport_input()
+            res = ui.canvas("viewport-input", width=0, height=0)
+            self._viewport_input(res)
 
-    def _render(self):
-        """Renders the document; the grid is toggled by ``self.show_grid``."""
+    def _render(self, width: int, height: int):
+        """Renders the document at ``width``x``height`` (grid optional)."""
         from oberon import viewport as vp
         if self.show_grid:
-            return render_document(self.doc, self.camera, _VIEW_W, _VIEW_H,
+            return render_document(self.doc, self.camera, width, height,
                                    selected_uid=self.doc.selected_uid)
         saved = vp.ViewportRenderer.draw_grid
         vp.ViewportRenderer.draw_grid = lambda self, fb, **k: None
         try:
-            return render_document(self.doc, self.camera, _VIEW_W, _VIEW_H,
+            return render_document(self.doc, self.camera, width, height,
                                    selected_uid=self.doc.selected_uid)
         finally:
             vp.ViewportRenderer.draw_grid = saved
 
-    def _viewport_input(self) -> None:
+    def _viewport_input(self, res) -> None:
+        """Camera controls while the pointer is over the viewport:
+
+        - drag to orbit,
+        - Shift-drag or right-drag to pan.
+        """
         ui = self.ui
-        res = ui.canvas("viewport-input", width=_VIEW_W, height=_VIEW_H)
-        mx, my = (res.mouse if res.mouse is not None else (0.0, 0.0))
+        mx, my = res.mouse
+        panning = bool(ui.modifiers & nexa.Mod.SHIFT) or ui.mouse_down(nexa.MouseButton.RIGHT)
         if res.pressed:
             if self._drag is None:
-                self._drag = (mx, my)
+                self._drag = (mx, my, panning)
             else:
-                dx, dy = mx - self._drag[0], my - self._drag[1]
-                self.camera.orbit(dx, dy)
-                self._drag = (mx, my)
+                px, py, _ = self._drag
+                dx, dy = mx - px, my - py
+                if panning:
+                    self.camera.pan(dx, dy)
+                else:
+                    self.camera.orbit(dx, dy)
+                self._drag = (mx, my, panning)
         else:
             self._drag = None
 
@@ -461,8 +479,10 @@ def main(argv: Optional[list] = None) -> int:
     return nexa.run(
         draw,
         title="Oberon — AUTOMATA Editor",
-        width=1440,
-        height=860,
+        width=1600,
+        height=950,
+        min_width=1100,
+        min_height=700,
         theme=ThemeMode.DARK,
         accent=Accent.BLUE,
     )
