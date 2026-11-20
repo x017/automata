@@ -33,6 +33,7 @@ pub use renderer::Renderer;
 pub use texture::Texture;
 
 pub use wgpu::Color;
+pub use wgpu::Texture as RenderTarget;
 
 /// Maximum number of sprite vertices in one batch (quads × 4).
 pub(crate) const SPRITE_VERTEX_CAPACITY: usize = 16_384;

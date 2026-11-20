@@ -8,7 +8,7 @@
 
 #![forbid(unsafe_code)]
 
-use automata_renderer::{DrawList, Renderer};
+use automata_renderer::{DrawList, RenderTarget, Renderer};
 use automata_scene::Scene;
 
 use crate::doc::Document;
@@ -22,7 +22,7 @@ pub struct ViewportRenderer {
     renderer: Option<Renderer>,
     scene: Scene,
     /// Reused offscreen render target (avoids a fresh GPU texture per frame).
-    target: Option<wgpu::Texture>,
+    target: Option<RenderTarget>,
     /// Reused readback buffer (avoids a fresh allocation per frame).
     frame: Vec<u8>,
     /// The document change counter the GPU world was last built from. When it
