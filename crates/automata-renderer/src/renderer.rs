@@ -56,6 +56,8 @@ pub struct Renderer {
     shadow_sampler: wgpu::Sampler,
     shadow_map_size: u32,
     shadows_enabled: bool,
+    /// Scratch buffer for CPU->surface frame blits (reused across frames).
+    blit_scratch: Vec<u8>,
 }
 
 impl Renderer {
@@ -103,6 +105,7 @@ impl Renderer {
             shadow_sampler,
             shadow_map_size: quality.shadow_map_size(),
             shadows_enabled: quality.shadows_enabled(),
+            blit_scratch: Vec::new(),
         })
     }
 
@@ -157,6 +160,7 @@ impl Renderer {
             shadow_sampler,
             shadow_map_size: quality.shadow_map_size(),
             shadows_enabled: quality.shadows_enabled(),
+            blit_scratch: Vec::new(),
         })
     }
 
@@ -366,6 +370,8 @@ impl Renderer {
     /// engine's existing surface — no OpenGL or `unsafe` needed.
     ///
     /// The image is written unscaled and must exactly cover the surface.
+    /// `rgba` is in **R,G,B,A byte order** (tiny-skia's layout); it is
+    /// converted to the surface's native order (often BGRA) before upload.
     pub fn blit_rgba_to_surface(&mut self, rgba: &[u8], size: (u32, u32)) {
         let (width, height) = (size.0.max(1), size.1.max(1));
         if rgba.len() != (width * height * 4) as usize {
@@ -379,6 +385,23 @@ impl Renderer {
         let Some(texture) = self.ctx.acquire_frame().ok().flatten() else {
             return; // occluded / outdated — skip this frame
         };
+
+        // Swap R<->B when the surface is BGR-ordered so colors stay correct.
+        let needs_bgr = matches!(
+            self.ctx.format(),
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+        );
+        let data: &[u8] = if needs_bgr {
+            self.blit_scratch.clear();
+            self.blit_scratch.extend_from_slice(rgba);
+            for px in self.blit_scratch.chunks_exact_mut(4) {
+                px.swap(0, 2);
+            }
+            &self.blit_scratch
+        } else {
+            rgba
+        };
+
         let queue = self.ctx.queue();
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -387,7 +410,7 @@ impl Renderer {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            rgba,
+            data,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * width),
