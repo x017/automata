@@ -46,12 +46,15 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Format
-        run: cargo fmt --all -- --check
+        run: cargo fmt --all -- --check 2>&1 | tee /tmp/fmt.log
 
+      # Runs even when Format failed, so one CI round reports both.
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --features automata-python/audio-cpal -- -D warnings
+        if: ${{ !cancelled() }}
+        run: cargo clippy --workspace --all-targets --features automata-python/audio-cpal -- -D warnings 2>&1 | tee /tmp/clippy.log
 
       - name: Tests (CPU + device)
+        if: ${{ !cancelled() }}
         run: cargo test --workspace --all-targets --features automata-python/audio-cpal -- --skip offscreen 2>&1 | tee /tmp/cpu-test.log
         env:
           WGPU_BACKEND: vulkan,gl
@@ -68,9 +71,27 @@ jobs:
         env:
           WGPU_BACKEND: vulkan,gl
 
+      # Surface the logs as check-run annotations too: readable through the
+      # REST API even when log downloads and branch pushes are unavailable.
+      - name: Annotate fmt log
+        if: failure()
+        run: python3 .github/scripts/annotate_log.py fmt
+
+      - name: Annotate clippy log
+        if: failure()
+        run: python3 .github/scripts/annotate_log.py clippy
+
+      - name: Annotate cpu-test log
+        if: failure()
+        run: python3 .github/scripts/annotate_log.py cpu-test
+
+      - name: Annotate gpu-test log
+        if: failure()
+        run: python3 .github/scripts/annotate_log.py gpu-test
+
       # The log-zip endpoint is unreachable from the dev sandbox; publish the
-      # test outputs to a scratch branch on failure so they can be read via
-      # plain git. Only runs when a test step failed.
+      # fmt / clippy / test outputs to a scratch branch on failure so they can
+      # be read via plain git. Only runs when a step failed.
       - name: Publish test logs on failure
         if: failure()
         run: |
@@ -78,6 +99,8 @@ jobs:
           git config user.name "ci"
           git checkout --orphan ci-logs
           git rm -rf . > /dev/null 2>&1 || true
+          cp /tmp/fmt.log fmt.log 2>/dev/null || true
+          cp /tmp/clippy.log clippy.log 2>/dev/null || true
           cp /tmp/cpu-test.log cpu-test.log 2>/dev/null || true
           cp /tmp/gpu-test.log gpu-test.log 2>/dev/null || true
           git add -A
