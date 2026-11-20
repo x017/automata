@@ -1518,6 +1518,8 @@ dependencies = [
  "glam 0.33.12",
  "image",
  "pollster",
+ "ron",
+ "serde",
  "tiny-skia",
  "tracing",
  "winit",
