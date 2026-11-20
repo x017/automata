@@ -20,13 +20,22 @@ import sys
 import traceback
 from typing import Optional
 
+# Allow running both as ``python -m oberon`` and directly as
+# ``python oberon/app.py``: in the latter case there is no package context,
+# so put the package's parent dir on the path and import it absolutely.
+if __package__ in (None, ""):  # direct script run
+    import os
+
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = "oberon"
+
 import nexa
 from nexa import Accent, Key, LogBuffer, ThemeMode
 
-from . import component_info
-from .document import SceneDocument
-from .runner import PlayModeRunner
-from .viewport import Camera, render_document
+from oberon import component_info
+from oberon.document import SceneDocument
+from oberon.runner import PlayModeRunner
+from oberon.viewport import Camera, render_document
 
 _LAYOUT = "h0.20([*Hierarchy,Console],h0.74([*Viewport],[Inspector]))"
 _VIEW_W, _VIEW_H = 720, 440
@@ -260,7 +269,7 @@ class OberonApp:
 
     def _render(self):
         """Renders the document; the grid is toggled by ``self.show_grid``."""
-        from . import viewport as vp
+        from oberon import viewport as vp
         if self.show_grid:
             return render_document(self.doc, self.camera, _VIEW_W, _VIEW_H,
                                    selected_uid=self.doc.selected_uid)

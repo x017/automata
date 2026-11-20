@@ -38,14 +38,26 @@ UI:
 
 ## Running
 
+Oberon needs the engine extension built first (it is a local maturin wheel,
+not on PyPI) plus nexa-ui:
+
 ```sh
-pip install -e tools/oberon          # installs nexa-ui + the engine wheel
+# 1. build + install the engine (from the repo root)
+maturin build --release --manifest-path crates/automata-python/Cargo.toml
+pip install target/wheels/automata_engine-*.whl
+
+# 2. install Oberon (pulls nexa-ui)
+pip install -e tools/oberon
+
+# 3. run (needs a display — it is a desktop window, not a headless tool)
 oberon                                # or: python -m oberon
 oberon path/to/scene.ron              # open a scene
+python tools/oberon/oberon/app.py     # direct-script run also works
 ```
 
-The engine extension must be built first (see the repo README), and the app
-needs a display — it is a desktop window, not a headless tool.
+If you prefer not to install the package, run it as a module from the
+`tools/oberon` directory (`python -m oberon`) or the script directly —
+both resolve imports correctly.
 
 ## Tests
 
