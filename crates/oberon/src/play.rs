@@ -13,8 +13,11 @@
 use std::collections::HashMap;
 
 use automata_core::TransformData;
-use automata_physics::PhysicsWorld3D;
+use automata_physics::{
+    BodyType, CharacterController, CharacterVelocity, PhysicsWorld3D, RigidBody,
+};
 use automata_scene::{Entity, Name, Scene, Transform};
+use glam::Vec3;
 
 use crate::doc::Document;
 
@@ -24,6 +27,36 @@ pub const TIMESTEP: f32 = 1.0 / 60.0;
 /// The most physics steps run in one frame (avoids a spiral of death after a
 /// long stall, e.g. while the window is being dragged).
 const MAX_STEPS: u32 = 5;
+
+/// Player walking speed (m/s); sprinting doubles it.
+const WALK_SPEED: f32 = 5.0;
+/// Upward speed of a jump (m/s).
+const JUMP_SPEED: f32 = 7.0;
+/// Gravity applied to characters (m/s²). Kinematic characters are not
+/// affected by the physics world's gravity, so the session integrates it.
+const CHARACTER_GRAVITY: f32 = 20.0;
+
+/// The player's controls for this frame (set by the app from the keyboard).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct PlayInput {
+    /// Forward (+1) / back (-1), relative to the camera.
+    pub forward: f32,
+    /// Right (+1) / left (-1), relative to the camera.
+    pub right: f32,
+    /// Jump held.
+    pub jump: bool,
+    /// Sprint held.
+    pub sprint: bool,
+    /// The view camera's yaw (radians): movement is camera-relative.
+    pub camera_yaw: f32,
+}
+
+/// A character-controlled entity and its vertical speed.
+#[derive(Debug, Clone, Copy)]
+struct Character {
+    entity: Entity,
+    vertical: f32,
+}
 
 /// A running simulation of a document.
 pub struct PlaySession {
@@ -40,6 +73,9 @@ pub struct PlaySession {
     pub elapsed: f32,
     /// Physics steps run since Play.
     pub steps: u64,
+    /// The player's controls (applied to every character controller).
+    pub input: PlayInput,
+    characters: Vec<Character>,
 }
 
 impl PlaySession {
@@ -72,6 +108,16 @@ impl PlaySession {
             }
         }
 
+        let characters = scene
+            .world()
+            .query::<(Entity, &CharacterController)>()
+            .iter()
+            .map(|(entity, _)| Character {
+                entity,
+                vertical: 0.0,
+            })
+            .collect();
+
         let mut physics = PhysicsWorld3D::new();
         physics.sync_from_scene(scene.world_mut());
         Self {
@@ -83,7 +129,34 @@ impl PlaySession {
             paused: false,
             elapsed: 0.0,
             steps: 0,
+            input: PlayInput::default(),
+            characters,
         }
+    }
+
+    /// Number of player-controllable characters.
+    #[must_use]
+    pub fn character_count(&self) -> usize {
+        self.characters.len()
+    }
+
+    /// Number of dynamic (moving, gravity-affected) bodies.
+    #[must_use]
+    pub fn dynamic_count(&self) -> usize {
+        self.scene
+            .world()
+            .query::<&RigidBody>()
+            .iter()
+            .filter(|b| b.enabled && b.body_type == BodyType::Dynamic)
+            .count()
+    }
+
+    /// The first character's position (the camera follows it).
+    #[must_use]
+    pub fn player_position(&self) -> Option<Vec3> {
+        let c = self.characters.first()?;
+        let t = self.scene.world().get::<&Transform>(c.entity).ok()?;
+        Some(t.position)
     }
 
     /// Number of simulated rigid bodies.
@@ -116,9 +189,44 @@ impl PlaySession {
     pub fn step_once(&mut self) {
         let world = self.scene.world_mut();
         self.physics.sync_from_scene(world);
+        self.drive_characters();
+        let world = self.scene.world_mut();
+        self.physics.move_characters(world, TIMESTEP);
         let _tick = self.physics.step(world, TIMESTEP);
         self.elapsed += TIMESTEP;
         self.steps += 1;
+    }
+
+    /// Turns the input into each character's desired velocity.
+    fn drive_characters(&mut self) {
+        let input = self.input;
+        // Camera-relative axes on the ground plane (the eye sits at
+        // +(sin yaw, _, cos yaw) from its target, looking back toward it).
+        let (sy, cy) = input.camera_yaw.sin_cos();
+        let forward = Vec3::new(-sy, 0.0, -cy);
+        let right = Vec3::new(cy, 0.0, -sy);
+        let mut wish = forward * input.forward + right * input.right;
+        if wish.length_squared() > 1.0 {
+            wish = wish.normalize();
+        }
+        let speed = if input.sprint {
+            WALK_SPEED * 2.0
+        } else {
+            WALK_SPEED
+        };
+        let world = self.scene.world_mut();
+        for c in &mut self.characters {
+            let grounded = self.physics.grounded(c.entity);
+            c.vertical = if grounded && input.jump {
+                JUMP_SPEED
+            } else if grounded && c.vertical <= 0.0 {
+                -2.0 // keep in contact with the ground
+            } else {
+                (c.vertical - CHARACTER_GRAVITY * TIMESTEP).max(-50.0)
+            };
+            let velocity = CharacterVelocity::new(wish * speed + Vec3::Y * c.vertical);
+            let _ = world.insert_one(c.entity, velocity);
+        }
     }
 
     /// Copies simulated transforms into the display document and refreshes
@@ -174,6 +282,36 @@ mod tests {
             doc.entities[idx].data.transform.unwrap().position[1],
             start_y
         );
+    }
+
+    #[test]
+    fn the_player_walks_with_the_input_and_lands_on_the_ground() {
+        let doc = Document::starter();
+        let idx = doc
+            .entities
+            .iter()
+            .position(|e| e.name() == "Player")
+            .unwrap();
+        let start = doc.entities[idx].data.transform.unwrap().position;
+        let mut play = PlaySession::start(&doc);
+        assert_eq!(play.character_count(), 1);
+        assert!(play.dynamic_count() >= 3, "the crates are dynamic");
+        // Camera yaw 0 looks down -Z: forward is -Z.
+        play.input = PlayInput {
+            forward: 1.0,
+            ..PlayInput::default()
+        };
+        for _ in 0..60 {
+            play.update(TIMESTEP);
+        }
+        let end = play.doc.entities[idx].data.transform.unwrap().position;
+        assert!(
+            end[2] < start[2] - 2.0,
+            "walked forward: {start:?} -> {end:?}"
+        );
+        assert!(end[1] > 0.5 && end[1] < 1.5, "stays on the ground: {end:?}");
+        let pos = play.player_position().unwrap();
+        assert!((pos.z - end[2]).abs() < 1e-4);
     }
 
     #[test]

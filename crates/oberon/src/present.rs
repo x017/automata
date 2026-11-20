@@ -14,6 +14,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -30,10 +31,10 @@ use automata_renderer::Renderer;
 use crate::canvas::Canvas;
 use crate::doc::Document;
 use crate::fields;
-use crate::play::PlaySession;
+use crate::play::{PlayInput, PlaySession};
 use crate::render::ViewportRenderer;
 use crate::ui::{CursorHint, EditKey, Intent, Layout, LogLevel, PlayState, Pointer, Ui};
-use crate::view::GizmoMode;
+use crate::view::{GizmoMode, ViewCamera};
 
 /// The editor window's initial logical size.
 pub const WINDOW_SIZE: (u32, u32) = (1600, 950);
@@ -75,12 +76,57 @@ struct Input {
     last_press: Option<(Instant, (f32, f32))>,
     scroll: f32,
     modifiers: ModifiersState,
+    /// Keys currently held (drives the player in play mode).
+    held: HashSet<KeyCode>,
 }
 
 impl Input {
     fn ctrl(&self) -> bool {
         self.modifiers.control_key() || self.modifiers.super_key()
     }
+
+    fn held_any(&self, keys: &[KeyCode]) -> bool {
+        keys.iter().any(|k| self.held.contains(k))
+    }
+
+    /// The player controls from the held keys (WASD / arrows, Space, Shift).
+    fn play_input(&self, camera_yaw: f32) -> PlayInput {
+        let axis = |pos: &[KeyCode], neg: &[KeyCode]| {
+            f32::from(u8::from(self.held_any(pos))) - f32::from(u8::from(self.held_any(neg)))
+        };
+        PlayInput {
+            forward: axis(
+                &[KeyCode::KeyW, KeyCode::ArrowUp],
+                &[KeyCode::KeyS, KeyCode::ArrowDown],
+            ),
+            right: axis(
+                &[KeyCode::KeyD, KeyCode::ArrowRight],
+                &[KeyCode::KeyA, KeyCode::ArrowLeft],
+            ),
+            jump: self.held.contains(&KeyCode::Space),
+            sprint: self.held_any(&[KeyCode::ShiftLeft, KeyCode::ShiftRight]),
+            camera_yaw,
+        }
+    }
+}
+
+/// Keys the player uses in play mode (never treated as editor shortcuts
+/// while simulating).
+fn is_game_key(code: KeyCode) -> bool {
+    matches!(
+        code,
+        KeyCode::KeyW
+            | KeyCode::KeyA
+            | KeyCode::KeyS
+            | KeyCode::KeyD
+            | KeyCode::ArrowUp
+            | KeyCode::ArrowDown
+            | KeyCode::ArrowLeft
+            | KeyCode::ArrowRight
+            | KeyCode::Space
+            | KeyCode::ShiftLeft
+            | KeyCode::ShiftRight
+    )
 }
 
 /// The running editor: document, UI state, and the window/GPU once resumed.
@@ -94,6 +140,8 @@ struct EditorApp {
     input: Input,
     /// The running simulation while in play mode.
     play: Option<PlaySession>,
+    /// The editor camera to restore when play mode ends.
+    edit_camera: Option<ViewCamera>,
     last_frame: Instant,
     last_title: String,
     last_cursor: CursorHint,
@@ -128,6 +176,7 @@ impl EditorApp {
             renderer: None,
             input: Input::default(),
             play: None,
+            edit_camera: None,
             last_frame: Instant::now(),
             last_title: String::new(),
             last_cursor: CursorHint::Default,
@@ -276,19 +325,39 @@ impl EditorApp {
             PlayState::Editing => {
                 self.doc.end_gesture();
                 let session = PlaySession::start(&self.doc);
-                let bodies = session.body_count();
+                let dynamic = session.dynamic_count();
+                let characters = session.character_count();
+                if let Some(pos) = session.player_position() {
+                    // Third-person follow camera behind the player.
+                    self.edit_camera = Some(self.ui.camera);
+                    self.ui.camera.target = (pos + glam::Vec3::Y * 0.6).to_array();
+                    self.ui.camera.distance = 9.0;
+                    self.ui.camera.pitch = 0.4;
+                }
                 self.play = Some(session);
                 self.ui.play = PlayState::Playing;
-                self.ui.log(
-                    LogLevel::Info,
-                    format!(
-                        "Play mode: simulating {bodies} rigid bodies. Stop restores the scene."
-                    ),
-                );
-                if bodies == 0 {
+                self.input.held.clear();
+                if characters > 0 {
+                    self.ui.log(
+                        LogLevel::Info,
+                        "Playing. WASD / arrows move, Space jumps, Shift sprints, \
+                         drag or right-drag turns the camera. Ctrl+P or Stop to exit.",
+                    );
+                } else {
+                    self.ui
+                        .log(LogLevel::Info, "Playing. Ctrl+P or Stop to exit.");
+                }
+                if dynamic == 0 && characters == 0 {
                     self.ui.log(
                         LogLevel::Warn,
-                        "No rigid bodies: add Rigid Body + Collider components (or + Create → Physics Cube).",
+                        "Nothing moves in this scene: add a Player (+ Create → Player) or a \
+                         Physics Cube, or give objects a Rigidbody + Collider.",
+                    );
+                } else if characters == 0 {
+                    self.ui.log(
+                        LogLevel::Warn,
+                        "No player to control: + Create → Player (or add a Character \
+                         Controller component) to walk around.",
                     );
                 }
             }
@@ -316,6 +385,10 @@ impl EditorApp {
             );
         }
         self.ui.play = PlayState::Editing;
+        if let Some(cam) = self.edit_camera.take() {
+            self.ui.camera = cam;
+        }
+        self.input.held.clear();
     }
 
     // ----- keyboard ------------------------------------------------------
@@ -324,6 +397,15 @@ impl EditorApp {
         let PhysicalKey::Code(code) = event.physical_key else {
             return;
         };
+        if event.state == ElementState::Pressed {
+            self.input.held.insert(code);
+        } else {
+            self.input.held.remove(&code);
+        }
+        // While simulating, movement keys drive the player, not the editor.
+        if self.play.is_some() && is_game_key(code) && !self.ui.is_editing_text() {
+            return;
+        }
         if event.state == ElementState::Released {
             // Releasing an arrow key ends the nudge gesture (one undo step
             // per key hold).
@@ -460,7 +542,16 @@ impl EditorApp {
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         if let Some(play) = &mut self.play {
+            play.input = self.input.play_input(self.ui.camera.yaw);
             play.update(dt);
+            // The camera follows the player (orbit/zoom stay under the
+            // user's control).
+            if let Some(pos) = play.player_position() {
+                let goal = pos + glam::Vec3::Y * 0.6;
+                let current = glam::Vec3::from(self.ui.camera.target);
+                let k = 1.0 - (-dt * 10.0).exp();
+                self.ui.camera.target = current.lerp(goal, k).to_array();
+            }
         }
 
         let scale = window.scale_factor() as f32;
@@ -672,6 +763,7 @@ impl ApplicationHandler for EditorApp {
                 self.input.right = false;
                 self.input.middle = false;
                 self.input.modifiers = ModifiersState::empty();
+                self.input.held.clear();
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.input.modifiers = modifiers.state();

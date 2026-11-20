@@ -58,6 +58,8 @@ pub enum Field {
     ColliderFriction,
     /// Collider restitution (bounciness, 0..1).
     ColliderRestitution,
+    /// Character controller: steepest walkable slope, in degrees.
+    CharacterSlope,
 }
 
 /// A boolean property of an entity (toggled by a checkbox).
@@ -127,6 +129,11 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::ColliderDensity => data.collider_3d.as_ref()?.density,
         F::ColliderFriction => data.collider_3d.as_ref()?.friction,
         F::ColliderRestitution => data.collider_3d.as_ref()?.restitution,
+        F::CharacterSlope => data
+            .character_controller
+            .as_ref()?
+            .max_slope_climb_angle
+            .to_degrees(),
     })
 }
 
@@ -140,6 +147,7 @@ pub fn range(field: Field) -> (f32, f32) {
             (0.001, 10_000.0)
         }
         F::CameraFov => (1.0, 179.0),
+        F::CharacterSlope => (0.0, 89.0),
         F::CameraNear => (0.001, 1_000.0),
         F::CameraFar => (0.01, 1_000_000.0),
         F::BodyLinearDamping | F::BodyAngularDamping | F::ColliderDensity | F::ColliderFriction => {
@@ -154,7 +162,7 @@ pub fn range(field: Field) -> (f32, f32) {
 pub fn scrub_step(field: Field) -> f32 {
     use Field as F;
     match field {
-        F::Rotation(_) | F::CameraFov => 0.5,
+        F::Rotation(_) | F::CameraFov | F::CharacterSlope => 0.5,
         F::MeshColor(_) | F::LightColor(_) | F::LightAmbient | F::ColliderRestitution => 0.005,
         F::Scale(_) | F::LightDirection(_) => 0.01,
         _ => 0.02,
@@ -257,6 +265,10 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
         },
         F::ColliderRestitution => match &mut data.collider_3d {
             Some(c) => c.restitution = v,
+            None => return false,
+        },
+        F::CharacterSlope => match &mut data.character_controller {
+            Some(c) => c.max_slope_climb_angle = v.to_radians(),
             None => return false,
         },
     }

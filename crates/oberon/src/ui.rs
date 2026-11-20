@@ -1144,6 +1144,25 @@ impl Ui {
             }
         }
 
+        if d.character_controller.is_some() {
+            let kind = ComponentKind::Character;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                y = self.float_row(canvas, x, y, w, e, "Max Slope", Field::CharacterSlope);
+                for line in [
+                    "Play mode: WASD / arrows move,",
+                    "Space jumps, Shift sprints.",
+                ] {
+                    if self.row_visible(Rect::new(x, y, w, 16.0)) {
+                        canvas.text(x, y, layout::SMALL_SIZE, line, color::text_dim());
+                    }
+                    y += 16.0;
+                }
+                y += 8.0;
+            }
+        }
+
         // Add Component / Delete.
         y += 8.0;
         let add = Rect::new(x + w * 0.12, y, w * 0.76, 26.0);

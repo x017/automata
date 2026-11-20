@@ -1039,6 +1039,96 @@ def test_scene_save_and_load_files(tmp_path):
     assert len(loaded) == 6
 
 
+# A scene exactly as the Oberon editor saves it (Ctrl+S): a static ground and
+# a "+ Create -> Player" entity (kinematic body + Character Controller).
+OBERON_SCENE = """(
+    version: 1,
+    entities: [
+        (
+            name: Some("Ground"),
+            transform: Some((
+                position: (0.0, -0.1, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (20.0, 0.2, 20.0),
+            )),
+            mesh_visual: Some((primitive: Cube(size: 1.0), color: (0.16, 0.17, 0.2, 1.0))),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(extents: (20.0, 0.2, 20.0)),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Player"),
+            transform: Some((
+                position: (-3.0, 0.9, 2.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.8, 1.6, 0.8),
+            )),
+            mesh_visual: Some((primitive: Cube(size: 1.0), color: (1.0, 0.56, 0.24, 1.0))),
+            rigid_body: Some((
+                body_type: KinematicPosition,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(extents: (0.8, 1.6, 0.8)),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+            character_controller: Some((
+                mode: Normal,
+                max_slope_climb_angle: 0.7853982,
+                min_slope_slide_angle: 0.5235988,
+                autostep_height: None,
+                snap_to_ground: Some(0.3),
+                offset: 0.05,
+                slide: true,
+            )),
+            character_velocity: Some((velocity: (0.0, 0.0, 0.0))),
+        ),
+    ],
+)
+"""
+
+
+def test_oberon_scene_loads_and_its_player_walks(tmp_path):
+    path = tmp_path / "scene.ron"
+    path.write_text(OBERON_SCENE)
+    scene = at.Scene.load(str(path))
+    assert len(scene) == 2
+
+    game = at.Game(headless=True)
+    game.load_scene(scene)
+    seen = {}
+
+    def walk(ctx):
+        player = ctx.scene["Player"]
+        player.character_velocity = (3.0, -2.0, 0.0)
+        seen["x"], seen["y"], _ = player.transform.position
+        seen["grounded"] = ctx.physics.grounded(player)
+
+    game.run(walk, max_frames=60)
+    assert seen["x"] > -1.0  # walked ~3 m/s for ~1 s from x = -3
+    assert seen["y"] == pytest.approx(0.8, abs=0.15)  # standing on the ground
+    assert seen["grounded"]
+
+
 def test_scene_from_ron_rejects_garbage_and_newer_versions():
     with pytest.raises(ValueError):
         at.Scene.from_ron("definitely not ron")

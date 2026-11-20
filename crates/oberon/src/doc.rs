@@ -69,17 +69,21 @@ pub enum CreateKind {
     Camera,
     /// A cube with a dynamic rigid body and a box collider.
     PhysicsCube,
+    /// A playable character: WASD / arrows to move, Space to jump in Play
+    /// mode.
+    Player,
 }
 
 impl CreateKind {
     /// Every kind, in menu order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Empty,
         Self::Cube,
         Self::Plane,
         Self::Light,
         Self::Camera,
         Self::PhysicsCube,
+        Self::Player,
     ];
 
     /// The menu label (also the base name of the new entity).
@@ -92,6 +96,7 @@ impl CreateKind {
             Self::Light => "Directional Light",
             Self::Camera => "Camera",
             Self::PhysicsCube => "Physics Cube",
+            Self::Player => "Player",
         }
     }
 }
@@ -109,16 +114,19 @@ pub enum ComponentKind {
     RigidBody,
     /// 3D collider.
     Collider,
+    /// Character controller (player movement in Play mode).
+    Character,
 }
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Mesh,
         Self::Light,
         Self::Camera,
         Self::RigidBody,
         Self::Collider,
+        Self::Character,
     ];
 
     /// The display name.
@@ -130,6 +138,7 @@ impl ComponentKind {
             Self::Camera => "Camera",
             Self::RigidBody => "Rigidbody",
             Self::Collider => "Collider",
+            Self::Character => "Character Controller",
         }
     }
 
@@ -142,6 +151,7 @@ impl ComponentKind {
             Self::Camera => data.camera_3d.is_some(),
             Self::RigidBody => data.rigid_body.is_some(),
             Self::Collider => data.collider_3d.is_some(),
+            Self::Character => data.character_controller.is_some(),
         }
     }
 
@@ -183,6 +193,22 @@ impl ComponentKind {
                     automata_physics::Collider3D::cuboid(ext(0), ext(1), ext(2))
                 });
             }
+            Self::Character => {
+                // A character needs a kinematic body and a collider.
+                if data
+                    .rigid_body
+                    .as_ref()
+                    .is_none_or(|b| b.body_type == automata_physics::BodyType::Dynamic)
+                {
+                    data.rigid_body = Some(automata_physics::RigidBody::kinematic_position());
+                }
+                Self::Collider.add_to(data);
+                data.character_controller.get_or_insert_with(|| {
+                    automata_physics::CharacterController::new().snap_to_ground(0.3)
+                });
+                data.character_velocity
+                    .get_or_insert_with(automata_physics::CharacterVelocity::default);
+            }
         }
     }
 
@@ -194,6 +220,10 @@ impl ComponentKind {
             Self::Camera => data.camera_3d = None,
             Self::RigidBody => data.rigid_body = None,
             Self::Collider => data.collider_3d = None,
+            Self::Character => {
+                data.character_controller = None;
+                data.character_velocity = None;
+            }
         }
     }
 }
@@ -259,9 +289,36 @@ impl Document {
             primitive: PrimitiveData::Cube { size: 1.0 },
             color: [0.62, 0.78, 1.0, 1.0],
         });
+        // Something to play with: a player and a stack of crates.
+        let player = doc.create(CreateKind::Player);
+        if let Some(t) = doc.transform_mut(player) {
+            t.position = [-3.0, 0.9, 2.0];
+        }
+        for (i, pos) in [[2.5, 0.5, -1.0], [2.5, 1.5, -1.0], [2.6, 2.5, -0.9]]
+            .into_iter()
+            .enumerate()
+        {
+            let id = doc.create(CreateKind::PhysicsCube);
+            if let Some(idx) = doc.index_of(id) {
+                let e = &mut doc.entities[idx].data;
+                e.name = Some(format!("Crate {}", i + 1));
+                if let Some(t) = &mut e.transform {
+                    t.position = pos;
+                }
+                if let Some(m) = &mut e.mesh_visual {
+                    m.color = [0.78, 0.62, 0.40, 1.0];
+                }
+            }
+        }
+        doc.selected = None;
         doc.dirty = false;
         doc.undo.clear();
         doc
+    }
+
+    fn transform_mut(&mut self, id: u64) -> Option<&mut TransformData> {
+        let idx = self.index_of(id)?;
+        self.entities[idx].data.transform.as_mut()
     }
 
     /// The number of entities.
@@ -570,6 +627,17 @@ impl Document {
                 ComponentKind::RigidBody.add_to(&mut data);
                 ComponentKind::Collider.add_to(&mut data);
             }
+            CreateKind::Player => {
+                if let Some(t) = &mut data.transform {
+                    t.position = [0.0, 0.9, 0.0];
+                    t.scale = [0.8, 1.6, 0.8];
+                }
+                data.mesh_visual = Some(MeshVisualData {
+                    primitive: PrimitiveData::Cube { size: 1.0 },
+                    color: [1.0, 0.56, 0.24, 1.0],
+                });
+                ComponentKind::Character.add_to(&mut data);
+            }
         }
         self.push_undo();
         let id = self.alloc_id();
@@ -844,12 +912,20 @@ mod tests {
     }
 
     #[test]
-    fn starter_scene_has_sun_ground_cube() {
+    fn starter_scene_is_playable() {
         let doc = Document::starter();
-        assert_eq!(doc.entity_count(), 3);
+        assert_eq!(doc.entity_count(), 7);
         assert!(!doc.dirty());
+        assert!(!doc.can_undo());
         let names: Vec<&str> = doc.entities.iter().map(super::EntityEntry::name).collect();
-        assert!(names.contains(&"Sun") && names.contains(&"Ground") && names.contains(&"Cube"));
+        for name in [
+            "Sun", "Ground", "Cube", "Player", "Crate 1", "Crate 2", "Crate 3",
+        ] {
+            assert!(names.contains(&name), "{name} missing from {names:?}");
+        }
+        let player = &doc.entities[names.iter().position(|n| *n == "Player").unwrap()].data;
+        assert!(player.character_controller.is_some());
+        assert!(player.rigid_body.is_some() && player.collider_3d.is_some());
     }
 
     #[test]

@@ -91,6 +91,30 @@ passed to `game.run(update)`), and functional style (`game.run(lambda ctx:
 components are mutable (`t.position = (1, 2, 0)`), and scene views support
 `scene["name"]` indexing and iteration (`for e in ctx.scene`).
 
+### Loading scenes made in Oberon
+
+The Oberon editor saves the engine's RON scene-file format (Ctrl+S writes
+`scene.ron`, then `scene-2.ron`, … in the directory Oberon was started
+from), so its files load directly:
+
+```python
+import automata as at
+
+game = at.Game(title="my level")
+game.load_scene(at.Scene.load("scene.ron"))   # IOError / ValueError on failure
+
+def update(ctx):
+    player = ctx.scene["Player"]              # entity names from the Hierarchy
+    player.character_velocity = (3.0, -2.0, 0.0)
+
+game.run(update)
+```
+
+Physics, meshes, lights and Character Controllers come across as authored;
+gameplay (input → movement, cameras) is your Python code.
+`examples/python/play_oberon_scene.py scene.ron` reproduces Oberon's Play
+mode (WASD/arrows, Space, Shift, follow camera) as a starting point.
+
 ### Reference
 
 | Item | Purpose |
