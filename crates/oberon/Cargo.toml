@@ -1,0 +1,31 @@
+[package]
+name = "oberon"
+description = "Oberon: the AUTOMATA scene editor — a native Rust app (winit + tiny-skia + the engine's wgpu renderer)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Oberon is an application binary that presents a window. The window/GL
+# boundary (glow context creation, winit) requires unsafe FFI, which the
+# engine's own crates forbid but an app shell cannot avoid. We therefore do
+# NOT inherit the workspace `unsafe_code = "forbid"` here; instead the safe
+# modules declare `#![forbid(unsafe_code)]` individually and the only unsafe
+# is contained to `present` (scoped `#![allow(unsafe_code)]`).
+
+[dependencies]
+automata-core = { path = "../automata-core" }
+automata-renderer = { path = "../automata-renderer" }
+automata-scene = { path = "../automata-scene" }
+ab_glyph.workspace = true
+glam.workspace = true
+glow.workspace = true
+image.workspace = true
+tiny-skia.workspace = true
+winit.workspace = true
+pollster.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]

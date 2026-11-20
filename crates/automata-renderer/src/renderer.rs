@@ -323,6 +323,40 @@ impl Renderer {
         self.execute_frame(draw, FrameTarget::Offscreen(view));
     }
 
+    /// Creates an offscreen render target texture of `size` for use with
+    /// [`Renderer::render_offscreen`] and [`Renderer::read_texture_rgba`].
+    ///
+    /// Editors and tooling (Oberon) render the live scene into this texture,
+    /// then read it back as RGBA8 to composite into their own UI.
+    #[must_use]
+    pub fn create_render_target(&self, size: (u32, u32)) -> wgpu::Texture {
+        let device = self.ctx.device();
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("oberon-viewport"),
+            size: wgpu::Extent3d {
+                width: size.0.max(1),
+                height: size.1.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        })
+    }
+
+    /// Reads a render target's pixels back to the CPU as tightly packed
+    /// RGBA8 (row-major, top-left origin). Blocks until the GPU finishes.
+    ///
+    /// Intended for editors and tooling that composite engine output into
+    /// their own window; not for per-frame game use.
+    #[must_use]
+    pub fn read_texture_rgba(&self, target: &wgpu::Texture, size: (u32, u32)) -> Vec<u8> {
+        read_texture_rgba(self, target, size)
+    }
+
     /// Builds a camera bind group from a view-projection matrix and the
     /// camera's world position (used for specular highlights).
     fn camera_bind_group(&self, view_proj: glam::Mat4, view_pos: glam::Vec3) -> wgpu::BindGroup {
@@ -811,6 +845,65 @@ impl SpriteBatch {
 #[allow(dead_code)]
 fn _assert_texture_inner_fields(_: &TextureInner) {}
 
+/// Reads a render target texture back to the CPU as tightly packed RGBA8
+/// (row-major, top-left origin). Blocks until the GPU readback completes.
+fn read_texture_rgba(renderer: &Renderer, target: &wgpu::Texture, size: (u32, u32)) -> Vec<u8> {
+    let device = renderer.context().device();
+    let queue = renderer.context().queue();
+    let bytes_per_row = 4 * size.0;
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("readback"),
+        size: u64::from(bytes_per_row) * u64::from(size.1),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("readback"),
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(bytes_per_row),
+                rows_per_image: Some(size.1),
+            },
+        },
+        wgpu::Extent3d {
+            width: size.0,
+            height: size.1,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit([encoder.finish()]);
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    wgpu::util::DownloadBuffer::read_buffer(device, queue, &buffer.slice(..), move |r| {
+        let _ = tx.send(r.map(|b| b.to_vec()));
+    });
+    // Drive the device until the readback callback fires. `Poll` alone can
+    // stall on some drivers; alternate Poll with a blocking Wait.
+    loop {
+        let _ = device.poll(wgpu::PollType::Poll);
+        if let Ok(received) = rx.try_recv() {
+            return received.expect("readback failed");
+        }
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_millis(10)),
+        });
+        if let Ok(received) = rx.try_recv() {
+            return received.expect("readback failed");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -850,60 +943,7 @@ mod tests {
 
     /// Reads the full target texture back to CPU memory.
     fn read_pixels(renderer: &Renderer, target: &wgpu::Texture, size: (u32, u32)) -> Vec<u8> {
-        let device = renderer.context().device();
-        let queue = renderer.context().queue();
-        let bytes_per_row = 4 * size.0;
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback"),
-            size: u64::from(bytes_per_row) * u64::from(size.1),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("readback"),
-        });
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: target,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(bytes_per_row),
-                    rows_per_image: Some(size.1),
-                },
-            },
-            wgpu::Extent3d {
-                width: size.0,
-                height: size.1,
-                depth_or_array_layers: 1,
-            },
-        );
-        queue.submit([encoder.finish()]);
-
-        let (tx, rx) = std::sync::mpsc::channel();
-        wgpu::util::DownloadBuffer::read_buffer(device, queue, &buffer.slice(..), move |r| {
-            let _ = tx.send(r.map(|b| b.to_vec()));
-        });
-        // Drive the device until the readback callback fires. `Poll` alone
-        // can stall on some drivers; alternate Poll with a blocking Wait.
-        loop {
-            let _ = device.poll(wgpu::PollType::Poll);
-            if let Ok(received) = rx.try_recv() {
-                return received.expect("readback failed");
-            }
-            let _ = device.poll(wgpu::PollType::Wait {
-                submission_index: None,
-                timeout: Some(std::time::Duration::from_millis(10)),
-            });
-            if let Ok(received) = rx.try_recv() {
-                return received.expect("readback failed");
-            }
-        }
+        read_texture_rgba(renderer, target, size)
     }
 
     /// The center pixel of a rendered target.

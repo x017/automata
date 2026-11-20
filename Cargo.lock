@@ -1507,6 +1507,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "oberon"
+version = "0.1.0"
+dependencies = [
+ "ab_glyph",
+ "automata-core",
+ "automata-renderer",
+ "automata-scene",
+ "glam 0.33.12",
+ "glow",
+ "image",
+ "pollster",
+ "tiny-skia",
+ "tracing",
+ "winit",
+]
+
+[[package]]
 name = "objc-sys"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

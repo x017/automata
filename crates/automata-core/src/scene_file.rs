@@ -94,6 +94,16 @@ pub struct TransformData {
     pub scale: [f32; 3],
 }
 
+impl Default for TransformData {
+    fn default() -> Self {
+        Self {
+            position: [0.0, 0.0, 0.0],
+            rotation_euler: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        }
+    }
+}
+
 impl From<Transform> for TransformData {
     fn from(t: Transform) -> Self {
         Self {
@@ -229,6 +239,55 @@ impl SceneFile {
         Self {
             version: SCENE_FILE_VERSION,
             entities,
+        }
+    }
+
+    /// Spawns every recorded entity into `world`, replacing its contents.
+    ///
+    /// The inverse of [`SceneFile::from_world`]; editors (Oberon) and
+    /// tooling use it to materialize a loaded scene file into a live world
+    /// for simulation or rendering. Entities get a [`GlobalTransform`] so
+    /// the renderer's draw-list recording sees them immediately.
+    pub fn apply_to_world(&self, world: &mut SceneWorld) {
+        use automata_scene::GlobalTransform;
+        world.clear();
+        for data in &self.entities {
+            let entity = world.spawn(());
+            if let Some(name) = &data.name {
+                let _ = world.insert_one(entity, Name::new(name.clone()));
+            }
+            if let Some(transform) = &data.transform {
+                let t = Transform::from(*transform);
+                let _ = world.insert_one(entity, t);
+                let _ = world.insert_one(entity, GlobalTransform(t.to_matrix()));
+            }
+            if let Some(camera) = &data.camera_3d {
+                let _ = world.insert_one(entity, *camera);
+            }
+            if let Some(camera) = &data.camera_2d {
+                let _ = world.insert_one(entity, *camera);
+            }
+            if let Some(light) = &data.directional_light {
+                let _ = world.insert_one(entity, *light);
+            }
+            if let Some(visual) = &data.mesh_visual {
+                let _ = world.insert_one(entity, MeshVisual::from(visual));
+            }
+            if let Some(body) = &data.rigid_body {
+                let _ = world.insert_one(entity, body.clone());
+            }
+            if let Some(collider) = &data.collider_3d {
+                let _ = world.insert_one(entity, collider.clone());
+            }
+            if let Some(collider) = &data.collider_2d {
+                let _ = world.insert_one(entity, collider.clone());
+            }
+            if let Some(controller) = &data.character_controller {
+                let _ = world.insert_one(entity, controller.clone());
+            }
+            if let Some(velocity) = &data.character_velocity {
+                let _ = world.insert_one(entity, *velocity);
+            }
         }
     }
 

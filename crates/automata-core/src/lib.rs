@@ -21,7 +21,10 @@ pub mod window;
 pub use app::{AppContext, AppState, Application, SharedAudio, WorldState};
 pub use config::EngineConfig;
 pub use error::{Error, Result};
-pub use scene_file::{EntityData, SceneFile, SceneFileError, TransformData, SCENE_FILE_VERSION};
+pub use scene_file::{
+    EntityData, MeshVisualData, PrimitiveData, SceneFile, SceneFileError, TransformData,
+    SCENE_FILE_VERSION,
+};
 pub use time::Time;
 pub use window::{WindowConfig, WindowMode};
 
