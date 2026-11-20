@@ -33,6 +33,7 @@ use crate::canvas::Canvas;
 use crate::code;
 use crate::doc::Document;
 use crate::fields;
+use crate::lsp::{self, LspAction, LspClient};
 use crate::play::{PlayInput, PlaySession};
 use crate::project::{self, Prefs};
 use crate::render::ViewportRenderer;
@@ -147,6 +148,10 @@ struct EditorApp {
     play: Option<PlaySession>,
     /// The Python script runner while playing a scene with scripts.
     bridge: Option<ScriptBridge>,
+    /// The language server for the script editor.
+    lsp: Option<LspClient>,
+    /// Whether starting a language server failed (don't retry).
+    lsp_failed: bool,
     /// Whether the "scripts are slow" warning was shown this session.
     bridge_slow_warned: bool,
     /// The editor camera to restore when play mode ends.
@@ -199,6 +204,8 @@ impl EditorApp {
             input: Input::default(),
             play: None,
             bridge: None,
+            lsp: None,
+            lsp_failed: false,
             bridge_slow_warned: false,
             edit_camera: None,
             last_frame: Instant::now(),
@@ -1016,16 +1023,63 @@ impl EditorApp {
     /// game through the bridge's hot reload; language features are served by
     /// the language server once one is running.
     fn handle_code_requests(&mut self) {
-        for ev in self.ui.take_code_requests() {
-            match ev {
-                code::CodeEvent::Saved(_)
-                | code::CodeEvent::Closed(_)
-                | code::CodeEvent::Complete(..)
-                | code::CodeEvent::Definition(..)
-                | code::CodeEvent::Hover(..)
-                | code::CodeEvent::Info(_)
-                | code::CodeEvent::Error(_) => {}
+        let requests = self.ui.take_code_requests();
+        // The language server starts with the first open script.
+        if self.lsp.is_none() && !self.lsp_failed && !self.ui.code.tabs.is_empty() {
+            let root = self.ui.project_root.clone();
+            let dirs = lsp::tool_dirs(&root, self.prefs.python.as_deref());
+            match LspClient::start(self.prefs.language_server.as_deref(), &root, &dirs) {
+                Ok(client) => {
+                    self.ui.code.server = Some(client.name.clone());
+                    self.lsp = Some(client);
+                }
+                Err(e) => {
+                    self.lsp_failed = true;
+                    self.ui.log(
+                        LogLevel::Info,
+                        format!("Code intelligence: {e}. Using word completion."),
+                    );
+                }
             }
+        }
+        let Some(client) = &mut self.lsp else {
+            for ev in requests {
+                if let code::CodeEvent::Complete(..) = ev {
+                    let items = self.ui.code.local_completions();
+                    self.ui.code.show_completions(items);
+                }
+            }
+            return;
+        };
+        client.sync(&self.ui.code);
+        for ev in &requests {
+            client.request(&self.ui.code, ev);
+        }
+        let actions = client.poll(&mut self.ui.code);
+        let dead = client.is_dead();
+        for action in actions {
+            match action {
+                LspAction::Log(text, error) => {
+                    let level = if error {
+                        LogLevel::Error
+                    } else {
+                        LogLevel::Info
+                    };
+                    self.ui.log(level, text);
+                }
+                LspAction::Goto(path, pos) => {
+                    self.ui.open_code(&path, u32::try_from(pos.line + 1).ok());
+                    if let Some(tab) = self.ui.code.current_mut() {
+                        tab.buf.move_to(pos, false);
+                        tab.reveal = true;
+                    }
+                }
+            }
+        }
+        if dead {
+            self.lsp = None;
+            self.lsp_failed = true;
+            self.ui.code.server = None;
         }
     }
 

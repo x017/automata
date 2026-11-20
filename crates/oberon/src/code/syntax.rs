@@ -42,14 +42,16 @@ pub enum LineState {
     TripleSingle,
 }
 
-const KEYWORDS: &[&str] = &[
+/// Python keywords.
+pub const KEYWORDS: &[&str] = &[
     "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif",
     "else", "except", "finally", "for", "from", "global", "if", "import", "in", "is", "lambda",
     "match", "case", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with",
     "yield",
 ];
 
-const BUILTINS: &[&str] = &[
+/// Python builtins.
+pub const BUILTINS: &[&str] = &[
     "abs",
     "all",
     "any",

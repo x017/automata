@@ -301,6 +301,8 @@ pub struct CodeEditor {
     pub events: Vec<CodeEvent>,
     /// Lines per page (set by the view from its height).
     pub page_lines: usize,
+    /// The running language server's name (status line), if any.
+    pub server: Option<String>,
     last_disk_check: Option<Instant>,
 }
 
@@ -513,6 +515,54 @@ impl CodeEditor {
             tab.reveal = true;
         }
         true
+    }
+
+    /// Completions without a language server: identifiers in the open
+    /// files (current file first), then keywords and builtins.
+    #[must_use]
+    pub fn local_completions(&self) -> Vec<CompletionItem> {
+        let Some(tab) = self.current() else {
+            return Vec::new();
+        };
+        let (a, b) = tab.buf.word_range(tab.buf.cursor);
+        let typing = if b == tab.buf.cursor {
+            tab.buf.text_range(a, b)
+        } else {
+            String::new()
+        };
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        let others = self.tabs.iter().filter(|t| !std::ptr::eq(*t, tab));
+        for (file, t) in std::iter::once(tab).chain(others).enumerate() {
+            for line in t.buf.lines() {
+                for word in line.split(|c: char| !buffer::is_word(c)) {
+                    let starts_ok = word.chars().next().is_some_and(|c| !c.is_ascii_digit());
+                    if word.chars().count() >= 3 && starts_ok && word != typing && seen.insert(word)
+                    {
+                        let detail = if file == 0 { "" } else { "other file" };
+                        out.push(CompletionItem {
+                            label: word.to_string(),
+                            detail: detail.to_string(),
+                            insert: word.to_string(),
+                            kind: 'v',
+                        });
+                    }
+                }
+            }
+        }
+        for (words, kind) in [(syntax::KEYWORDS, 'k'), (syntax::BUILTINS, 'f')] {
+            for w in words {
+                if seen.insert(w) {
+                    out.push(CompletionItem {
+                        label: (*w).to_string(),
+                        detail: String::new(),
+                        insert: (*w).to_string(),
+                        kind,
+                    });
+                }
+            }
+        }
+        out
     }
 
     fn request(&mut self, make: fn(PathBuf, Pos) -> CodeEvent) {

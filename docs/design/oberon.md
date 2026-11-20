@@ -110,7 +110,7 @@ Recorded decisions (both stand):
   (basedpyright / pylsp / jedi-language-server over hand-written JSON-RPC)
   rather than a webview or a Code-OSS fork.
 
-#### 3.2.1 The script editor *(shipped: editor; LSP client next)*
+#### 3.2.1 The script editor *(shipped)*
 
 Scripts open as document tabs next to the **Scene** tab over the center area
 (double-click a `.py` in Project, *Edit Script* in the Inspector, or click a
@@ -139,10 +139,20 @@ the 3D view isn't rendered.
 - Saving is all the running game needs: the bridge's mtime hot reload
   (§8) picks the file up. Files changed on disk reload automatically when
   the tab is clean. Quitting with modified scripts asks first.
-- Language features arrive as `CodeEvent::{Complete, Definition, Hover}`
-  requests; the LSP client answers them by filling
-  `CodeTab::diagnostics`, `CodeEditor::show_completions` and
-  `CodeEditor::hover`.
+- Language features (`lsp.rs`): the first opened script starts a language
+  server — `language_server` in `~/.config/oberon/prefs.ron` (a command
+  line, `"auto"` or `"off"`), else the first installed of
+  basedpyright-langserver, pyright-langserver, pylsp, jedi-language-server
+  (searched in the project's `.venv`/`venv`, the configured Python's
+  directory, `~/.local/bin`, then `PATH`). JSON-RPC over stdio with
+  `Content-Length` framing, read on a background thread and polled once per
+  frame; full-text document sync; char ↔ UTF-16 column conversion.
+  Diagnostics (squiggles, gutter marks, tab and status counts), completion
+  (on `.`, after two word chars, or Ctrl+Space), hover (resting the mouse
+  on a word for 0.6 s, or Ctrl+Shift+I) and go-to-definition (F12 /
+  Ctrl+click, across files). With no server installed, completion falls
+  back to words from the open files plus Python keywords and builtins.
+  `tests/lsp_e2e.rs` exercises a real server when one is installed.
 
 ## 4. Engine work required (the embedding hooks)
 

@@ -110,6 +110,7 @@ impl Ui {
 
     /// Forwards a key to the code editor; false when it isn't used.
     pub fn code_key(&mut self, key: crate::code::Key, mods: crate::code::Mods) -> bool {
+        self.code.hover = None;
         let handled = self.code.key(key, mods);
         self.drain_code_events();
         handled
@@ -117,6 +118,7 @@ impl Ui {
 
     /// Forwards typed text to the code editor.
     pub fn code_text(&mut self, text: &str) {
+        self.code.hover = None;
         let clean: String = text
             .chars()
             .filter(|c| !c.is_control() || *c == '\t')
@@ -559,6 +561,7 @@ impl Ui {
         if over_text {
             self.cursor = CursorHint::Text;
         }
+        self.hover_dwell(over_text && !p.down, geom, idx);
         let tab = &mut self.code.tabs[idx];
         if p.pressed
             && (over_text || over_gutter)
@@ -629,6 +632,30 @@ impl Ui {
         }
     }
 
+    /// Resting the mouse on a word asks the language server for hover
+    /// info; moving away hides it.
+    fn hover_dwell(&mut self, active: bool, geom: TextGeom, idx: usize) {
+        let tab = &self.code.tabs[idx];
+        let pos = geom.pos_at(&tab.buf, self.p.x, self.p.y);
+        let (a, b) = tab.buf.word_range(pos);
+        let on_word = active && b.col > a.col && pos.col < b.col;
+        let now = std::time::Instant::now();
+        match self.code_dwell {
+            Some((since, at, sent)) if on_word && at == a => {
+                if !sent && (now - since).as_secs_f32() > 0.6 {
+                    self.code.events.push(CodeEvent::Hover(tab.path.clone(), a));
+                    self.code_dwell = Some((since, at, true));
+                }
+            }
+            _ => {
+                if self.code_dwell.is_some_and(|(_, _, sent)| sent) {
+                    self.code.hover = None;
+                }
+                self.code_dwell = on_word.then_some((now, a, false));
+            }
+        }
+    }
+
     fn code_status(&mut self, canvas: &mut Canvas, r: Rect, idx: usize) {
         canvas.fill_rect(r.x, r.y, r.w, r.h, color::surface());
         canvas.line(r.x, r.y + 0.5, r.x + r.w, r.y + 0.5, color::border(), 1.0);
@@ -675,9 +702,13 @@ impl Ui {
             );
         }
         let right = format!(
-            "{}Spaces: 4   UTF-8   {}   Python",
+            "{}Spaces: 4   UTF-8   {}   Python{}",
             if tab.buf.dirty() { "Unsaved   " } else { "" },
-            if tab.buf.crlf { "CRLF" } else { "LF" }
+            if tab.buf.crlf { "CRLF" } else { "LF" },
+            self.code
+                .server
+                .as_ref()
+                .map_or_else(String::new, |s| format!(" · {s}"))
         );
         let w = canvas.measure_text(layout::SMALL_SIZE, &right);
         canvas.text(

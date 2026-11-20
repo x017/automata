@@ -608,6 +608,8 @@ pub struct Ui {
     code_popup: Option<Rect>,
     /// Last click time, click count and line (double / triple click).
     code_clicks: Option<(std::time::Instant, u8, usize)>,
+    /// Mouse rest for hover info: since, word start, request sent.
+    code_dwell: Option<(std::time::Instant, crate::code::Pos, bool)>,
 }
 
 impl Default for Ui {
@@ -660,6 +662,7 @@ impl Ui {
             code_drag: None,
             code_popup: None,
             code_clicks: None,
+            code_dwell: None,
         }
     }
 
