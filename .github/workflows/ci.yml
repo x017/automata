@@ -13,6 +13,11 @@ jobs:
   test:
     name: fmt / clippy / test / doc
     runs-on: ubuntu-latest
+    # Explicit bash => `-eo pipefail`, so `cmd | tee log` steps fail when
+    # `cmd` fails (the implicit default shell has no pipefail).
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 

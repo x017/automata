@@ -135,19 +135,16 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
 pub fn range(field: Field) -> (f32, f32) {
     use Field as F;
     match field {
-        F::MeshColor(_) | F::LightColor(_) | F::LightAmbient | F::ColliderRestitution => {
-            (0.0, 1.0)
-        }
+        F::MeshColor(_) | F::LightColor(_) | F::LightAmbient | F::ColliderRestitution => (0.0, 1.0),
         F::MeshSize | F::ColliderRadius | F::ColliderExtents(_) | F::ColliderHalfHeight => {
             (0.001, 10_000.0)
         }
         F::CameraFov => (1.0, 179.0),
         F::CameraNear => (0.001, 1_000.0),
         F::CameraFar => (0.01, 1_000_000.0),
-        F::BodyLinearDamping
-        | F::BodyAngularDamping
-        | F::ColliderDensity
-        | F::ColliderFriction => (0.0, 10_000.0),
+        F::BodyLinearDamping | F::BodyAngularDamping | F::ColliderDensity | F::ColliderFriction => {
+            (0.0, 10_000.0)
+        }
         _ => (-1_000_000.0, 1_000_000.0),
     }
 }

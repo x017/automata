@@ -42,6 +42,7 @@ pub mod color {
     c!(camera_icon, 140, 220, 170);
 
     /// Translucent black for drop shadows under menus.
+    #[must_use]
     pub fn shadow() -> Color {
         Color::from_rgba8(0, 0, 0, 120)
     }

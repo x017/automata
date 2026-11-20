@@ -107,7 +107,10 @@ impl EditorApp {
             None => Document::starter(),
         };
         let mut ui = Ui::new();
-        ui.log(LogLevel::Info, "Oberon ready. Click an object to select it; drag the gizmo to move it.");
+        ui.log(
+            LogLevel::Info,
+            "Oberon ready. Click an object to select it; drag the gizmo to move it.",
+        );
         ui.log(
             LogLevel::Info,
             "Edit values in the Inspector: drag a number to scrub it, or click to type.",
@@ -156,28 +159,41 @@ impl EditorApp {
             Intent::Create(kind) => {
                 let id = doc.create(kind);
                 let name = doc.index_of(id).map(|i| doc.entities[i].name().to_string());
-                self.ui.log(LogLevel::Info, format!("Created {}", name.unwrap_or_default()));
+                self.ui.log(
+                    LogLevel::Info,
+                    format!("Created {}", name.unwrap_or_default()),
+                );
             }
             Intent::Duplicate(id) => {
                 if let Some(new_id) = doc.duplicate_entity(id) {
-                    let name = doc.index_of(new_id).map(|i| doc.entities[i].name().to_string());
-                    self.ui.log(LogLevel::Info, format!("Duplicated as {}", name.unwrap_or_default()));
+                    let name = doc
+                        .index_of(new_id)
+                        .map(|i| doc.entities[i].name().to_string());
+                    self.ui.log(
+                        LogLevel::Info,
+                        format!("Duplicated as {}", name.unwrap_or_default()),
+                    );
                 }
             }
             Intent::Delete(id) => {
                 let name = doc.index_of(id).map(|i| doc.entities[i].name().to_string());
                 if doc.delete_entity(id) {
-                    self.ui.log(LogLevel::Info, format!("Deleted {}", name.unwrap_or_default()));
+                    self.ui.log(
+                        LogLevel::Info,
+                        format!("Deleted {}", name.unwrap_or_default()),
+                    );
                 }
             }
             Intent::AddComponent(id, kind) => {
                 if doc.add_component(id, kind) {
-                    self.ui.log(LogLevel::Info, format!("Added {}", kind.label()));
+                    self.ui
+                        .log(LogLevel::Info, format!("Added {}", kind.label()));
                 }
             }
             Intent::RemoveComponent(id, kind) => {
                 if doc.remove_component(id, kind) {
-                    self.ui.log(LogLevel::Info, format!("Removed {}", kind.label()));
+                    self.ui
+                        .log(LogLevel::Info, format!("Removed {}", kind.label()));
                 }
             }
             Intent::SetField {
@@ -245,7 +261,9 @@ impl EditorApp {
     fn save(&mut self) {
         let path = self.doc.path.clone().unwrap_or_else(default_save_path);
         match self.doc.save(Some(path.as_path())) {
-            Ok(path) => self.ui.log(LogLevel::Info, format!("Saved {}", path.display())),
+            Ok(path) => self
+                .ui
+                .log(LogLevel::Info, format!("Saved {}", path.display())),
             Err(err) => {
                 tracing::error!(error = %err, "save failed");
                 self.ui.log(LogLevel::Error, format!("Save failed: {err}"));
@@ -263,7 +281,9 @@ impl EditorApp {
                 self.ui.play = PlayState::Playing;
                 self.ui.log(
                     LogLevel::Info,
-                    format!("Play mode: simulating {bodies} rigid bodies. Stop restores the scene."),
+                    format!(
+                        "Play mode: simulating {bodies} rigid bodies. Stop restores the scene."
+                    ),
                 );
                 if bodies == 0 {
                     self.ui.log(
@@ -406,7 +426,11 @@ impl EditorApp {
     /// Arrow keys move the selection on the ground plane relative to the
     /// camera; PageUp/PageDown move it along world Y. Shift = fine steps.
     fn nudge_delta(&self, code: KeyCode) -> Option<[f32; 3]> {
-        let step = if self.input.modifiers.shift_key() { 0.05 } else { 0.25 };
+        let step = if self.input.modifiers.shift_key() {
+            0.05
+        } else {
+            0.25
+        };
         let (sy, cy) = self.ui.camera.yaw.sin_cos();
         Some(match code {
             KeyCode::ArrowLeft => [-cy * step, 0.0, sy * step],
@@ -520,8 +544,10 @@ impl EditorApp {
         let name = self.doc.path.as_ref().map_or_else(
             || "Untitled".to_string(),
             |p| {
-                p.file_name()
-                    .map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned())
+                p.file_name().map_or_else(
+                    || p.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                )
             },
         );
         let mode = match self.ui.play {
@@ -569,7 +595,7 @@ fn default_save_path() -> PathBuf {
     if !first.exists() {
         return first;
     }
-    (2..)
+    (2..10_000)
         .map(|i| PathBuf::from(format!("scene-{i}.ron")))
         .find(|p| !p.exists())
         .unwrap_or(first)

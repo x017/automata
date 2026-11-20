@@ -170,7 +170,10 @@ mod tests {
         assert!(y < start_y - 1.0, "the cube fell (from {start_y} to {y})");
         assert!(y > 0.0, "the ground stopped it (y = {y})");
         // The edited document is unchanged.
-        assert_eq!(doc.entities[idx].data.transform.unwrap().position[1], start_y);
+        assert_eq!(
+            doc.entities[idx].data.transform.unwrap().position[1],
+            start_y
+        );
     }
 
     #[test]

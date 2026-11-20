@@ -190,13 +190,7 @@ pub mod render_wireframe {
     }
 
     /// Like [`render`], but reuses `px` (resized to `width*height*4`).
-    pub fn render_into(
-        doc: &Document,
-        cam: ViewCamera,
-        width: u32,
-        height: u32,
-        px: &mut Vec<u8>,
-    ) {
+    pub fn render_into(doc: &Document, cam: ViewCamera, width: u32, height: u32, px: &mut Vec<u8>) {
         let (w, h) = (width as usize, height as usize);
         px.clear();
         px.resize(w * h * 4, 0);
@@ -218,10 +212,14 @@ pub mod render_wireframe {
                 .as_ref()
                 .and_then(|_| view::box_corners(&entity.data));
             if let Some(corners) = corners {
-                let col = entity.data.mesh_visual.as_ref().map_or((232, 234, 240, 255), |m| {
-                    let c = |i: usize| (m.color[i].clamp(0.0, 1.0) * 255.0) as u8;
-                    (c(0), c(1), c(2), 255)
-                });
+                let col = entity
+                    .data
+                    .mesh_visual
+                    .as_ref()
+                    .map_or((232, 234, 240, 255), |m| {
+                        let c = |i: usize| (m.color[i].clamp(0.0, 1.0) * 255.0) as u8;
+                        (c(0), c(1), c(2), 255)
+                    });
                 for i in 0..8 {
                     for bit in [1usize, 2, 4] {
                         if i & bit == 0 {
@@ -315,7 +313,10 @@ mod tests {
     fn fallback_viewport_follows_the_orbit_camera() {
         let doc = Document::starter();
         let mut vp = ViewportRenderer::new();
-        let a = vp.render(None, &doc, ViewCamera::default(), 320, 200).0.to_vec();
+        let a = vp
+            .render(None, &doc, ViewCamera::default(), 320, 200)
+            .0
+            .to_vec();
         let turned = ViewCamera {
             yaw: 2.0,
             ..ViewCamera::default()

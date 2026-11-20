@@ -160,7 +160,10 @@ impl ComponentKind {
             }
             Self::Camera => {
                 data.camera_3d.get_or_insert_with(|| {
-                    automata_renderer::Camera3D::new(glam::Vec3::new(0.0, 2.0, 6.0), glam::Vec3::ZERO)
+                    automata_renderer::Camera3D::new(
+                        glam::Vec3::new(0.0, 2.0, 6.0),
+                        glam::Vec3::ZERO,
+                    )
                 });
             }
             Self::RigidBody => {
@@ -492,12 +495,7 @@ impl Document {
     /// gesture records an undo snapshot, until [`Document::end_gesture`].
     /// Edits that leave the data unchanged record nothing. Returns true when
     /// the entity changed.
-    pub fn modify(
-        &mut self,
-        id: u64,
-        gesture: bool,
-        f: impl FnOnce(&mut EntityData),
-    ) -> bool {
+    pub fn modify(&mut self, id: u64, gesture: bool, f: impl FnOnce(&mut EntityData)) -> bool {
         let Some(idx) = self.index_of(id) else {
             return false;
         };
@@ -590,7 +588,8 @@ impl Document {
         data.name = Some(self.unique_name(&base));
         self.push_undo();
         let new_id = self.alloc_id();
-        self.entities.insert(idx + 1, EntityEntry { id: new_id, data });
+        self.entities
+            .insert(idx + 1, EntityEntry { id: new_id, data });
         self.selected = Some(new_id);
         self.touch();
         Some(new_id)

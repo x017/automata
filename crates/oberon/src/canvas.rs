@@ -6,7 +6,7 @@
 //!
 //! All coordinates are **logical** pixels. The canvas carries a DPI scale
 //! factor (the window's `scale_factor`) and maps logical coordinates to the
-//! physical pixmap, so the editor is crisp and correctly sized on HiDPI
+//! physical pixmap, so the editor is crisp and correctly sized on `HiDPI`
 //! displays.
 
 #![forbid(unsafe_code)]

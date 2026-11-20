@@ -536,7 +536,7 @@ impl Renderer {
     }
 
     /// Renders the frame into `target`, then presents if it's the surface.
-    /// Renders the frame into `target`, then presents if it's the surface.
+    #[allow(clippy::too_many_lines)] // one linear sequence of GPU passes
     fn execute_frame(&mut self, draw: &DrawList, target: FrameTarget) {
         let (viewport, offscreen) = match &target {
             FrameTarget::Offscreen { size, .. } => (*size, true),

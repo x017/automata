@@ -201,12 +201,7 @@ impl Intent {
     pub fn edits_document(&self) -> bool {
         !matches!(
             self,
-            Self::Select(_)
-                | Self::EndGesture
-                | Self::Save
-                | Self::Play
-                | Self::Pause
-                | Self::Stop
+            Self::Select(_) | Self::EndGesture | Self::Save | Self::Play | Self::Pause | Self::Stop
         )
     }
 }
@@ -445,8 +440,7 @@ impl Ui {
             edit.buffer.clear();
             edit.fresh = false;
         }
-        edit.buffer
-            .extend(text.chars().filter(|c| !c.is_control()));
+        edit.buffer.extend(text.chars().filter(|c| !c.is_control()));
     }
 
     /// Handles a control key in the focused field. Returns the edit to apply
@@ -520,14 +514,12 @@ impl Ui {
                     name: name.to_string(),
                 })
             }
-            EditTarget::Field(field) => {
-                eval_number(&edit.buffer).map(|value| Intent::SetField {
-                    id: edit.id,
-                    field,
-                    value,
-                    gesture: false,
-                })
-            }
+            EditTarget::Field(field) => eval_number(&edit.buffer).map(|value| Intent::SetField {
+                id: edit.id,
+                field,
+                value,
+                gesture: false,
+            }),
         }
     }
 
@@ -718,7 +710,13 @@ impl Ui {
         hot && self.p.pressed
     }
 
-    fn icon_button(&mut self, canvas: &mut Canvas, r: Rect, icon: Icon, style: ButtonStyle) -> bool {
+    fn icon_button(
+        &mut self,
+        canvas: &mut Canvas,
+        r: Rect,
+        icon: Icon,
+        style: ButtonStyle,
+    ) -> bool {
         let clicked = self.button(canvas, r, "", style);
         let c = match style {
             ButtonStyle::Disabled => color::border(),
@@ -753,9 +751,8 @@ impl Ui {
             ("Redo", Intent::Redo, doc.can_redo()),
         ] {
             let bw = canvas.measure_text(layout::FONT_SIZE, label) + 22.0;
-            let style = if enabled && self.play == PlayState::Editing {
-                ButtonStyle::Normal
-            } else if enabled && intent == Intent::Save {
+            // Saving stays available in play mode (it saves the edit scene).
+            let style = if enabled && (self.play == PlayState::Editing || intent == Intent::Save) {
                 ButtonStyle::Normal
             } else {
                 ButtonStyle::Disabled
@@ -832,11 +829,17 @@ impl Ui {
         let name = doc.path.as_ref().map_or_else(
             || "Untitled scene".to_string(),
             |p| {
-                p.file_name()
-                    .map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned())
+                p.file_name().map_or_else(
+                    || p.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                )
             },
         );
-        let label = if doc.dirty() { format!("{name} *") } else { name };
+        let label = if doc.dirty() {
+            format!("{name} *")
+        } else {
+            name
+        };
         let room = rect.w - (px + group + 24.0);
         if room > 40.0 {
             let tw = canvas.measure_text(layout::FONT_SIZE, &label).min(room);
@@ -919,7 +922,12 @@ impl Ui {
 
         self.clip = (0.0, f32::INFINITY);
         self.panel_title(canvas, rect, "Hierarchy");
-        let add = Rect::new(rect.x + rect.w - 84.0, rect.y + 4.0, 76.0, layout::TITLEBAR_H - 8.0);
+        let add = Rect::new(
+            rect.x + rect.w - 84.0,
+            rect.y + 4.0,
+            76.0,
+            layout::TITLEBAR_H - 8.0,
+        );
         let style = if self.play == PlayState::Editing {
             ButtonStyle::Accent
         } else {
@@ -954,7 +962,13 @@ impl Ui {
         let end = match doc.selected_index() {
             Some(idx) => self.inspector_body(canvas, &doc.entities[idx], x, start, w),
             None => {
-                canvas.text(x, start + 4.0, layout::FONT_SIZE, "No entity selected", color::text_dim());
+                canvas.text(
+                    x,
+                    start + 4.0,
+                    layout::FONT_SIZE,
+                    "No entity selected",
+                    color::text_dim(),
+                );
                 canvas.text(
                     x,
                     start + 26.0,
@@ -990,7 +1004,14 @@ impl Ui {
     }
 
     /// Draws the selected entity's components. Returns the y after the last row.
-    fn inspector_body(&mut self, canvas: &mut Canvas, e: &EntityEntry, x: f32, y: f32, w: f32) -> f32 {
+    fn inspector_body(
+        &mut self,
+        canvas: &mut Canvas,
+        e: &EntityEntry,
+        x: f32,
+        y: f32,
+        w: f32,
+    ) -> f32 {
         let mut y = y;
         let id = e.id;
         let d = &e.data;
@@ -1003,7 +1024,13 @@ impl Ui {
         }
         y += 30.0;
         if self.row_visible(Rect::new(x, y, w, 14.0)) {
-            canvas.text(x, y, layout::SMALL_SIZE, &format!("Entity #{id}"), color::text_dim());
+            canvas.text(
+                x,
+                y,
+                layout::SMALL_SIZE,
+                &format!("Entity #{id}"),
+                color::text_dim(),
+            );
         }
         y += 22.0;
 
@@ -1024,12 +1051,20 @@ impl Ui {
             if open {
                 y = self.choice_row(canvas, x, y, w, e, "Primitive", Choice::MeshPrimitive);
                 y = self.float_row(canvas, x, y, w, e, "Size", Field::MeshSize);
-                y = self.color_row(canvas, x, y, w, e, "Color", &[
-                    Field::MeshColor(0),
-                    Field::MeshColor(1),
-                    Field::MeshColor(2),
-                    Field::MeshColor(3),
-                ]);
+                y = self.color_row(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    e,
+                    "Color",
+                    &[
+                        Field::MeshColor(0),
+                        Field::MeshColor(1),
+                        Field::MeshColor(2),
+                        Field::MeshColor(3),
+                    ],
+                );
                 y += 6.0;
             }
         }
@@ -1039,11 +1074,19 @@ impl Ui {
             y = ny;
             if open {
                 y = self.vec3_row(canvas, x, y, w, e, "Direction", Field::LightDirection);
-                y = self.color_row(canvas, x, y, w, e, "Color", &[
-                    Field::LightColor(0),
-                    Field::LightColor(1),
-                    Field::LightColor(2),
-                ]);
+                y = self.color_row(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    e,
+                    "Color",
+                    &[
+                        Field::LightColor(0),
+                        Field::LightColor(1),
+                        Field::LightColor(2),
+                    ],
+                );
                 y = self.float_row(canvas, x, y, w, e, "Ambient", Field::LightAmbient);
                 y = self.flag_row(canvas, x, y, w, e, "Cast Shadows", Flag::LightShadows);
                 y += 6.0;
@@ -1070,7 +1113,15 @@ impl Ui {
                 y = self.choice_row(canvas, x, y, w, e, "Body Type", Choice::BodyType);
                 y = self.float_row(canvas, x, y, w, e, "Gravity Scale", Field::BodyGravityScale);
                 y = self.float_row(canvas, x, y, w, e, "Linear Damp", Field::BodyLinearDamping);
-                y = self.float_row(canvas, x, y, w, e, "Angular Damp", Field::BodyAngularDamping);
+                y = self.float_row(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    e,
+                    "Angular Damp",
+                    Field::BodyAngularDamping,
+                );
                 y = self.flag_row(canvas, x, y, w, e, "Enabled", Flag::BodyEnabled);
                 y += 6.0;
             }
@@ -1153,7 +1204,13 @@ impl Ui {
                     color::text_dim(),
                 );
             }
-            canvas.text(x + 16.0, y + 5.0, layout::FONT_SIZE, title, color::accent_soft());
+            canvas.text(
+                x + 16.0,
+                y + 5.0,
+                layout::FONT_SIZE,
+                title,
+                color::accent_soft(),
+            );
 
             let editing = self.play == PlayState::Editing;
             let mut right = x + w;
@@ -1230,7 +1287,14 @@ impl Ui {
                 let f = field(i as u8);
                 if let Some(v) = fields::get(&e.data, f) {
                     let fx = x + layout::LABEL_W + i as f32 * (fw + gap);
-                    self.float_field(canvas, Rect::new(fx, y, fw, layout::FIELD_H), e.id, f, v, Some(tag));
+                    self.float_field(
+                        canvas,
+                        Rect::new(fx, y, fw, layout::FIELD_H),
+                        e.id,
+                        f,
+                        v,
+                        Some(tag),
+                    );
                 }
             }
         }
@@ -1290,7 +1354,14 @@ impl Ui {
             let fw = (w - layout::LABEL_W - sw - gap * n) / n;
             for (i, (f, v)) in channels.iter().zip(values.iter()).enumerate() {
                 let fx = sx + sw + gap + i as f32 * (fw + gap);
-                self.float_field(canvas, Rect::new(fx, y, fw, layout::FIELD_H), e.id, *f, *v, None);
+                self.float_field(
+                    canvas,
+                    Rect::new(fx, y, fw, layout::FIELD_H),
+                    e.id,
+                    *f,
+                    *v,
+                    None,
+                );
             }
         }
         y + layout::ROW_STEP
@@ -1377,7 +1448,14 @@ impl Ui {
                 if hot { color::hover() } else { color::raised() },
             );
             canvas.stroke_rounded(b.x, b.y, b.w, b.h, 3.0, color::border(), 1.0);
-            canvas.text_clipped(b.x + 6.0, b.y + 3.0, layout::FONT_SIZE, value, color::text(), b.w - 24.0);
+            canvas.text_clipped(
+                b.x + 6.0,
+                b.y + 3.0,
+                layout::FONT_SIZE,
+                value,
+                color::text(),
+                b.w - 24.0,
+            );
             let (cx, cy) = (b.x + b.w - 11.0, b.y + b.h / 2.0);
             canvas.fill_polygon(
                 &[(cx - 4.0, cy - 2.0), (cx + 4.0, cy - 2.0), (cx, cy + 3.0)],
@@ -1412,8 +1490,21 @@ impl Ui {
         if fresh && !text.is_empty() {
             canvas.fill_rect(tx - 1.0, r.y + 3.0, tw + 2.0, r.h - 6.0, color::select());
         }
-        canvas.text_clipped(tx, r.y + (r.h - layout::FONT_SIZE) / 2.0 - 1.0, layout::FONT_SIZE, &text, color::text(), max_w);
-        canvas.fill_rect((tx + tw + 1.0).min(r.x + r.w - 3.0), r.y + 3.0, 1.5, r.h - 6.0, color::accent_soft());
+        canvas.text_clipped(
+            tx,
+            r.y + (r.h - layout::FONT_SIZE) / 2.0 - 1.0,
+            layout::FONT_SIZE,
+            &text,
+            color::text(),
+            max_w,
+        );
+        canvas.fill_rect(
+            (tx + tw + 1.0).min(r.x + r.w - 3.0),
+            r.y + 3.0,
+            1.5,
+            r.h - 6.0,
+            color::accent_soft(),
+        );
     }
 
     fn float_field(
@@ -1445,7 +1536,11 @@ impl Ui {
             r.w,
             r.h,
             3.0,
-            if editing { color::accent() } else { color::border() },
+            if editing {
+                color::accent()
+            } else {
+                color::border()
+            },
             1.0,
         );
         let mut tx = r.x + 5.0;
@@ -1507,7 +1602,11 @@ impl Ui {
             r.w,
             r.h,
             3.0,
-            if editing { color::accent() } else { color::border() },
+            if editing {
+                color::accent()
+            } else {
+                color::border()
+            },
             1.0,
         );
         if editing {
@@ -1653,7 +1752,10 @@ impl Ui {
                         let hit = view::pick(doc, &proj, start.0, start.1);
                         self.out.push(Intent::Select(hit));
                         if double {
-                            if let Some(e) = hit.and_then(|id| doc.index_of(id)).map(|i| &doc.entities[i]) {
+                            if let Some(e) = hit
+                                .and_then(|id| doc.index_of(id))
+                                .map(|i| &doc.entities[i])
+                            {
                                 self.focus_entity(e);
                             }
                         }
@@ -1708,18 +1810,36 @@ impl Ui {
             PlayState::Paused => "Paused".to_string(),
         };
         let tw = canvas.measure_text(layout::SMALL_SIZE, &label);
-        canvas.fill_rounded(rect.x + 8.0, rect.y + 8.0, tw + 16.0, 20.0, 10.0, color::surface());
+        canvas.fill_rounded(
+            rect.x + 8.0,
+            rect.y + 8.0,
+            tw + 16.0,
+            20.0,
+            10.0,
+            color::surface(),
+        );
         canvas.text(
             rect.x + 16.0,
             rect.y + 11.0,
             layout::SMALL_SIZE,
             &label,
-            if editing { color::text_dim() } else { color::warn() },
+            if editing {
+                color::text_dim()
+            } else {
+                color::warn()
+            },
         );
-        if !editing {
-            canvas.stroke_rect(rect.x + 1.0, rect.y + 1.0, rect.w - 2.0, rect.h - 2.0, color::accent(), 2.0);
-        } else {
+        if editing {
             canvas.stroke_rect(rect.x, rect.y, rect.w, rect.h, color::border(), 1.0);
+        } else {
+            canvas.stroke_rect(
+                rect.x + 1.0,
+                rect.y + 1.0,
+                rect.w - 2.0,
+                rect.h - 2.0,
+                color::accent(),
+                2.0,
+            );
         }
     }
 
@@ -1742,7 +1862,11 @@ impl Ui {
         // Draw back-to-front so the axis facing the viewer is on top.
         let mut order: Vec<usize> = vec![0, 1, 2];
         order.sort_by(|&a, &b| {
-            axes[b].0.dot(f).partial_cmp(&axes[a].0.dot(f)).unwrap_or(std::cmp::Ordering::Equal)
+            axes[b]
+                .0
+                .dot(f)
+                .partial_cmp(&axes[a].0.dot(f))
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         for i in order {
             let (axis, c, label) = axes[i];
@@ -1750,7 +1874,13 @@ impl Ui {
             let (tx, ty) = (cx + sx * 22.0, cy + sy * 22.0);
             canvas.line(cx, cy, tx, ty, c, 2.0);
             canvas.fill_circle(tx, ty, 7.0, c);
-            canvas.text(tx - 3.5, ty - 7.0, layout::SMALL_SIZE, label, color::background());
+            canvas.text(
+                tx - 3.5,
+                ty - 7.0,
+                layout::SMALL_SIZE,
+                label,
+                color::background(),
+            );
         }
     }
 
@@ -1760,7 +1890,9 @@ impl Ui {
         canvas.fill_rect(rect.x, rect.y, rect.w, rect.h, color::surface());
         let line_h = 17.0;
         let body_top = rect.y + layout::TITLEBAR_H + 4.0;
-        let max_lines = ((rect.h - layout::TITLEBAR_H - 8.0) / line_h).floor().max(0.0) as usize;
+        let max_lines = ((rect.h - layout::TITLEBAR_H - 8.0) / line_h)
+            .floor()
+            .max(0.0) as usize;
         let start = self.console.len().saturating_sub(max_lines);
         let mut y = body_top;
         for line in &self.console[start..] {
@@ -1782,7 +1914,12 @@ impl Ui {
         }
         let title = format!("Console  ({})", self.console.len());
         self.panel_title(canvas, rect, &title);
-        let clear = Rect::new(rect.x + rect.w - 64.0, rect.y + 4.0, 56.0, layout::TITLEBAR_H - 8.0);
+        let clear = Rect::new(
+            rect.x + rect.w - 64.0,
+            rect.y + 4.0,
+            56.0,
+            layout::TITLEBAR_H - 8.0,
+        );
         if self.button(canvas, clear, "Clear", ButtonStyle::Normal) {
             self.console.clear();
         }
@@ -1796,7 +1933,13 @@ impl Ui {
             left.push_str("  ·  ");
             left.push_str(doc.entities[i].name());
         }
-        let lw = canvas.text(rect.x + layout::PAD, rect.y + 5.0, layout::SMALL_SIZE, &left, color::text_dim());
+        let lw = canvas.text(
+            rect.x + layout::PAD,
+            rect.y + 5.0,
+            layout::SMALL_SIZE,
+            &left,
+            color::text_dim(),
+        );
         let hint = match self.play {
             PlayState::Editing => {
                 "Click select · Drag/RMB orbit · MMB pan · Wheel zoom · W/E/R tools · F focus · F2 rename · Ctrl+D duplicate · Del delete · Ctrl+Z/Y undo/redo · Ctrl+P play"
@@ -1845,7 +1988,11 @@ impl Ui {
         let mh = n * layout::ROW_H + 8.0;
         let mw = layout::MENU_W;
         let x = x.min(w - mw - 4.0).max(0.0);
-        let y = if y + mh > h { (y - mh - 30.0).max(0.0) } else { y };
+        let y = if y + mh > h {
+            (y - mh - 30.0).max(0.0)
+        } else {
+            y
+        };
         Some(Rect::new(x, y, mw, mh))
     }
 
@@ -1881,7 +2028,13 @@ impl Ui {
                 canvas.fill_rounded(row.x, row.y, row.w, row.h, 4.0, color::select());
                 self.cursor = CursorHint::Pointer;
             }
-            canvas.text(row.x + 10.0, row.y + 5.0, layout::FONT_SIZE, label, color::text());
+            canvas.text(
+                row.x + 10.0,
+                row.y + 5.0,
+                layout::FONT_SIZE,
+                label,
+                color::text(),
+            );
             if hot && raw.pressed {
                 chosen = Some(intent);
             }
@@ -1897,7 +2050,10 @@ impl Ui {
 
 fn draw_icon(canvas: &mut Canvas, icon: Icon, cx: f32, cy: f32, c: Color) {
     match icon {
-        Icon::Play => canvas.fill_polygon(&[(cx - 4.0, cy - 6.0), (cx + 6.0, cy), (cx - 4.0, cy + 6.0)], c),
+        Icon::Play => canvas.fill_polygon(
+            &[(cx - 4.0, cy - 6.0), (cx + 6.0, cy), (cx - 4.0, cy + 6.0)],
+            c,
+        ),
         Icon::Pause => {
             canvas.fill_rect(cx - 5.0, cy - 6.0, 3.5, 12.0, c);
             canvas.fill_rect(cx + 1.5, cy - 6.0, 3.5, 12.0, c);
@@ -1917,20 +2073,54 @@ fn entity_icon(canvas: &mut Canvas, cx: f32, cy: f32, d: &EntityData) {
         for i in 0..8 {
             let a = i as f32 * std::f32::consts::FRAC_PI_4;
             let (s, c) = a.sin_cos();
-            canvas.line(cx + c * 6.0, cy + s * 6.0, cx + c * 8.0, cy + s * 8.0, color::light_icon(), 1.2);
+            canvas.line(
+                cx + c * 6.0,
+                cy + s * 6.0,
+                cx + c * 8.0,
+                cy + s * 8.0,
+                color::light_icon(),
+                1.2,
+            );
         }
     } else if d.camera_3d.is_some() {
         canvas.fill_rounded(cx - 6.0, cy - 4.0, 9.0, 8.0, 1.5, color::camera_icon());
-        canvas.fill_polygon(&[(cx + 3.0, cy), (cx + 7.0, cy - 4.0), (cx + 7.0, cy + 4.0)], color::camera_icon());
+        canvas.fill_polygon(
+            &[(cx + 3.0, cy), (cx + 7.0, cy - 4.0), (cx + 7.0, cy + 4.0)],
+            color::camera_icon(),
+        );
     } else if d.mesh_visual.is_some() {
         let c = if d.rigid_body.is_some() {
             color::warn()
         } else {
             color::accent_soft()
         };
-        canvas.fill_polygon(&[(cx, cy - 6.0), (cx + 6.0, cy - 3.0), (cx, cy), (cx - 6.0, cy - 3.0)], c);
-        canvas.fill_polygon(&[(cx - 6.0, cy - 3.0), (cx, cy), (cx, cy + 6.5), (cx - 6.0, cy + 3.5)], color::accent());
-        canvas.fill_polygon(&[(cx + 6.0, cy - 3.0), (cx, cy), (cx, cy + 6.5), (cx + 6.0, cy + 3.5)], color::select());
+        canvas.fill_polygon(
+            &[
+                (cx, cy - 6.0),
+                (cx + 6.0, cy - 3.0),
+                (cx, cy),
+                (cx - 6.0, cy - 3.0),
+            ],
+            c,
+        );
+        canvas.fill_polygon(
+            &[
+                (cx - 6.0, cy - 3.0),
+                (cx, cy),
+                (cx, cy + 6.5),
+                (cx - 6.0, cy + 3.5),
+            ],
+            color::accent(),
+        );
+        canvas.fill_polygon(
+            &[
+                (cx + 6.0, cy - 3.0),
+                (cx, cy),
+                (cx, cy + 6.5),
+                (cx + 6.0, cy + 3.5),
+            ],
+            color::select(),
+        );
     } else {
         canvas.stroke_circle(cx, cy, 5.0, color::text_dim(), 1.4);
     }
@@ -1953,7 +2143,13 @@ fn draw_markers(canvas: &mut Canvas, doc: &Document, proj: &Projector, rect: Rec
         }
         canvas.fill_circle(x, y, 11.0, color::surface());
         entity_icon(canvas, x, y, &e.data);
-        canvas.text(x + 14.0, y - 7.0, layout::SMALL_SIZE, e.name(), color::text_dim());
+        canvas.text(
+            x + 14.0,
+            y - 7.0,
+            layout::SMALL_SIZE,
+            e.name(),
+            color::text_dim(),
+        );
     }
 }
 
@@ -1961,7 +2157,8 @@ fn draw_markers(canvas: &mut Canvas, doc: &Document, proj: &Projector, rect: Rec
 fn draw_selection(canvas: &mut Canvas, d: &EntityData, proj: &Projector) {
     if d.mesh_visual.is_some() {
         if let Some(corners) = view::box_corners(d) {
-            let screen: Vec<Option<(f32, f32)>> = corners.iter().map(|c| proj.project(*c)).collect();
+            let screen: Vec<Option<(f32, f32)>> =
+                corners.iter().map(|c| proj.project(*c)).collect();
             for i in 0..8 {
                 for bit in [1usize, 2, 4] {
                     if i & bit == 0 {
@@ -1986,7 +2183,11 @@ fn draw_selection(canvas: &mut Canvas, d: &EntityData, proj: &Projector) {
 fn draw_gizmo(canvas: &mut Canvas, g: &Gizmo, hover: Option<usize>) {
     let colors = [color::axis_x(), color::axis_y(), color::axis_z()];
     for (a, base) in colors.into_iter().enumerate() {
-        let c = if hover == Some(a) { color::gizmo_hot() } else { base };
+        let c = if hover == Some(a) {
+            color::gizmo_hot()
+        } else {
+            base
+        };
         match g.mode {
             GizmoMode::Move | GizmoMode::Scale => {
                 let Some(tip) = g.tips[a] else {
@@ -2107,9 +2308,19 @@ mod tests {
     }
 
     fn click(ui: &mut Ui, c: &mut Canvas, doc: &Document, x: f32, y: f32) -> Vec<Intent> {
-        let press = Pointer { x, y, down: true, pressed: true, ..Pointer::default() };
+        let press = Pointer {
+            x,
+            y,
+            down: true,
+            pressed: true,
+            ..Pointer::default()
+        };
         let mut out = ui.frame(c, doc, press, None);
-        let release = Pointer { x, y, ..Pointer::default() };
+        let release = Pointer {
+            x,
+            y,
+            ..Pointer::default()
+        };
         out.extend(ui.frame(c, doc, release, None));
         out
     }
@@ -2135,9 +2346,39 @@ mod tests {
         let mut ui = Ui::new();
         let (x, y) = center_of(lay().viewport);
         let before = ui.camera;
-        ui.frame(&mut c, &doc, Pointer { x, y, down: true, pressed: true, ..Pointer::default() }, None);
-        ui.frame(&mut c, &doc, Pointer { x: x + 40.0, y, down: true, ..Pointer::default() }, None);
-        let out = ui.frame(&mut c, &doc, Pointer { x: x + 40.0, y, ..Pointer::default() }, None);
+        ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x,
+                y,
+                down: true,
+                pressed: true,
+                ..Pointer::default()
+            },
+            None,
+        );
+        ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x: x + 40.0,
+                y,
+                down: true,
+                ..Pointer::default()
+            },
+            None,
+        );
+        let out = ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x: x + 40.0,
+                y,
+                ..Pointer::default()
+            },
+            None,
+        );
         assert_ne!(ui.camera, before);
         assert!(!out.iter().any(|i| matches!(i, Intent::Select(_))));
     }
@@ -2149,11 +2390,41 @@ mod tests {
         let mut ui = Ui::new();
         let (x, y) = center_of(lay().viewport);
         let yaw = ui.camera.yaw;
-        ui.frame(&mut c, &doc, Pointer { x, y, right_down: true, ..Pointer::default() }, None);
-        ui.frame(&mut c, &doc, Pointer { x: x + 30.0, y, right_down: true, ..Pointer::default() }, None);
+        ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x,
+                y,
+                right_down: true,
+                ..Pointer::default()
+            },
+            None,
+        );
+        ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x: x + 30.0,
+                y,
+                right_down: true,
+                ..Pointer::default()
+            },
+            None,
+        );
         assert!((ui.camera.yaw - yaw).abs() > 1e-4);
         let dist = ui.camera.distance;
-        ui.frame(&mut c, &doc, Pointer { x, y, scroll: 2.0, ..Pointer::default() }, None);
+        ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x,
+                y,
+                scroll: 2.0,
+                ..Pointer::default()
+            },
+            None,
+        );
         assert!(ui.camera.distance < dist);
     }
 
@@ -2165,19 +2436,58 @@ mod tests {
         doc.select(Some(cube));
         let mut ui = Ui::new();
         let proj = Projector::new(&ui.camera, lay().viewport);
-        let t = doc.entities[doc.index_of(cube).unwrap()].data.transform.unwrap();
+        let t = doc.entities[doc.index_of(cube).unwrap()]
+            .data
+            .transform
+            .unwrap();
         let g = Gizmo::build(GizmoMode::Move, &t, &proj).unwrap();
         let tip = g.tips[1].unwrap();
-        let grab = ((g.origin.0 + tip.0) / 2.0, (g.origin.1 + tip.1) / 2.0);
-        ui.frame(&mut c, &doc, Pointer { x: grab.0, y: grab.1, down: true, pressed: true, ..Pointer::default() }, None);
-        let out = ui.frame(&mut c, &doc, Pointer { x: grab.0, y: grab.1 - 30.0, down: true, ..Pointer::default() }, None);
+        let grab = (
+            f32::midpoint(g.origin.0, tip.0),
+            f32::midpoint(g.origin.1, tip.1),
+        );
+        ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x: grab.0,
+                y: grab.1,
+                down: true,
+                pressed: true,
+                ..Pointer::default()
+            },
+            None,
+        );
+        let out = ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x: grab.0,
+                y: grab.1 - 30.0,
+                down: true,
+                ..Pointer::default()
+            },
+            None,
+        );
         let moved = out.iter().find_map(|i| match i {
             Intent::SetTransform { id, transform } if *id == cube => Some(*transform),
             _ => None,
         });
         let moved = moved.expect("gizmo drag edits the transform");
-        assert!(moved.position[1] > t.position[1], "dragging up the Y handle raises it");
-        let out = ui.frame(&mut c, &doc, Pointer { x: grab.0, y: grab.1 - 30.0, ..Pointer::default() }, None);
+        assert!(
+            moved.position[1] > t.position[1],
+            "dragging up the Y handle raises it"
+        );
+        let out = ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x: grab.0,
+                y: grab.1 - 30.0,
+                ..Pointer::default()
+            },
+            None,
+        );
         assert!(out.contains(&Intent::EndGesture));
     }
 
@@ -2195,7 +2505,12 @@ mod tests {
         let intent = ui.edit_key(EditKey::Enter);
         assert_eq!(
             intent,
-            Some(Intent::SetField { id: 7, field: Field::Position(0), value: 6.0, gesture: false })
+            Some(Intent::SetField {
+                id: 7,
+                field: Field::Position(0),
+                value: 6.0,
+                gesture: false
+            })
         );
         assert!(!ui.is_editing_text());
     }
@@ -2213,13 +2528,50 @@ mod tests {
         let x = insp.x + layout::PAD + layout::LABEL_W + 10.0;
         // Header (30) + id (22) + section (30) from the inspector's top.
         let y = insp.y + layout::TITLEBAR_H + 10.0 + 30.0 + 22.0 + 30.0 + 8.0;
-        ui.frame(&mut c, &doc, Pointer { x, y, down: true, pressed: true, ..Pointer::default() }, None);
-        let out = ui.frame(&mut c, &doc, Pointer { x: x + 50.0, y, down: true, ..Pointer::default() }, None);
+        ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x,
+                y,
+                down: true,
+                pressed: true,
+                ..Pointer::default()
+            },
+            None,
+        );
+        let out = ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x: x + 50.0,
+                y,
+                down: true,
+                ..Pointer::default()
+            },
+            None,
+        );
         assert!(
-            out.iter().any(|i| matches!(i, Intent::SetField { field: Field::Position(0), gesture: true, .. })),
+            out.iter().any(|i| matches!(
+                i,
+                Intent::SetField {
+                    field: Field::Position(0),
+                    gesture: true,
+                    ..
+                }
+            )),
             "{out:?}"
         );
-        let out = ui.frame(&mut c, &doc, Pointer { x: x + 50.0, y, ..Pointer::default() }, None);
+        let out = ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x: x + 50.0,
+                y,
+                ..Pointer::default()
+            },
+            None,
+        );
         assert!(out.contains(&Intent::EndGesture));
     }
 

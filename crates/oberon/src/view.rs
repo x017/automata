@@ -297,7 +297,7 @@ pub fn pick(doc: &Document, proj: &Projector, sx: f32, sy: f32) -> Option<u64> {
                 -0.5
             };
             let score = dist + bias;
-            if best.map_or(true, |(b, _)| score < b) {
+            if best.is_none_or(|(b, _)| score < b) {
                 best = Some((score, entity.id));
             }
         }
@@ -416,7 +416,7 @@ impl Gizmo {
                     .map(|w| dist_to_segment((x, y), w[0], w[1]))
                     .fold(f32::INFINITY, f32::min),
             };
-            if d < GRAB_RADIUS && best.map_or(true, |(b, _)| d < b) {
+            if d < GRAB_RADIUS && best.is_none_or(|(b, _)| d < b) {
                 best = Some((d, a));
             }
         }
@@ -467,7 +467,10 @@ impl Gizmo {
                     .iter()
                     .enumerate()
                     .map(|(i, p)| (i, (p.0 - x).powi(2) + (p.1 - y).powi(2)))
-                    .fold((0, f32::INFINITY), |acc, it| if it.1 < acc.1 { it } else { acc });
+                    .fold(
+                        (0, f32::INFINITY),
+                        |acc, it| if it.1 < acc.1 { it } else { acc },
+                    );
                 let prev = ring[i.saturating_sub(1)];
                 let next = ring[(i + 1).min(ring.len() - 1)];
                 let (tx, ty) = (next.0 - prev.0, next.1 - prev.1);
@@ -525,7 +528,10 @@ mod tests {
         let cam = ViewCamera::default();
         let proj = Projector::new(&cam, rect());
         let (x, y) = proj.project(Vec3::from(cam.target)).unwrap();
-        assert!((x - 400.0).abs() < 0.5 && (y - 300.0).abs() < 0.5, "{x},{y}");
+        assert!(
+            (x - 400.0).abs() < 0.5 && (y - 300.0).abs() < 0.5,
+            "{x},{y}"
+        );
     }
 
     #[test]
@@ -603,7 +609,10 @@ mod tests {
         let t = TransformData::default();
         let g = Gizmo::build(GizmoMode::Move, &t, &proj).unwrap();
         let tip = g.tips[1].unwrap();
-        let mid = ((g.origin.0 + tip.0) / 2.0, (g.origin.1 + tip.1) / 2.0);
+        let mid = (
+            f32::midpoint(g.origin.0, tip.0),
+            f32::midpoint(g.origin.1, tip.1),
+        );
         assert_eq!(g.hit(mid.0, mid.1), Some(1));
     }
 

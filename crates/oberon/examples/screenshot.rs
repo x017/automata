@@ -6,6 +6,12 @@
 //! cargo run --offline -p oberon --example screenshot -- /tmp/oberon.png
 //! ```
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+
 use oberon::canvas::Canvas;
 use oberon::doc::Document;
 use oberon::ui::{Layout, Pointer, Ui};
