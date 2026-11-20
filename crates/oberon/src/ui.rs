@@ -23,6 +23,9 @@ pub struct Pointer {
     pub down: bool,
     /// Whether the primary button was pressed this frame.
     pub pressed: bool,
+    /// Whether the right or middle button is held (orbit-only; never clicks
+    /// UI widgets).
+    pub secondary_down: bool,
     /// Scroll wheel delta this frame (positive = up/zoom-in).
     pub scroll: f32,
 }
@@ -552,20 +555,23 @@ impl Ui {
             canvas.blit_rgba(dx, dy, fw as u32, fh as u32, rgba);
         }
 
-        // Orbit on drag; zoom on scroll.
-        if rect.contains(pointer.x, pointer.y) {
-            if pointer.scroll != 0.0 {
-                intents.push(Intent::Zoom(pointer.scroll));
-            }
-            if pointer.down {
-                if let Some((px, py)) = self.drag {
-                    intents.push(Intent::Orbit(pointer.x - px, pointer.y - py));
+        // Zoom on scroll; orbit on left/right/middle drag. A drag starts
+        // inside the viewport and keeps orbiting even if the cursor leaves it.
+        let inside = rect.contains(pointer.x, pointer.y);
+        if inside && pointer.scroll != 0.0 {
+            intents.push(Intent::Zoom(pointer.scroll));
+        }
+        if pointer.down || pointer.secondary_down {
+            if let Some((px, py)) = self.drag {
+                let (dx, dy) = (pointer.x - px, pointer.y - py);
+                if dx != 0.0 || dy != 0.0 {
+                    intents.push(Intent::Orbit(dx, dy));
                 }
                 self.drag = Some((pointer.x, pointer.y));
-            } else {
-                self.drag = None;
+            } else if inside {
+                self.drag = Some((pointer.x, pointer.y));
             }
-        } else if !pointer.down {
+        } else {
             self.drag = None;
         }
 
@@ -597,5 +603,66 @@ impl Ui {
             &text,
             color::text_dim(),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(ui: &mut Ui, canvas: &mut Canvas, doc: &Document, p: Pointer) -> Vec<Intent> {
+        ui.frame(canvas, doc, p, None)
+    }
+
+    /// A point inside the viewport panel of a 1600x950 window.
+    fn viewport_point() -> (f32, f32) {
+        (layout::HIERARCHY_W + 200.0, layout::TOOLBAR_H + 200.0)
+    }
+
+    #[test]
+    fn dragging_in_viewport_emits_orbit() {
+        let mut canvas = Canvas::new(1600, 950);
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        let (x, y) = viewport_point();
+        let press = Pointer { x, y, down: true, pressed: true, ..Pointer::default() };
+        assert!(!frame(&mut ui, &mut canvas, &doc, press).contains(&Intent::Orbit(0.0, 0.0)));
+        let moved = Pointer { x: x + 30.0, y: y + 10.0, down: true, ..Pointer::default() };
+        let intents = frame(&mut ui, &mut canvas, &doc, moved);
+        assert!(intents.contains(&Intent::Orbit(30.0, 10.0)), "{intents:?}");
+    }
+
+    #[test]
+    fn right_drag_orbits_and_continues_outside_viewport() {
+        let mut canvas = Canvas::new(1600, 950);
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        let (x, y) = viewport_point();
+        let start = Pointer { x, y, secondary_down: true, ..Pointer::default() };
+        frame(&mut ui, &mut canvas, &doc, start);
+        // Leave the viewport (over the hierarchy) while still dragging.
+        let outside = Pointer { x: 10.0, y, secondary_down: true, ..Pointer::default() };
+        let intents = frame(&mut ui, &mut canvas, &doc, outside);
+        assert!(intents.contains(&Intent::Orbit(10.0 - x, 0.0)), "{intents:?}");
+    }
+
+    #[test]
+    fn scroll_in_viewport_emits_zoom() {
+        let mut canvas = Canvas::new(1600, 950);
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        let (x, y) = viewport_point();
+        let p = Pointer { x, y, scroll: 1.0, ..Pointer::default() };
+        assert!(frame(&mut ui, &mut canvas, &doc, p).contains(&Intent::Zoom(1.0)));
+    }
+
+    #[test]
+    fn orbit_camera_moves_eye() {
+        let a = ViewCamera::default().to_camera3d();
+        let b = ViewCamera { yaw: 2.0, ..ViewCamera::default() }.to_camera3d();
+        assert!((a.position - b.position).length() > 1.0);
+        // Distance from the target is preserved.
+        let d = ViewCamera::default().distance;
+        assert!((b.position.length() - d).abs() < 1e-3);
     }
 }

@@ -1,10 +1,12 @@
 //! The viewport renderer: the engine's real GPU output for the scene.
 //!
 //! Oberon builds a live ECS world from the document, materializes its mesh
-//! visuals, records a [`DrawList`], and renders it offscreen with the
-//! engine's wgpu renderer, then reads the pixels back to composite into the
-//! editor UI. When no GPU adapter is available (headless CI), the viewport
-//! falls back to a software wireframe so the editor still shows the scene.
+//! visuals, records a [`DrawList`], and renders it into an offscreen texture
+//! **on the window's own GPU device** (the same [`Renderer`] that presents
+//! the editor), then reads the pixels back to composite into the UI. When no
+//! renderer is available (headless CI), the viewport falls back to a
+//! software wireframe — driven by the same orbit camera — so the editor still
+//! shows the scene.
 
 #![forbid(unsafe_code)]
 
@@ -12,18 +14,18 @@ use automata_renderer::{DrawList, RenderTarget, Renderer};
 use automata_scene::Scene;
 
 use crate::doc::Document;
+use crate::ui::ViewCamera;
 
 /// Renders the document's scene to an RGBA8 pixel buffer of `width`×`height`.
 ///
-/// Uses the engine's offscreen GPU renderer when available; otherwise (or on
-/// render failure) falls back to a wireframe projection so the viewport is
-/// never blank.
+/// All GPU work goes through a caller-provided [`Renderer`] (the window's), so
+/// the editor runs on exactly one device — the real GPU. Without one, it
+/// falls back to a wireframe projection so the viewport is never blank.
 pub struct ViewportRenderer {
-    renderer: Option<Renderer>,
     scene: Scene,
-    /// Reused offscreen render target (avoids a fresh GPU texture per frame).
-    target: Option<RenderTarget>,
-    /// Reused readback buffer (avoids a fresh allocation per frame).
+    /// Reused offscreen render target and its size (recreated on resize).
+    target: Option<(RenderTarget, (u32, u32))>,
+    /// Reused output buffer (overwritten each frame, never grown past size).
     frame: Vec<u8>,
     /// The document change counter the GPU world was last built from. When it
     /// matches the document's current counter, the world is reused as-is.
@@ -37,11 +39,10 @@ impl Default for ViewportRenderer {
 }
 
 impl ViewportRenderer {
-    /// Creates a viewport renderer. GPU init is deferred to first render.
+    /// Creates a viewport renderer.
     #[must_use]
     pub fn new() -> Self {
         Self {
-            renderer: None,
             scene: Scene::new(),
             target: None,
             frame: Vec::new(),
@@ -49,61 +50,60 @@ impl ViewportRenderer {
         }
     }
 
-    /// Renders the document into an RGBA8 buffer. `cam` is the editor viewport
-    /// orbit camera (yaw/pitch/distance); it drives the 3D view so dragging in
-    /// the viewport actually moves the camera. Returns the frame plus its size.
+    /// Forces the next render to rebuild the GPU world (call when the whole
+    /// document is replaced, since a fresh document restarts its counter).
+    pub fn invalidate(&mut self) {
+        self.built_counter = None;
+    }
+
+    /// Renders the document into the internal RGBA8 buffer and returns it.
+    ///
+    /// `renderer` is the GPU renderer to draw with (the window's); `None`
+    /// selects the software wireframe. `cam` is the editor's orbit camera and
+    /// drives both paths, so dragging in the viewport moves the view.
     pub fn render(
         &mut self,
+        renderer: Option<&mut Renderer>,
         doc: &Document,
-        cam: crate::ui::ViewCamera,
+        cam: ViewCamera,
         width: u32,
         height: u32,
-    ) -> (Vec<u8>, u32, u32) {
+    ) -> (&[u8], u32, u32) {
         let width = width.max(1);
         let height = height.max(1);
-        // GPU path (lazy-init; the editor may start before a GPU is ready).
-        if self.renderer.is_none() {
-            self.renderer = pollster::block_on(Renderer::new_offscreen((width, height))).ok();
-        }
-        let mut ok = false;
-        if let Some(renderer) = &mut self.renderer {
-            if renderer.size() != (width, height) {
-                renderer.resize(width, height);
-                self.target = None; // recreate the target at the new size
-            }
-            // Reuse the render target across frames (recreate only on resize).
-            let target = self
-                .target
-                .get_or_insert_with(|| renderer.create_render_target((width, height)));
+        match renderer {
+            Some(renderer) => {
+                // Reuse the render target across frames (recreate on resize).
+                if self.target.as_ref().map(|(_, size)| *size) != Some((width, height)) {
+                    let target = renderer.create_render_target((width, height));
+                    self.target = Some((target, (width, height)));
+                }
+                let (target, _) = self.target.as_ref().expect("target just ensured");
 
-            // Rebuild the live world ONLY when the document changed. Rebuilding
-            // every frame cleared + respawned the ECS world and re-uploaded
-            // every mesh/material — the unbounded memory growth. On an
-            // unchanged frame we re-record the existing world.
-            let counter = doc.change_counter();
-            if self.built_counter != Some(counter) {
-                let file = doc.to_scene_file();
-                file.apply_to_world(self.scene.world_mut());
-                automata_scene::materialize_visuals(self.scene.world_mut(), renderer);
-                self.built_counter = Some(counter);
+                // Rebuild the live world ONLY when the document changed.
+                // Rebuilding every frame respawned the ECS world and
+                // re-uploaded every mesh/material each frame.
+                let counter = doc.change_counter();
+                if self.built_counter != Some(counter) {
+                    let file = doc.to_scene_file();
+                    file.apply_to_world(self.scene.world_mut());
+                    automata_scene::materialize_visuals(self.scene.world_mut(), renderer);
+                    self.built_counter = Some(counter);
+                }
+                let mut draw = DrawList::new();
+                draw.set_clear_color(wgpu_color(0.05, 0.055, 0.07, 1.0));
+                automata_scene::record_draw_list(self.scene.world(), &mut draw);
+                // The editor's orbit camera overrides any scene camera so the
+                // viewport is freely navigable regardless of scene contents.
+                draw.set_camera_3d(cam.to_camera3d());
+                renderer.render_offscreen(&draw, target);
+                renderer.read_texture_rgba_into(target, (width, height), &mut self.frame);
             }
-            let mut draw = DrawList::new();
-            draw.set_clear_color(wgpu_color(0.05, 0.055, 0.07, 1.0));
-            automata_scene::record_draw_list(self.scene.world(), &mut draw);
-            // The editor's orbit camera overrides the scene camera so the
-            // viewport is freely navigable regardless of scene contents.
-            draw.set_camera_3d(cam.to_camera3d());
-            renderer.render_offscreen(&draw, target);
-            // Reuse the readback buffer (clobbered each frame, not grown).
-            renderer.read_texture_rgba_into(target, (width, height), &mut self.frame);
-            ok = true;
+            None => {
+                render_wireframe::render_into(doc, cam, width, height, &mut self.frame);
+            }
         }
-        if ok {
-            (self.frame.clone(), width, height)
-        } else {
-            // Software fallback: a wireframe projection of the scene.
-            (render_wireframe::render(doc, width, height), width, height)
-        }
+        (self.frame.as_slice(), width, height)
     }
 }
 
@@ -114,19 +114,39 @@ fn wgpu_color(r: f64, g: f64, b: f64, a: f64) -> automata_renderer::Color {
 /// A CPU wireframe fallback used when no GPU adapter is present.
 pub mod render_wireframe {
     use crate::doc::Document;
+    use crate::ui::ViewCamera;
 
-    /// Renders the document's meshes as wireframes onto an RGBA buffer.
+    /// Renders the document's meshes as wireframes onto an RGBA buffer,
+    /// viewed from the editor orbit camera `view`.
     #[must_use]
-    pub fn render(doc: &Document, width: u32, height: u32) -> Vec<u8> {
+    pub fn render(doc: &Document, view: ViewCamera, width: u32, height: u32) -> Vec<u8> {
+        let mut px = Vec::new();
+        render_into(doc, view, width, height, &mut px);
+        px
+    }
+
+    /// Like [`render`], but reuses `px` (resized to `width*height*4`).
+    pub fn render_into(
+        doc: &Document,
+        view: ViewCamera,
+        width: u32,
+        height: u32,
+        px: &mut Vec<u8>,
+    ) {
         let (w, h) = (width as usize, height as usize);
-        let mut px = vec![0u8; w * h * 4];
+        px.clear();
+        px.resize(w * h * 4, 0);
         // Background.
         for chunk in px.chunks_exact_mut(4) {
             chunk.copy_from_slice(&[13, 14, 18, 255]);
         }
         // Grid + a simple perspective projection of each cube.
-        let cam = Camera::default();
-        draw_grid(&mut px, w, h, &cam);
+        let cam = Camera {
+            yaw: view.yaw,
+            pitch: view.pitch,
+            dist: view.distance,
+        };
+        draw_grid(px, w, h, &cam);
         for entity in &doc.entities {
             let Some(t) = &entity.data.transform else {
                 continue;
@@ -135,7 +155,7 @@ pub mod render_wireframe {
             let (sx, sy, sz) = (t.scale[0], t.scale[1], t.scale[2]);
             if entity.data.mesh_visual.is_some() {
                 draw_cube(
-                    &mut px,
+                    px,
                     w,
                     h,
                     &cam,
@@ -144,10 +164,9 @@ pub mod render_wireframe {
                     (232, 234, 240, 255),
                 );
             } else {
-                draw_marker(&mut px, w, h, &cam, (cx, cy, cz));
+                draw_marker(px, w, h, &cam, (cx, cy, cz));
             }
         }
-        px
     }
 
     #[derive(Clone, Copy)]
@@ -155,16 +174,6 @@ pub mod render_wireframe {
         yaw: f32,
         pitch: f32,
         dist: f32,
-    }
-
-    impl Default for Camera {
-        fn default() -> Self {
-            Self {
-                yaw: 0.6,
-                pitch: 0.5,
-                dist: 10.0,
-            }
-        }
     }
 
     impl Camera {
@@ -317,5 +326,24 @@ pub mod render_wireframe {
         edge(px, w, h, cam, (c.0 - m, c.1, c.2), (c.0 + m, c.1, c.2), col);
         edge(px, w, h, cam, (c.0, c.1 - m, c.2), (c.0, c.1 + m, c.2), col);
         edge(px, w, h, cam, (c.0, c.1, c.2 - m), (c.0, c.1, c.2 + m), col);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fallback_viewport_follows_the_orbit_camera() {
+        let doc = Document::starter();
+        let mut vp = ViewportRenderer::new();
+        let a = vp.render(None, &doc, ViewCamera::default(), 320, 200).0.to_vec();
+        let turned = ViewCamera {
+            yaw: 2.0,
+            ..ViewCamera::default()
+        };
+        let b = vp.render(None, &doc, turned, 320, 200).0.to_vec();
+        assert_eq!(a.len(), 320 * 200 * 4);
+        assert_ne!(a, b, "orbiting must change the rendered view");
     }
 }

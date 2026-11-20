@@ -23,9 +23,13 @@ fn main() {
     }
     let mut ui = Ui::new();
 
-    // Render the viewport frame (wireframe fallback; no GPU headless here).
-    let mut renderer = oberon::render::ViewportRenderer::new();
-    let (frame, fw, fh) = renderer.render(&doc, ui.camera, 1024, 640);
+    // Render the viewport frame on an offscreen GPU renderer when one is
+    // available; otherwise use the software wireframe fallback.
+    let (vw, vh) = (1024u32, 640u32);
+    let mut gpu = pollster::block_on(automata_renderer::Renderer::new_offscreen((vw, vh))).ok();
+    let mut viewport = oberon::render::ViewportRenderer::new();
+    let (frame, fw, fh) = viewport.render(gpu.as_mut(), &doc, ui.camera, vw, vh);
+    let frame = frame.to_vec();
 
     let pointer = Pointer::default();
     let _intents = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));

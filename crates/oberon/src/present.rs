@@ -65,6 +65,8 @@ struct EditorApp {
     /// Cursor state tracked between events to build each frame's `Pointer`.
     cursor: (f32, f32),
     mouse_down: bool,
+    /// Right/middle button held (orbits the viewport; never clicks widgets).
+    secondary_down: bool,
     /// Set when a button was pressed since the last frame.
     pressed_pending: bool,
     scroll_pending: f32,
@@ -89,6 +91,7 @@ impl EditorApp {
             renderer: None,
             cursor: (0.0, 0.0),
             mouse_down: false,
+            secondary_down: false,
             pressed_pending: false,
             scroll_pending: 0.0,
             scene_path,
@@ -148,6 +151,7 @@ impl EditorApp {
             }
             Intent::New => {
                 self.doc = Document::new();
+                self.viewport.invalidate();
                 self.scene_path = None;
             }
             Intent::Save => match self.doc.save(self.scene_path.as_deref()) {
@@ -200,16 +204,19 @@ impl EditorApp {
                 y: self.cursor.1,
                 down: self.mouse_down,
                 pressed: self.pressed_pending,
+                secondary_down: self.secondary_down,
                 scroll: self.scroll_pending,
             };
 
-            // Render the live viewport (driven by the editor orbit camera),
-            // then composite the whole UI over it.
+            // Render the live viewport on the window's own GPU device (driven
+            // by the editor orbit camera), then composite the UI over it.
             let (vw, vh) = viewport_pixels(w, h);
             let cam = self.ui.camera;
-            let (frame, fw, fh) = self.viewport.render(&self.doc, cam, vw, vh);
+            let (frame, fw, fh) = self
+                .viewport
+                .render(self.renderer.as_mut(), &self.doc, cam, vw, vh);
             self.ui
-                .frame(canvas, &self.doc, pointer, Some((&frame, fw, fh)))
+                .frame(canvas, &self.doc, pointer, Some((frame, fw, fh)))
         };
 
         // 2) Apply intents (mutates the document / UI camera). Drawing already
@@ -318,6 +325,16 @@ impl ApplicationHandler for EditorApp {
                     window.request_redraw();
                 }
             }
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Right | MouseButton::Middle,
+                ..
+            } => {
+                self.secondary_down = state == ElementState::Pressed;
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 let amount = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
@@ -341,7 +358,9 @@ impl ApplicationHandler for EditorApp {
                     let delta = match event.physical_key {
                         // Camera-relative horizontal move on the ground plane.
                         PhysicalKey::Code(KeyCode::ArrowLeft) => Some([-cy * step, 0.0, sy * step]),
-                        PhysicalKey::Code(KeyCode::ArrowRight) => Some([cy * step, 0.0, -sy * step]),
+                        PhysicalKey::Code(KeyCode::ArrowRight) => {
+                            Some([cy * step, 0.0, -sy * step])
+                        }
                         PhysicalKey::Code(KeyCode::ArrowUp) => Some([-sy * step, 0.0, -cy * step]),
                         PhysicalKey::Code(KeyCode::ArrowDown) => Some([sy * step, 0.0, cy * step]),
                         PhysicalKey::Code(KeyCode::PageUp) => Some([0.0, step, 0.0]),

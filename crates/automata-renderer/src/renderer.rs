@@ -19,12 +19,20 @@ use crate::{GraphicsQuality, RenderContext, Sun};
 /// Depth buffer format used by the mesh pass.
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 
+/// Color format of offscreen render targets ([`Renderer::create_render_target`]).
+/// Always RGBA8 sRGB so CPU readback is plain RGBA regardless of the window
+/// surface's native format.
+pub(crate) const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
 /// Where a frame is rendered: the window surface or an offscreen texture.
 enum FrameTarget {
     /// Windowed: the surface texture is presented after rendering.
     Surface(wgpu::SurfaceTexture),
-    /// Offscreen: a regular texture view owned by the caller.
-    Offscreen(wgpu::TextureView),
+    /// Offscreen: a regular texture view owned by the caller, and its size.
+    Offscreen {
+        view: wgpu::TextureView,
+        size: (u32, u32),
+    },
 }
 
 /// Per-frame GPU resources derived from a draw list.
@@ -58,6 +66,13 @@ pub struct Renderer {
     shadows_enabled: bool,
     /// Scratch buffer for CPU->surface frame blits (reused across frames).
     blit_scratch: Vec<u8>,
+    /// `(mesh, sprite)` pipelines targeting [`OFFSCREEN_FORMAT`], built lazily
+    /// when it differs from the surface format. Lets a windowed renderer also
+    /// draw into offscreen targets on the same device (Oberon's viewport).
+    offscreen_pipelines: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
+    /// Depth buffer for offscreen targets whose size differs from the
+    /// surface's, cached by size.
+    offscreen_depth: Option<((u32, u32), wgpu::Texture)>,
 }
 
 impl Renderer {
@@ -106,6 +121,8 @@ impl Renderer {
             shadow_map_size: quality.shadow_map_size(),
             shadows_enabled: quality.shadows_enabled(),
             blit_scratch: Vec::new(),
+            offscreen_pipelines: None,
+            offscreen_depth: None,
         })
     }
 
@@ -161,6 +178,8 @@ impl Renderer {
             shadow_map_size: quality.shadow_map_size(),
             shadows_enabled: quality.shadows_enabled(),
             blit_scratch: Vec::new(),
+            offscreen_pipelines: None,
+            offscreen_depth: None,
         })
     }
 
@@ -323,9 +342,32 @@ impl Renderer {
     /// The texture must be `Rgba8UnormSrgb` with
     /// `RENDER_ATTACHMENT | COPY_SRC` usage. Intended for tests and tooling
     /// that need to inspect rendered output without a window.
+    ///
+    /// Works on windowed renderers too: the target may be any size (it gets
+    /// its own depth buffer) and is drawn with pipelines built for
+    /// [`OFFSCREEN_FORMAT`], so one device can drive both the window and an
+    /// embedded viewport.
     pub fn render_offscreen(&mut self, draw: &DrawList, target: &wgpu::Texture) {
+        let size = (target.width().max(1), target.height().max(1));
+        self.ensure_offscreen_resources(size);
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        self.execute_frame(draw, FrameTarget::Offscreen(view));
+        self.execute_frame(draw, FrameTarget::Offscreen { view, size });
+    }
+
+    /// Lazily builds the offscreen-format pipelines (only when the surface
+    /// format differs) and a depth buffer matching `size` (only when it
+    /// differs from the surface size).
+    fn ensure_offscreen_resources(&mut self, size: (u32, u32)) {
+        if self.ctx.format() != OFFSCREEN_FORMAT && self.offscreen_pipelines.is_none() {
+            let device = self.ctx.device();
+            let mesh = pipeline::create_mesh_pipeline(device, &self.shared, OFFSCREEN_FORMAT);
+            let sprite = pipeline::create_sprite_pipeline(device, &self.shared, OFFSCREEN_FORMAT);
+            self.offscreen_pipelines = Some((mesh, sprite));
+        }
+        let cached = self.offscreen_depth.as_ref().map(|(s, _)| *s);
+        if size != self.ctx.size() && cached != Some(size) {
+            self.offscreen_depth = Some((size, create_depth_texture(self.ctx.device(), size)));
+        }
     }
 
     /// Creates an offscreen render target texture of `size` for use with
@@ -337,7 +379,7 @@ impl Renderer {
     pub fn create_render_target(&self, size: (u32, u32)) -> wgpu::Texture {
         let device = self.ctx.device();
         device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("oberon-viewport"),
+            label: Some("offscreen-target"),
             size: wgpu::Extent3d {
                 width: size.0.max(1),
                 height: size.1.max(1),
@@ -346,7 +388,7 @@ impl Renderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: OFFSCREEN_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         })
@@ -437,6 +479,11 @@ impl Renderer {
             },
         );
         self.ctx.present(texture);
+        // Reclaim finished submissions. `present` flushes the write above in
+        // an internal submission but never runs device maintenance, so
+        // without a poll every frame's ~(w*h*4)-byte staging buffer stays
+        // alive forever — hundreds of MB per second at 60 FPS.
+        let _ = self.ctx.device().poll(wgpu::PollType::Poll);
     }
 
     /// Builds a camera bind group from a view-projection matrix and the
@@ -479,9 +526,12 @@ impl Renderer {
     /// Renders the frame into `target`, then presents if it's the surface.
     /// Renders the frame into `target`, then presents if it's the surface.
     fn execute_frame(&mut self, draw: &DrawList, target: FrameTarget) {
-        let viewport = {
-            let s = self.ctx.size();
-            (s.0.max(1), s.1.max(1))
+        let (viewport, offscreen) = match &target {
+            FrameTarget::Offscreen { size, .. } => (*size, true),
+            FrameTarget::Surface(_) => {
+                let s = self.ctx.size();
+                ((s.0.max(1), s.1.max(1)), false)
+            }
         };
         let mut encoder =
             self.ctx
@@ -514,12 +564,20 @@ impl Renderer {
                 FrameTarget::Surface(texture) => texture
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default()),
-                FrameTarget::Offscreen(view) => view.clone(),
+                FrameTarget::Offscreen { view, .. } => view.clone(),
             };
-            let depth_view = self
-                .depth_texture
-                .as_ref()
-                .map(|t| t.create_view(&wgpu::TextureViewDescriptor::default()));
+            // Offscreen targets of a different size use their own depth buffer.
+            let depth_texture = match &self.offscreen_depth {
+                Some((size, texture)) if offscreen && *size == viewport => Some(texture),
+                _ => self.depth_texture.as_ref(),
+            };
+            let depth_view =
+                depth_texture.map(|t| t.create_view(&wgpu::TextureViewDescriptor::default()));
+            // Offscreen targets use pipelines built for their color format.
+            let (mesh_pipeline, sprite_pipeline) = match &self.offscreen_pipelines {
+                Some((mesh, sprite)) if offscreen => (mesh, sprite),
+                _ => (&self.mesh_pipeline, &self.sprite_pipeline),
+            };
 
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main"),
@@ -546,7 +604,7 @@ impl Renderer {
             });
 
             if !draw.meshes.is_empty() {
-                pass.set_pipeline(&self.mesh_pipeline);
+                pass.set_pipeline(mesh_pipeline);
                 pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
                 pass.set_bind_group(3, &prepared.light_bind, &[]);
                 for (mesh_draw, model_bind) in draw.meshes.iter().zip(&prepared.model_bind_groups) {
@@ -555,7 +613,7 @@ impl Renderer {
             }
 
             if !draw.sprites.is_empty() {
-                pass.set_pipeline(&self.sprite_pipeline);
+                pass.set_pipeline(sprite_pipeline);
                 pass.set_bind_group(0, &prepared.camera_2d_bind, &[]);
                 pass.set_vertex_buffer(0, self.sprite_batch.vertex_buffer.slice(..));
                 pass.set_index_buffer(
@@ -579,7 +637,7 @@ impl Renderer {
         self.ctx.queue().submit([encoder.finish()]);
         match target {
             FrameTarget::Surface(texture) => self.ctx.present(texture),
-            FrameTarget::Offscreen(_) => {
+            FrameTarget::Offscreen { .. } => {
                 let _ = self.ctx.device().poll(wgpu::PollType::wait_indefinitely());
             }
         }
@@ -947,7 +1005,11 @@ fn read_texture_rgba_into(
 ) {
     let device = renderer.context().device();
     let queue = renderer.context().queue();
-    let bytes_per_row = 4 * size.0;
+    // Texture->buffer copies need rows padded to 256 bytes; arbitrary widths
+    // (e.g. an editor viewport) would otherwise fail validation.
+    let unpadded_row = 4 * size.0;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let bytes_per_row = unpadded_row.div_ceil(align) * align;
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("readback"),
         size: u64::from(bytes_per_row) * u64::from(size.1),
@@ -1000,7 +1062,14 @@ fn read_texture_rgba_into(
         }
     };
     out.clear();
-    out.extend_from_slice(&data);
+    if bytes_per_row == unpadded_row {
+        out.extend_from_slice(&data);
+    } else {
+        out.reserve((unpadded_row * size.1) as usize);
+        for row in data.chunks_exact(bytes_per_row as usize) {
+            out.extend_from_slice(&row[..unpadded_row as usize]);
+        }
+    }
 }
 
 #[cfg(test)]
