@@ -54,6 +54,147 @@ pub struct Document {
     mid_gesture: bool,
 }
 
+/// The kinds of entity the Create menu can spawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateKind {
+    /// An empty entity with only a transform.
+    Empty,
+    /// A unit cube with a mesh renderer.
+    Cube,
+    /// A flat 10×10 plane facing +Y.
+    Plane,
+    /// A directional (sun) light.
+    Light,
+    /// A perspective camera.
+    Camera,
+    /// A cube with a dynamic rigid body and a box collider.
+    PhysicsCube,
+}
+
+impl CreateKind {
+    /// Every kind, in menu order.
+    pub const ALL: [Self; 6] = [
+        Self::Empty,
+        Self::Cube,
+        Self::Plane,
+        Self::Light,
+        Self::Camera,
+        Self::PhysicsCube,
+    ];
+
+    /// The menu label (also the base name of the new entity).
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Empty => "Empty",
+            Self::Cube => "Cube",
+            Self::Plane => "Plane",
+            Self::Light => "Directional Light",
+            Self::Camera => "Camera",
+            Self::PhysicsCube => "Physics Cube",
+        }
+    }
+}
+
+/// Components that can be added to / removed from an entity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ComponentKind {
+    /// Primitive mesh visual.
+    Mesh,
+    /// Directional light.
+    Light,
+    /// Perspective camera.
+    Camera,
+    /// Rigid body.
+    RigidBody,
+    /// 3D collider.
+    Collider,
+}
+
+impl ComponentKind {
+    /// Every addable component, in menu order.
+    pub const ALL: [Self; 5] = [
+        Self::Mesh,
+        Self::Light,
+        Self::Camera,
+        Self::RigidBody,
+        Self::Collider,
+    ];
+
+    /// The display name.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Mesh => "Mesh Renderer",
+            Self::Light => "Directional Light",
+            Self::Camera => "Camera",
+            Self::RigidBody => "Rigidbody",
+            Self::Collider => "Collider",
+        }
+    }
+
+    /// Whether `data` has this component.
+    #[must_use]
+    pub fn present_in(self, data: &EntityData) -> bool {
+        match self {
+            Self::Mesh => data.mesh_visual.is_some(),
+            Self::Light => data.directional_light.is_some(),
+            Self::Camera => data.camera_3d.is_some(),
+            Self::RigidBody => data.rigid_body.is_some(),
+            Self::Collider => data.collider_3d.is_some(),
+        }
+    }
+
+    /// Adds a default instance of this component to `data` (no-op if present).
+    pub fn add_to(self, data: &mut EntityData) {
+        match self {
+            Self::Mesh => {
+                data.mesh_visual.get_or_insert(MeshVisualData {
+                    primitive: PrimitiveData::Cube { size: 1.0 },
+                    color: [0.85, 0.87, 0.92, 1.0],
+                });
+            }
+            Self::Light => {
+                data.directional_light
+                    .get_or_insert_with(automata_scene::DirectionalLight::default);
+            }
+            Self::Camera => {
+                data.camera_3d.get_or_insert_with(|| {
+                    automata_renderer::Camera3D::new(glam::Vec3::new(0.0, 2.0, 6.0), glam::Vec3::ZERO)
+                });
+            }
+            Self::RigidBody => {
+                data.rigid_body
+                    .get_or_insert_with(automata_physics::RigidBody::default);
+            }
+            Self::Collider => {
+                // Fit the box to the visible mesh (physics ignores scale, so
+                // the collider carries the world size).
+                let size = match data.mesh_visual.as_ref().map(|m| &m.primitive) {
+                    Some(PrimitiveData::Cube { size }) => *size,
+                    _ => 1.0,
+                };
+                let scale = data.transform.map_or([1.0; 3], |t| t.scale);
+                let ext = |i: usize| (size * scale[i].abs()).max(0.01);
+                data.collider_3d.get_or_insert_with(|| {
+                    automata_physics::Collider3D::cuboid(ext(0), ext(1), ext(2))
+                });
+            }
+        }
+    }
+
+    /// Removes this component from `data`.
+    pub fn remove_from(self, data: &mut EntityData) {
+        match self {
+            Self::Mesh => data.mesh_visual = None,
+            Self::Light => data.directional_light = None,
+            Self::Camera => data.camera_3d = None,
+            Self::RigidBody => data.rigid_body = None,
+            Self::Collider => data.collider_3d = None,
+        }
+    }
+}
+
 impl Default for Document {
     fn default() -> Self {
         Self::new()
@@ -94,14 +235,18 @@ impl Document {
         });
         let ground = doc.add_entity_named("Ground");
         doc.entities[ground].data.transform = Some(TransformData {
-            position: [0.0, -0.5, 0.0],
-            scale: [12.0, 0.2, 12.0],
+            position: [0.0, -0.1, 0.0],
+            scale: [20.0, 0.2, 20.0],
             ..Default::default()
         });
         doc.entities[ground].data.mesh_visual = Some(MeshVisualData {
             primitive: PrimitiveData::Cube { size: 1.0 },
             color: [0.16, 0.17, 0.20, 1.0],
         });
+        // A static collider so physics objects land on the ground in play mode.
+        doc.entities[ground].data.rigid_body = Some(automata_physics::RigidBody::fixed());
+        doc.entities[ground].data.collider_3d =
+            Some(automata_physics::Collider3D::cuboid(20.0, 0.2, 20.0));
         let cube = doc.add_entity_named("Cube");
         doc.entities[cube].data.transform = Some(TransformData {
             position: [0.0, 0.5, 0.0],
@@ -158,6 +303,23 @@ impl Document {
     /// Selects an entity by id (`None` clears the selection).
     pub fn select(&mut self, id: Option<u64>) {
         self.selected = id;
+    }
+
+    /// A copy of the document for play mode: the same entities, ids,
+    /// selection, path and dirty flag, without the undo history.
+    #[must_use]
+    pub fn play_copy(&self) -> Self {
+        Self {
+            entities: self.entities.clone(),
+            next_id: self.next_id,
+            path: self.path.clone(),
+            selected: self.selected,
+            dirty: self.dirty,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            change_counter: self.change_counter,
+            mid_gesture: false,
+        }
     }
 
     fn snapshot(&self) -> String {
@@ -323,6 +485,132 @@ impl Document {
         true
     }
 
+    /// Applies an edit to one entity's data through `f`, with undo.
+    ///
+    /// When `gesture` is true the edit is part of a continuous interaction
+    /// (dragging a gizmo or scrubbing a field): only the first edit of the
+    /// gesture records an undo snapshot, until [`Document::end_gesture`].
+    /// Edits that leave the data unchanged record nothing. Returns true when
+    /// the entity changed.
+    pub fn modify(
+        &mut self,
+        id: u64,
+        gesture: bool,
+        f: impl FnOnce(&mut EntityData),
+    ) -> bool {
+        let Some(idx) = self.index_of(id) else {
+            return false;
+        };
+        let mut edited = self.entities[idx].data.clone();
+        f(&mut edited);
+        if edited == self.entities[idx].data {
+            return false;
+        }
+        if gesture {
+            if !self.mid_gesture {
+                self.push_undo();
+                self.mid_gesture = true;
+            }
+        } else {
+            self.push_undo();
+        }
+        self.entities[idx].data = edited;
+        self.touch();
+        true
+    }
+
+    /// Ends a continuous edit gesture: the next gesture edit records a fresh
+    /// undo snapshot.
+    pub fn end_gesture(&mut self) {
+        self.mid_gesture = false;
+    }
+
+    /// Creates a new entity of `kind`, selects it, and returns its id.
+    pub fn create(&mut self, kind: CreateKind) -> u64 {
+        let name = self.unique_name(kind.label());
+        let mut data = EntityData {
+            name: Some(name),
+            transform: Some(TransformData::default()),
+            ..Default::default()
+        };
+        match kind {
+            CreateKind::Empty => {}
+            CreateKind::Cube => {
+                if let Some(t) = &mut data.transform {
+                    t.position = [0.0, 0.5, 0.0];
+                }
+                ComponentKind::Mesh.add_to(&mut data);
+            }
+            CreateKind::Plane => {
+                if let Some(t) = &mut data.transform {
+                    // A quad faces +Z; tip it over to face +Y.
+                    t.rotation_euler = [-std::f32::consts::FRAC_PI_2, 0.0, 0.0];
+                    t.position = [0.0, 0.01, 0.0];
+                }
+                data.mesh_visual = Some(MeshVisualData {
+                    primitive: PrimitiveData::Quad { size: 10.0 },
+                    color: [0.55, 0.58, 0.64, 1.0],
+                });
+            }
+            CreateKind::Light => {
+                if let Some(t) = &mut data.transform {
+                    t.position = [0.0, 5.0, 0.0];
+                }
+                ComponentKind::Light.add_to(&mut data);
+            }
+            CreateKind::Camera => {
+                if let Some(t) = &mut data.transform {
+                    t.position = [0.0, 2.0, 6.0];
+                }
+                ComponentKind::Camera.add_to(&mut data);
+            }
+            CreateKind::PhysicsCube => {
+                if let Some(t) = &mut data.transform {
+                    t.position = [0.0, 4.0, 0.0];
+                }
+                ComponentKind::Mesh.add_to(&mut data);
+                ComponentKind::RigidBody.add_to(&mut data);
+                ComponentKind::Collider.add_to(&mut data);
+            }
+        }
+        self.push_undo();
+        let id = self.alloc_id();
+        self.entities.push(EntityEntry { id, data });
+        self.selected = Some(id);
+        self.touch();
+        id
+    }
+
+    /// Duplicates the entity with `id` (placed right after it, selected).
+    /// Returns the new entity's id.
+    pub fn duplicate_entity(&mut self, id: u64) -> Option<u64> {
+        let idx = self.index_of(id)?;
+        let mut data = self.entities[idx].data.clone();
+        let base = self.entities[idx].name().to_string();
+        data.name = Some(self.unique_name(&base));
+        self.push_undo();
+        let new_id = self.alloc_id();
+        self.entities.insert(idx + 1, EntityEntry { id: new_id, data });
+        self.selected = Some(new_id);
+        self.touch();
+        Some(new_id)
+    }
+
+    /// Adds a default `kind` component to the entity. Returns true if added.
+    pub fn add_component(&mut self, id: u64, kind: ComponentKind) -> bool {
+        self.modify(id, false, |d| kind.add_to(d))
+    }
+
+    /// Removes the `kind` component from the entity. Returns true if removed.
+    pub fn remove_component(&mut self, id: u64, kind: ComponentKind) -> bool {
+        self.modify(id, false, |d| kind.remove_from(d))
+    }
+
+    /// Resets the entity's transform to identity. Returns true if changed.
+    pub fn reset_transform(&mut self, id: u64) -> bool {
+        self.modify(id, false, |d| d.transform = Some(TransformData::default()))
+    }
+
     /// Whether undo is available.
     #[must_use]
     pub fn can_undo(&self) -> bool {
@@ -392,21 +680,31 @@ impl Document {
             .iter()
             .map(|e| (e.name().to_string(), e.id))
             .collect();
-        self.entities = file
-            .entities
-            .into_iter()
-            .map(|data| {
-                let name = data.name.clone().unwrap_or_default();
-                let id = old_ids.iter().find(|(n, _)| *n == name).map_or_else(
-                    || {
-                        self.next_id += 1;
-                        self.next_id - 1
-                    },
-                    |(_, id)| *id,
-                );
-                EntityEntry { id, data }
-            })
-            .collect();
+        let mut used: Vec<u64> = Vec::new();
+        let mut entities = Vec::with_capacity(file.entities.len());
+        for (i, data) in file.entities.into_iter().enumerate() {
+            let name = data.name.clone().unwrap_or_else(|| "(unnamed)".to_string());
+            // Match by name first; else keep the id at the same position
+            // (an undone rename); else allocate a fresh id.
+            let by_name = old_ids
+                .iter()
+                .find(|(n, id)| *n == name && !used.contains(id))
+                .map(|(_, id)| *id);
+            let by_index = old_ids
+                .get(i)
+                .map(|(_, id)| *id)
+                .filter(|id| !used.contains(id));
+            let id = match by_name.or(by_index) {
+                Some(id) => id,
+                None => {
+                    self.next_id += 1;
+                    self.next_id - 1
+                }
+            };
+            used.push(id);
+            entities.push(EntityEntry { id, data });
+        }
+        self.entities = entities;
         self.next_id = self
             .entities
             .iter()

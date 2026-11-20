@@ -34,28 +34,51 @@ pub mod color {
     c!(axis_x, 224, 96, 100);
     c!(axis_z, 96, 148, 224);
     c!(danger, 224, 96, 100);
+    c!(axis_y, 128, 204, 112);
+    c!(field, 17, 18, 23);
+    c!(warn, 236, 190, 92);
+    c!(gizmo_hot, 255, 220, 96);
+    c!(light_icon, 255, 214, 120);
+    c!(camera_icon, 140, 220, 170);
+
+    /// Translucent black for drop shadows under menus.
+    pub fn shadow() -> Color {
+        Color::from_rgba8(0, 0, 0, 120)
+    }
 }
 
-/// Layout metrics.
+/// Layout metrics, in logical pixels (scaled by the window's DPI factor).
 pub mod layout {
     /// Height of the top toolbar.
-    pub const TOOLBAR_H: f32 = 40.0;
+    pub const TOOLBAR_H: f32 = 44.0;
     /// Width of the hierarchy panel.
-    pub const HIERARCHY_W: f32 = 230.0;
+    pub const HIERARCHY_W: f32 = 250.0;
     /// Width of the inspector panel.
-    pub const INSPECTOR_W: f32 = 300.0;
+    pub const INSPECTOR_W: f32 = 340.0;
     /// Height of the console panel.
-    pub const CONSOLE_H: f32 = 160.0;
+    pub const CONSOLE_H: f32 = 150.0;
     /// Height of the status bar.
-    pub const STATUS_H: f32 = 26.0;
+    pub const STATUS_H: f32 = 24.0;
     /// Panel title-bar height.
-    pub const TITLEBAR_H: f32 = 26.0;
+    pub const TITLEBAR_H: f32 = 28.0;
     /// Standard inner padding.
-    pub const PAD: f32 = 8.0;
+    pub const PAD: f32 = 10.0;
     /// Corner radius for panels and buttons.
     pub const RADIUS: f32 = 4.0;
     /// Body text size.
     pub const FONT_SIZE: f32 = 13.0;
+    /// Small text size (hints, console, ids).
+    pub const SMALL_SIZE: f32 = 11.5;
     /// Panel title text size.
     pub const TITLE_SIZE: f32 = 12.0;
+    /// List row height (hierarchy, menus).
+    pub const ROW_H: f32 = 24.0;
+    /// Inspector field height.
+    pub const FIELD_H: f32 = 20.0;
+    /// Vertical advance per inspector row.
+    pub const ROW_STEP: f32 = 25.0;
+    /// Width of the inspector property-label column.
+    pub const LABEL_W: f32 = 96.0;
+    /// Width of popup menus.
+    pub const MENU_W: f32 = 210.0;
 }

@@ -8,7 +8,7 @@
 
 use oberon::canvas::Canvas;
 use oberon::doc::Document;
-use oberon::ui::{Pointer, Ui};
+use oberon::ui::{Layout, Pointer, Ui};
 
 fn main() {
     let out = std::env::args()
@@ -25,7 +25,8 @@ fn main() {
 
     // Render the viewport frame on an offscreen GPU renderer when one is
     // available; otherwise use the software wireframe fallback.
-    let (vw, vh) = (1024u32, 640u32);
+    let view = Layout::compute(w as f32, h as f32).viewport;
+    let (vw, vh) = (view.w as u32, view.h as u32);
     let mut gpu = pollster::block_on(automata_renderer::Renderer::new_offscreen((vw, vh))).ok();
     let mut viewport = oberon::render::ViewportRenderer::new();
     let (frame, fw, fh) = viewport.render(gpu.as_mut(), &doc, ui.camera, vw, vh);

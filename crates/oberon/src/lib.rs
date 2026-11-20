@@ -5,16 +5,15 @@
 //! viewport frame (composited into the UI each frame).
 //!
 //! The crate is a library plus a binary. The library holds the testable
-//! pieces (scene document model, UI rendering, viewport compositing) so they
-//! can be exercised headless; the binary adds the winit/glow shell.
+//! pieces (scene document model, inspector property tables, scene-view math,
+//! UI, viewport compositing) so they can be exercised headless; the binary
+//! adds the winit shell.
 //!
 //! # Safety
 //!
-//! Editor logic is entirely safe: every module here declares
-//! `#![forbid(unsafe_code)]`. Presenting a window needs an OpenGL context,
-//! whose bindings are `unsafe` FFI — that `unsafe` is contained to
-//! [`present`], the one module that opts out with a scoped `allow`. Nothing
-//! outside [`present`] may use `unsafe`.
+//! Every module declares `#![forbid(unsafe_code)]`; the workspace forbids
+//! `unsafe` too. Presentation goes through winit and the engine's wgpu
+//! surface, which need no `unsafe` in this crate.
 
 // The editor UI is coordinate- and projection-heavy: it deals in f32 pixel
 // positions, per-channel RGBA bytes, and draw helpers that take a rect plus a
@@ -36,8 +35,11 @@
 
 pub mod canvas;
 pub mod doc;
+pub mod fields;
+pub mod play;
 pub mod present;
 pub mod render;
 pub mod text;
 pub mod theme;
 pub mod ui;
+pub mod view;
