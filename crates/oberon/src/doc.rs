@@ -212,6 +212,23 @@ impl ComponentKind {
         }
     }
 
+    /// Copies this component's values from `src` to `dst` (adding it to
+    /// `dst` if missing; removing it if `src` lacks it).
+    pub fn copy_between(self, src: &EntityData, dst: &mut EntityData) {
+        match self {
+            Self::Mesh => dst.mesh_visual.clone_from(&src.mesh_visual),
+            Self::Light => dst.directional_light = src.directional_light,
+            Self::Camera => dst.camera_3d = src.camera_3d,
+            Self::RigidBody => dst.rigid_body.clone_from(&src.rigid_body),
+            Self::Collider => dst.collider_3d.clone_from(&src.collider_3d),
+            Self::Character => {
+                dst.character_controller
+                    .clone_from(&src.character_controller);
+                dst.character_velocity = src.character_velocity;
+            }
+        }
+    }
+
     /// Removes this component from `data`.
     pub fn remove_from(self, data: &mut EntityData) {
         match self {
@@ -785,6 +802,117 @@ impl Document {
         }
     }
 
+    /// Resolves a scene-relative path (scripts, prefabs) against the scene
+    /// file's directory, or the working directory for unsaved scenes.
+    #[must_use]
+    pub fn resolve(&self, rel: &str) -> PathBuf {
+        let p = Path::new(rel);
+        if p.is_absolute() {
+            return p.to_path_buf();
+        }
+        self.base_dir().join(p)
+    }
+
+    /// The directory scene-relative paths are resolved against.
+    #[must_use]
+    pub fn base_dir(&self) -> PathBuf {
+        self.path
+            .as_ref()
+            .and_then(|p| p.parent())
+            .filter(|p| !p.as_os_str().is_empty())
+            .map_or_else(
+                || std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+                Path::to_path_buf,
+            )
+    }
+
+    /// `path` relative to [`Document::base_dir`] when inside it (forward
+    /// slashes, so scene files stay portable), else absolute.
+    #[must_use]
+    pub fn relative(&self, path: &Path) -> String {
+        let base = self.base_dir();
+        let abs = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
+        };
+        let base = std::fs::canonicalize(&base).unwrap_or(base);
+        let abs_c = abs
+            .parent()
+            .and_then(|parent| std::fs::canonicalize(parent).ok())
+            .and_then(|parent| abs.file_name().map(|n| parent.join(n)))
+            .unwrap_or(abs);
+        match abs_c.strip_prefix(&base) {
+            Ok(rel) => rel
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/"),
+            Err(_) => abs_c.display().to_string(),
+        }
+    }
+
+    /// Resets a component to its defaults. Returns true if changed.
+    pub fn reset_component(&mut self, id: u64, kind: ComponentKind) -> bool {
+        self.modify(id, false, |d| {
+            kind.remove_from(d);
+            kind.add_to(d);
+        })
+    }
+
+    /// Copies the `kind` component's values from `source` onto entity `id`.
+    pub fn paste_component(&mut self, id: u64, kind: ComponentKind, source: &EntityData) -> bool {
+        self.modify(id, false, |d| kind.copy_between(source, d))
+    }
+
+    /// Adds copies of `entities` (unique names, offset slightly so pastes
+    /// are visible), selecting the last. Returns the new ids.
+    pub fn paste_entities(&mut self, entities: &[EntityData], offset: [f32; 3]) -> Vec<u64> {
+        if entities.is_empty() {
+            return Vec::new();
+        }
+        self.push_undo();
+        let mut ids = Vec::with_capacity(entities.len());
+        for data in entities {
+            let mut data = data.clone();
+            let base = data.name.clone().unwrap_or_else(|| "Entity".to_string());
+            data.name = Some(self.unique_name(&base));
+            if let Some(t) = &mut data.transform {
+                for (axis, d) in t.position.iter_mut().zip(offset) {
+                    *axis += d;
+                }
+            }
+            let id = self.alloc_id();
+            self.entities.push(EntityEntry { id, data });
+            ids.push(id);
+        }
+        self.selected = ids.last().copied();
+        self.touch();
+        ids
+    }
+
+    /// The prefab file for entity `id`: a one-entity scene file.
+    #[must_use]
+    pub fn prefab_of(&self, id: u64) -> Option<SceneFile> {
+        let idx = self.index_of(id)?;
+        Some(SceneFile {
+            version: automata_core::SCENE_FILE_VERSION,
+            entities: vec![self.entities[idx].data.clone()],
+        })
+    }
+
+    /// Instantiates a prefab file's entities with their first entity placed
+    /// at `at` (others keep their relative offsets). Returns the new ids.
+    pub fn instantiate(&mut self, prefab: &SceneFile, at: [f32; 3]) -> Vec<u64> {
+        let origin = prefab
+            .entities
+            .first()
+            .and_then(|e| e.transform)
+            .map_or([0.0; 3], |t| t.position);
+        let offset = [at[0] - origin[0], at[1] - origin[1], at[2] - origin[2]];
+        self.paste_entities(&prefab.entities, offset)
+    }
+
     /// Builds the engine [`SceneFile`] from the document.
     #[must_use]
     pub fn to_scene_file(&self) -> SceneFile {
@@ -970,5 +1098,96 @@ mod tests {
             .unwrap()
             .position;
         assert_eq!(restored, before);
+    }
+
+    fn cube(doc: &mut Document, name: &str) -> u64 {
+        let idx = doc.add_entity();
+        let id = doc.entities[idx].id;
+        doc.add_mesh(id, true);
+        doc.entities[idx].data.name = Some(name.to_string());
+        id
+    }
+
+    #[test]
+    fn paths_resolve_against_the_scene_directory() {
+        let dir = std::env::temp_dir().join("oberon_doc_paths");
+        std::fs::create_dir_all(dir.join("scripts")).unwrap();
+        let mut doc = Document::new();
+        doc.path = Some(dir.join("level.ron"));
+        assert_eq!(doc.base_dir(), dir);
+        assert_eq!(doc.resolve("scripts/a.py"), dir.join("scripts/a.py"));
+        assert_eq!(
+            doc.relative(&dir.join("scripts").join("a.py")),
+            "scripts/a.py"
+        );
+        let outside = std::env::temp_dir().join("elsewhere.py");
+        assert!(Path::new(&doc.relative(&outside)).is_absolute());
+        assert_eq!(doc.resolve(&outside.display().to_string()), outside);
+    }
+
+    #[test]
+    fn paste_entities_offsets_renames_and_undoes() {
+        let mut doc = Document::new();
+        let id = cube(&mut doc, "Box");
+        let data = doc.entities[doc.index_of(id).unwrap()].data.clone();
+        let ids = doc.paste_entities(std::slice::from_ref(&data), [1.0, 0.0, 0.0]);
+        assert_eq!(ids.len(), 1);
+        assert_eq!(doc.selected, Some(ids[0]));
+        let pasted = &doc.entities[doc.index_of(ids[0]).unwrap()].data;
+        assert_ne!(pasted.name, data.name, "pasted copies get unique names");
+        let (a, b) = (
+            data.transform.unwrap().position,
+            pasted.transform.unwrap().position,
+        );
+        assert!((b[0] - a[0] - 1.0).abs() < 1e-6);
+        assert!(doc.undo());
+        assert_eq!(doc.entity_count(), 1);
+        assert_eq!(doc.paste_entities(&[], [0.0; 3]), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn prefabs_round_trip_and_instantiate_at_a_point() {
+        let mut doc = Document::new();
+        let id = cube(&mut doc, "Crate");
+        doc.entities[0]
+            .data
+            .attributes
+            .insert("health".into(), automata_core::AttributeValue::Int(5));
+        let prefab = doc.prefab_of(id).unwrap();
+        assert_eq!(prefab.entities.len(), 1);
+        let text = prefab.to_ron().unwrap();
+        let back = SceneFile::from_ron(&text).unwrap();
+        let mut other = Document::new();
+        let ids = other.instantiate(&back, [3.0, 1.0, -2.0]);
+        let e = &other.entities[other.index_of(ids[0]).unwrap()].data;
+        assert_eq!(e.transform.unwrap().position, [3.0, 1.0, -2.0]);
+        assert_eq!(
+            e.attributes.get("health"),
+            Some(&automata_core::AttributeValue::Int(5))
+        );
+        assert!(e.mesh_visual.is_some());
+        assert!(doc.prefab_of(999_999).is_none());
+    }
+
+    #[test]
+    fn reset_and_paste_component_values() {
+        let mut doc = Document::new();
+        let a = cube(&mut doc, "A");
+        let b = cube(&mut doc, "B");
+        let ia = doc.index_of(a).unwrap();
+        doc.entities[ia].data.mesh_visual.as_mut().unwrap().color = [0.1, 0.2, 0.3, 1.0];
+        let source = doc.entities[ia].data.clone();
+        assert!(doc.paste_component(b, ComponentKind::Mesh, &source));
+        let ib = doc.index_of(b).unwrap();
+        assert_eq!(
+            doc.entities[ib].data.mesh_visual.as_ref().unwrap().color,
+            [0.1, 0.2, 0.3, 1.0]
+        );
+        assert!(doc.reset_component(a, ComponentKind::Mesh));
+        let ia = doc.index_of(a).unwrap();
+        assert_ne!(
+            doc.entities[ia].data.mesh_visual.as_ref().unwrap().color,
+            [0.1, 0.2, 0.3, 1.0]
+        );
     }
 }

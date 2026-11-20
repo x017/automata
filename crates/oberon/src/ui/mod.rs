@@ -13,8 +13,9 @@
 #![forbid(unsafe_code)]
 
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
-use automata_core::{EntityData, TransformData};
+use automata_core::{AttributeValue, EntityData, TransformData};
 use glam::Vec3;
 use tiny_skia::Color;
 
@@ -23,6 +24,18 @@ use crate::doc::{ComponentKind, CreateKind, Document, EntityEntry};
 use crate::fields::{self, Choice, Field, Flag};
 use crate::theme::{color, layout};
 use crate::view::{self, Gizmo, GizmoMode, Projector};
+
+pub mod attributes;
+pub mod dialogs;
+pub mod menus;
+pub mod picker;
+pub mod project_panel;
+
+use dialogs::Dialog;
+use menus::MENUBAR_H;
+pub use menus::{DialogKind, Panel};
+use picker::ColorPicker;
+pub use picker::ColorTarget;
 
 pub use crate::view::ViewCamera;
 
@@ -45,6 +58,8 @@ pub struct Pointer {
     pub middle_down: bool,
     /// Scroll wheel notches since the last frame (positive = up).
     pub scroll: f32,
+    /// Whether the right button was pressed since the last frame.
+    pub right_pressed: bool,
     /// Shift held (fine scrubbing).
     pub shift: bool,
     /// Ctrl held (coarse scrubbing).
@@ -80,36 +95,99 @@ impl Rect {
     }
 }
 
+/// Panel sizes and visibility (resizable via splitters, toggled from the
+/// Window menu).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PanelSizes {
+    /// Hierarchy width.
+    pub hierarchy_w: f32,
+    /// Inspector width.
+    pub inspector_w: f32,
+    /// Bottom dock height.
+    pub bottom_h: f32,
+    /// Hierarchy visible.
+    pub show_hierarchy: bool,
+    /// Inspector visible.
+    pub show_inspector: bool,
+    /// Bottom dock visible.
+    pub show_bottom: bool,
+}
+
+impl Default for PanelSizes {
+    fn default() -> Self {
+        Self {
+            hierarchy_w: layout::HIERARCHY_W,
+            inspector_w: layout::INSPECTOR_W,
+            bottom_h: layout::CONSOLE_H + 40.0,
+            show_hierarchy: true,
+            show_inspector: true,
+            show_bottom: true,
+        }
+    }
+}
+
+/// Tabs of the bottom dock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BottomTab {
+    /// Log output.
+    #[default]
+    Console,
+    /// File browser.
+    Project,
+}
+
 /// The editor's panel rectangles for a window of a given logical size.
 #[derive(Debug, Clone, Copy)]
 pub struct Layout {
-    /// Top toolbar.
+    /// Menu bar.
+    pub menubar: Rect,
+    /// Tool bar (under the menu bar).
     pub toolbar: Rect,
     /// Left hierarchy panel.
     pub hierarchy: Rect,
     /// Right inspector panel.
     pub inspector: Rect,
-    /// Center scene view.
+    /// Center scene view (or code editor).
     pub viewport: Rect,
-    /// Console under the scene view.
+    /// Bottom dock (Console / Project) under the center area.
     pub console: Rect,
     /// Bottom status bar.
     pub status: Rect,
 }
 
 impl Layout {
-    /// Computes the layout for a `w`×`h` logical window.
+    /// Computes the default layout for a `w`×`h` logical window.
     #[must_use]
     pub fn compute(w: f32, h: f32) -> Self {
-        let body_y = layout::TOOLBAR_H;
-        let body_h = (h - layout::TOOLBAR_H - layout::STATUS_H).max(1.0);
-        let hier_w = layout::HIERARCHY_W.min(w * 0.25);
-        let insp_w = layout::INSPECTOR_W.min(w * 0.32);
+        Self::with_panels(w, h, &PanelSizes::default())
+    }
+
+    /// Computes the layout for a `w`×`h` logical window and panel config.
+    #[must_use]
+    pub fn with_panels(w: f32, h: f32, panels: &PanelSizes) -> Self {
+        let top = MENUBAR_H + layout::TOOLBAR_H;
+        let body_y = top;
+        let body_h = (h - top - layout::STATUS_H).max(1.0);
+        let hier_w = if panels.show_hierarchy {
+            panels.hierarchy_w.clamp(140.0, (w * 0.4).max(140.0))
+        } else {
+            0.0
+        };
+        let insp_w = if panels.show_inspector {
+            panels.inspector_w.clamp(220.0, (w * 0.45).max(220.0))
+        } else {
+            0.0
+        };
         let center_w = (w - hier_w - insp_w).max(1.0);
-        let console_h = layout::CONSOLE_H.min(body_h * 0.4);
+        let console_h = if panels.show_bottom {
+            panels.bottom_h.clamp(80.0, (body_h * 0.7).max(80.0))
+        } else {
+            0.0
+        };
         let view_h = (body_h - console_h).max(1.0);
         Self {
-            toolbar: Rect::new(0.0, 0.0, w, layout::TOOLBAR_H),
+            menubar: Rect::new(0.0, 0.0, w, MENUBAR_H),
+            toolbar: Rect::new(0.0, MENUBAR_H, w, layout::TOOLBAR_H),
             hierarchy: Rect::new(0.0, body_y, hier_w, body_h),
             inspector: Rect::new(w - insp_w, body_y, insp_w, body_h),
             viewport: Rect::new(hier_w, body_y, center_w, view_h),
@@ -193,6 +271,105 @@ pub enum Intent {
     Pause,
     /// Leave play mode, restoring the edit-time scene.
     Stop,
+    /// Set a color property (picker / hex entry). Gestures coalesce.
+    SetColor {
+        /// Entity id.
+        id: u64,
+        /// Which color.
+        target: ColorTarget,
+        /// The new RGBA (alpha ignored for RGB colors).
+        rgba: [f32; 4],
+        /// Part of a continuous drag (coalesced undo).
+        gesture: bool,
+    },
+    /// Set an enumerated property to the option labelled `label`.
+    SetChoice {
+        /// Entity id.
+        id: u64,
+        /// The property.
+        choice: Choice,
+        /// The option's label.
+        label: &'static str,
+    },
+    /// Reset a component to its defaults.
+    ResetComponent(u64, ComponentKind),
+    /// Copy one component's values from `source` onto entity `id`.
+    PasteComponent {
+        /// Target entity.
+        id: u64,
+        /// Which component.
+        kind: ComponentKind,
+        /// The entity data the component was copied from.
+        source: Box<EntityData>,
+    },
+    /// Add copies of entities (paste).
+    PasteEntities(Vec<EntityData>),
+    /// Set (add or replace) a custom attribute.
+    SetAttribute {
+        /// Entity id.
+        id: u64,
+        /// Attribute name.
+        key: String,
+        /// New value.
+        value: AttributeValue,
+        /// Part of a continuous drag (coalesced undo).
+        gesture: bool,
+    },
+    /// Remove a custom attribute.
+    RemoveAttribute {
+        /// Entity id.
+        id: u64,
+        /// Attribute name.
+        key: String,
+    },
+    /// Rename a custom attribute.
+    RenameAttribute {
+        /// Entity id.
+        id: u64,
+        /// Old name.
+        from: String,
+        /// New name.
+        to: String,
+    },
+    /// Open a scene file (asks to save unsaved changes first).
+    Open(PathBuf),
+    /// Save the scene to a new path.
+    SaveAs(PathBuf),
+    /// Save an entity as a prefab file.
+    SavePrefab {
+        /// Entity id.
+        id: u64,
+        /// Destination `.prefab` path.
+        path: PathBuf,
+    },
+    /// Add a prefab's entities to the scene.
+    InstantiatePrefab(PathBuf),
+    /// Open a script in the code editor.
+    OpenScript(PathBuf),
+    /// Create a script from the template (if missing) and open it.
+    NewScript(PathBuf),
+    /// Attach a script to an entity (created from the template if missing).
+    AttachScript {
+        /// Entity id.
+        id: u64,
+        /// Script path.
+        path: PathBuf,
+    },
+    /// Detach an entity's script.
+    DetachScript(u64),
+    /// Open a script at a line (console links, go-to-definition).
+    OpenScriptAt {
+        /// Script path.
+        path: PathBuf,
+        /// 1-based line.
+        line: u32,
+    },
+    /// Create a folder.
+    NewFolder(PathBuf),
+    /// Quit the editor (asks to save unsaved changes first).
+    Quit,
+    /// Run an intent without the unsaved-changes prompt.
+    Force(Box<Intent>),
 }
 
 impl Intent {
@@ -201,7 +378,19 @@ impl Intent {
     pub fn edits_document(&self) -> bool {
         !matches!(
             self,
-            Self::Select(_) | Self::EndGesture | Self::Save | Self::Play | Self::Pause | Self::Stop
+            Self::Select(_)
+                | Self::EndGesture
+                | Self::Save
+                | Self::SaveAs(_)
+                | Self::SavePrefab { .. }
+                | Self::OpenScript(_)
+                | Self::OpenScriptAt { .. }
+                | Self::NewScript(_)
+                | Self::NewFolder(_)
+                | Self::Play
+                | Self::Pause
+                | Self::Stop
+                | Self::Quit
         )
     }
 }
@@ -219,7 +408,7 @@ pub enum PlayState {
 }
 
 /// Console message severity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LogLevel {
     /// Informational.
     Info,
@@ -263,8 +452,10 @@ pub enum CursorHint {
     Pointer,
     /// Over a text field.
     Text,
-    /// Over a scrubbable number field.
+    /// Over a scrubbable number field / vertical splitter.
     ResizeH,
+    /// Over a horizontal splitter.
+    ResizeV,
     /// Over a gizmo handle.
     Grab,
     /// Dragging a gizmo handle.
@@ -277,6 +468,14 @@ pub enum CursorHint {
 enum EditTarget {
     Name,
     Field(Field),
+    /// The color picker's hex field.
+    Hex(ColorTarget),
+    /// The file dialog's name field.
+    DialogName,
+    /// A custom attribute's name (sorted index).
+    AttrKey(usize),
+    /// A custom attribute's value (sorted index; component for vectors).
+    AttrValue(usize, u8),
 }
 
 #[derive(Debug, Clone)]
@@ -287,6 +486,9 @@ struct TextEdit {
     rect: Rect,
     /// True until the first keystroke: typing replaces the whole value.
     fresh: bool,
+    /// For attribute fields: the attribute's name and value when editing
+    /// began (the commit needs both, and the UI has no document then).
+    attr: Option<(String, AttributeValue)>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -316,10 +518,11 @@ enum Drag {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
-enum Menu {
-    Create { x: f32, y: f32 },
-    AddComponent { x: f32, y: f32, id: u64 },
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Splitter {
+    Hierarchy,
+    Inspector,
+    Bottom,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -351,7 +554,36 @@ pub struct Ui {
     right_last: Option<(f32, f32)>,
     middle_last: Option<(f32, f32)>,
     edit: Option<TextEdit>,
-    menu: Option<Menu>,
+    menu: Option<menus::Menu>,
+    picker: Option<ColorPicker>,
+    dialog: Option<Dialog>,
+    /// Recently opened scenes (most recent first), set by the app.
+    pub recent: Vec<PathBuf>,
+    /// The project directory (file dialogs and the Project panel), set by
+    /// the app.
+    pub project_root: PathBuf,
+    /// Panel sizes and visibility.
+    pub panels: PanelSizes,
+    /// Active bottom-dock tab.
+    pub bottom_tab: BottomTab,
+    recent_colors: Vec<[f32; 4]>,
+    entity_clipboard: Vec<EntityData>,
+    component_clipboard: Option<(ComponentKind, EntityData)>,
+    /// The menu bar consumed this frame's click.
+    bar_click_consumed: bool,
+    /// Right press in the scene view: (start, moved) → a click opens the
+    /// context menu, a drag orbits.
+    right_click: Option<((f32, f32), bool)>,
+    /// Splitter being dragged.
+    splitter: Option<Splitter>,
+    /// An attribute number being scrubbed.
+    attr_scrub: Option<attributes::AttrScrub>,
+    /// Console scroll offset from the newest line (0 = follow the tail).
+    console_scroll: f32,
+    /// Console levels hidden by the filter buttons.
+    console_hidden: HashSet<LogLevel>,
+    /// Project panel state.
+    project: project_panel::ProjectState,
     collapsed: HashSet<&'static str>,
     inspector_scroll: f32,
     hierarchy_scroll: f32,
@@ -387,6 +619,22 @@ impl Ui {
             middle_last: None,
             edit: None,
             menu: None,
+            picker: None,
+            dialog: None,
+            recent: Vec::new(),
+            project_root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            panels: PanelSizes::default(),
+            bottom_tab: BottomTab::Console,
+            recent_colors: Vec::new(),
+            entity_clipboard: Vec::new(),
+            component_clipboard: None,
+            bar_click_consumed: false,
+            right_click: None,
+            splitter: None,
+            attr_scrub: None,
+            console_scroll: 0.0,
+            console_hidden: HashSet::new(),
+            project: project_panel::ProjectState::default(),
             collapsed: HashSet::new(),
             inspector_scroll: 0.0,
             hierarchy_scroll: 0.0,
@@ -464,6 +712,13 @@ impl Ui {
             }
             EditKey::Enter | EditKey::Tab => self.commit_edit(),
             EditKey::Escape => {
+                if self
+                    .edit
+                    .as_ref()
+                    .is_some_and(|e| e.target == EditTarget::DialogName)
+                {
+                    self.close_dialog();
+                }
                 self.edit = None;
                 None
             }
@@ -473,6 +728,13 @@ impl Ui {
     /// Starts renaming the selected entity (F2).
     pub fn begin_rename(&mut self, doc: &Document) {
         if let Some(i) = doc.selected_index() {
+            self.begin_rename_id(doc, doc.entities[i].id);
+        }
+    }
+
+    /// Starts renaming entity `id` in the inspector.
+    fn begin_rename_id(&mut self, doc: &Document, id: u64) {
+        if let Some(i) = doc.index_of(id) {
             let e = &doc.entities[i];
             self.edit = Some(TextEdit {
                 id: e.id,
@@ -480,6 +742,7 @@ impl Ui {
                 buffer: e.name().to_string(),
                 rect: Rect::default(),
                 fresh: true,
+                attr: None,
             });
             self.inspector_scroll = 0.0;
         }
@@ -520,10 +783,107 @@ impl Ui {
                 value,
                 gesture: false,
             }),
+            EditTarget::Hex(target) => {
+                let rgba = picker::parse_hex(&edit.buffer)?;
+                self.remember_color(rgba);
+                Some(Intent::SetColor {
+                    id: edit.id,
+                    target,
+                    rgba,
+                    gesture: false,
+                })
+            }
+            EditTarget::DialogName => self.submit_dialog(&edit.buffer),
+            EditTarget::AttrKey(_) => {
+                let (from, _) = edit.attr?;
+                let to = edit.buffer.trim().to_string();
+                (!to.is_empty() && to != from).then_some(Intent::RenameAttribute {
+                    id: edit.id,
+                    from,
+                    to,
+                })
+            }
+            EditTarget::AttrValue(_, component) => {
+                let (key, old) = edit.attr?;
+                let value = attributes::parse_value(&old, component, &edit.buffer)?;
+                Some(Intent::SetAttribute {
+                    id: edit.id,
+                    key,
+                    value,
+                    gesture: false,
+                })
+            }
         }
     }
 
     // ----- frame ---------------------------------------------------------
+
+    /// The current layout for a `w`×`h` logical window.
+    #[must_use]
+    pub fn layout(&self, w: f32, h: f32) -> Layout {
+        Layout::with_panels(w, h, &self.panels)
+    }
+
+    /// Whether a popup, picker, or dialog is open (Escape closes it).
+    #[must_use]
+    pub fn overlay_open(&self) -> bool {
+        self.menu.is_some() || self.picker.is_some() || self.dialog.is_some()
+    }
+
+    /// Closes the topmost popup / picker / dialog. Returns false if none.
+    pub fn close_overlay(&mut self) -> bool {
+        if self.dialog.is_some() {
+            self.close_dialog();
+        } else if self.menu.is_some() {
+            self.menu = None;
+        } else if self.picker.is_some() {
+            self.picker = None;
+        } else {
+            return false;
+        }
+        true
+    }
+
+    /// Opens a dialog (for keyboard shortcuts such as Ctrl+O, F1).
+    pub fn open_dialog_kind(&mut self, kind: DialogKind, doc: &Document) {
+        self.open_dialog(kind, doc);
+    }
+
+    /// Opens a script in the code editor (optionally at a 1-based line).
+    pub fn open_code(&mut self, path: &std::path::Path, line: Option<u32>) {
+        let at = line.map_or_else(String::new, |l| format!(":{l}"));
+        self.log(LogLevel::Info, format!("Script: {}{at}", path.display()));
+    }
+
+    /// Opens the color picker for an entity's color (tools / screenshots).
+    pub fn open_color_picker(&mut self, doc: &Document, id: u64, target: ColorTarget) {
+        self.open_picker(doc, id, target);
+    }
+
+    /// Opens menu-bar menu `index` (0 = File …).
+    pub fn open_bar_menu(&mut self, index: usize, doc: &Document) {
+        let items = self.bar_items(index, doc);
+        self.menu = Some(menus::Menu {
+            x: 98.0,
+            y: MENUBAR_H,
+            items,
+            bar: Some(index),
+        });
+    }
+
+    /// Copies the selected entity (Ctrl+C).
+    pub fn copy_selected(&mut self, doc: &Document) {
+        if let Some(i) = doc.selected_index() {
+            self.copy_entity(doc, doc.entities[i].id);
+        }
+    }
+
+    /// The paste intent for the entity clipboard (Ctrl+V), if not empty.
+    #[must_use]
+    pub fn paste_intent(&self) -> Option<Intent> {
+        (!self.entity_clipboard.is_empty())
+            .then(|| Intent::PasteEntities(self.entity_clipboard.clone()))
+    }
 
     /// Draws the whole editor for this frame and returns the requested edits.
     ///
@@ -537,18 +897,18 @@ impl Ui {
         viewport: Option<(&[u8], u32, u32)>,
     ) -> Vec<Intent> {
         let (w, h) = canvas.logical_size();
-        let lay = Layout::compute(w, h);
+        let lay = self.layout(w, h);
         self.cursor = CursorHint::Default;
         self.raw = pointer;
         self.p = pointer;
         self.clip = (0.0, h);
+        self.bar_click_consumed = false;
 
         // Clicking outside the focused text field commits it.
         if pointer.pressed {
-            let outside = self
-                .edit
-                .as_ref()
-                .is_some_and(|e| !e.rect.contains(pointer.x, pointer.y));
+            let outside = self.edit.as_ref().is_some_and(|e| {
+                e.target != EditTarget::DialogName && !e.rect.contains(pointer.x, pointer.y)
+            });
             if outside {
                 if let Some(intent) = self.commit_edit() {
                     self.out.push(intent);
@@ -556,36 +916,150 @@ impl Ui {
             }
         }
 
-        // An open menu captures the pointer; clicking outside closes it.
-        let menu_rect = self.menu_rect(doc, w, h);
-        if let Some(r) = menu_rect {
-            let over = r.contains(pointer.x, pointer.y);
-            if pointer.pressed && !over {
-                self.menu = None;
-                self.p.pressed = false;
-            } else if over {
-                self.p.pressed = false;
-                self.p.scroll = 0.0;
-                self.p.x = -1.0e6;
-                self.p.y = -1.0e6;
+        // Overlays capture the pointer: a modal dialog masks everything; a
+        // menu or picker masks what is under it, and a click outside closes
+        // it.
+        if self.dialog.is_some() {
+            self.mask_pointer();
+        } else {
+            let over_menu = self
+                .menu
+                .as_ref()
+                .map(|m| m.rect(canvas, w, h))
+                .is_some_and(|r| r.contains(pointer.x, pointer.y));
+            let over_bar = lay.menubar.contains(pointer.x, pointer.y);
+            let over_picker = self
+                .picker_rect(w, h)
+                .is_some_and(|r| r.contains(pointer.x, pointer.y))
+                || self.picker_dragging();
+            if self.menu.is_some() {
+                if pointer.pressed && !over_menu && !over_bar {
+                    self.menu = None;
+                    self.p.pressed = false;
+                    self.p.right_pressed = false;
+                } else if over_menu {
+                    self.mask_pointer();
+                }
+            }
+            if self.picker.is_some() && self.menu.is_none() {
+                if pointer.pressed && !over_picker {
+                    self.picker = None;
+                    self.p.pressed = false;
+                } else if over_picker {
+                    self.mask_pointer();
+                }
             }
         }
 
         self.update_scrub();
+        self.update_attr_scrub();
+        self.update_splitters(&lay, w, h);
 
         canvas.clear(color::background());
         // Scene view first: its overlays may spill outside its rect and are
         // covered by the panels drawn after it.
         self.scene_view(canvas, doc, lay.viewport, viewport);
-        self.console_panel(canvas, lay.console);
-        self.hierarchy(canvas, doc, lay.hierarchy);
-        self.inspector(canvas, doc, lay.inspector);
+        if self.panels.show_bottom {
+            self.bottom_dock(canvas, doc, lay.console);
+        }
+        if self.panels.show_hierarchy {
+            self.hierarchy(canvas, doc, lay.hierarchy);
+        }
+        if self.panels.show_inspector {
+            self.inspector(canvas, doc, lay.inspector);
+        }
         self.toolbar(canvas, doc, lay.toolbar);
         self.status_bar(canvas, doc, lay.status);
         self.clip = (0.0, h);
+        self.draw_splitters(canvas, &lay);
+        self.menu_bar(canvas, doc, w);
+        self.draw_picker(canvas, doc, w, h);
         self.draw_menu(canvas, doc, w, h);
+        self.draw_dialog(canvas, w, h);
 
         std::mem::take(&mut self.out)
+    }
+
+    /// Hides the pointer from ordinary widgets (an overlay owns it).
+    fn mask_pointer(&mut self) {
+        self.p.pressed = false;
+        self.p.right_pressed = false;
+        self.p.double_click = false;
+        self.p.scroll = 0.0;
+        self.p.x = -1.0e6;
+        self.p.y = -1.0e6;
+    }
+
+    /// Splitter hit areas for the current layout.
+    fn splitter_rects(&self, lay: &Layout) -> Vec<(Splitter, Rect)> {
+        let mut v = Vec::new();
+        if self.panels.show_hierarchy {
+            let r = lay.hierarchy;
+            v.push((
+                Splitter::Hierarchy,
+                Rect::new(r.x + r.w - 3.0, r.y, 6.0, r.h),
+            ));
+        }
+        if self.panels.show_inspector {
+            let r = lay.inspector;
+            v.push((Splitter::Inspector, Rect::new(r.x - 3.0, r.y, 6.0, r.h)));
+        }
+        if self.panels.show_bottom {
+            let r = lay.console;
+            v.push((Splitter::Bottom, Rect::new(r.x, r.y - 3.0, r.w, 6.0)));
+        }
+        v
+    }
+
+    /// Starts, continues, and ends panel-splitter drags.
+    fn update_splitters(&mut self, lay: &Layout, w: f32, h: f32) {
+        let p = self.raw;
+        if let Some(which) = self.splitter {
+            if p.down {
+                match which {
+                    Splitter::Hierarchy => self.panels.hierarchy_w = p.x.clamp(140.0, w * 0.4),
+                    Splitter::Inspector => {
+                        self.panels.inspector_w = (w - p.x).clamp(220.0, w * 0.45);
+                    }
+                    Splitter::Bottom => {
+                        self.panels.bottom_h = (lay.status.y - p.y).clamp(80.0, h * 0.7);
+                    }
+                }
+                self.cursor = match which {
+                    Splitter::Bottom => CursorHint::ResizeV,
+                    _ => CursorHint::ResizeH,
+                };
+                self.mask_pointer();
+            } else {
+                self.splitter = None;
+            }
+            return;
+        }
+        if !matches!(self.drag, Drag::None) || self.overlay_open() {
+            return;
+        }
+        for (which, r) in self.splitter_rects(lay) {
+            if r.contains(self.p.x, self.p.y) {
+                self.cursor = match which {
+                    Splitter::Bottom => CursorHint::ResizeV,
+                    _ => CursorHint::ResizeH,
+                };
+                if self.p.pressed {
+                    self.splitter = Some(which);
+                    self.mask_pointer();
+                }
+                break;
+            }
+        }
+    }
+
+    fn draw_splitters(&mut self, canvas: &mut Canvas, lay: &Layout) {
+        let hot = self.splitter;
+        for (which, r) in self.splitter_rects(lay) {
+            if hot == Some(which) {
+                canvas.fill_rect(r.x + 1.0, r.y + 1.0, r.w - 2.0, r.h - 2.0, color::accent());
+            }
+        }
     }
 
     /// Continues (or finishes) a number-field scrub started on a press.
@@ -641,6 +1115,7 @@ impl Ui {
                     buffer: fields::format_value(start_value),
                     rect,
                     fresh: true,
+                    attr: None,
                 });
             }
         }
@@ -733,17 +1208,9 @@ impl Ui {
         canvas.fill_rect(rect.x, rect.y, rect.w, rect.h, color::surface());
         canvas.fill_rect(rect.x, rect.y + rect.h - 1.0, rect.w, 1.0, color::border());
 
-        // Logo.
-        let cy = rect.h / 2.0;
-        canvas.fill_polygon(
-            &[(12.0, cy), (19.0, cy - 7.0), (26.0, cy), (19.0, cy + 7.0)],
-            color::accent(),
-        );
-        canvas.text(32.0, cy - 8.0, 15.0, "OBERON", color::accent_soft());
-
-        let by = 8.0;
-        let bh = rect.h - 16.0;
-        let mut x = 120.0;
+        let by = rect.y + 7.0;
+        let bh = rect.h - 14.0;
+        let mut x = 10.0;
         for (label, intent, enabled) in [
             ("New", Intent::New, true),
             ("Save", Intent::Save, true),
@@ -825,32 +1292,19 @@ impl Ui {
             self.out.push(Intent::Stop);
         }
 
-        // Document name + unsaved marker, right-aligned.
-        let name = doc.path.as_ref().map_or_else(
-            || "Untitled scene".to_string(),
-            |p| {
-                p.file_name().map_or_else(
-                    || p.display().to_string(),
-                    |n| n.to_string_lossy().into_owned(),
-                )
-            },
-        );
-        let label = if doc.dirty() {
-            format!("{name} *")
-        } else {
-            name
+        // Play state badge, right-aligned.
+        let badge = match self.play {
+            PlayState::Editing => None,
+            PlayState::Playing => Some(("PLAYING", color::accent())),
+            PlayState::Paused => Some(("PAUSED", color::warn())),
         };
-        let room = rect.w - (px + group + 24.0);
-        if room > 40.0 {
-            let tw = canvas.measure_text(layout::FONT_SIZE, &label).min(room);
-            canvas.text_clipped(
-                rect.w - tw - layout::PAD,
-                cy - 8.0,
-                layout::FONT_SIZE,
-                &label,
-                color::text_dim(),
-                room,
-            );
+        if let Some((text, c)) = badge {
+            let tw = canvas.measure_text(layout::SMALL_SIZE, text) + 16.0;
+            let bx = rect.w - tw - layout::PAD;
+            if bx > px + group + 10.0 {
+                canvas.stroke_rounded(bx, by + 4.0, tw, bh - 8.0, 4.0, c, 1.0);
+                canvas.text(bx + 8.0, by + bh / 2.0 - 7.0, layout::SMALL_SIZE, text, c);
+            }
         }
     }
 
@@ -903,6 +1357,12 @@ impl Ui {
                         self.focus_entity(entity);
                     }
                 }
+                if hot && self.p.right_pressed {
+                    row_clicked = true;
+                    self.out.push(Intent::Select(Some(entity.id)));
+                    let items = self.entity_menu(doc, entity.id);
+                    self.open_menu(self.p.x, self.p.y, items);
+                }
             }
             y += layout::ROW_H;
         }
@@ -915,9 +1375,25 @@ impl Ui {
                 color::text_dim(),
             );
         }
-        // Clicking empty space clears the selection.
+        // Clicking empty space clears the selection; right-click offers
+        // Create / Paste.
         if !row_clicked && self.hot(list) && self.p.pressed {
             self.out.push(Intent::Select(None));
+        }
+        if !row_clicked && self.hot(list) && self.p.right_pressed {
+            let mut items = self.create_items();
+            if let Some(paste) = self.paste_intent() {
+                items.insert(
+                    0,
+                    menus::MenuItem {
+                        label: "Paste".into(),
+                        shortcut: "Ctrl+V",
+                        action: Some(menus::Action::Intent(paste)),
+                        enabled: self.play == PlayState::Editing,
+                    },
+                );
+            }
+            self.open_menu(self.p.x, self.p.y, items);
         }
 
         self.clip = (0.0, f32::INFINITY);
@@ -934,10 +1410,8 @@ impl Ui {
             ButtonStyle::Disabled
         };
         if self.button(canvas, add, "+ Create", style) {
-            self.menu = Some(Menu::Create {
-                x: add.x,
-                y: add.y + add.h + 2.0,
-            });
+            let items = self.create_items();
+            self.open_menu(add.x, add.y + add.h + 2.0, items);
         }
     }
 
@@ -960,7 +1434,7 @@ impl Ui {
         let w = rect.w - 2.0 * layout::PAD;
         let start = top + 10.0 - self.inspector_scroll;
         let end = match doc.selected_index() {
-            Some(idx) => self.inspector_body(canvas, &doc.entities[idx], x, start, w),
+            Some(idx) => self.inspector_body(canvas, doc, &doc.entities[idx], x, start, w),
             None => {
                 canvas.text(
                     x,
@@ -1007,6 +1481,7 @@ impl Ui {
     fn inspector_body(
         &mut self,
         canvas: &mut Canvas,
+        doc: &Document,
         e: &EntityEntry,
         x: f32,
         y: f32,
@@ -1051,20 +1526,7 @@ impl Ui {
             if open {
                 y = self.choice_row(canvas, x, y, w, e, "Primitive", Choice::MeshPrimitive);
                 y = self.float_row(canvas, x, y, w, e, "Size", Field::MeshSize);
-                y = self.color_row(
-                    canvas,
-                    x,
-                    y,
-                    w,
-                    e,
-                    "Color",
-                    &[
-                        Field::MeshColor(0),
-                        Field::MeshColor(1),
-                        Field::MeshColor(2),
-                        Field::MeshColor(3),
-                    ],
-                );
+                y = self.color_row(canvas, x, y, w, e, "Color", ColorTarget::Mesh);
                 y += 6.0;
             }
         }
@@ -1074,19 +1536,7 @@ impl Ui {
             y = ny;
             if open {
                 y = self.vec3_row(canvas, x, y, w, e, "Direction", Field::LightDirection);
-                y = self.color_row(
-                    canvas,
-                    x,
-                    y,
-                    w,
-                    e,
-                    "Color",
-                    &[
-                        Field::LightColor(0),
-                        Field::LightColor(1),
-                        Field::LightColor(2),
-                    ],
-                );
+                y = self.color_row(canvas, x, y, w, e, "Color", ColorTarget::Light);
                 y = self.float_row(canvas, x, y, w, e, "Ambient", Field::LightAmbient);
                 y = self.flag_row(canvas, x, y, w, e, "Cast Shadows", Flag::LightShadows);
                 y += 6.0;
@@ -1163,6 +1613,9 @@ impl Ui {
             }
         }
 
+        y = self.script_section(canvas, doc, e, x, y, w);
+        y = self.attributes_section(canvas, e, x, y, w);
+
         // Add Component / Delete.
         y += 8.0;
         let add = Rect::new(x + w * 0.12, y, w * 0.76, 26.0);
@@ -1173,11 +1626,8 @@ impl Ui {
                 ButtonStyle::Disabled
             };
             if self.button(canvas, add, "Add Component", style) {
-                self.menu = Some(Menu::AddComponent {
-                    x: add.x,
-                    y: add.y + add.h + 2.0,
-                    id,
-                });
+                let items = self.bar_items(3, doc);
+                self.open_menu(add.x, add.y + add.h + 2.0, items);
             }
         }
         y += 34.0;
@@ -1245,17 +1695,13 @@ impl Ui {
                 }
                 right -= 26.0;
             }
-            if resettable {
-                let r = Rect::new(right - 50.0, y + 3.0, 50.0, 18.0);
-                let style = if editing {
-                    ButtonStyle::Normal
-                } else {
-                    ButtonStyle::Disabled
-                };
-                if self.button(canvas, r, "Reset", style) {
-                    self.out.push(Intent::ResetTransform(id));
+            if resettable || removable.is_some() {
+                let r = Rect::new(right - 22.0, y + 3.0, 22.0, 18.0);
+                if self.kebab_button(canvas, r) {
+                    let items = self.component_menu(id, removable);
+                    self.open_menu(r.x, r.y + r.h + 2.0, items);
                 }
-                right -= 54.0;
+                right -= 26.0;
             }
             let toggle_area = Rect::new(header.x, header.y, (right - header.x).max(0.0), header.h);
             if self.hot(toggle_area) {
@@ -1350,40 +1796,78 @@ impl Ui {
         w: f32,
         e: &EntityEntry,
         label: &str,
-        channels: &[Field],
+        target: ColorTarget,
     ) -> f32 {
-        let values: Vec<f32> = channels
-            .iter()
-            .filter_map(|f| fields::get(&e.data, *f))
-            .collect();
-        if values.len() != channels.len() || values.is_empty() {
+        let Some(rgba) = target.read(&e.data) else {
             return y;
-        }
+        };
         let r = Rect::new(x, y, w, layout::FIELD_H);
         if self.row_visible(r) {
             self.row_label(canvas, x, y, label);
-            let sw = layout::FIELD_H;
-            let sx = x + layout::LABEL_W;
-            let rgb = |i: usize| values.get(i).copied().unwrap_or(1.0).clamp(0.0, 1.0);
-            let swatch = Color::from_rgba(rgb(0), rgb(1), rgb(2), 1.0).unwrap_or(Color::WHITE);
-            canvas.fill_rounded(sx, y, sw, sw, 3.0, swatch);
-            canvas.stroke_rounded(sx, y, sw, sw, 3.0, color::border(), 1.0);
-            let gap = 3.0;
-            let n = channels.len() as f32;
-            let fw = (w - layout::LABEL_W - sw - gap * n) / n;
-            for (i, (f, v)) in channels.iter().zip(values.iter()).enumerate() {
-                let fx = sx + sw + gap + i as f32 * (fw + gap);
-                self.float_field(
-                    canvas,
-                    Rect::new(fx, y, fw, layout::FIELD_H),
-                    e.id,
-                    *f,
-                    *v,
-                    None,
-                );
-            }
+            let sw = Rect::new(x + layout::LABEL_W, y, w - layout::LABEL_W, layout::FIELD_H);
+            self.color_swatch(canvas, sw, e.id, target, rgba);
         }
         y + layout::ROW_STEP
+    }
+
+    /// A clickable color swatch with its hex code; opens the color picker.
+    fn color_swatch(
+        &mut self,
+        canvas: &mut Canvas,
+        sw: Rect,
+        id: u64,
+        target: ColorTarget,
+        rgba: [f32; 4],
+    ) {
+        let c = |v: f32| v.clamp(0.0, 1.0);
+        let opaque =
+            Color::from_rgba(c(rgba[0]), c(rgba[1]), c(rgba[2]), 1.0).unwrap_or(Color::WHITE);
+        let hot = self.hot(sw);
+        canvas.fill_rounded(sw.x, sw.y, sw.w, sw.h, 3.0, opaque);
+        if target.has_alpha() {
+            // Alpha strip along the bottom edge.
+            let a = c(rgba[3]);
+            canvas.fill_rect(sw.x + 2.0, sw.y + sw.h - 4.0, sw.w - 4.0, 2.0, Color::BLACK);
+            canvas.fill_rect(
+                sw.x + 2.0,
+                sw.y + sw.h - 4.0,
+                (sw.w - 4.0) * a,
+                2.0,
+                Color::WHITE,
+            );
+        }
+        canvas.stroke_rounded(
+            sw.x,
+            sw.y,
+            sw.w,
+            sw.h,
+            3.0,
+            if hot {
+                color::accent()
+            } else {
+                color::border()
+            },
+            1.0,
+        );
+        let luma = 0.299 * rgba[0] + 0.587 * rgba[1] + 0.114 * rgba[2];
+        let fg = if luma > 0.55 {
+            Color::from_rgba8(20, 20, 24, 255)
+        } else {
+            Color::WHITE
+        };
+        canvas.text(
+            sw.x + 6.0,
+            sw.y + 3.0,
+            layout::SMALL_SIZE,
+            &picker::to_hex(rgba, target.has_alpha()),
+            fg,
+        );
+        if hot {
+            self.cursor = CursorHint::Pointer;
+            if self.p.pressed {
+                self.open_picker_rgba(id, target, rgba);
+            }
+        }
     }
 
     fn flag_row(
@@ -1483,7 +1967,24 @@ impl Ui {
             if hot {
                 self.cursor = CursorHint::Pointer;
                 if self.p.pressed && self.play == PlayState::Editing {
-                    self.out.push(Intent::Cycle { id: e.id, choice });
+                    let items = fields::choice_options(&e.data, choice)
+                        .into_iter()
+                        .map(|label| menus::MenuItem {
+                            label: if label == value {
+                                format!("✓ {label}")
+                            } else {
+                                format!("   {label}")
+                            },
+                            shortcut: "",
+                            action: Some(menus::Action::Intent(Intent::SetChoice {
+                                id: e.id,
+                                choice,
+                                label,
+                            })),
+                            enabled: true,
+                        })
+                        .collect();
+                    self.open_menu(b.x, b.y + b.h + 2.0, items);
                 }
             }
         }
@@ -1562,6 +2063,20 @@ impl Ui {
             },
             1.0,
         );
+        let (lo, hi) = fields::range(field);
+        if !editing && lo.abs() < 1e-6 && [1.0, 89.0, 179.0].iter().any(|b| (hi - b).abs() < 1e-6) {
+            // Bounded values read as sliders: a fill shows where in the range
+            // the value sits.
+            let t = ((value - lo) / (hi - lo)).clamp(0.0, 1.0);
+            canvas.fill_rounded(
+                r.x + 1.0,
+                r.y + 1.0,
+                (r.w - 2.0) * t,
+                r.h - 2.0,
+                2.0,
+                color::select(),
+            );
+        }
         let mut tx = r.x + 5.0;
         if let Some(c) = tag {
             canvas.fill_rounded(r.x + 1.0, r.y + 2.0, 3.0, r.h - 4.0, 1.5, c);
@@ -1650,6 +2165,7 @@ impl Ui {
                     buffer: name.to_string(),
                     rect: r,
                     fresh: true,
+                    attr: None,
                 });
             }
         }
@@ -1690,6 +2206,44 @@ impl Ui {
         // --- Camera: wheel zoom, RMB orbit, MMB pan (continue outside). ---
         if inside && p.scroll != 0.0 {
             self.camera.zoom(p.scroll);
+        }
+        // Right click (no drag) opens the context menu for what is under
+        // the cursor; right drag orbits.
+        if self.p.right_pressed && inside {
+            self.right_click = Some(((p.x, p.y), false));
+        }
+        if let Some((start, moved)) = self.right_click {
+            if raw.right_down {
+                if (raw.x - start.0).abs() + (raw.y - start.1).abs() > 4.0 {
+                    self.right_click = Some((start, true));
+                }
+            } else {
+                self.right_click = None;
+                if !moved {
+                    let items = match view::pick(doc, &proj, start.0, start.1) {
+                        Some(id) => {
+                            self.out.push(Intent::Select(Some(id)));
+                            self.entity_menu(doc, id)
+                        }
+                        None => {
+                            let mut items = self.create_items();
+                            if let Some(paste) = self.paste_intent() {
+                                items.insert(
+                                    0,
+                                    menus::MenuItem {
+                                        label: "Paste".into(),
+                                        shortcut: "Ctrl+V",
+                                        action: Some(menus::Action::Intent(paste)),
+                                        enabled: editing,
+                                    },
+                                );
+                            }
+                            items
+                        }
+                    };
+                    self.open_menu(start.0, start.1, items);
+                }
+            }
         }
         if raw.right_down {
             match self.right_last {
@@ -1905,42 +2459,172 @@ impl Ui {
 
     // ----- console & status -----------------------------------------------
 
-    fn console_panel(&mut self, canvas: &mut Canvas, rect: Rect) {
+    /// The bottom dock: Console and Project tabs.
+    fn bottom_dock(&mut self, canvas: &mut Canvas, doc: &Document, rect: Rect) {
         canvas.fill_rect(rect.x, rect.y, rect.w, rect.h, color::surface());
+        canvas.fill_rect(rect.x, rect.y, rect.w, 1.0, color::border());
+        let body = Rect::new(
+            rect.x,
+            rect.y + layout::TITLEBAR_H,
+            rect.w,
+            (rect.h - layout::TITLEBAR_H).max(0.0),
+        );
+        match self.bottom_tab {
+            BottomTab::Console => self.console_body(canvas, body),
+            BottomTab::Project => self.project_body(canvas, doc, body),
+        }
+        // Tab strip.
+        canvas.fill_rect(
+            rect.x,
+            rect.y + 1.0,
+            rect.w,
+            layout::TITLEBAR_H - 1.0,
+            color::surface(),
+        );
+        canvas.fill_rect(
+            rect.x,
+            rect.y + layout::TITLEBAR_H - 1.0,
+            rect.w,
+            1.0,
+            color::border(),
+        );
+        let mut x = rect.x + 6.0;
+        let errors = self
+            .console
+            .iter()
+            .filter(|l| l.level == LogLevel::Error)
+            .count();
+        let console_label = if errors > 0 {
+            format!("Console  ({})  ×{errors}", self.console.len())
+        } else {
+            format!("Console  ({})", self.console.len())
+        };
+        for (tab, label) in [
+            (BottomTab::Console, console_label),
+            (BottomTab::Project, "Project".to_string()),
+        ] {
+            let tw = canvas.measure_text(layout::TITLE_SIZE, &label) + 22.0;
+            let r = Rect::new(x, rect.y + 3.0, tw, layout::TITLEBAR_H - 4.0);
+            let active = self.bottom_tab == tab;
+            if active {
+                canvas.fill_rounded(r.x, r.y, r.w, r.h + 4.0, 4.0, color::raised());
+                canvas.fill_rect(r.x + 4.0, r.y, r.w - 8.0, 2.0, color::accent());
+            } else if self.hot(r) {
+                canvas.fill_rounded(r.x, r.y, r.w, r.h, 4.0, color::hover());
+            }
+            canvas.text(
+                r.x + 11.0,
+                r.y + (r.h - layout::TITLE_SIZE) / 2.0 - 1.0,
+                layout::TITLE_SIZE,
+                &label,
+                if active {
+                    color::text()
+                } else {
+                    color::text_dim()
+                },
+            );
+            if self.hot(r) {
+                self.cursor = CursorHint::Pointer;
+                if self.p.pressed {
+                    self.bottom_tab = tab;
+                }
+            }
+            x += tw + 2.0;
+        }
+        if self.bottom_tab == BottomTab::Console {
+            let clear = Rect::new(
+                rect.x + rect.w - 64.0,
+                rect.y + 4.0,
+                56.0,
+                layout::TITLEBAR_H - 8.0,
+            );
+            if self.button(canvas, clear, "Clear", ButtonStyle::Normal) {
+                self.console.clear();
+                self.console_scroll = 0.0;
+            }
+            let mut fx = clear.x - 6.0;
+            for (level, label) in [
+                (LogLevel::Error, "Errors"),
+                (LogLevel::Warn, "Warnings"),
+                (LogLevel::Info, "Info"),
+            ] {
+                let bw = canvas.measure_text(layout::SMALL_SIZE, label) + 18.0;
+                fx -= bw + 4.0;
+                let r = Rect::new(fx, rect.y + 4.0, bw, layout::TITLEBAR_H - 8.0);
+                let on = !self.console_hidden.contains(&level);
+                let style = if on {
+                    ButtonStyle::Active
+                } else {
+                    ButtonStyle::Normal
+                };
+                if self.button(canvas, r, label, style) {
+                    if on {
+                        self.console_hidden.insert(level);
+                    } else {
+                        self.console_hidden.remove(&level);
+                    }
+                }
+            }
+        }
+    }
+
+    fn console_body(&mut self, canvas: &mut Canvas, rect: Rect) {
         let line_h = 17.0;
-        let body_top = rect.y + layout::TITLEBAR_H + 4.0;
-        let max_lines = ((rect.h - layout::TITLEBAR_H - 8.0) / line_h)
-            .floor()
-            .max(0.0) as usize;
-        let start = self.console.len().saturating_sub(max_lines);
-        let mut y = body_top;
-        for line in &self.console[start..] {
+        let lines: Vec<usize> = self
+            .console
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| !self.console_hidden.contains(&l.level))
+            .map(|(i, _)| i)
+            .collect();
+        let visible = ((rect.h - 8.0) / line_h).floor().max(0.0) as usize;
+        let max_scroll = lines.len().saturating_sub(visible) as f32 * line_h;
+        if self.hot(rect) && self.p.scroll != 0.0 {
+            // Scrolling up moves into history; scroll = 0 follows the tail.
+            self.console_scroll =
+                (self.console_scroll + self.p.scroll * line_h * 3.0).clamp(0.0, max_scroll);
+        }
+        self.console_scroll = self.console_scroll.min(max_scroll);
+        let skip_from_end = (self.console_scroll / line_h).round() as usize;
+        let end = lines.len().saturating_sub(skip_from_end);
+        let start = end.saturating_sub(visible);
+        let prev = canvas.set_clip(Some((rect.x, rect.y, rect.w, rect.h)));
+        let mut y = rect.y + 4.0;
+        let mut open = None;
+        for &i in &lines[start..end] {
+            let line = &self.console[i];
             let (c, tag) = match line.level {
                 LogLevel::Info => (color::text_dim(), "•"),
                 LogLevel::Warn => (color::warn(), "!"),
                 LogLevel::Error => (color::danger(), "×"),
             };
+            let row = Rect::new(rect.x, y - 1.0, rect.w, line_h);
+            let link = console_location(&line.text);
+            if link.is_some() && self.hot(row) {
+                canvas.fill_rect(row.x, row.y, row.w, row.h, color::hover());
+                self.cursor = CursorHint::Pointer;
+                if self.p.pressed {
+                    open.clone_from(&link);
+                }
+            }
             canvas.text(rect.x + layout::PAD, y, layout::SMALL_SIZE, tag, c);
             canvas.text_clipped(
                 rect.x + layout::PAD + 14.0,
                 y,
                 layout::SMALL_SIZE,
                 &line.text,
-                c,
+                if link.is_some() {
+                    color::accent_soft()
+                } else {
+                    c
+                },
                 rect.w - 2.0 * layout::PAD - 14.0,
             );
             y += line_h;
         }
-        let title = format!("Console  ({})", self.console.len());
-        self.panel_title(canvas, rect, &title);
-        let clear = Rect::new(
-            rect.x + rect.w - 64.0,
-            rect.y + 4.0,
-            56.0,
-            layout::TITLEBAR_H - 8.0,
-        );
-        if self.button(canvas, clear, "Clear", ButtonStyle::Normal) {
-            self.console.clear();
+        canvas.restore_clip(prev);
+        if let Some((path, line)) = open {
+            self.out.push(Intent::OpenScriptAt { path, line });
         }
     }
 
@@ -1978,91 +2662,39 @@ impl Ui {
             );
         }
     }
+}
 
-    // ----- menus -----------------------------------------------------------
-
-    fn menu_items(&self, doc: &Document) -> Vec<(&'static str, Intent)> {
-        match self.menu {
-            None => Vec::new(),
-            Some(Menu::Create { .. }) => CreateKind::ALL
-                .iter()
-                .map(|k| (k.label(), Intent::Create(*k)))
-                .collect(),
-            Some(Menu::AddComponent { id, .. }) => match doc.index_of(id) {
-                Some(i) => ComponentKind::ALL
-                    .iter()
-                    .filter(|k| !k.present_in(&doc.entities[i].data))
-                    .map(|k| (k.label(), Intent::AddComponent(id, *k)))
-                    .collect(),
-                None => Vec::new(),
-            },
+/// Finds a `path:line` reference in a console line (Python tracebacks print
+/// `File "x.py", line 12`; linters print `x.py:12:`).
+#[must_use]
+pub fn console_location(text: &str) -> Option<(PathBuf, u32)> {
+    if let Some(start) = text.find("File \"") {
+        let rest = &text[start + 6..];
+        let end = rest.find('"')?;
+        let path = &rest[..end];
+        let after = &rest[end..];
+        let line_at = after.find("line ")?;
+        let digits: String = after[line_at + 5..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        if Path::new(path)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("py"))
+        {
+            return Some((PathBuf::from(path), digits.parse().ok()?));
         }
     }
-
-    fn menu_rect(&self, doc: &Document, w: f32, h: f32) -> Option<Rect> {
-        let (x, y) = match self.menu? {
-            Menu::Create { x, y } | Menu::AddComponent { x, y, .. } => (x, y),
-        };
-        let n = self.menu_items(doc).len().max(1) as f32;
-        let mh = n * layout::ROW_H + 8.0;
-        let mw = layout::MENU_W;
-        let x = x.min(w - mw - 4.0).max(0.0);
-        let y = if y + mh > h {
-            (y - mh - 30.0).max(0.0)
-        } else {
-            y
-        };
-        Some(Rect::new(x, y, mw, mh))
-    }
-
-    fn draw_menu(&mut self, canvas: &mut Canvas, doc: &Document, w: f32, h: f32) {
-        let Some(r) = self.menu_rect(doc, w, h) else {
-            return;
-        };
-        let items = self.menu_items(doc);
-        canvas.fill_rounded(r.x + 3.0, r.y + 4.0, r.w, r.h, 6.0, color::shadow());
-        canvas.fill_rounded(r.x, r.y, r.w, r.h, 6.0, color::raised());
-        canvas.stroke_rounded(r.x, r.y, r.w, r.h, 6.0, color::border(), 1.0);
-        let raw = self.raw;
-        if items.is_empty() {
-            canvas.text(
-                r.x + 12.0,
-                r.y + 9.0,
-                layout::FONT_SIZE,
-                "All components added",
-                color::text_dim(),
-            );
-            return;
-        }
-        let mut chosen = None;
-        for (i, (label, intent)) in items.into_iter().enumerate() {
-            let row = Rect::new(
-                r.x + 4.0,
-                r.y + 4.0 + i as f32 * layout::ROW_H,
-                r.w - 8.0,
-                layout::ROW_H,
-            );
-            let hot = row.contains(raw.x, raw.y);
-            if hot {
-                canvas.fill_rounded(row.x, row.y, row.w, row.h, 4.0, color::select());
-                self.cursor = CursorHint::Pointer;
-            }
-            canvas.text(
-                row.x + 10.0,
-                row.y + 5.0,
-                layout::FONT_SIZE,
-                label,
-                color::text(),
-            );
-            if hot && raw.pressed {
-                chosen = Some(intent);
-            }
-        }
-        if let Some(intent) = chosen {
-            self.out.push(intent);
-            self.menu = None;
-        }
-    }
+    let idx = text.find(".py:")?;
+    let begin = text[..idx]
+        .rfind(|c: char| c.is_whitespace() || c == '(' || c == '"')
+        .map_or(0, |i| i + 1);
+    let path = &text[begin..idx + 3];
+    let digits: String = text[idx + 4..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    Some((PathBuf::from(path), digits.parse().ok()?))
 }
 
 // ----- free drawing helpers -------------------------------------------------
@@ -2314,6 +2946,8 @@ fn factor(s: &[char], pos: &mut usize) -> Option<f64> {
 mod tests {
     use super::*;
 
+    const SV_TEST_H: f32 = 150.0;
+
     fn canvas() -> Canvas {
         Canvas::new(1600, 950)
     }
@@ -2519,6 +3153,7 @@ mod tests {
             buffer: "0".into(),
             rect: Rect::default(),
             fresh: true,
+            attr: None,
         });
         ui.type_text("2*3");
         let intent = ui.edit_key(EditKey::Enter);
@@ -2603,12 +3238,235 @@ mod tests {
         let plus = (hier.x + hier.w - 46.0, hier.y + 14.0);
         click(&mut ui, &mut c, &doc, plus.0, plus.1);
         assert!(ui.menu.is_some(), "+ Create opens the menu");
-        let r = ui.menu_rect(&doc, 1600.0, 950.0).unwrap();
+        let r = ui.menu.as_ref().unwrap().rect(&mut c, 1600.0, 950.0);
         // Second item: Cube.
         let item = (r.x + 30.0, r.y + 4.0 + layout::ROW_H * 1.5);
         let out = click(&mut ui, &mut c, &doc, item.0, item.1);
         assert!(out.contains(&Intent::Create(CreateKind::Cube)), "{out:?}");
         assert!(ui.menu.is_none());
+    }
+
+    fn select_named(doc: &mut Document, name: &str) -> u64 {
+        let id = doc.entities.iter().find(|e| e.name() == name).unwrap().id;
+        doc.select(Some(id));
+        id
+    }
+
+    fn right_click(ui: &mut Ui, c: &mut Canvas, doc: &Document, x: f32, y: f32) -> Vec<Intent> {
+        let mut out = ui.frame(
+            c,
+            doc,
+            Pointer {
+                x,
+                y,
+                right_down: true,
+                right_pressed: true,
+                ..Pointer::default()
+            },
+            None,
+        );
+        out.extend(ui.frame(
+            c,
+            doc,
+            Pointer {
+                x,
+                y,
+                ..Pointer::default()
+            },
+            None,
+        ));
+        out
+    }
+
+    #[test]
+    fn menu_bar_opens_menus_and_runs_items() {
+        let mut c = canvas();
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        // "GameObject" is the third bar entry; find it by hovering along.
+        let mut opened = false;
+        for x in (100..400).step_by(6) {
+            click(&mut ui, &mut c, &doc, x as f32, 13.0);
+            if ui.menu.as_ref().is_some_and(|m| m.bar == Some(2)) {
+                opened = true;
+                break;
+            }
+            ui.menu = None;
+        }
+        assert!(opened, "GameObject menu opens from the bar");
+        let r = ui.menu.as_ref().unwrap().rect(&mut c, 1600.0, 950.0);
+        let out = click(
+            &mut ui,
+            &mut c,
+            &doc,
+            r.x + 30.0,
+            r.y + 4.0 + layout::ROW_H * 1.5,
+        );
+        assert!(out.contains(&Intent::Create(CreateKind::Cube)), "{out:?}");
+    }
+
+    #[test]
+    fn right_clicking_a_hierarchy_row_opens_the_entity_menu() {
+        let mut c = canvas();
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        let hier = lay().hierarchy;
+        let row_y = hier.y + layout::TITLEBAR_H + 4.0 + layout::ROW_H * 0.5;
+        let out = right_click(&mut ui, &mut c, &doc, hier.x + 60.0, row_y);
+        assert!(
+            matches!(out.first(), Some(Intent::Select(Some(_)))),
+            "{out:?}"
+        );
+        let menu = ui.menu.as_ref().expect("context menu");
+        assert!(menu.items.iter().any(|i| i.label == "Save as Prefab…"));
+        assert!(menu.items.iter().any(|i| i.label == "Duplicate"));
+    }
+
+    #[test]
+    fn the_color_swatch_opens_a_picker_that_edits_the_color() {
+        let mut c = canvas();
+        let mut doc = Document::starter();
+        let id = select_named(&mut doc, "Cube");
+        let mut ui = Ui::new();
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        ui.raw = Pointer {
+            x: 900.0,
+            y: 300.0,
+            ..Pointer::default()
+        };
+        ui.run_action(menus::UiAction::PickColor(id, ColorTarget::Mesh), &doc);
+        assert!(ui.picker.is_some(), "the picker opens");
+        let r = ui.picker_rect(1600.0, 950.0).unwrap();
+        // Drag in the SV square: bottom-left is black.
+        let (x, y) = (r.x + 14.0, r.y + 12.0 + SV_TEST_H - 1.0);
+        let mut out = ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x,
+                y,
+                down: true,
+                pressed: true,
+                ..Pointer::default()
+            },
+            None,
+        );
+        out.extend(ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x,
+                y,
+                down: true,
+                ..Pointer::default()
+            },
+            None,
+        ));
+        out.extend(ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x,
+                y,
+                ..Pointer::default()
+            },
+            None,
+        ));
+        let set = out.iter().find_map(|i| match i {
+            Intent::SetColor {
+                id: got,
+                rgba,
+                gesture: true,
+                ..
+            } if *got == id => Some(*rgba),
+            _ => None,
+        });
+        let rgba = set.unwrap_or_else(|| panic!("no SetColor in {out:?}"));
+        assert!(
+            rgba[0] < 0.05 && rgba[1] < 0.05 && rgba[2] < 0.05,
+            "{rgba:?}"
+        );
+        assert!(out.contains(&Intent::EndGesture));
+    }
+
+    #[test]
+    fn dragging_a_splitter_resizes_the_panel() {
+        let mut c = canvas();
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        let hier = lay().hierarchy;
+        let x = hier.x + hier.w;
+        let y = hier.y + 200.0;
+        ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x,
+                y,
+                down: true,
+                pressed: true,
+                ..Pointer::default()
+            },
+            None,
+        );
+        ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x: x + 80.0,
+                y,
+                down: true,
+                ..Pointer::default()
+            },
+            None,
+        );
+        ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x: x + 80.0,
+                y,
+                ..Pointer::default()
+            },
+            None,
+        );
+        assert!(
+            (ui.panels.hierarchy_w - (hier.w + 80.0)).abs() < 1.0,
+            "{}",
+            ui.panels.hierarchy_w
+        );
+    }
+
+    #[test]
+    fn the_save_as_dialog_submits_a_path_with_the_extension() {
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        ui.project_root = std::env::temp_dir();
+        ui.open_dialog_kind(DialogKind::SaveSceneAs, &doc);
+        assert!(ui.dialog_open() && ui.is_editing_text());
+        ui.edit_key(EditKey::Delete);
+        ui.type_text("oberon_dialog_test_level");
+        let intent = ui.edit_key(EditKey::Enter);
+        assert_eq!(
+            intent,
+            Some(Intent::SaveAs(
+                std::env::temp_dir().join("oberon_dialog_test_level.ron")
+            ))
+        );
+        assert!(!ui.dialog_open());
+    }
+
+    #[test]
+    fn console_links_find_python_locations() {
+        assert_eq!(
+            console_location("  File \"scripts/player.py\", line 12, in update"),
+            Some((PathBuf::from("scripts/player.py"), 12))
+        );
+        assert_eq!(
+            console_location("error: player.py:7: bad"),
+            Some((PathBuf::from("player.py"), 7))
+        );
+        assert_eq!(console_location("plain message"), None);
     }
 
     #[test]

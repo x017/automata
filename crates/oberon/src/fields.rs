@@ -385,6 +385,71 @@ pub fn cycle(data: &mut EntityData, choice: Choice) -> bool {
     true
 }
 
+/// Writes a color property (RGB colors ignore alpha). Returns true if the
+/// entity has it.
+pub fn set_color(data: &mut EntityData, target: crate::ui::ColorTarget, rgba: [f32; 4]) -> bool {
+    use crate::ui::ColorTarget;
+    let c = rgba.map(|v| {
+        if v.is_finite() {
+            v.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    });
+    match target {
+        ColorTarget::Attribute(i) => {
+            let Some(key) = data.attributes.keys().nth(i).cloned() else {
+                return false;
+            };
+            data.attributes
+                .insert(key, automata_core::AttributeValue::Color(c));
+            true
+        }
+        _ => {
+            let mut ok = true;
+            for (i, f) in target.channels().into_iter().enumerate() {
+                ok &= set(data, f, c[i]);
+            }
+            ok
+        }
+    }
+}
+
+/// Every option of an enumerated property, in cycling order (empty if the
+/// entity lacks the property).
+#[must_use]
+pub fn choice_options(data: &EntityData, choice: Choice) -> Vec<&'static str> {
+    let mut probe = data.clone();
+    let mut out = Vec::new();
+    while let Some(label) = choice_label(&probe, choice) {
+        if out.contains(&label) || out.len() > 16 {
+            break;
+        }
+        out.push(label);
+        if !cycle(&mut probe, choice) {
+            break;
+        }
+    }
+    out
+}
+
+/// Sets an enumerated property to the option labelled `label`. Returns
+/// true if the option exists.
+pub fn set_choice(data: &mut EntityData, choice: Choice, label: &str) -> bool {
+    for _ in 0..16 {
+        match choice_label(data, choice) {
+            Some(current) if current == label => return true,
+            Some(_) => {
+                if !cycle(data, choice) {
+                    return false;
+                }
+            }
+            None => return false,
+        }
+    }
+    false
+}
+
 /// Formats a value for display: up to 3 decimals, trailing zeros trimmed.
 #[must_use]
 pub fn format_value(v: f32) -> String {

@@ -26,6 +26,8 @@ pub struct Canvas {
     scale: f32,
     /// Scratch buffer for premultiplying blitted images (reused per frame).
     blit_scratch: Vec<u8>,
+    /// Physical clip rectangle `x0, y0, x1, y1` for text and rectangles.
+    clip: Option<[i32; 4]>,
 }
 
 impl Canvas {
@@ -37,6 +39,7 @@ impl Canvas {
             text: TextRenderer::new(),
             scale: 1.0,
             blit_scratch: Vec::new(),
+            clip: None,
         }
     }
 
@@ -79,6 +82,34 @@ impl Canvas {
         Transform::from_scale(self.scale, self.scale)
     }
 
+    /// Restricts text and rectangle drawing to a logical rectangle (`None`
+    /// lifts the restriction). Returns the previous clip so callers can
+    /// restore it.
+    pub fn set_clip(&mut self, clip: Option<(f32, f32, f32, f32)>) -> Option<[i32; 4]> {
+        let s = self.scale;
+        let prev = self.clip;
+        self.clip = clip.map(|(x, y, w, h)| {
+            [
+                (x * s).floor() as i32,
+                (y * s).floor() as i32,
+                ((x + w) * s).ceil() as i32,
+                ((y + h) * s).ceil() as i32,
+            ]
+        });
+        prev
+    }
+
+    /// Restores a clip returned by [`Canvas::set_clip`].
+    pub fn restore_clip(&mut self, clip: Option<[i32; 4]>) {
+        self.clip = clip;
+    }
+
+    /// The width of one character cell at `size` (logical; monospaced font).
+    pub fn cell_width(&mut self, size: f32) -> f32 {
+        let s = self.scale;
+        self.text.cell_width(size * s) / s
+    }
+
     /// Clears the whole canvas to `color`.
     pub fn clear(&mut self, color: Color) {
         self.pixmap.fill(color);
@@ -86,6 +117,17 @@ impl Canvas {
 
     /// Fills a rectangle.
     pub fn fill_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+        let (mut x, mut y, mut w, mut h) = (x, y, w, h);
+        if let Some([x0, y0, x1, y1]) = self.clip {
+            let s = self.scale;
+            let (cx0, cy0, cx1, cy1) = (x0 as f32 / s, y0 as f32 / s, x1 as f32 / s, y1 as f32 / s);
+            let (nx0, ny0) = (x.max(cx0), y.max(cy0));
+            let (nx1, ny1) = ((x + w).min(cx1), (y + h).min(cy1));
+            if nx1 <= nx0 || ny1 <= ny0 {
+                return;
+            }
+            (x, y, w, h) = (nx0, ny0, nx1 - nx0, ny1 - ny0);
+        }
         let Some(rect) = Rect::from_xywh(x, y, w, h) else {
             return;
         };
@@ -217,9 +259,15 @@ impl Canvas {
     /// Draws text at `(x, y)` (top-left), returning the advance width.
     pub fn text(&mut self, x: f32, y: f32, size: f32, text: &str, color: Color) -> f32 {
         let s = self.scale;
-        self.text
-            .draw(&mut self.pixmap, x * s, y * s, size * s, text, color)
-            / s
+        self.text.draw(
+            &mut self.pixmap,
+            x * s,
+            y * s,
+            size * s,
+            text,
+            color,
+            self.clip,
+        ) / s
     }
 
     /// Draws text truncated with an ellipsis so it fits in `max_w`.

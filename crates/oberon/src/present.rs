@@ -32,8 +32,9 @@ use crate::canvas::Canvas;
 use crate::doc::Document;
 use crate::fields;
 use crate::play::{PlayInput, PlaySession};
+use crate::project::{self, Prefs};
 use crate::render::ViewportRenderer;
-use crate::ui::{CursorHint, EditKey, Intent, Layout, LogLevel, PlayState, Pointer, Ui};
+use crate::ui::{CursorHint, DialogKind, EditKey, Intent, LogLevel, PlayState, Pointer, Ui};
 use crate::view::{GizmoMode, ViewCamera};
 
 /// The editor window's initial logical size.
@@ -71,6 +72,8 @@ struct Input {
     middle: bool,
     /// A left press happened since the last frame.
     pressed: bool,
+    /// A right press happened since the last frame.
+    right_pressed: bool,
     /// That press was a double click.
     double_click: bool,
     last_press: Option<(Instant, (f32, f32))>,
@@ -146,6 +149,12 @@ struct EditorApp {
     last_title: String,
     last_cursor: CursorHint,
     fatal_error: Option<String>,
+    /// Persistent preferences (recent files, layout, tool paths).
+    prefs: Prefs,
+    /// When the scene was last autosaved (or loaded/saved).
+    last_autosave: Instant,
+    /// The app should exit at the next opportunity.
+    quit: bool,
 }
 
 impl EditorApp {
@@ -155,6 +164,13 @@ impl EditorApp {
             None => Document::starter(),
         };
         let mut ui = Ui::new();
+        let mut prefs = Prefs::load();
+        prefs.apply_panels(&mut ui.panels);
+        if let Some(path) = &doc.path {
+            prefs.touch_recent(path);
+        }
+        ui.recent = prefs.existing_recent();
+        ui.project_root = doc.base_dir();
         ui.log(
             LogLevel::Info,
             "Oberon ready. Click an object to select it; drag the gizmo to move it.",
@@ -181,6 +197,9 @@ impl EditorApp {
             last_title: String::new(),
             last_cursor: CursorHint::Default,
             fatal_error: None,
+            prefs,
+            last_autosave: Instant::now(),
+            quit: false,
         })
     }
 
@@ -194,7 +213,22 @@ impl EditorApp {
 
     /// Applies a UI intent to the document (or play state).
     fn apply(&mut self, intent: Intent) {
-        if intent.edits_document() && self.ui.play != PlayState::Editing {
+        // Actions that discard the scene ask about unsaved changes first.
+        if matches!(intent, Intent::New | Intent::Open(_) | Intent::Quit) && self.doc.dirty() {
+            self.ui.ask_unsaved(intent);
+            return;
+        }
+        let intent = match intent {
+            Intent::Force(inner) => *inner,
+            other => other,
+        };
+        if matches!(intent, Intent::New | Intent::Open(_)) && self.play.is_some() {
+            self.stop();
+        }
+        if intent.edits_document()
+            && self.ui.play != PlayState::Editing
+            && !matches!(intent, Intent::New | Intent::Open(_))
+        {
             return; // the scene is read-only while simulating
         }
         let doc = &mut self.doc;
@@ -304,15 +338,255 @@ impl EditorApp {
                 PlayState::Editing => {}
             },
             Intent::Stop => self.stop(),
+            other => self.apply_more(other),
+        }
+    }
+
+    /// Intents for files, prefabs, attributes, scripts, and clipboard.
+    #[allow(clippy::too_many_lines)]
+    fn apply_more(&mut self, intent: Intent) {
+        let doc = &mut self.doc;
+        match intent {
+            Intent::SetColor {
+                id,
+                target,
+                rgba,
+                gesture,
+            } => {
+                doc.modify(id, gesture, |d| {
+                    fields::set_color(d, target, rgba);
+                });
+            }
+            Intent::SetChoice { id, choice, label } => {
+                doc.modify(id, false, |d| {
+                    fields::set_choice(d, choice, label);
+                });
+            }
+            Intent::ResetComponent(id, kind) => {
+                if doc.reset_component(id, kind) {
+                    self.ui
+                        .log(LogLevel::Info, format!("Reset {}", kind.label()));
+                }
+            }
+            Intent::PasteComponent { id, kind, source } => {
+                if doc.paste_component(id, kind, &source) {
+                    self.ui
+                        .log(LogLevel::Info, format!("Pasted {} values", kind.label()));
+                }
+            }
+            Intent::PasteEntities(entities) => {
+                let ids = doc.paste_entities(&entities, [0.5, 0.0, 0.5]);
+                self.ui
+                    .log(LogLevel::Info, format!("Pasted {} entity(s)", ids.len()));
+            }
+            Intent::SetAttribute {
+                id,
+                key,
+                value,
+                gesture,
+            } => {
+                doc.modify(id, gesture, |d| {
+                    d.attributes.insert(key, value);
+                });
+            }
+            Intent::RemoveAttribute { id, key } => {
+                doc.modify(id, false, |d| {
+                    d.attributes.remove(&key);
+                });
+            }
+            Intent::RenameAttribute { id, from, to } => {
+                let mut clash = false;
+                doc.modify(id, false, |d| {
+                    if d.attributes.contains_key(&to) {
+                        clash = true;
+                    } else if let Some(v) = d.attributes.remove(&from) {
+                        d.attributes.insert(to.clone(), v);
+                    }
+                });
+                if clash {
+                    self.ui.log(
+                        LogLevel::Warn,
+                        format!("An attribute named {to:?} already exists"),
+                    );
+                }
+            }
+            Intent::Open(path) => self.open_scene(&path),
+            Intent::SaveAs(path) => {
+                self.doc.path = Some(path);
+                self.save();
+            }
+            Intent::SavePrefab { id, path } => self.save_prefab(id, &path),
+            Intent::InstantiatePrefab(path) => self.instantiate_prefab(&path),
+            Intent::OpenScript(path) => self.open_script(&path, None),
+            Intent::OpenScriptAt { path, line } => self.open_script(&path, Some(line)),
+            Intent::NewScript(path) => {
+                if self.ensure_script(&path) {
+                    self.open_script(&path, None);
+                }
+            }
+            Intent::AttachScript { id, path } => {
+                if self.ensure_script(&path) {
+                    let rel = self.doc.relative(&path);
+                    self.doc.modify(id, false, |d| {
+                        d.script = Some(automata_core::Script { path: rel.clone() });
+                    });
+                    self.ui.log(LogLevel::Info, format!("Attached {rel}"));
+                    self.open_script(&path, None);
+                }
+            }
+            Intent::DetachScript(id) => {
+                if self.doc.modify(id, false, |d| d.script = None) {
+                    self.ui.log(LogLevel::Info, "Script detached");
+                }
+            }
+            Intent::NewFolder(path) => match std::fs::create_dir_all(&path) {
+                Ok(()) => self
+                    .ui
+                    .log(LogLevel::Info, format!("Created folder {}", path.display())),
+                Err(e) => self
+                    .ui
+                    .log(LogLevel::Error, format!("New folder failed: {e}")),
+            },
+            Intent::Quit => self.quit = true,
+            _ => {}
+        }
+    }
+
+    fn open_scene(&mut self, path: &std::path::Path) {
+        match Document::load(path) {
+            Ok(doc) => {
+                self.doc = doc;
+                self.viewport.invalidate();
+                self.prefs.touch_recent(path);
+                self.ui.recent = self.prefs.existing_recent();
+                self.ui.project_root = self.doc.base_dir();
+                self.last_autosave = Instant::now();
+                self.save_prefs();
+                self.ui
+                    .log(LogLevel::Info, format!("Opened {}", path.display()));
+            }
+            Err(e) => self.ui.log(
+                LogLevel::Error,
+                format!("Open {} failed: {e}", path.display()),
+            ),
+        }
+    }
+
+    fn save_prefab(&mut self, id: u64, path: &std::path::Path) {
+        let Some(prefab) = self.doc.prefab_of(id) else {
+            return;
+        };
+        let result = prefab.to_ron().map_err(|e| e.to_string()).and_then(|text| {
+            if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+                std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(path, text).map_err(|e| e.to_string())
+        });
+        match result {
+            Ok(()) => self
+                .ui
+                .log(LogLevel::Info, format!("Saved prefab {}", path.display())),
+            Err(e) => self
+                .ui
+                .log(LogLevel::Error, format!("Save prefab failed: {e}")),
+        }
+    }
+
+    fn instantiate_prefab(&mut self, path: &std::path::Path) {
+        let loaded = std::fs::read_to_string(path)
+            .map_err(|e| e.to_string())
+            .and_then(|t| automata_core::SceneFile::from_ron(&t).map_err(|e| e.to_string()));
+        match loaded {
+            Ok(prefab) => {
+                // Drop it where the scene camera is looking, on the ground.
+                let t = self.ui.camera.target;
+                let ground = prefab
+                    .entities
+                    .first()
+                    .and_then(|e| e.transform)
+                    .map_or(0.0, |tr| tr.position[1]);
+                let ids = self.doc.instantiate(&prefab, [t[0], ground, t[2]]);
+                self.ui.log(
+                    LogLevel::Info,
+                    format!("Instantiated {} ({} entity(s))", path.display(), ids.len()),
+                );
+            }
+            Err(e) => self.ui.log(
+                LogLevel::Error,
+                format!("Instantiate {} failed: {e}", path.display()),
+            ),
+        }
+    }
+
+    /// Creates `path` from the script template if it does not exist.
+    fn ensure_script(&mut self, path: &std::path::Path) -> bool {
+        if path.exists() {
+            return true;
+        }
+        let result = path
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(path, project::script_template(path)));
+        match result {
+            Ok(()) => {
+                self.ui
+                    .log(LogLevel::Info, format!("Created {}", path.display()));
+                true
+            }
+            Err(e) => {
+                self.ui.log(
+                    LogLevel::Error,
+                    format!("Create {} failed: {e}", path.display()),
+                );
+                false
+            }
+        }
+    }
+
+    /// Opens a script in the code editor.
+    fn open_script(&mut self, path: &std::path::Path, line: Option<u32>) {
+        self.ui.open_code(path, line);
+    }
+
+    fn save_prefs(&mut self) {
+        self.prefs.capture_panels(&self.ui.panels);
+        if let Err(e) = self.prefs.save() {
+            tracing::warn!(error = %e, "could not save preferences");
+        }
+    }
+
+    /// Writes the autosave file when the scene has unsaved changes.
+    fn autosave(&mut self) {
+        let secs = self.prefs.autosave_secs;
+        if secs == 0 || self.last_autosave.elapsed() < Duration::from_secs(secs) {
+            return;
+        }
+        self.last_autosave = Instant::now();
+        if !self.doc.dirty() || self.play.is_some() {
+            return;
+        }
+        let Ok(text) = self.doc.to_ron() else {
+            return;
+        };
+        match project::write_autosave(&self.ui.project_root, &text) {
+            Ok(path) => tracing::info!(path = %path.display(), "autosaved"),
+            Err(e) => self.ui.log(LogLevel::Warn, format!("Autosave failed: {e}")),
         }
     }
 
     fn save(&mut self) {
         let path = self.doc.path.clone().unwrap_or_else(default_save_path);
         match self.doc.save(Some(path.as_path())) {
-            Ok(path) => self
-                .ui
-                .log(LogLevel::Info, format!("Saved {}", path.display())),
+            Ok(path) => {
+                self.ui
+                    .log(LogLevel::Info, format!("Saved {}", path.display()));
+                self.prefs.touch_recent(&path);
+                self.ui.recent = self.prefs.existing_recent();
+                self.ui.project_root = self.doc.base_dir();
+                self.last_autosave = Instant::now();
+                self.save_prefs();
+            }
             Err(err) => {
                 tracing::error!(error = %err, "save failed");
                 self.ui.log(LogLevel::Error, format!("Save failed: {err}"));
@@ -414,6 +688,17 @@ impl EditorApp {
             }
             return;
         }
+        // Escape closes the topmost popup / picker / dialog first.
+        if code == KeyCode::Escape && !self.ui.is_editing_text() && self.ui.close_overlay() {
+            return;
+        }
+        // A modal dialog without a focused field only listens for Enter.
+        if self.ui.dialog_open() && !self.ui.is_editing_text() {
+            if matches!(code, KeyCode::Enter | KeyCode::NumpadEnter) {
+                self.ui.close_dialog();
+            }
+            return;
+        }
 
         // A focused text field takes the keyboard.
         if self.ui.is_editing_text() {
@@ -456,6 +741,24 @@ impl EditorApp {
             return;
         }
         let intent = match (code, ctrl) {
+            (KeyCode::KeyS, true) if shift => {
+                self.ui.open_dialog_kind(DialogKind::SaveSceneAs, &self.doc);
+                None
+            }
+            (KeyCode::KeyO, true) => {
+                self.ui.open_dialog_kind(DialogKind::OpenScene, &self.doc);
+                None
+            }
+            (KeyCode::KeyQ, true) => Some(Intent::Quit),
+            (KeyCode::KeyC, true) => {
+                self.ui.copy_selected(&self.doc);
+                None
+            }
+            (KeyCode::KeyV, true) => self.ui.paste_intent(),
+            (KeyCode::F1, false) => {
+                self.ui.open_dialog_kind(DialogKind::Shortcuts, &self.doc);
+                None
+            }
             (KeyCode::KeyZ, true) if shift => Some(Intent::Redo),
             (KeyCode::KeyZ, true) => Some(Intent::Undo),
             (KeyCode::KeyY, true) => Some(Intent::Redo),
@@ -576,7 +879,7 @@ impl EditorApp {
             // The scene view's size in physical pixels: the GPU renders at
             // full resolution and the UI composites it 1:1.
             let (lw, lh) = canvas.logical_size();
-            let view = Layout::compute(lw, lh).viewport;
+            let view = ui.layout(lw, lh).viewport;
             let s = canvas.scale();
             let vw = (view.w * s).round().max(1.0) as u32;
             let vh = (view.h * s).round().max(1.0) as u32;
@@ -597,6 +900,7 @@ impl EditorApp {
 
         // Per-frame transient input is consumed.
         self.input.pressed = false;
+        self.input.right_pressed = false;
         self.input.double_click = false;
         self.input.scroll = 0.0;
 
@@ -609,6 +913,7 @@ impl EditorApp {
             renderer.blit_rgba_to_surface(canvas.pixels(), canvas.size());
         }
         self.update_window_chrome(&window);
+        self.autosave();
     }
 
     /// This frame's pointer in logical pixels.
@@ -622,6 +927,7 @@ impl EditorApp {
             pressed: i.pressed,
             double_click: i.double_click,
             right_down: i.right,
+            right_pressed: i.right_pressed,
             middle_down: i.middle,
             scroll: i.scroll,
             shift: i.modifiers.shift_key(),
@@ -659,6 +965,7 @@ impl EditorApp {
                 CursorHint::Pointer => CursorIcon::Pointer,
                 CursorHint::Text => CursorIcon::Text,
                 CursorHint::ResizeH => CursorIcon::EwResize,
+                CursorHint::ResizeV => CursorIcon::NsResize,
                 CursorHint::Grab => CursorIcon::Grab,
                 CursorHint::Grabbing => CursorIcon::Grabbing,
                 CursorHint::Move => CursorIcon::Move,
@@ -744,11 +1051,12 @@ impl ApplicationHandler for EditorApp {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
-                if self.doc.dirty() {
-                    tracing::warn!("closing with unsaved changes");
+                self.apply(Intent::Quit);
+                if self.quit {
+                    self.save_prefs();
+                    event_loop.exit();
+                    return;
                 }
-                event_loop.exit();
-                return;
             }
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = &mut self.renderer {
@@ -790,7 +1098,12 @@ impl ApplicationHandler for EditorApp {
                             self.input.last_press = if double { None } else { Some((now, at)) };
                         }
                     }
-                    MouseButton::Right => self.input.right = down,
+                    MouseButton::Right => {
+                        self.input.right = down;
+                        if down {
+                            self.input.right_pressed = true;
+                        }
+                    }
                     MouseButton::Middle => self.input.middle = down,
                     _ => {}
                 }
@@ -814,6 +1127,11 @@ impl ApplicationHandler for EditorApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.quit {
+            self.save_prefs();
+            event_loop.exit();
+            return;
+        }
         // Redraw at a steady ~60 FPS so play mode, hover and drags stay live
         // without spinning the CPU between frames.
         let deadline = self.last_frame + Duration::from_millis(16);

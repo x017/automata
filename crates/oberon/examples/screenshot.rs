@@ -38,7 +38,30 @@ fn main() {
     let (frame, fw, fh) = viewport.render(gpu.as_mut(), &doc, ui.camera, vw, vh);
     let frame = frame.to_vec();
 
-    let pointer = Pointer::default();
+    // Optional scene: `picker`, `menu`, `dialog`, `project`, `code`.
+    let scene = std::env::args().nth(2).unwrap_or_default();
+    let selected = doc.selected;
+    let pointer = Pointer {
+        x: 1180.0,
+        y: 330.0,
+        ..Pointer::default()
+    };
+    let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+    match scene.as_str() {
+        "picker" => {
+            if let Some(id) = selected {
+                ui.open_color_picker(&doc, id, oberon::ui::ColorTarget::Mesh);
+            }
+        }
+        "menu" => ui.open_bar_menu(0, &doc),
+        "dialog" => ui.open_dialog_kind(oberon::ui::DialogKind::SaveSceneAs, &doc),
+        "project" => ui.bottom_tab = oberon::ui::BottomTab::Project,
+        "code" => {
+            let path = std::path::Path::new("examples/python/oop_platformer.py");
+            ui.open_code(path, Some(150));
+        }
+        _ => {}
+    }
     let _intents = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
 
     // tiny-skia pixels are premultiplied RGBA; the UI is opaque, so write

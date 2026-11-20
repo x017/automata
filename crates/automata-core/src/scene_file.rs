@@ -16,6 +16,7 @@ use automata_renderer::{Camera2D, Camera3D, MeshData};
 use automata_scene::{DirectionalLight, MeshVisual, MeshVisualKind, Name, SceneWorld, Transform};
 use glam::EulerRot;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// The current scene file format version.
 pub const SCENE_FILE_VERSION: u32 = 1;
@@ -81,6 +82,60 @@ pub struct EntityData {
     /// Character velocity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub character_velocity: Option<automata_physics::CharacterVelocity>,
+    /// Custom named gameplay values (`health: Int(100)`, `team: Text("red")`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub attributes: BTreeMap<String, AttributeValue>,
+    /// The Python behaviour script attached to the entity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<Script>,
+}
+
+/// A custom attribute value: the small set of types an editor can show and
+/// a script can read without schema knowledge.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AttributeValue {
+    /// A true/false flag.
+    Bool(bool),
+    /// A whole number.
+    Int(i64),
+    /// A real number.
+    Float(f64),
+    /// Free text.
+    Text(String),
+    /// A 3D vector.
+    Vec3([f32; 3]),
+    /// An RGBA color (components 0..1).
+    Color([f32; 4]),
+}
+
+impl AttributeValue {
+    /// A short type name ("Bool", "Int", …) for editors and error messages.
+    #[must_use]
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::Bool(_) => "Bool",
+            Self::Int(_) => "Int",
+            Self::Float(_) => "Float",
+            Self::Text(_) => "Text",
+            Self::Vec3(_) => "Vec3",
+            Self::Color(_) => "Color",
+        }
+    }
+}
+
+/// The custom attributes component: named values attached to an entity.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Attributes(pub BTreeMap<String, AttributeValue>);
+
+/// A Python behaviour script attached to an entity (also its ECS component).
+///
+/// `path` is relative to the scene file's directory (or absolute). The
+/// script defines optional `start(entity, ctx)` / `update(entity, ctx)`
+/// functions that runners call for the owning entity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Script {
+    /// Path to the `.py` file.
+    pub path: String,
 }
 
 /// Human-editable transform: position, Euler rotation (XYZ, radians), scale.
@@ -234,6 +289,12 @@ impl SceneFile {
             if let Some(velocity) = eref.get::<&automata_physics::CharacterVelocity>() {
                 data.character_velocity = Some(*velocity);
             }
+            if let Some(attributes) = eref.get::<&Attributes>() {
+                data.attributes = attributes.0.clone();
+            }
+            if let Some(script) = eref.get::<&Script>() {
+                data.script = Some((*script).clone());
+            }
             entities.push(data);
         }
         Self {
@@ -288,6 +349,12 @@ impl SceneFile {
             if let Some(velocity) = &data.character_velocity {
                 let _ = world.insert_one(entity, *velocity);
             }
+            if !data.attributes.is_empty() {
+                let _ = world.insert_one(entity, Attributes(data.attributes.clone()));
+            }
+            if let Some(script) = &data.script {
+                let _ = world.insert_one(entity, script.clone());
+            }
         }
     }
 
@@ -325,6 +392,51 @@ mod tests {
     use super::*;
     use automata_physics::{CharacterController, CharacterVelocity, Collider3D, RigidBody};
     use automata_scene::{Name, Scene};
+
+    #[test]
+    fn attributes_and_scripts_round_trip_through_ron_and_the_world() {
+        let mut data = EntityData {
+            name: Some("enemy".into()),
+            script: Some(Script {
+                path: "scripts/enemy.py".into(),
+            }),
+            ..EntityData::default()
+        };
+        data.attributes
+            .insert("health".into(), AttributeValue::Int(100));
+        data.attributes
+            .insert("speed".into(), AttributeValue::Float(4.5));
+        data.attributes
+            .insert("team".into(), AttributeValue::Text("red".into()));
+        data.attributes
+            .insert("boss".into(), AttributeValue::Bool(false));
+        data.attributes
+            .insert("tint".into(), AttributeValue::Color([1.0, 0.5, 0.0, 1.0]));
+        data.attributes
+            .insert("spawn".into(), AttributeValue::Vec3([1.0, 2.0, 3.0]));
+        let file = SceneFile {
+            version: SCENE_FILE_VERSION,
+            entities: vec![data, EntityData::default()],
+        };
+        let text = file.to_ron().unwrap();
+        assert!(text.contains("health"), "{text}");
+        assert!(text.contains("scripts/enemy.py"), "{text}");
+        // Entities without attributes/scripts keep the file terse.
+        assert_eq!(text.matches("attributes").count(), 1, "{text}");
+        let back = SceneFile::from_ron(&text).unwrap();
+        assert_eq!(back, file);
+
+        let mut world = SceneWorld::new();
+        back.apply_to_world(&mut world);
+        let again = SceneFile::from_world(&world);
+        let enemy = again
+            .entities
+            .iter()
+            .find(|e| e.name.as_deref() == Some("enemy"))
+            .unwrap();
+        assert_eq!(enemy.attributes, file.entities[0].attributes);
+        assert_eq!(enemy.script, file.entities[0].script);
+    }
 
     fn kitchen_sink_world() -> automata_scene::Scene {
         let mut scene = Scene::new();

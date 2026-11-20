@@ -40,6 +40,7 @@ pub mod doc;
 pub mod fields;
 pub mod play;
 pub mod present;
+pub mod project;
 pub mod render;
 pub mod text;
 pub mod theme;
