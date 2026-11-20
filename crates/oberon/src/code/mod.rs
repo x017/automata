@@ -5,6 +5,7 @@
 //! completion and diagnostics) and every keyboard command; drawing and the
 //! mouse live in `ui::code_view`.
 
+pub mod api;
 pub mod buffer;
 pub mod clipboard;
 pub mod syntax;
@@ -215,6 +216,44 @@ pub enum Key {
     Char(char),
 }
 
+/// Script editor preferences (persisted in the editor preferences).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct EditorSettings {
+    /// Code font size in logical pixels.
+    pub font_size: f32,
+    /// Highlight the line with the caret.
+    pub highlight_line: bool,
+    /// Draw vertical guides at each indentation level.
+    pub indent_guides: bool,
+    /// Show spaces and tabs as faint dots / arrows.
+    pub show_whitespace: bool,
+    /// Insert the closing bracket / quote when typing an opening one.
+    pub auto_close: bool,
+    /// Show completions while typing (Ctrl+Space always works).
+    pub auto_complete: bool,
+    /// Remove trailing whitespace when saving.
+    pub trim_on_save: bool,
+    /// Save modified scripts when entering Play mode.
+    pub save_before_play: bool,
+}
+
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self {
+            font_size: 13.0,
+            highlight_line: true,
+            indent_guides: true,
+            show_whitespace: false,
+            auto_close: true,
+            auto_complete: true,
+            trim_on_save: true,
+            save_before_play: true,
+        }
+    }
+}
+
 /// Modifier keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Mods {
@@ -303,6 +342,11 @@ pub struct CodeEditor {
     pub page_lines: usize,
     /// The running language server's name (status line), if any.
     pub server: Option<String>,
+    /// Preferences (copied from the app's preferences every frame).
+    pub settings: EditorSettings,
+    /// Entity and attribute names from the open scene, for completing
+    /// `ctx.scene["…"]` and `entity.attributes["…"]` (set by the UI).
+    pub scene_names: api::SceneNames,
     last_disk_check: Option<Instant>,
 }
 
@@ -406,9 +450,13 @@ impl CodeEditor {
 
     /// Saves tab `idx`.
     pub fn save(&mut self, idx: usize) -> bool {
+        let trim = self.settings.trim_on_save;
         let Some(tab) = self.tabs.get_mut(idx) else {
             return false;
         };
+        if trim {
+            tab.buf.trim_trailing_whitespace();
+        }
         match tab.save() {
             Ok(()) => {
                 let path = tab.path.clone();
@@ -483,16 +531,21 @@ impl CodeEditor {
         let Some(tab) = self.current() else {
             return;
         };
-        if items.is_empty() {
-            self.completion = None;
-            return;
-        }
         let (a, _) = tab.buf.word_range(tab.buf.cursor);
         let anchor = if a.col < tab.buf.cursor.col {
             a
         } else {
             tab.buf.cursor
         };
+        self.show_completions_at(items, anchor);
+    }
+
+    /// Opens the completion popup with `items` replacing `anchor..caret`.
+    pub fn show_completions_at(&mut self, items: Vec<CompletionItem>, anchor: Pos) {
+        if items.is_empty() {
+            self.completion = None;
+            return;
+        }
         self.completion = Some(Completion {
             items,
             selected: 0,
@@ -565,6 +618,59 @@ impl CodeEditor {
         out
     }
 
+    /// Completes script-API expressions (`ctx.`, `entity.transform.`, key
+    /// names in `ctx.input.pressed("…")`, …) without the language server,
+    /// which can't know the hook parameters' types. Returns false when the
+    /// caret isn't in such an expression.
+    pub fn api_complete(&mut self) -> bool {
+        let Some(tab) = self.current() else {
+            return false;
+        };
+        let cursor = tab.buf.cursor;
+        let Some(items) = api::complete(&tab.buf, cursor, &self.scene_names) else {
+            return false;
+        };
+        // Strings complete from just after the quote (names can contain
+        // spaces); members from the start of the word.
+        let line = tab.buf.line(cursor.line);
+        let before: Vec<char> = line.chars().take(cursor.col).collect();
+        let quote = before.iter().rposition(|c| matches!(c, '"' | '\''));
+        let word_start = before
+            .iter()
+            .rposition(|c| !buffer::is_word(*c))
+            .map_or(0, |i| i + 1);
+        let anchor = match quote {
+            Some(q)
+                if before
+                    .get(word_start.saturating_sub(1))
+                    .is_some_and(|c| *c != '.') =>
+            {
+                Pos::new(cursor.line, q + 1)
+            }
+            _ => Pos::new(cursor.line, word_start),
+        };
+        self.show_completions_at(items, anchor);
+        true
+    }
+
+    /// Completion at the caret: the script API when it applies, otherwise
+    /// a request to the language server (or local words).
+    pub fn complete_at_caret(&mut self) {
+        if !self.api_complete() {
+            self.request(CodeEvent::Complete);
+        }
+    }
+
+    /// Answers a hover request for a script-API name. Returns false when
+    /// the language server should answer.
+    pub fn api_hover(&mut self, pos: Pos) -> bool {
+        let Some(text) = self.current().and_then(|t| api::hover(&t.buf, pos)) else {
+            return false;
+        };
+        self.hover = Some((pos, text));
+        true
+    }
+
     fn request(&mut self, make: fn(PathBuf, Pos) -> CodeEvent) {
         if let Some(tab) = self.current() {
             let ev = make(tab.path.clone(), tab.buf.cursor);
@@ -599,6 +705,7 @@ impl CodeEditor {
                 tab.reveal = true;
                 let word_char = s.chars().last().is_some_and(buffer::is_word);
                 let after_dot = s.ends_with('.');
+                let after_quote = s.ends_with(['"', '\'']);
                 if self.completion.is_some() {
                     if !word_char {
                         self.completion = None;
@@ -606,10 +713,17 @@ impl CodeEditor {
                         c.selected = 0;
                     }
                 }
-                if after_dot
-                    || (word_char && self.completion.is_none() && self.word_len_at_caret() == 2)
+                let auto = self.settings.auto_complete;
+                if auto && after_quote {
+                    // Key / entity / attribute names; never the server.
+                    self.api_complete();
+                } else if auto
+                    && (after_dot
+                        || (word_char
+                            && self.completion.is_none()
+                            && self.word_len_at_caret() == 2))
                 {
-                    self.request(CodeEvent::Complete);
+                    self.complete_at_caret();
                 }
             }
         }
@@ -887,9 +1001,14 @@ impl CodeEditor {
                 self.focus = Focus::GoTo;
             }
             (Key::F3, _) => self.find_step(m.shift, false),
-            (Key::Char(' '), true) => self.request(CodeEvent::Complete),
+            (Key::Char(' '), true) => self.complete_at_caret(),
             (Key::F12, _) => self.request(CodeEvent::Definition),
-            (Key::Char('i'), true) if m.shift => self.request(CodeEvent::Hover),
+            (Key::Char('i'), true) if m.shift => {
+                let caret = self.current().map(|t| t.buf.cursor);
+                if !caret.is_some_and(|p| self.api_hover(p)) {
+                    self.request(CodeEvent::Hover);
+                }
+            }
             (Key::Escape, _) => {
                 if self.find.is_some() {
                     self.find = None;
@@ -1184,5 +1303,99 @@ mod tests {
     fn fuzzy_matching() {
         assert!(fuzzy("character_velocity", "chvel"));
         assert!(!fuzzy("time", "tx"));
+    }
+
+    fn editor_named(tag: &str, text: &str) -> (CodeEditor, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("oberon_code_{}_{tag}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("script.py");
+        std::fs::write(&path, text).unwrap();
+        let mut ed = CodeEditor::new();
+        ed.open(&path, None).unwrap();
+        (ed, path)
+    }
+
+    #[test]
+    fn script_api_completes_without_the_language_server() {
+        let (mut ed, _) = editor_named("api", "def update(entity, ctx):\n    \n");
+        ed.current_mut().unwrap().buf.move_to(Pos::new(1, 4), false);
+        ed.text("ctx.");
+        assert_eq!(ed.events, [], "answered locally");
+        let c = ed.completion.as_ref().unwrap();
+        assert!(c.items.iter().any(|i| i.label == "input"));
+        ed.text("inp");
+        assert!(ed.key(Key::Enter, Mods::default()));
+        ed.text(".pressed(\"");
+        let c = ed.completion.as_ref().expect("key names");
+        assert_eq!(c.anchor, Pos::new(1, 23));
+        ed.text("spa");
+        assert!(ed.key(Key::Enter, Mods::default()));
+        assert_eq!(
+            ed.current().unwrap().buf.line(1),
+            "    ctx.input.pressed(\"space\")"
+        );
+        assert_eq!(ed.events, []);
+
+        // Entity names with spaces replace from the quote.
+        ed.scene_names.entities = vec!["Crate 1".into()];
+        ed.current_mut()
+            .unwrap()
+            .buf
+            .move_to(Pos::new(1, 99), false);
+        ed.key(Key::Enter, Mods::default());
+        ed.text("ctx.scene[\"");
+        assert!(ed.key(Key::Enter, Mods::default()));
+        assert!(ed
+            .current()
+            .unwrap()
+            .buf
+            .line(2)
+            .ends_with("ctx.scene[\"Crate 1\"]"));
+
+        // Ctrl+Shift+I on an API name hovers locally.
+        ed.current_mut().unwrap().buf.move_to(Pos::new(1, 6), false);
+        ed.key(
+            Key::Char('i'),
+            Mods {
+                ctrl: true,
+                shift: true,
+                alt: false,
+            },
+        );
+        assert!(ed.hover.as_ref().unwrap().1.starts_with("ctx: Context"));
+        assert_eq!(ed.events, []);
+
+        // Anything else still goes to the server.
+        ed.current_mut()
+            .unwrap()
+            .buf
+            .move_to(Pos::new(2, 99), false);
+        ed.key(Key::Enter, Mods::default());
+        ed.text("math.");
+        assert!(matches!(ed.events.last(), Some(CodeEvent::Complete(..))));
+    }
+
+    #[test]
+    fn editor_settings_apply() {
+        let (mut ed, path) = editor_named("settings", "x = 1\n");
+        ed.settings.auto_complete = false;
+        ed.text("ab");
+        assert_eq!(ed.events, [], "no automatic completion");
+        ed.key(Key::Char(' '), CTRL);
+        assert_eq!(ed.events.len(), 1, "Ctrl+Space still completes");
+        ed.events.clear();
+
+        let tab = ed.current_mut().unwrap();
+        tab.buf.auto_close = false;
+        tab.buf.type_text("(");
+        assert_eq!(tab.buf.line(0), "ab(x = 1");
+        tab.buf.move_to(Pos::new(0, 99), false);
+        tab.buf.type_text("   ");
+        assert!(ed.save(0));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "ab(x = 1\n");
+        ed.settings.trim_on_save = false;
+        ed.current_mut().unwrap().buf.type_text("  ");
+        assert!(ed.save(0));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "ab(x = 1  \n");
     }
 }

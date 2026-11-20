@@ -41,10 +41,21 @@ game logic remains Python in the user's editor of choice.
 
 Oberon follows AUTOMATA's identity: **dark white sci-fi**.
 
-- Near-black background, off-white foreground (matching the logo's
-  paper-white on true black), one accent used sparingly.
-- Thin lines, orbital motifs, generous spacing. nexa theming does the
-  heavy lifting (`accent`, dark palette).
+- **AUTOMATA Black** (`crates/oberon/src/theme.rs`): neutral, untinted
+  blacks — background 5, panels 12, raised controls 22, the 3D viewport
+  pure black — with the logo's warm paper-white (242, 240, 235) as both
+  text and accent. No blue tint anywhere; color is reserved for meaning
+  (axis colors, warnings, errors, success, syntax).
+- Thin 1 px borders, 5 px radii, generous spacing. Primary actions are
+  filled paper-white with black text; everything else is outline or
+  ghost.
+- UX conveniences: toolbar tooltips (0.45 s), a segmented Move / Rotate /
+  Scale control with key hints, a pill play-state badge, a **command
+  palette** (Ctrl+Shift+P or the toolbar Search box — fuzzy search over
+  every menu command, scene entities, project scripts and settings pages),
+  **Settings** (Ctrl+, or the gear: Appearance / Script Editor / Python /
+  Files; changes apply instantly and persist to `prefs.ron`), and
+  interface zoom (Ctrl+= / Ctrl+- / Ctrl+0, 60–250 %).
 - The logo's gear-in-the-A reads as the inspector's component gear; the
   orbital ring is the play-mode indicator. Brand assets live in
   `docs/assets/`.
@@ -153,6 +164,22 @@ the 3D view isn't rendered.
   Ctrl+click, across files). With no server installed, completion falls
   back to words from the open files plus Python keywords and builtins.
   `tests/lsp_e2e.rs` exercises a real server when one is installed.
+- Script API completion (`code/api.rs`): behaviour scripts never import
+  automata, so no language server can type `entity` / `ctx`. Oberon models
+  the bridge API (`Context`, `Input`, `Time`, `Physics`, `Scene`, `Entity`,
+  `Transform`, `Attributes`) itself: inside any `def f(entity, ctx)` hook it
+  resolves chains such as `ctx.scene["Player"].transform.`, local
+  assignments (`player = ctx.scene.find("Player")`) and `for e in
+  ctx.scene:` loops, and completes members with signatures; key names in
+  `ctx.input.pressed("…")` / `axis("…", "…")`; entity names in
+  `ctx.scene["…"]` / `find("…")`; and attribute names in
+  `entity.attributes["…"]` / `.get("…")`, taken from the open scene. Hover
+  documents API members. These answers never go to the server; everything
+  else does.
+- Settings (Script Editor page): font size, highlight current line,
+  indentation guides, show whitespace, auto-close brackets and quotes,
+  suggest while typing, trim trailing whitespace on save, save scripts
+  before Play.
 
 ## 4. Engine work required (the embedding hooks)
 

@@ -28,6 +28,8 @@ pub enum Dialog {
         /// Whether the scene has unsaved changes (else only scripts do).
         scene: bool,
     },
+    /// The Settings dialog.
+    Settings(super::settings::SettingsPage),
     /// Read-only text (shortcuts, about).
     Message {
         /// Title line.
@@ -350,6 +352,7 @@ impl Ui {
         let (dw, dh): (f32, f32) = match self.dialog.as_ref()? {
             Dialog::File(_) => (620.0, 460.0),
             Dialog::Unsaved { .. } => (440.0, 150.0),
+            Dialog::Settings(_) => (820.0, 600.0),
             Dialog::Message { lines, .. } => (640.0, 90.0 + lines.len() as f32 * 19.0),
         };
         let dw = dw.min(w - 20.0);
@@ -377,6 +380,7 @@ impl Ui {
         let saved_clip = self.clip;
         self.clip = (0.0, f32::INFINITY);
         match dialog {
+            Dialog::Settings(page) => self.draw_settings(canvas, r, page),
             Dialog::Message { title, lines } => {
                 canvas.text(r.x + 18.0, r.y + 16.0, 15.0, title, color::accent_soft());
                 let mut y = r.y + 46.0;

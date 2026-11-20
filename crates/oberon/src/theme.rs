@@ -1,4 +1,4 @@
-//! The Oberon visual theme: dark-white sci-fi.
+//! The Oberon visual theme: AUTOMATA black (dark-white sci-fi).
 //!
 //! One place for every color, size, and spacing the editor uses, so the
 //! whole app reads consistently and a re-skin is a single edit.
@@ -19,27 +19,35 @@ pub mod color {
         };
     }
 
-    c!(background, 13, 14, 18);
-    c!(surface, 22, 24, 30);
-    c!(raised, 32, 35, 43);
-    c!(hover, 40, 44, 54);
-    c!(border, 52, 56, 68);
-    c!(text, 232, 234, 240);
-    c!(text_dim, 150, 156, 170);
-    c!(accent, 96, 156, 255);
-    c!(accent_soft, 150, 195, 255);
-    c!(select, 43, 70, 110);
-    c!(viewport_bg, 9, 10, 13);
-    c!(grid, 44, 48, 58);
-    c!(axis_x, 224, 96, 100);
-    c!(axis_z, 96, 148, 224);
-    c!(danger, 224, 96, 100);
-    c!(axis_y, 128, 204, 112);
-    c!(field, 17, 18, 23);
-    c!(warn, 236, 190, 92);
+    // AUTOMATA black: neutral (untinted) blacks layered by elevation, with
+    // the logo's paper white as text and accent. Hue is reserved for
+    // meaning: axes, errors, warnings, play state.
+    c!(background, 5, 5, 5);
+    c!(surface, 12, 12, 12);
+    c!(raised, 22, 22, 22);
+    c!(hover, 32, 32, 31);
+    c!(border, 36, 36, 35);
+    c!(text, 242, 240, 235);
+    c!(text_dim, 140, 138, 132);
+    c!(text_faint, 88, 87, 84);
+    c!(accent, 242, 240, 235);
+    c!(accent_soft, 214, 211, 204);
+    c!(select, 42, 42, 41);
+    c!(viewport_bg, 0, 0, 0);
+    c!(grid, 38, 38, 37);
+    c!(axis_x, 230, 92, 92);
+    c!(axis_z, 92, 144, 230);
+    c!(danger, 236, 98, 98);
+    c!(axis_y, 120, 204, 112);
+    c!(field, 8, 8, 8);
+    c!(warn, 232, 186, 92);
+    c!(success, 128, 208, 150);
     c!(gizmo_hot, 255, 220, 96);
     c!(light_icon, 255, 214, 120);
     c!(camera_icon, 140, 220, 170);
+    c!(entity_icon, 200, 197, 190);
+    // Text drawn on an accent (paper-white) fill.
+    c!(on_accent, 8, 8, 8);
 
     /// Translucent black for drop shadows under menus.
     #[must_use]
@@ -65,7 +73,7 @@ pub mod layout {
     /// Standard inner padding.
     pub const PAD: f32 = 10.0;
     /// Corner radius for panels and buttons.
-    pub const RADIUS: f32 = 4.0;
+    pub const RADIUS: f32 = 5.0;
     /// Body text size.
     pub const FONT_SIZE: f32 = 13.0;
     /// Small text size (hints, console, ids).

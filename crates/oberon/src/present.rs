@@ -161,7 +161,6 @@ struct EditorApp {
     last_cursor: CursorHint,
     fatal_error: Option<String>,
     /// Persistent preferences (recent files, layout, tool paths).
-    prefs: Prefs,
     /// When the scene was last autosaved (or loaded/saved).
     last_autosave: Instant,
     /// The app should exit at the next opportunity.
@@ -181,6 +180,7 @@ impl EditorApp {
             prefs.touch_recent(path);
         }
         ui.recent = prefs.existing_recent();
+        ui.prefs = prefs;
         ui.project_root = doc.base_dir();
         ui.log(
             LogLevel::Info,
@@ -212,7 +212,6 @@ impl EditorApp {
             last_title: String::new(),
             last_cursor: CursorHint::Default,
             fatal_error: None,
-            prefs,
             last_autosave: Instant::now(),
             quit: false,
         })
@@ -350,7 +349,21 @@ impl EditorApp {
                 self.viewport.invalidate();
                 self.ui.log(LogLevel::Info, "New scene");
             }
-            Intent::Play => self.play(),
+            Intent::Play => {
+                if self.ui.prefs.editor.save_before_play && self.ui.code.dirty_count() > 0 {
+                    self.ui.code.save_all();
+                }
+                self.play();
+            }
+            Intent::RestartLanguageServer => {
+                if let Some(mut client) = self.lsp.take() {
+                    client.shutdown();
+                }
+                self.lsp_failed = false;
+                self.ui.code.server = None;
+                self.ui
+                    .log(LogLevel::Info, "Restarting the language server…");
+            }
             Intent::Pause => match self.ui.play {
                 PlayState::Playing => self.set_paused(true),
                 PlayState::Paused => self.set_paused(false),
@@ -476,8 +489,8 @@ impl EditorApp {
             Ok(doc) => {
                 self.doc = doc;
                 self.viewport.invalidate();
-                self.prefs.touch_recent(path);
-                self.ui.recent = self.prefs.existing_recent();
+                self.ui.prefs.touch_recent(path);
+                self.ui.recent = self.ui.prefs.existing_recent();
                 self.ui.project_root = self.doc.base_dir();
                 self.last_autosave = Instant::now();
                 self.save_prefs();
@@ -568,16 +581,30 @@ impl EditorApp {
         self.ui.open_code(path, line);
     }
 
+    /// Changes the interface zoom by `delta` (0 resets to 100%).
+    fn zoom(&mut self, delta: f32) {
+        let p = &mut self.ui.prefs;
+        p.ui_scale = if delta == 0.0 {
+            1.0
+        } else {
+            ((p.ui_scale + delta) * 10.0).round().clamp(6.0, 25.0) / 10.0
+        };
+        let pct = (p.ui_scale * 100.0).round();
+        self.ui
+            .log(LogLevel::Info, format!("Interface scale {pct}%"));
+        self.save_prefs();
+    }
+
     fn save_prefs(&mut self) {
-        self.prefs.capture_panels(&self.ui.panels);
-        if let Err(e) = self.prefs.save() {
+        self.ui.prefs.capture_panels(&self.ui.panels);
+        if let Err(e) = self.ui.prefs.save() {
             tracing::warn!(error = %e, "could not save preferences");
         }
     }
 
     /// Writes the autosave file when the scene has unsaved changes.
     fn autosave(&mut self) {
-        let secs = self.prefs.autosave_secs;
+        let secs = self.ui.prefs.autosave_secs;
         if secs == 0 || self.last_autosave.elapsed() < Duration::from_secs(secs) {
             return;
         }
@@ -600,8 +627,8 @@ impl EditorApp {
             Ok(path) => {
                 self.ui
                     .log(LogLevel::Info, format!("Saved {}", path.display()));
-                self.prefs.touch_recent(&path);
-                self.ui.recent = self.prefs.existing_recent();
+                self.ui.prefs.touch_recent(&path);
+                self.ui.recent = self.ui.prefs.existing_recent();
                 self.ui.project_root = self.doc.base_dir();
                 self.last_autosave = Instant::now();
                 self.save_prefs();
@@ -677,6 +704,7 @@ impl EditorApp {
     /// Starts the Python script runner for the session's scripts.
     fn start_bridge(&mut self, scripts: usize) {
         let python = self
+            .ui
             .prefs
             .python
             .clone()
@@ -858,6 +886,31 @@ impl EditorApp {
         if code == KeyCode::Escape && !self.ui.is_editing_text() && self.ui.close_overlay() {
             return;
         }
+        // The command palette owns the keyboard while open.
+        if self.ui.palette_open() {
+            use crate::ui::palette::PaletteKey;
+            let key = match code {
+                KeyCode::ArrowUp => Some(PaletteKey::Up),
+                KeyCode::ArrowDown => Some(PaletteKey::Down),
+                KeyCode::Enter | KeyCode::NumpadEnter => Some(PaletteKey::Enter),
+                KeyCode::Backspace => Some(PaletteKey::Backspace),
+                KeyCode::Escape => Some(PaletteKey::Escape),
+                _ => None,
+            };
+            match key {
+                Some(k) => {
+                    let doc = self.play.as_ref().map_or(&self.doc, |p| &p.doc);
+                    self.ui.palette_key(k, doc);
+                }
+                None if !self.input.ctrl() => {
+                    if let Some(text) = &event.text {
+                        self.ui.palette_text(text);
+                    }
+                }
+                None => {}
+            }
+            return;
+        }
         // A modal dialog without a focused field only listens for Enter.
         if self.ui.dialog_open() && !self.ui.is_editing_text() {
             if matches!(code, KeyCode::Enter | KeyCode::NumpadEnter) {
@@ -930,6 +983,27 @@ impl EditorApp {
             return;
         }
         let intent = match (code, ctrl) {
+            (KeyCode::KeyP, true) if shift => {
+                let doc = self.play.as_ref().map_or(&self.doc, |p| &p.doc);
+                self.ui.open_palette(doc);
+                None
+            }
+            (KeyCode::Comma, true) => {
+                self.ui.open_settings();
+                None
+            }
+            (KeyCode::Equal | KeyCode::NumpadAdd, true) => {
+                self.zoom(0.1);
+                None
+            }
+            (KeyCode::Minus | KeyCode::NumpadSubtract, true) => {
+                self.zoom(-0.1);
+                None
+            }
+            (KeyCode::Digit0 | KeyCode::Numpad0, true) => {
+                self.zoom(0.0);
+                None
+            }
             (KeyCode::KeyS, true) if shift => {
                 self.ui.open_dialog_kind(DialogKind::SaveSceneAs, &self.doc);
                 None
@@ -1027,8 +1101,8 @@ impl EditorApp {
         // The language server starts with the first open script.
         if self.lsp.is_none() && !self.lsp_failed && !self.ui.code.tabs.is_empty() {
             let root = self.ui.project_root.clone();
-            let dirs = lsp::tool_dirs(&root, self.prefs.python.as_deref());
-            match LspClient::start(self.prefs.language_server.as_deref(), &root, &dirs) {
+            let dirs = lsp::tool_dirs(&root, self.ui.prefs.python.as_deref());
+            match LspClient::start(self.ui.prefs.language_server.as_deref(), &root, &dirs) {
                 Ok(client) => {
                     self.ui.code.server = Some(client.name.clone());
                     self.lsp = Some(client);
@@ -1113,7 +1187,7 @@ impl EditorApp {
             }
         }
 
-        let scale = window.scale_factor() as f32;
+        let scale = window.scale_factor() as f32 * self.ui.prefs.ui_scale.clamp(0.5, 3.0);
         let pointer = self.pointer(scale);
 
         let intents = {
@@ -1170,6 +1244,9 @@ impl EditorApp {
             self.apply(intent);
         }
         self.handle_code_requests();
+        if self.ui.take_prefs_dirty() {
+            self.save_prefs();
+        }
 
         if let (Some(renderer), Some(canvas)) = (&mut self.renderer, &self.canvas) {
             renderer.blit_rgba_to_surface(canvas.pixels(), canvas.size());

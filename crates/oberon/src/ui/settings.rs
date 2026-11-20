@@ -1,0 +1,721 @@
+//! The Settings dialog (Edit ▸ Settings…, Ctrl+,): interface, script
+//! editor, Python tooling and file handling. Changes apply immediately and
+//! are saved to the preferences file.
+
+use super::{ButtonStyle, CursorHint, EditTarget, Intent, Rect, TextEdit, Ui};
+use crate::canvas::Canvas;
+use crate::theme::{color, layout};
+
+/// A page of the Settings dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettingsPage {
+    /// Interface scale and chrome.
+    #[default]
+    Appearance,
+    /// The script editor.
+    Editor,
+    /// Python interpreter and language server.
+    Python,
+    /// Autosave and recent files.
+    Files,
+}
+
+impl SettingsPage {
+    const ALL: [Self; 4] = [Self::Appearance, Self::Editor, Self::Python, Self::Files];
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Appearance => "Appearance",
+            Self::Editor => "Script Editor",
+            Self::Python => "Python",
+            Self::Files => "Files",
+        }
+    }
+
+    fn blurb(self) -> &'static str {
+        match self {
+            Self::Appearance => "How Oberon looks on your display.",
+            Self::Editor => "Typing, display and saving in the built-in script editor.",
+            Self::Python => "The interpreter that runs Play mode scripts and the language server behind completions.",
+            Self::Files => "Autosave and recently opened scenes.",
+        }
+    }
+}
+
+/// A free-text setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingText {
+    /// The Python interpreter for Play mode scripts.
+    Python,
+    /// The language-server command line.
+    LanguageServer,
+}
+
+const ROW: f32 = 52.0;
+
+/// A Script Editor toggle: label, hint and the setting it flips.
+type ToggleRow = (
+    &'static str,
+    &'static str,
+    fn(&mut crate::code::EditorSettings) -> &mut bool,
+);
+const AUTOSAVE: [(u64, &str); 5] = [
+    (0, "Off"),
+    (30, "30 s"),
+    (60, "1 min"),
+    (120, "2 min"),
+    (300, "5 min"),
+];
+
+impl Ui {
+    /// Opens the Settings dialog on `page`.
+    pub fn open_settings_page(&mut self, page: SettingsPage) {
+        self.settings_page = page;
+        self.open_settings();
+    }
+
+    /// Opens Settings on the last-viewed page.
+    pub fn open_settings(&mut self) {
+        self.menu = None;
+        self.picker = None;
+        self.palette = None;
+        self.dialog = Some(super::dialogs::Dialog::Settings(self.settings_page));
+    }
+
+    /// Applies a committed settings text field.
+    pub(super) fn commit_setting(&mut self, which: SettingText, text: &str) -> Option<Intent> {
+        let value = Some(text.trim().to_string()).filter(|t| !t.is_empty());
+        let slot = match which {
+            SettingText::Python => &mut self.prefs.python,
+            SettingText::LanguageServer => &mut self.prefs.language_server,
+        };
+        if *slot == value {
+            return None;
+        }
+        *slot = value;
+        self.prefs_dirty = true;
+        Some(Intent::RestartLanguageServer)
+    }
+
+    /// Draws the Settings dialog body inside `r`.
+    pub(super) fn draw_settings(&mut self, canvas: &mut Canvas, r: Rect, page: SettingsPage) {
+        // Header.
+        super::menus::draw_logo(canvas, r.x + 28.0, r.y + 27.0, 16.0, color::accent());
+        canvas.text(r.x + 50.0, r.y + 18.0, 16.0, "Settings", color::text());
+        let saved = "Changes apply instantly and are saved automatically";
+        let sw = canvas.measure_text(layout::SMALL_SIZE, saved);
+        canvas.text(
+            r.x + r.w - sw - 56.0,
+            r.y + 22.0,
+            layout::SMALL_SIZE,
+            saved,
+            color::text_faint(),
+        );
+        if self.button(
+            canvas,
+            Rect::new(r.x + r.w - 42.0, r.y + 14.0, 26.0, 26.0),
+            "",
+            ButtonStyle::Normal,
+        ) {
+            self.dialog = None;
+            return;
+        }
+        let (cx, cy) = (r.x + r.w - 29.0, r.y + 27.0);
+        canvas.line(
+            cx - 4.0,
+            cy - 4.0,
+            cx + 4.0,
+            cy + 4.0,
+            color::text_dim(),
+            1.4,
+        );
+        canvas.line(
+            cx + 4.0,
+            cy - 4.0,
+            cx - 4.0,
+            cy + 4.0,
+            color::text_dim(),
+            1.4,
+        );
+        let top = r.y + 54.0;
+        canvas.line(r.x, top, r.x + r.w, top, color::border(), 1.0);
+
+        // Navigation.
+        let nav = Rect::new(r.x, top, 190.0, r.h - (top - r.y));
+        canvas.line(
+            nav.x + nav.w,
+            nav.y,
+            nav.x + nav.w,
+            nav.y + nav.h - 10.0,
+            color::border(),
+            1.0,
+        );
+        let mut y = nav.y + 12.0;
+        for p in SettingsPage::ALL {
+            let row = Rect::new(nav.x + 10.0, y, nav.w - 20.0, 32.0);
+            let active = p == page;
+            let hot = self.hot(row);
+            if active {
+                canvas.fill_rounded(row.x, row.y, row.w, row.h, layout::RADIUS, color::select());
+                canvas.fill_rounded(row.x, row.y + 8.0, 3.0, row.h - 16.0, 1.5, color::accent());
+            } else if hot {
+                canvas.fill_rounded(row.x, row.y, row.w, row.h, layout::RADIUS, color::hover());
+            }
+            let fg = if active {
+                color::text()
+            } else {
+                color::text_dim()
+            };
+            canvas.text(row.x + 14.0, row.y + 9.0, layout::FONT_SIZE, p.title(), fg);
+            if hot {
+                self.cursor = CursorHint::Pointer;
+                if self.p.pressed {
+                    self.settings_page = p;
+                    self.dialog = Some(super::dialogs::Dialog::Settings(p));
+                    self.edit = None;
+                }
+            }
+            y += 36.0;
+        }
+
+        // Page.
+        let body = Rect::new(nav.x + nav.w + 24.0, top + 18.0, r.w - nav.w - 48.0, 0.0);
+        canvas.text(body.x, body.y, 15.0, page.title(), color::text());
+        canvas.text_clipped(
+            body.x,
+            body.y + 24.0,
+            layout::SMALL_SIZE,
+            page.blurb(),
+            color::text_dim(),
+            body.w,
+        );
+        let mut y = body.y + 54.0;
+        match page {
+            SettingsPage::Appearance => self.page_appearance(canvas, body, &mut y),
+            SettingsPage::Editor => self.page_editor(canvas, body, &mut y),
+            SettingsPage::Python => self.page_python(canvas, body, &mut y),
+            SettingsPage::Files => self.page_files(canvas, body, &mut y),
+        }
+
+        // Footer.
+        let fy = r.y + r.h - 46.0;
+        canvas.line(
+            nav.x + nav.w,
+            fy - 10.0,
+            r.x + r.w,
+            fy - 10.0,
+            color::border(),
+            1.0,
+        );
+        if self.button(
+            canvas,
+            Rect::new(body.x, fy, 150.0, 28.0),
+            "Reset this page",
+            ButtonStyle::Normal,
+        ) {
+            self.reset_page(page);
+        }
+        if self.button(
+            canvas,
+            Rect::new(r.x + r.w - 110.0, fy, 92.0, 28.0),
+            "Done",
+            ButtonStyle::Accent,
+        ) {
+            self.dialog = None;
+            self.edit = None;
+        }
+    }
+
+    fn reset_page(&mut self, page: SettingsPage) {
+        let d = crate::project::Prefs::default();
+        match page {
+            SettingsPage::Appearance => {
+                self.prefs.ui_scale = d.ui_scale;
+                self.prefs.status_hints = d.status_hints;
+            }
+            SettingsPage::Editor => self.prefs.editor = d.editor,
+            SettingsPage::Python => {
+                if self.prefs.python.is_some() || self.prefs.language_server.is_some() {
+                    self.out.push(Intent::RestartLanguageServer);
+                }
+                self.prefs.python = None;
+                self.prefs.language_server = None;
+            }
+            SettingsPage::Files => self.prefs.autosave_secs = d.autosave_secs,
+        }
+        self.edit = None;
+        self.prefs_dirty = true;
+    }
+
+    fn page_appearance(&mut self, canvas: &mut Canvas, body: Rect, y: &mut f32) {
+        let pct = (self.prefs.ui_scale * 100.0).round();
+        if let Some(d) = self.setting_stepper(
+            canvas,
+            body,
+            *y,
+            "Interface scale",
+            "Zoom on top of your display's scaling. Ctrl+= / Ctrl+- / Ctrl+0.",
+            &format!("{pct}%"),
+        ) {
+            self.prefs.ui_scale = ((pct + d * 10.0) / 100.0).clamp(0.6, 2.5);
+            self.prefs_dirty = true;
+        }
+        *y += ROW;
+        let on = self.prefs.status_hints;
+        if self.setting_toggle(
+            canvas,
+            body,
+            *y,
+            "Shortcut hints",
+            "Show keyboard hints in the status bar.",
+            on,
+        ) {
+            self.prefs.status_hints = !on;
+            self.prefs_dirty = true;
+        }
+        *y += ROW;
+        self.setting_info(
+            canvas,
+            body,
+            *y,
+            "Theme",
+            "AUTOMATA Black — neutral blacks, paper-white accents.",
+        );
+    }
+
+    fn page_editor(&mut self, canvas: &mut Canvas, body: Rect, y: &mut f32) {
+        let size = self.prefs.editor.font_size;
+        if let Some(d) = self.setting_stepper(
+            canvas,
+            body,
+            *y,
+            "Font size",
+            "Code font size (Fira Code).",
+            &format!("{size:.0} px"),
+        ) {
+            self.prefs.editor.font_size = (size + d).clamp(9.0, 28.0);
+            self.prefs_dirty = true;
+        }
+        *y += ROW;
+        let rows: [ToggleRow; 7] = [
+            (
+                "Highlight current line",
+                "A subtle band behind the caret's line.",
+                |e| &mut e.highlight_line,
+            ),
+            (
+                "Indentation guides",
+                "Vertical lines at each indentation level.",
+                |e| &mut e.indent_guides,
+            ),
+            (
+                "Show whitespace",
+                "Dots for spaces, arrows for tabs.",
+                |e| &mut e.show_whitespace,
+            ),
+            (
+                "Auto-close brackets and quotes",
+                "Typing ( [ { \" ' inserts the closer.",
+                |e| &mut e.auto_close,
+            ),
+            (
+                "Suggest while typing",
+                "Completions after a dot or two letters (Ctrl+Space always works).",
+                |e| &mut e.auto_complete,
+            ),
+            (
+                "Trim trailing whitespace",
+                "Strip spaces at line ends when saving.",
+                |e| &mut e.trim_on_save,
+            ),
+            (
+                "Save scripts before Play",
+                "Modified scripts are saved when you press Play.",
+                |e| &mut e.save_before_play,
+            ),
+        ];
+        for (label, hint, get) in rows {
+            let on = *get(&mut self.prefs.editor);
+            if self.setting_toggle(canvas, body, *y, label, hint, on) {
+                *get(&mut self.prefs.editor) = !on;
+                self.prefs_dirty = true;
+            }
+            *y += ROW - 4.0;
+        }
+    }
+
+    fn page_python(&mut self, canvas: &mut Canvas, body: Rect, y: &mut f32) {
+        let python = self.prefs.python.clone().unwrap_or_default();
+        self.setting_text(
+            canvas,
+            body,
+            *y,
+            "Interpreter",
+            "Runs Play mode scripts. Empty = python3 on PATH.",
+            SettingText::Python,
+            &python,
+            crate::bridge::default_python(),
+        );
+        *y += ROW + 8.0;
+        let ls = self.prefs.language_server.clone().unwrap_or_default();
+        self.setting_text(
+            canvas,
+            body,
+            *y,
+            "Language server",
+            "A command line, \"off\", or empty to auto-detect.",
+            SettingText::LanguageServer,
+            &ls,
+            "auto  (basedpyright · pyright · pylsp · jedi)",
+        );
+        *y += ROW + 8.0;
+        let (status, c) = match &self.code.server {
+            Some(name) => (format!("Running: {name}"), color::success()),
+            None if self.code.tabs.is_empty() => (
+                "Starts when you open a script".to_string(),
+                color::text_dim(),
+            ),
+            None => (
+                "Not running — word completion only".to_string(),
+                color::warn(),
+            ),
+        };
+        canvas.text(body.x, *y + 4.0, layout::FONT_SIZE, "Status", color::text());
+        canvas.fill_circle(body.x + 200.0, *y + 11.0, 4.0, c);
+        canvas.text(body.x + 212.0, *y + 4.0, layout::FONT_SIZE, &status, c);
+        if self.button(
+            canvas,
+            Rect::new(body.x + body.w - 120.0, *y - 2.0, 120.0, 26.0),
+            "Restart server",
+            ButtonStyle::Normal,
+        ) {
+            self.out.push(Intent::RestartLanguageServer);
+        }
+        *y += ROW;
+        self.setting_info(
+            canvas,
+            body,
+            *y,
+            "Script API",
+            "ctx. and entity. completions, key names and entity names are built in — no import needed.",
+        );
+    }
+
+    fn page_files(&mut self, canvas: &mut Canvas, body: Rect, y: &mut f32) {
+        canvas.text(body.x, *y, layout::FONT_SIZE, "Autosave", color::text());
+        canvas.text(
+            body.x,
+            *y + 18.0,
+            layout::SMALL_SIZE,
+            "Writes .oberon/autosave.ron while the scene has unsaved changes.",
+            color::text_dim(),
+        );
+        *y += 40.0;
+        let mut x = body.x;
+        for (secs, label) in AUTOSAVE {
+            let w = canvas.measure_text(layout::FONT_SIZE, label) + 26.0;
+            let on = self.prefs.autosave_secs == secs;
+            let style = if on {
+                ButtonStyle::Active
+            } else {
+                ButtonStyle::Normal
+            };
+            if self.button(canvas, Rect::new(x, *y, w, 26.0), label, style) {
+                self.prefs.autosave_secs = secs;
+                self.prefs_dirty = true;
+            }
+            x += w + 6.0;
+        }
+        *y += ROW;
+        let n = self.prefs.recent.len();
+        canvas.text(
+            body.x,
+            *y,
+            layout::FONT_SIZE,
+            "Recent scenes",
+            color::text(),
+        );
+        let hint = format!("{n} remembered (File ▸ Open Recent).");
+        canvas.text(
+            body.x,
+            *y + 18.0,
+            layout::SMALL_SIZE,
+            &hint,
+            color::text_dim(),
+        );
+        let style = if n == 0 {
+            ButtonStyle::Disabled
+        } else {
+            ButtonStyle::Normal
+        };
+        if self.button(
+            canvas,
+            Rect::new(body.x + body.w - 120.0, *y + 2.0, 120.0, 26.0),
+            "Clear list",
+            style,
+        ) {
+            self.prefs.recent.clear();
+            self.recent.clear();
+            self.prefs_dirty = true;
+        }
+        *y += ROW;
+        let path = crate::project::Prefs::path()
+            .map_or_else(|| "(unavailable)".to_string(), |p| p.display().to_string());
+        self.setting_info(canvas, body, *y, "Preferences file", &path);
+    }
+
+    // ----- rows ------------------------------------------------------------
+
+    fn setting_label(canvas: &mut Canvas, body: Rect, y: f32, label: &str, hint: &str, right: f32) {
+        canvas.text(body.x, y, layout::FONT_SIZE, label, color::text());
+        canvas.text_clipped(
+            body.x,
+            y + 18.0,
+            layout::SMALL_SIZE,
+            hint,
+            color::text_dim(),
+            body.w - right - 16.0,
+        );
+    }
+
+    fn setting_info(&mut self, canvas: &mut Canvas, body: Rect, y: f32, label: &str, text: &str) {
+        canvas.text(body.x, y, layout::FONT_SIZE, label, color::text());
+        canvas.text_clipped(
+            body.x,
+            y + 18.0,
+            layout::SMALL_SIZE,
+            text,
+            color::text_dim(),
+            body.w,
+        );
+    }
+
+    /// A labelled on/off switch; returns true when clicked.
+    fn setting_toggle(
+        &mut self,
+        canvas: &mut Canvas,
+        body: Rect,
+        y: f32,
+        label: &str,
+        hint: &str,
+        on: bool,
+    ) -> bool {
+        Self::setting_label(canvas, body, y, label, hint, 50.0);
+        let sw = Rect::new(body.x + body.w - 40.0, y + 4.0, 40.0, 22.0);
+        let row = Rect::new(body.x, y - 4.0, body.w, 44.0);
+        let hot = self.hot(row);
+        let track = if on {
+            color::accent()
+        } else if hot {
+            color::hover()
+        } else {
+            color::raised()
+        };
+        canvas.fill_rounded(sw.x, sw.y, sw.w, sw.h, sw.h / 2.0, track);
+        if !on {
+            canvas.stroke_rounded(sw.x, sw.y, sw.w, sw.h, sw.h / 2.0, color::border(), 1.0);
+        }
+        let knob_x = if on { sw.x + sw.w - 11.0 } else { sw.x + 11.0 };
+        let knob = if on {
+            color::on_accent()
+        } else {
+            color::text_dim()
+        };
+        canvas.fill_circle(knob_x, sw.y + sw.h / 2.0, 7.5, knob);
+        if hot {
+            self.cursor = CursorHint::Pointer;
+        }
+        hot && self.p.pressed
+    }
+
+    /// A labelled − value + stepper; returns −1 / +1 when clicked.
+    fn setting_stepper(
+        &mut self,
+        canvas: &mut Canvas,
+        body: Rect,
+        y: f32,
+        label: &str,
+        hint: &str,
+        value: &str,
+    ) -> Option<f32> {
+        Self::setting_label(canvas, body, y, label, hint, 140.0);
+        let x = body.x + body.w - 132.0;
+        let minus = self.button(
+            canvas,
+            Rect::new(x, y + 2.0, 30.0, 26.0),
+            "−",
+            ButtonStyle::Normal,
+        );
+        canvas.fill_rounded(
+            x + 34.0,
+            y + 2.0,
+            64.0,
+            26.0,
+            layout::RADIUS,
+            color::field(),
+        );
+        let vw = canvas.measure_text(layout::FONT_SIZE, value);
+        canvas.text(
+            x + 66.0 - vw / 2.0,
+            y + 7.0,
+            layout::FONT_SIZE,
+            value,
+            color::text(),
+        );
+        let plus = self.button(
+            canvas,
+            Rect::new(x + 102.0, y + 2.0, 30.0, 26.0),
+            "+",
+            ButtonStyle::Normal,
+        );
+        if minus {
+            Some(-1.0)
+        } else if plus {
+            Some(1.0)
+        } else {
+            None
+        }
+    }
+
+    /// A labelled text field (click to edit, Enter to apply).
+    #[allow(clippy::too_many_arguments)]
+    fn setting_text(
+        &mut self,
+        canvas: &mut Canvas,
+        body: Rect,
+        y: f32,
+        label: &str,
+        hint: &str,
+        which: SettingText,
+        value: &str,
+        placeholder: &str,
+    ) {
+        canvas.text(body.x, y, layout::FONT_SIZE, label, color::text());
+        canvas.text_clipped(
+            body.x,
+            y + 18.0,
+            layout::SMALL_SIZE,
+            hint,
+            color::text_dim(),
+            body.w,
+        );
+        let field = Rect::new(body.x, y + 36.0, body.w, 26.0);
+        let editing = self
+            .edit
+            .as_ref()
+            .is_some_and(|e| e.target == EditTarget::Setting(which));
+        canvas.fill_rounded(
+            field.x,
+            field.y,
+            field.w,
+            field.h,
+            layout::RADIUS,
+            color::field(),
+        );
+        let border = if editing {
+            color::accent()
+        } else {
+            color::border()
+        };
+        canvas.stroke_rounded(
+            field.x,
+            field.y,
+            field.w,
+            field.h,
+            layout::RADIUS,
+            border,
+            1.0,
+        );
+        if editing {
+            self.draw_edit_text(canvas, field, field.x + 8.0);
+        } else {
+            let (text, c) = if value.is_empty() {
+                (placeholder, color::text_faint())
+            } else {
+                (value, color::text())
+            };
+            canvas.text_clipped(
+                field.x + 8.0,
+                field.y + 6.0,
+                layout::FONT_SIZE,
+                text,
+                c,
+                field.w - 16.0,
+            );
+            if self.hot(field) {
+                self.cursor = CursorHint::Text;
+                if self.p.pressed {
+                    if let Some(intent) = self.commit_edit() {
+                        self.out.push(intent);
+                    }
+                    self.edit = Some(TextEdit {
+                        id: 0,
+                        target: EditTarget::Setting(which),
+                        buffer: value.to_string(),
+                        rect: field,
+                        fresh: false,
+                        attr: None,
+                    });
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::Pointer;
+    use super::*;
+    use crate::doc::Document;
+
+    fn click(ui: &mut Ui, c: &mut Canvas, doc: &Document, x: f32, y: f32) {
+        let press = Pointer {
+            x,
+            y,
+            down: true,
+            pressed: true,
+            ..Pointer::default()
+        };
+        ui.frame(c, doc, press, None);
+        ui.frame(
+            c,
+            doc,
+            Pointer {
+                x,
+                y,
+                ..Pointer::default()
+            },
+            None,
+        );
+    }
+
+    #[test]
+    fn toggles_change_and_persist_preferences() {
+        let mut c = Canvas::new(1600, 950);
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        ui.settings_page = SettingsPage::Editor;
+        ui.open_settings();
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        let r = ui.dialog_rect(1600.0, 950.0).unwrap();
+        // First toggle row ("Highlight current line") below the font size.
+        let body_x = r.x + 190.0 + 24.0;
+        let body_w = r.w - 190.0 - 48.0;
+        let y = r.y + 54.0 + 18.0 + 54.0 + ROW;
+        assert!(ui.prefs.editor.highlight_line);
+        assert!(!ui.take_prefs_dirty());
+        click(&mut ui, &mut c, &doc, body_x + body_w - 20.0, y + 15.0);
+        assert!(!ui.prefs.editor.highlight_line);
+        assert!(ui.take_prefs_dirty(), "a changed setting is saved");
+        // The code editor picks it up on the next frame.
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        assert!(!ui.code.settings.highlight_line);
+        // Reset restores the defaults.
+        click(&mut ui, &mut c, &doc, body_x + 40.0, r.y + r.h - 32.0);
+        assert!(ui.prefs.editor.highlight_line);
+        assert!(ui.take_prefs_dirty());
+        // Switch pages from the navigation.
+        click(&mut ui, &mut c, &doc, r.x + 60.0, r.y + 54.0 + 12.0 + 16.0);
+        assert_eq!(ui.settings_page, SettingsPage::Appearance);
+    }
+}

@@ -29,8 +29,10 @@ pub mod attributes;
 mod code_view;
 pub mod dialogs;
 pub mod menus;
+pub mod palette;
 pub mod picker;
 pub mod project_panel;
+pub mod settings;
 
 use dialogs::Dialog;
 use menus::MENUBAR_H;
@@ -369,6 +371,8 @@ pub enum Intent {
     NewFolder(PathBuf),
     /// Quit the editor (asks to save unsaved changes first).
     Quit,
+    /// Restart the language server (its settings changed).
+    RestartLanguageServer,
     /// Run an intent without the unsaved-changes prompt.
     Force(Box<Intent>),
 }
@@ -392,6 +396,7 @@ impl Intent {
                 | Self::Pause
                 | Self::Stop
                 | Self::Quit
+                | Self::RestartLanguageServer
         )
     }
 }
@@ -477,6 +482,8 @@ enum EditTarget {
     AttrKey(usize),
     /// A custom attribute's value (sorted index; component for vectors).
     AttrValue(usize, u8),
+    /// A Settings text field.
+    Setting(settings::SettingText),
 }
 
 #[derive(Debug, Clone)]
@@ -540,6 +547,8 @@ enum Icon {
     Pause,
     Stop,
     Close,
+    Gear,
+    Search,
 }
 
 /// The editor UI state.
@@ -598,6 +607,18 @@ pub struct Ui {
     clip: (f32, f32),
     /// Intents produced this frame.
     out: Vec<Intent>,
+    /// The command palette, while open.
+    palette: Option<palette::Palette>,
+    /// The Settings page shown last.
+    settings_page: settings::SettingsPage,
+    /// A tooltip requested this frame: anchor and text.
+    tip_request: Option<(Rect, String)>,
+    /// The tooltip being hovered and since when.
+    tip_since: Option<(String, std::time::Instant)>,
+    /// Editor preferences (owned here so Settings can edit them live).
+    pub prefs: crate::project::Prefs,
+    /// Set when Settings changed `prefs` (the app saves and applies them).
+    prefs_dirty: bool,
     /// The built-in script editor.
     pub code: crate::code::CodeEditor,
     /// Editor requests waiting for the app (language server, …).
@@ -657,6 +678,12 @@ impl Ui {
             p: Pointer::default(),
             clip: (0.0, f32::INFINITY),
             out: Vec::new(),
+            palette: None,
+            settings_page: settings::SettingsPage::default(),
+            tip_request: None,
+            tip_since: None,
+            prefs: crate::project::Prefs::default(),
+            prefs_dirty: false,
             code: crate::code::CodeEditor::new(),
             code_requests: Vec::new(),
             code_drag: None,
@@ -813,6 +840,7 @@ impl Ui {
                 })
             }
             EditTarget::DialogName => self.submit_dialog(&edit.buffer),
+            EditTarget::Setting(which) => self.commit_setting(which, &edit.buffer),
             EditTarget::AttrKey(_) => {
                 let (from, _) = edit.attr?;
                 let to = edit.buffer.trim().to_string();
@@ -853,13 +881,18 @@ impl Ui {
     /// Whether a popup, picker, or dialog is open (Escape closes it).
     #[must_use]
     pub fn overlay_open(&self) -> bool {
-        self.menu.is_some() || self.picker.is_some() || self.dialog.is_some()
+        self.menu.is_some()
+            || self.picker.is_some()
+            || self.dialog.is_some()
+            || self.palette.is_some()
     }
 
     /// Closes the topmost popup / picker / dialog. Returns false if none.
     pub fn close_overlay(&mut self) -> bool {
         if self.dialog.is_some() {
             self.close_dialog();
+        } else if self.palette.is_some() {
+            self.palette = None;
         } else if self.menu.is_some() {
             self.menu = None;
         } else if self.picker.is_some() {
@@ -873,6 +906,11 @@ impl Ui {
     /// Opens a dialog (for keyboard shortcuts such as Ctrl+O, F1).
     pub fn open_dialog_kind(&mut self, kind: DialogKind, doc: &Document) {
         self.open_dialog(kind, doc);
+    }
+
+    /// Whether Settings changed the preferences since the last call.
+    pub fn take_prefs_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.prefs_dirty)
     }
 
     /// Opens a script in the code editor (optionally at a 1-based line).
@@ -969,6 +1007,15 @@ impl Ui {
                     self.mask_pointer();
                 }
             }
+            if self.palette.is_some() {
+                let over = self
+                    .palette_rect(w)
+                    .is_some_and(|r| r.contains(pointer.x, pointer.y));
+                if pointer.pressed && !over {
+                    self.palette = None;
+                }
+                self.mask_pointer();
+            }
             if self.picker.is_some() && self.menu.is_none() {
                 if pointer.pressed && !over_picker {
                     self.picker = None;
@@ -979,6 +1026,10 @@ impl Ui {
             }
         }
 
+        self.code.settings.clone_from(&self.prefs.editor);
+        if self.code.active.is_some() {
+            self.code.scene_names = scene_names(doc);
+        }
         self.update_scrub();
         self.update_attr_scrub();
         self.update_splitters(&lay, w, h);
@@ -1010,7 +1061,9 @@ impl Ui {
         self.menu_bar(canvas, doc, w);
         self.draw_picker(canvas, doc, w, h);
         self.draw_menu(canvas, doc, w, h);
+        self.draw_palette(canvas, doc, w);
         self.draw_dialog(canvas, w, h);
+        self.draw_tooltip(canvas, w, h);
 
         std::mem::take(&mut self.out)
     }
@@ -1239,6 +1292,7 @@ impl Ui {
 
     // ----- toolbar -------------------------------------------------------
 
+    #[allow(clippy::too_many_lines)]
     fn toolbar(&mut self, canvas: &mut Canvas, doc: &Document, rect: Rect) {
         canvas.fill_rect(rect.x, rect.y, rect.w, rect.h, color::surface());
         canvas.fill_rect(rect.x, rect.y + rect.h - 1.0, rect.w, 1.0, color::border());
@@ -1246,11 +1300,11 @@ impl Ui {
         let by = rect.y + 7.0;
         let bh = rect.h - 14.0;
         let mut x = 10.0;
-        for (label, intent, enabled) in [
-            ("New", Intent::New, true),
-            ("Save", Intent::Save, true),
-            ("Undo", Intent::Undo, doc.can_undo()),
-            ("Redo", Intent::Redo, doc.can_redo()),
+        for (label, intent, enabled, tip) in [
+            ("New", Intent::New, true, "New scene  (Ctrl+N)"),
+            ("Save", Intent::Save, true, "Save scene  (Ctrl+S)"),
+            ("Undo", Intent::Undo, doc.can_undo(), "Undo  (Ctrl+Z)"),
+            ("Redo", Intent::Redo, doc.can_redo(), "Redo  (Ctrl+Y)"),
         ] {
             let bw = canvas.measure_text(layout::FONT_SIZE, label) + 22.0;
             // Saving stays available in play mode (it saves the edit scene).
@@ -1259,32 +1313,86 @@ impl Ui {
             } else {
                 ButtonStyle::Disabled
             };
-            if self.button(canvas, Rect::new(x, by, bw, bh), label, style) {
+            let r = Rect::new(x, by, bw, bh);
+            let is_save = intent == Intent::Save;
+            if self.button(canvas, r, label, style) {
                 self.out.push(intent);
             }
+            if is_save && doc.dirty() {
+                canvas.fill_circle(r.x + r.w - 6.0, r.y + 6.0, 2.5, color::warn());
+            }
+            self.tip(r, tip);
             x += bw + 4.0;
         }
 
-        // Transform tools.
+        // Transform tools: one joined segmented control.
         x += 10.0;
         canvas.fill_rect(x, by + 4.0, 1.0, bh - 8.0, color::border());
         x += 11.0;
-        for (mode, key) in [
-            (GizmoMode::Move, "W"),
-            (GizmoMode::Rotate, "E"),
-            (GizmoMode::Scale, "R"),
-        ] {
-            let label = format!("{}  {key}", mode.label());
-            let bw = canvas.measure_text(layout::FONT_SIZE, &label) + 22.0;
-            let style = if self.gizmo == mode {
-                ButtonStyle::Active
-            } else {
-                ButtonStyle::Normal
-            };
-            if self.button(canvas, Rect::new(x, by, bw, bh), &label, style) {
-                self.gizmo = mode;
+        let tools = [
+            (GizmoMode::Move, "W", "Move tool: drag the arrows  (W)"),
+            (GizmoMode::Rotate, "E", "Rotate tool: drag the rings  (E)"),
+            (GizmoMode::Scale, "R", "Scale tool: drag the handles  (R)"),
+        ];
+        let widths: Vec<f32> = tools
+            .iter()
+            .map(|(m, k, _)| {
+                canvas.measure_text(layout::FONT_SIZE, &format!("{}  {k}", m.label())) + 22.0
+            })
+            .collect();
+        let total: f32 = widths.iter().sum();
+        canvas.fill_rounded(x, by, total, bh, layout::RADIUS, color::raised());
+        canvas.stroke_rounded(x, by, total, bh, layout::RADIUS, color::border(), 1.0);
+        for ((mode, key, tip), bw) in tools.iter().zip(widths) {
+            let r = Rect::new(x, by, bw, bh);
+            let active = self.gizmo == *mode;
+            let hot = self.hot(r);
+            if active {
+                canvas.fill_rounded(
+                    r.x + 2.0,
+                    r.y + 2.0,
+                    r.w - 4.0,
+                    r.h - 4.0,
+                    layout::RADIUS - 1.0,
+                    color::accent(),
+                );
+            } else if hot {
+                canvas.fill_rounded(
+                    r.x + 2.0,
+                    r.y + 2.0,
+                    r.w - 4.0,
+                    r.h - 4.0,
+                    layout::RADIUS - 1.0,
+                    color::hover(),
+                );
             }
-            x += bw + 4.0;
+            let (fg, kc) = if active {
+                (color::on_accent(), color::on_accent())
+            } else {
+                (color::text(), color::text_faint())
+            };
+            let lw = canvas.text(
+                r.x + 11.0,
+                r.y + (r.h - layout::FONT_SIZE) / 2.0 - 1.0,
+                layout::FONT_SIZE,
+                mode.label(),
+                fg,
+            );
+            canvas.text(
+                r.x + 11.0 + lw + 8.0,
+                r.y + (r.h - layout::FONT_SIZE) / 2.0,
+                layout::SMALL_SIZE,
+                key,
+                kc,
+            );
+            if hot {
+                self.cursor = CursorHint::Pointer;
+                if self.p.pressed {
+                    self.gizmo = *mode;
+                }
+            }
+            self.tip(r, tip);
+            x += bw;
         }
 
         // Play controls, centered (pushed right if the tools need the room).
@@ -1292,55 +1400,168 @@ impl Ui {
         let group = bw * 3.0 + 8.0;
         let px = (rect.w / 2.0 - group / 2.0).max(x + 16.0);
         let editing = self.play == PlayState::Editing;
-        let play_style = if self.play == PlayState::Playing {
-            ButtonStyle::Active
-        } else {
-            ButtonStyle::Accent
-        };
-        if self.icon_button(canvas, Rect::new(px, by, bw, bh), Icon::Play, play_style) {
+        let play_r = Rect::new(px, by, bw, bh);
+        if self.play == PlayState::Playing {
+            // A filled paper-white button with a dark glyph while playing.
+            canvas.fill_rounded(
+                play_r.x,
+                play_r.y,
+                play_r.w,
+                play_r.h,
+                layout::RADIUS,
+                color::accent(),
+            );
+            draw_icon(
+                canvas,
+                Icon::Play,
+                play_r.x + bw / 2.0,
+                play_r.y + bh / 2.0,
+                color::on_accent(),
+            );
+            if self.hot(play_r) {
+                self.cursor = CursorHint::Pointer;
+                if self.p.pressed {
+                    self.out.push(Intent::Play);
+                }
+            }
+        } else if self.icon_button(canvas, play_r, Icon::Play, ButtonStyle::Accent) {
             self.out.push(Intent::Play);
         }
+        self.tip(
+            play_r,
+            if editing {
+                "Play the scene  (Ctrl+P)"
+            } else {
+                "Playing — click to stop  (Ctrl+P)"
+            },
+        );
         let pause_style = match self.play {
             PlayState::Editing => ButtonStyle::Disabled,
             PlayState::Paused => ButtonStyle::Active,
             PlayState::Playing => ButtonStyle::Normal,
         };
-        if self.icon_button(
-            canvas,
-            Rect::new(px + bw + 4.0, by, bw, bh),
-            Icon::Pause,
-            pause_style,
-        ) {
+        let pause_r = Rect::new(px + bw + 4.0, by, bw, bh);
+        if self.icon_button(canvas, pause_r, Icon::Pause, pause_style) {
             self.out.push(Intent::Pause);
         }
+        self.tip(pause_r, "Pause / resume the simulation");
         let stop_style = if editing {
             ButtonStyle::Disabled
         } else {
             ButtonStyle::Normal
         };
-        if self.icon_button(
-            canvas,
-            Rect::new(px + 2.0 * (bw + 4.0), by, bw, bh),
-            Icon::Stop,
-            stop_style,
-        ) {
+        let stop_r = Rect::new(px + 2.0 * (bw + 4.0), by, bw, bh);
+        if self.icon_button(canvas, stop_r, Icon::Stop, stop_style) {
             self.out.push(Intent::Stop);
         }
+        self.tip(stop_r, "Stop and restore the scene");
 
-        // Play state badge, right-aligned.
+        // Right side: search, settings, play-state badge.
+        let gear = Rect::new(rect.w - layout::PAD - bh, by, bh, bh);
+        if self.icon_button(canvas, gear, Icon::Gear, ButtonStyle::Normal) {
+            self.open_settings();
+        }
+        self.tip(gear, "Settings  (Ctrl+,)");
+        let search_w = 196.0_f32;
+        let search = Rect::new(gear.x - 8.0 - search_w, by, search_w, bh);
+        let mut right_edge = gear.x;
+        if search.x > px + group + 24.0 {
+            let hot = self.hot(search);
+            let bg = if hot { color::hover() } else { color::field() };
+            canvas.fill_rounded(search.x, search.y, search.w, search.h, layout::RADIUS, bg);
+            canvas.stroke_rounded(
+                search.x,
+                search.y,
+                search.w,
+                search.h,
+                layout::RADIUS,
+                color::border(),
+                1.0,
+            );
+            draw_icon(
+                canvas,
+                Icon::Search,
+                search.x + 15.0,
+                search.y + bh / 2.0,
+                color::text_dim(),
+            );
+            canvas.text(
+                search.x + 28.0,
+                search.y + (bh - layout::FONT_SIZE) / 2.0 - 1.0,
+                layout::FONT_SIZE,
+                "Search",
+                color::text_dim(),
+            );
+            let k = "Ctrl+Shift+P";
+            let kw = canvas.measure_text(layout::SMALL_SIZE, k);
+            canvas.text(
+                search.x + search.w - kw - 10.0,
+                search.y + (bh - layout::SMALL_SIZE) / 2.0 - 1.0,
+                layout::SMALL_SIZE,
+                k,
+                color::text_faint(),
+            );
+            if hot {
+                self.cursor = CursorHint::Pointer;
+                if self.p.pressed {
+                    self.open_palette(doc);
+                }
+            }
+            self.tip(search, "Find any command, entity, script or setting");
+            right_edge = search.x;
+        }
         let badge = match self.play {
             PlayState::Editing => None,
-            PlayState::Playing => Some(("PLAYING", color::accent())),
+            PlayState::Playing => Some(("PLAYING", color::success())),
             PlayState::Paused => Some(("PAUSED", color::warn())),
         };
         if let Some((text, c)) = badge {
-            let tw = canvas.measure_text(layout::SMALL_SIZE, text) + 16.0;
-            let bx = rect.w - tw - layout::PAD;
+            let tw = canvas.measure_text(layout::SMALL_SIZE, text) + 22.0;
+            let bx = right_edge - tw - 10.0;
             if bx > px + group + 10.0 {
-                canvas.stroke_rounded(bx, by + 4.0, tw, bh - 8.0, 4.0, c, 1.0);
-                canvas.text(bx + 8.0, by + bh / 2.0 - 7.0, layout::SMALL_SIZE, text, c);
+                canvas.stroke_rounded(bx, by + 5.0, tw, bh - 10.0, (bh - 10.0) / 2.0, c, 1.0);
+                canvas.fill_circle(bx + 10.0, by + bh / 2.0, 3.0, c);
+                canvas.text(bx + 17.0, by + bh / 2.0 - 7.0, layout::SMALL_SIZE, text, c);
             }
         }
+    }
+
+    /// Requests a tooltip for `r` while the pointer rests on it.
+    fn tip(&mut self, r: Rect, text: &str) {
+        if self.hot(r) && !self.p.down {
+            self.tip_request = Some((r, text.to_string()));
+        }
+    }
+
+    /// Draws the tooltip requested this frame once the pointer has rested
+    /// on its widget for a moment.
+    fn draw_tooltip(&mut self, canvas: &mut Canvas, w: f32, h: f32) {
+        let Some((r, text)) = self.tip_request.take() else {
+            self.tip_since = None;
+            return;
+        };
+        let now = std::time::Instant::now();
+        let since = match &self.tip_since {
+            Some((t, at)) if *t == text => *at,
+            _ => {
+                self.tip_since = Some((text.clone(), now));
+                now
+            }
+        };
+        if (now - since).as_secs_f32() < 0.45 {
+            return;
+        }
+        let tw = canvas.measure_text(layout::SMALL_SIZE, &text) + 20.0;
+        let th = 24.0;
+        let x = (r.x + r.w / 2.0 - tw / 2.0).clamp(4.0, (w - tw - 4.0).max(4.0));
+        let mut y = r.y + r.h + 6.0;
+        if y + th > h - 4.0 {
+            y = r.y - th - 6.0;
+        }
+        canvas.fill_rounded(x + 1.0, y + 3.0, tw, th, 5.0, color::shadow());
+        canvas.fill_rounded(x, y, tw, th, 5.0, color::raised());
+        canvas.stroke_rounded(x, y, tw, th, 5.0, color::border(), 1.0);
+        canvas.text(x + 10.0, y + 5.0, layout::SMALL_SIZE, &text, color::text());
     }
 
     // ----- hierarchy -----------------------------------------------------
@@ -1886,7 +2107,7 @@ impl Ui {
         );
         let luma = 0.299 * rgba[0] + 0.587 * rgba[1] + 0.114 * rgba[2];
         let fg = if luma > 0.55 {
-            Color::from_rgba8(20, 20, 24, 255)
+            Color::from_rgba8(8, 8, 8, 255)
         } else {
             Color::WHITE
         };
@@ -2678,9 +2899,15 @@ impl Ui {
             &left,
             color::text_dim(),
         );
+        if !self.prefs.status_hints {
+            return;
+        }
         let hint = match self.play {
+            PlayState::Editing if self.code.active.is_some() => {
+                "Ctrl+Space complete · F12 definition · Ctrl+F find · Ctrl+/ comment · Ctrl+S save · Esc back to scene keys · Ctrl+Shift+P commands"
+            }
             PlayState::Editing => {
-                "Click select · Drag/RMB orbit · MMB pan · Wheel zoom · W/E/R tools · F focus · F2 rename · Ctrl+D duplicate · Del delete · Ctrl+Z/Y undo/redo · Ctrl+P play"
+                "Click select · Drag/RMB orbit · MMB pan · Wheel zoom · W/E/R tools · F focus · F2 rename · Ctrl+D duplicate · Del delete · Ctrl+Z/Y undo/redo · Ctrl+P play · Ctrl+Shift+P commands"
             }
             _ => "Play mode: the simulation runs on a copy of the scene · Stop (or Ctrl+P) returns to editing",
         };
@@ -2748,6 +2975,25 @@ fn draw_icon(canvas: &mut Canvas, icon: Icon, cx: f32, cy: f32, c: Color) {
         Icon::Close => {
             canvas.line(cx - 4.0, cy - 4.0, cx + 4.0, cy + 4.0, c, 1.6);
             canvas.line(cx - 4.0, cy + 4.0, cx + 4.0, cy - 4.0, c, 1.6);
+        }
+        Icon::Gear => {
+            for i in 0..8 {
+                let a = i as f32 * std::f32::consts::FRAC_PI_4;
+                let (s, co) = a.sin_cos();
+                canvas.line(
+                    cx + co * 5.0,
+                    cy + s * 5.0,
+                    cx + co * 8.0,
+                    cy + s * 8.0,
+                    c,
+                    2.6,
+                );
+            }
+            canvas.stroke_circle(cx, cy, 5.2, c, 2.0);
+        }
+        Icon::Search => {
+            canvas.stroke_circle(cx - 1.0, cy - 1.0, 4.5, c, 1.4);
+            canvas.line(cx + 2.4, cy + 2.4, cx + 6.0, cy + 6.0, c, 1.4);
         }
     }
 }
@@ -2975,6 +3221,24 @@ fn factor(s: &[char], pos: &mut usize) -> Option<f64> {
             num.parse::<f64>().ok()
         }
     }
+}
+
+/// Entity and custom-attribute names in `doc` (for script completion).
+fn scene_names(doc: &Document) -> crate::code::api::SceneNames {
+    let mut names = crate::code::api::SceneNames::default();
+    for e in &doc.entities {
+        if let Some(n) = &e.data.name {
+            if !names.entities.contains(n) {
+                names.entities.push(n.clone());
+            }
+        }
+        for key in e.data.attributes.keys() {
+            if !names.attributes.contains(key) {
+                names.attributes.push(key.clone());
+            }
+        }
+    }
+    names
 }
 
 #[cfg(test)]

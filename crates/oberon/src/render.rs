@@ -152,7 +152,7 @@ impl ViewportRenderer {
             return;
         };
         let mut draw = DrawList::new();
-        draw.set_clear_color(wgpu_color(0.05, 0.055, 0.07, 1.0));
+        draw.set_clear_color(wgpu_color(0.012, 0.012, 0.012, 1.0));
         automata_scene::record_draw_list(world, &mut draw);
         // The editor's orbit camera overrides any scene camera so the
         // viewport is freely navigable regardless of scene contents.
@@ -195,7 +195,7 @@ pub mod render_wireframe {
         px.clear();
         px.resize(w * h * 4, 0);
         for chunk in px.chunks_exact_mut(4) {
-            chunk.copy_from_slice(&[13, 14, 18, 255]);
+            chunk.copy_from_slice(&[3, 3, 3, 255]);
         }
         let proj = Projector::new(&cam, Rect::new(0.0, 0.0, width as f32, height as f32));
         let mut canvas = Lines {

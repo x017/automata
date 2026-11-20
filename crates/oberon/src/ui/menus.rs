@@ -76,6 +76,10 @@ pub enum UiAction {
     ShowConsole,
     /// Show the Project tab in the bottom dock.
     ShowProject,
+    /// Open the Settings dialog.
+    Settings,
+    /// Open the command palette.
+    CommandPalette,
 }
 
 /// What a menu item does.
@@ -304,6 +308,14 @@ impl Ui {
                     true,
                 ),
                 MenuItem::intent("Pause", "", Intent::Pause, !editing),
+                MenuItem::separator(),
+                MenuItem::ui(
+                    "Command Palette…",
+                    "Ctrl+Shift+P",
+                    UiAction::CommandPalette,
+                    true,
+                ),
+                MenuItem::ui("Settings…", "Ctrl+,", UiAction::Settings, true),
             ],
             2 => CreateKind::ALL
                 .iter()
@@ -540,6 +552,8 @@ impl Ui {
                 self.panels.show_bottom = true;
                 self.bottom_tab = super::BottomTab::Project;
             }
+            UiAction::Settings => self.open_settings(),
+            UiAction::CommandPalette => self.open_palette(doc),
         }
     }
 
@@ -560,11 +574,8 @@ impl Ui {
         canvas.fill_rect(0.0, 0.0, w, MENUBAR_H, color::background());
         canvas.fill_rect(0.0, MENUBAR_H - 1.0, w, 1.0, color::border());
         let cy = MENUBAR_H / 2.0;
-        canvas.fill_polygon(
-            &[(10.0, cy), (16.0, cy - 6.0), (22.0, cy), (16.0, cy + 6.0)],
-            color::accent(),
-        );
-        canvas.text(28.0, cy - 7.5, 13.0, "OBERON", color::accent_soft());
+        draw_logo(canvas, 17.0, cy, 15.0, color::accent());
+        canvas.text(36.0, cy - 7.5, 13.0, "OBERON", color::text());
         let mut x = 98.0;
         let open_bar = self.menu.as_ref().and_then(|m| m.bar);
         for (i, title) in BAR.iter().enumerate() {
@@ -709,4 +720,48 @@ impl Ui {
         }
         clicked
     }
+}
+
+/// The AUTOMATA mark: a sharp "A" crossed by an orbital ring, with a
+/// four-point star. `h` is the letter height, centred on `(cx, cy)`.
+pub(super) fn draw_logo(canvas: &mut Canvas, cx: f32, cy: f32, h: f32, c: tiny_skia::Color) {
+    let half = h / 2.0;
+    let leg = h * 0.40;
+    let w = (h * 0.15).max(1.6);
+    canvas.polyline(
+        &[
+            (cx - leg, cy + half),
+            (cx, cy - half + w * 0.4),
+            (cx + leg, cy + half),
+        ],
+        c,
+        w,
+    );
+    // The orbit: a tilted ellipse arc sweeping in front of the letter.
+    let (rx, ry, tilt) = (h * 0.78, h * 0.2, -0.36_f32);
+    let (st, ct) = tilt.sin_cos();
+    let pts: Vec<(f32, f32)> = (0..=28)
+        .map(|i| {
+            let a = 0.35 + i as f32 / 28.0 * 4.4;
+            let (x, y) = (rx * a.cos(), ry * a.sin());
+            (cx + x * ct - y * st, cy + h * 0.1 + x * st + y * ct)
+        })
+        .collect();
+    canvas.polyline(&pts, c, (h * 0.07).max(1.0));
+    // The star.
+    let (sx, sy, r) = (cx + h * 0.72, cy - h * 0.34, h * 0.16);
+    let k = r * 0.28;
+    canvas.fill_polygon(
+        &[
+            (sx, sy - r),
+            (sx + k, sy - k),
+            (sx + r, sy),
+            (sx + k, sy + k),
+            (sx, sy + r),
+            (sx - k, sy + k),
+            (sx - r, sy),
+            (sx - k, sy - k),
+        ],
+        c,
+    );
 }

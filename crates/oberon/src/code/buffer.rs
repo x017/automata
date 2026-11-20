@@ -63,6 +63,8 @@ pub struct Buffer {
     saved_version: u64,
     /// Whether the file used `\r\n` line endings (kept on save).
     pub crlf: bool,
+    /// Whether typing an opening bracket / quote inserts its closer.
+    pub auto_close: bool,
 }
 
 impl Default for Buffer {
@@ -150,6 +152,7 @@ impl Buffer {
             version: 0,
             saved_version: 0,
             crlf,
+            auto_close: true,
         }
     }
 
@@ -657,7 +660,8 @@ impl Buffer {
             }
             Some(close) => next_ok.then_some(close),
             None => None,
-        };
+        }
+        .filter(|_| self.auto_close);
         let mut s = String::from(c);
         if let Some(close) = pair {
             s.push(close);
@@ -990,6 +994,23 @@ impl Buffer {
     }
 
     // ----- search --------------------------------------------------------
+
+    /// Removes trailing whitespace from every line (one undo step).
+    /// Returns whether anything changed.
+    pub fn trim_trailing_whitespace(&mut self) -> bool {
+        if !self.lines.iter().any(|l| l.ends_with([' ', '\t'])) {
+            return false;
+        }
+        self.checkpoint(EditKind::Other);
+        for line in &mut self.lines {
+            let t = line.trim_end().len();
+            line.truncate(t);
+        }
+        self.cursor = self.clamp(self.cursor);
+        self.anchor = self.anchor.map(|a| self.clamp(a));
+        self.changed();
+        true
+    }
 
     /// All matches of `query` (char ranges), in order.
     #[must_use]

@@ -321,7 +321,7 @@ impl Ui {
                                     (b.x + 7.5, b.y + 13.0),
                                     (b.x + 14.0, b.y + 5.0),
                                 ],
-                                color::text(),
+                                color::on_accent(),
                                 2.0,
                             );
                         }

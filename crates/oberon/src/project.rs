@@ -34,6 +34,12 @@ pub struct Prefs {
     pub language_server: Option<String>,
     /// Autosave interval in seconds (0 disables).
     pub autosave_secs: u64,
+    /// Interface zoom on top of the display's scale factor (1.0 = 100%).
+    pub ui_scale: f32,
+    /// Show the shortcut hints in the status bar.
+    pub status_hints: bool,
+    /// Script editor settings.
+    pub editor: crate::code::EditorSettings,
 }
 
 impl Default for Prefs {
@@ -47,6 +53,9 @@ impl Default for Prefs {
             python: None,
             language_server: None,
             autosave_secs: 60,
+            ui_scale: 1.0,
+            status_hints: true,
+            editor: crate::code::EditorSettings::default(),
         }
     }
 }

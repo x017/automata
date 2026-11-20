@@ -16,6 +16,7 @@ use oberon::canvas::Canvas;
 use oberon::doc::Document;
 use oberon::ui::{Layout, Pointer, Ui};
 
+#[allow(clippy::too_many_lines)]
 fn main() {
     let out = std::env::args()
         .nth(1)
@@ -38,7 +39,8 @@ fn main() {
     let (frame, fw, fh) = viewport.render(gpu.as_mut(), &doc, ui.camera, vw, vh);
     let frame = frame.to_vec();
 
-    // Optional scene: `picker`, `menu`, `dialog`, `project`, `code`.
+    // Optional scene: `picker`, `menu`, `dialog`, `project`, `code`,
+    // `code-complete`, `code-api`, `settings`, `palette`.
     let scene = std::env::args().nth(2).unwrap_or_default();
     let selected = doc.selected;
     let pointer = Pointer {
@@ -99,6 +101,24 @@ fn main() {
                 );
                 ui.code_text("ctx");
             }
+        }
+        "settings" => {
+            ui.open_settings_page(oberon::ui::settings::SettingsPage::Editor);
+        }
+        "palette" => {
+            ui.open_palette(&doc);
+            ui.palette_text("sa");
+        }
+        "code-api" => {
+            let path = std::env::temp_dir().join("oberon_screenshot_player.py");
+            let src = "SPEED = 6.0\n\n\ndef start(entity, ctx):\n    ctx.log(\"ready\", entity.name)\n\n\ndef update(entity, ctx):\n    move = ctx.input.axis(\"a\", \"d\") * SPEED\n    entity.transform.translate((move * ctx.time.delta, 0.0, 0.0))\n    \n";
+            std::fs::write(&path, src).expect("write script");
+            ui.open_code(&path, Some(11));
+            ui.code.focused = true;
+            if let Some(tab) = ui.code.current_mut() {
+                tab.buf.move_to(oberon::code::Pos::new(10, 4), false);
+            }
+            ui.code_text("if ctx.input.just_pressed(\"");
         }
         _ => {}
     }

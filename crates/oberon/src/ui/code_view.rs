@@ -13,9 +13,8 @@ use crate::theme::{color, layout};
 
 /// Height of the document tab strip.
 pub const DOC_TABS_H: f32 = 28.0;
-/// Code font size.
-const FONT: f32 = 13.0;
-/// Line height.
+/// Line height at the default font size (tests).
+#[cfg(test)]
 const LINE_H: f32 = 19.0;
 /// Status line height.
 const STATUS_H: f32 = 22.0;
@@ -30,21 +29,20 @@ fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color {
     Color::from_rgba8(r, g, b, a)
 }
 
-/// Syntax colors (dark-white sci-fi: white text, cool accents).
+/// Syntax colors: paper-white text on black with two warm / cool tints
+/// (peach for things you call, mint for strings) and quiet grays for
+/// structure.
 fn tok_color(t: Tok) -> Color {
     match t {
-        Tok::Text => color::text(),
-        Tok::Keyword => rgb(150, 190, 255),
-        Tok::Builtin => rgb(190, 165, 255),
-        Tok::Constant => rgb(255, 165, 125),
-        Tok::SelfKw => rgb(230, 135, 160),
-        Tok::Str => rgb(150, 215, 170),
-        Tok::Number => rgb(236, 196, 110),
-        Tok::Comment => rgb(108, 116, 134),
-        Tok::Decorator => rgb(236, 170, 110),
-        Tok::Function => rgb(120, 220, 255),
-        Tok::Class => rgb(130, 235, 200),
-        Tok::Op => rgb(170, 178, 196),
+        Tok::Text => rgb(236, 234, 228),
+        Tok::Keyword => rgb(158, 156, 150),
+        Tok::Builtin | Tok::Function | Tok::Decorator => rgb(255, 199, 153),
+        Tok::Constant | Tok::Number => rgb(255, 170, 128),
+        Tok::SelfKw => rgb(198, 196, 190),
+        Tok::Str => rgb(153, 238, 214),
+        Tok::Comment => rgb(98, 97, 93),
+        Tok::Class => rgb(255, 226, 190),
+        Tok::Op => rgb(124, 122, 117),
     }
 }
 
@@ -65,11 +63,12 @@ struct TextGeom {
     cell: f32,
     scroll: f32,
     scroll_x: f32,
+    lh: f32,
 }
 
 impl TextGeom {
     fn pos_at(&self, buf: &crate::code::Buffer, x: f32, y: f32) -> Pos {
-        let line_f = ((y - self.area.y) / LINE_H + self.scroll).floor().max(0.0);
+        let line_f = ((y - self.area.y) / self.lh + self.scroll).floor().max(0.0);
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let line = (line_f as usize).min(buf.line_count() - 1);
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -80,7 +79,7 @@ impl TextGeom {
     }
 
     fn y_of(&self, line: usize) -> f32 {
-        self.area.y + (line as f32 - self.scroll) * LINE_H
+        self.area.y + (line as f32 - self.scroll) * self.lh
     }
 
     fn x_of(&self, buf: &crate::code::Buffer, p: Pos) -> f32 {
@@ -94,6 +93,12 @@ impl Ui {
     pub(super) fn doc_tabs_rect(&self, viewport: Rect) -> Option<Rect> {
         (!self.code.tabs.is_empty())
             .then(|| Rect::new(viewport.x, viewport.y - DOC_TABS_H, viewport.w, DOC_TABS_H))
+    }
+
+    /// Code font size and line height from the settings.
+    fn code_metrics(&self) -> (f32, f32) {
+        let font = self.prefs.editor.font_size.clamp(9.0, 28.0);
+        (font, (font * 1.46).round())
     }
 
     /// Whether the 3D scene is the visible center tab.
@@ -268,6 +273,12 @@ impl Ui {
     /// The code editor for the active script tab.
     #[allow(clippy::too_many_lines)]
     pub(super) fn code_view(&mut self, canvas: &mut Canvas, rect: Rect) {
+        let (font, lh) = self.code_metrics();
+        self.code.settings.clone_from(&self.prefs.editor);
+        let opts = self.prefs.editor.clone();
+        for tab in &mut self.code.tabs {
+            tab.buf.auto_close = opts.auto_close;
+        }
         self.code.check_disk();
         self.drain_code_events();
         canvas.fill_rect(rect.x, rect.y, rect.w, rect.h, color::viewport_bg());
@@ -296,17 +307,17 @@ impl Ui {
             top = self.goto_bar(canvas, Rect::new(rect.x, top, rect.w, 0.0), idx);
         }
         let status = Rect::new(rect.x, rect.y + rect.h - STATUS_H, rect.w, STATUS_H);
-        let area = Rect::new(rect.x, top, rect.w, (status.y - top).max(LINE_H));
+        let area = Rect::new(rect.x, top, rect.w, (status.y - top).max(lh));
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         {
-            self.code.page_lines = ((area.h / LINE_H) as usize).saturating_sub(1).max(1);
+            self.code.page_lines = ((area.h / lh) as usize).saturating_sub(1).max(1);
         }
-        let cell = canvas.cell_width(FONT);
+        let cell = canvas.cell_width(font);
         let line_count = self.code.tabs[idx].buf.line_count();
         let digits = line_count.to_string().len().max(3);
         let gutter_w = digits as f32 * cell + 26.0;
         let text_x = area.x + gutter_w + 8.0;
-        let visible = area.h / LINE_H;
+        let visible = area.h / lh;
 
         // --- scrolling ---
         {
@@ -345,6 +356,7 @@ impl Ui {
             cell,
             scroll: self.code.tabs[idx].scroll,
             scroll_x: self.code.tabs[idx].scroll_x,
+            lh,
         };
 
         // --- mouse ---
@@ -370,9 +382,37 @@ impl Ui {
         let selection = buf.selection();
 
         // Current line.
-        if selection.is_none() {
+        if selection.is_none() && opts.highlight_line {
             let y = geom.y_of(cursor.line);
-            canvas.fill_rect(area.x, y, area.w, LINE_H, rgb(18, 20, 26));
+            canvas.fill_rect(area.x, y, area.w, lh, rgb(15, 15, 15));
+        }
+        // Indentation guides (blank lines continue the block below them).
+        if opts.indent_guides {
+            let unit = crate::code::buffer::INDENT;
+            let mut next_indent = 0usize;
+            let mut guides = vec![0usize; last - first];
+            let scan_end = (last + 40).min(line_count);
+            for line_idx in (first..scan_end).rev() {
+                let l = buf.line(line_idx);
+                let indent = if l.trim().is_empty() {
+                    next_indent
+                } else {
+                    visual_col(l, crate::code::buffer::indent_of(l).chars().count())
+                };
+                next_indent = indent;
+                if line_idx < last {
+                    guides[line_idx - first] = indent / unit;
+                }
+            }
+            for (k, levels) in guides.iter().enumerate() {
+                let y = geom.y_of(first + k);
+                for level in 0..*levels {
+                    let x = (text_x - geom.scroll_x + (level * unit) as f32 * cell).round() + 0.5;
+                    if x > text_x - 1.0 {
+                        canvas.line(x, y, x, y + lh, rgb(30, 30, 29), 1.0);
+                    }
+                }
+            }
         }
         // Find matches, then occurrences of the word under the caret.
         let mut marks: Vec<((Pos, Pos), Color)> = Vec::new();
@@ -390,7 +430,7 @@ impl Ui {
                 let w = buf.text_range(a, b);
                 for m in buf.find_all(&w, true, true) {
                     if m.0.line >= first && m.0.line < last && m.0 != a {
-                        marks.push((m, rgba(96, 156, 255, 45)));
+                        marks.push((m, rgba(242, 240, 235, 26)));
                     }
                 }
             }
@@ -402,7 +442,7 @@ impl Ui {
                 x0,
                 geom.y_of(a.line) + 1.0,
                 (x1 - x0).max(2.0),
-                LINE_H - 2.0,
+                lh - 2.0,
                 2.0,
                 *c,
             );
@@ -410,9 +450,9 @@ impl Ui {
         // Selection.
         if let Some((a, b)) = selection {
             let sel = if focused {
-                color::select()
+                rgb(52, 52, 50)
             } else {
-                rgb(36, 44, 60)
+                rgb(32, 32, 31)
             };
             for line in a.line.max(first)..=b.line.min(last.saturating_sub(1)) {
                 let start = if line == a.line { a.col } else { 0 };
@@ -427,7 +467,7 @@ impl Ui {
                 if line != b.line {
                     x1 += cell * 0.6;
                 }
-                canvas.fill_rect(x0, geom.y_of(line), (x1 - x0).max(0.0), LINE_H, sel);
+                canvas.fill_rect(x0, geom.y_of(line), (x1 - x0).max(0.0), lh, sel);
             }
         }
         // Matching bracket.
@@ -439,8 +479,8 @@ impl Ui {
                         x,
                         geom.y_of(m.line) + 1.0,
                         cell,
-                        LINE_H - 2.0,
-                        rgba(150, 195, 255, 150),
+                        lh - 2.0,
+                        rgba(242, 240, 235, 110),
                         1.0,
                     );
                 }
@@ -449,7 +489,32 @@ impl Ui {
         // Text.
         for (k, line_idx) in (first..last).enumerate() {
             let line = buf.line(line_idx);
-            let y = geom.y_of(line_idx) + 2.0;
+            let y = geom.y_of(line_idx) + ((lh - font) / 2.0 - 1.0).max(0.0);
+            if opts.show_whitespace {
+                let mut vcol = 0usize;
+                for ch in line.chars() {
+                    let x = text_x - geom.scroll_x + vcol as f32 * cell;
+                    let mid = geom.y_of(line_idx) + lh / 2.0;
+                    if ch == ' ' {
+                        canvas.fill_rect(
+                            x + cell / 2.0 - 1.0,
+                            mid - 1.0,
+                            2.0,
+                            2.0,
+                            rgb(58, 58, 56),
+                        );
+                        vcol += 1;
+                    } else if ch == '\t' {
+                        let next =
+                            (vcol / crate::code::buffer::INDENT + 1) * crate::code::buffer::INDENT;
+                        let x1 = text_x - geom.scroll_x + next as f32 * cell - 3.0;
+                        canvas.line(x + 2.0, mid, x1, mid, rgb(58, 58, 56), 1.0);
+                        vcol = next;
+                    } else {
+                        vcol += 1;
+                    }
+                }
+            }
             let (spans, _) = syntax::highlight(line, states[k]);
             let mut vcol = 0usize;
             for (range, tok) in spans {
@@ -471,7 +536,7 @@ impl Ui {
                 if end_x < area.x || x > area.x + area.w || shown.trim().is_empty() {
                     continue;
                 }
-                canvas.text(x, y, FONT, &shown, tok_color(tok));
+                canvas.text(x, y, font, &shown, tok_color(tok));
             }
         }
         // Diagnostics: squiggles.
@@ -486,7 +551,7 @@ impl Ui {
                 }
                 let x0 = geom.x_of(buf, Pos::new(line, a));
                 let x1 = geom.x_of(buf, Pos::new(line, b)).max(x0 + cell);
-                let y = geom.y_of(line) + LINE_H - 2.5;
+                let y = geom.y_of(line) + lh - 2.5;
                 let mut pts = Vec::new();
                 let mut x = x0;
                 let mut up = true;
@@ -506,20 +571,20 @@ impl Ui {
                 x - 0.5,
                 geom.y_of(cursor.line) + 1.0,
                 2.0,
-                LINE_H - 2.0,
+                lh - 2.0,
                 color::accent_soft(),
             );
         }
         canvas.restore_clip(clip);
 
         // Gutter.
-        canvas.fill_rect(area.x, area.y, gutter_w, area.h, rgb(13, 14, 18));
+        canvas.fill_rect(area.x, area.y, gutter_w, area.h, rgb(3, 3, 3));
         canvas.line(
             area.x + gutter_w,
             area.y,
             area.x + gutter_w,
             area.y + area.h,
-            rgb(30, 33, 41),
+            rgb(24, 24, 23),
             1.0,
         );
         let clip = canvas.set_clip(Some((area.x, area.y, gutter_w, area.h)));
@@ -529,12 +594,12 @@ impl Ui {
             let c = if line_idx == cursor.line {
                 color::text()
             } else {
-                rgb(80, 86, 100)
+                color::text_faint()
             };
             let nx = area.x + gutter_w - 10.0 - num.len() as f32 * cell;
-            canvas.text(nx, y + 2.0, FONT - 1.0, &num, c);
+            canvas.text(nx, y + 2.0, font - 1.0, &num, c);
             if let Some(sev) = tab.line_severity(line_idx) {
-                canvas.fill_circle(area.x + 8.0, y + LINE_H / 2.0, 3.0, severity_color(sev));
+                canvas.fill_circle(area.x + 8.0, y + lh / 2.0, 3.0, severity_color(sev));
             }
         }
         canvas.restore_clip(clip);
@@ -546,7 +611,7 @@ impl Ui {
             let th = (area.h * visible / content).max(24.0);
             let ty = track.y
                 + (area.h - th) * (geom.scroll / (content - visible).max(1.0)).clamp(0.0, 1.0);
-            canvas.fill_rounded(track.x + 2.0, ty, 4.0, th, 2.0, rgba(150, 156, 170, 70));
+            canvas.fill_rounded(track.x + 2.0, ty, 4.0, th, 2.0, rgba(160, 158, 152, 60));
         }
 
         self.code_status(canvas, status, idx);
@@ -643,7 +708,10 @@ impl Ui {
         match self.code_dwell {
             Some((since, at, sent)) if on_word && at == a => {
                 if !sent && (now - since).as_secs_f32() > 0.6 {
-                    self.code.events.push(CodeEvent::Hover(tab.path.clone(), a));
+                    let path = tab.path.clone();
+                    if !self.code.api_hover(a) {
+                        self.code.events.push(CodeEvent::Hover(path, a));
+                    }
                     self.code_dwell = Some((since, at, true));
                 }
             }
@@ -1027,7 +1095,7 @@ impl Ui {
         }
         let buf = &self.code.tabs[idx].buf;
         let anchor_x = geom.x_of(buf, comp.anchor);
-        let below = geom.y_of(buf.cursor.line) + LINE_H;
+        let below = geom.y_of(buf.cursor.line) + geom.lh;
         let rows = items.len().min(10);
         let row_h = 21.0;
         let w = 380.0_f32.min(area.w - 20.0);
@@ -1054,11 +1122,11 @@ impl Ui {
                 canvas.fill_rounded(row.x, row.y, row.w, row.h, 3.0, color::hover());
             }
             let badge = match item.kind {
-                'f' | 'm' => rgb(120, 220, 255),
-                'c' => rgb(130, 235, 200),
-                'k' => rgb(150, 190, 255),
-                'M' => rgb(236, 196, 110),
-                _ => rgb(190, 165, 255),
+                'f' | 'm' => tok_color(Tok::Function),
+                'c' => tok_color(Tok::Class),
+                'k' => tok_color(Tok::Keyword),
+                'M' => tok_color(Tok::Str),
+                _ => color::text_dim(),
             };
             canvas.fill_rounded(row.x + 5.0, row.y + 4.0, 14.0, 13.0, 3.0, rgba(0, 0, 0, 60));
             canvas.text(
@@ -1068,7 +1136,13 @@ impl Ui {
                 &item.kind.to_string(),
                 badge,
             );
-            let lw = canvas.text(row.x + 26.0, row.y + 3.0, FONT, &item.label, color::text());
+            let lw = canvas.text(
+                row.x + 26.0,
+                row.y + 3.0,
+                layout::FONT_SIZE,
+                &item.label,
+                color::text(),
+            );
             if !item.detail.is_empty() {
                 let dx = row.x + 34.0 + lw;
                 canvas.text_clipped(
@@ -1106,11 +1180,11 @@ impl Ui {
             if let Some(d) = tab.diagnostics.iter().find(|d| {
                 let after = (pos.line, pos.col) >= (d.start.line, d.start.col);
                 let before = (pos.line, pos.col) <= (d.end.line, d.end.col.max(d.start.col + 1));
-                after && before && (self.p.y - line_y) < LINE_H
+                after && before && (self.p.y - line_y) < geom.lh
             }) {
                 tip = Some((
                     self.p.x,
-                    line_y + LINE_H + 2.0,
+                    line_y + geom.lh + 2.0,
                     d.message.clone(),
                     severity_color(d.severity),
                 ));
@@ -1119,7 +1193,7 @@ impl Ui {
         // Language-server hover text at a position.
         if tip.is_none() {
             if let Some((p, text)) = &self.code.hover {
-                let y = geom.y_of(p.line) + LINE_H + 2.0;
+                let y = geom.y_of(p.line) + geom.lh + 2.0;
                 if y > area.y && y < area.y + area.h {
                     tip = Some((geom.x_of(&tab.buf, *p), y, text.clone(), color::accent()));
                 }
@@ -1137,7 +1211,7 @@ impl Ui {
         let h = lines.len() as f32 * 16.0 + 10.0;
         let x = x.min(area.x + area.w - w - 6.0).max(area.x + 4.0);
         let y = if y + h > area.y + area.h {
-            (y - h - LINE_H - 4.0).max(area.y)
+            (y - h - geom.lh - 4.0).max(area.y)
         } else {
             y
         };
