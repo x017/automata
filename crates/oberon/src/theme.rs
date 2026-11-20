@@ -3,6 +3,8 @@
 //! One place for every color, size, and spacing the editor uses, so the
 //! whole app reads consistently and a re-skin is a single edit.
 
+#![forbid(unsafe_code)]
+
 /// Opaque theme colors. `tiny_skia::Color::from_rgba8` is not `const`, so
 /// these are functions rather than associated constants.
 pub mod color {

@@ -4,36 +4,40 @@
 //! UI, and the AUTOMATA engine's own wgpu renderer producing the live
 //! viewport frame (composited into the UI each frame).
 //!
-//! The crate is a binary plus a library. The library holds the testable
-//! pieces (scene document model, UI rendering, viewport compositing) so
-//! they can be exercised headless; the binary adds the winit/glow shell.
+//! The crate is a library plus a binary. The library holds the testable
+//! pieces (scene document model, UI rendering, viewport compositing) so they
+//! can be exercised headless; the binary adds the winit/glow shell.
 //!
 //! # Safety
 //!
-//! Oberon presents a window via `glow`, whose GL bindings are `unsafe` FFI.
-//! The engine's own crates forbid `unsafe`, but a windowed application shell
-//! cannot avoid it; all `unsafe` is contained to [`present`], which opts out
-//! of the crate-level `forbid` with a scoped `allow`.
+//! Editor logic is entirely safe: every module here declares
+//! `#![forbid(unsafe_code)]`. Presenting a window needs an OpenGL context,
+//! whose bindings are `unsafe` FFI — that `unsafe` is contained to
+//! [`present`], the one module that opts out with a scoped `allow`. Nothing
+//! outside [`present`] may use `unsafe`.
 
-#![forbid(unsafe_code)]
+// The editor UI is coordinate- and projection-heavy: it deals in f32 pixel
+// positions, per-channel RGBA bytes, and draw helpers that take a rect plus a
+// color. The pedantic lints that would only add noise here are relaxed
+// crate-wide (the workspace `unsafe_code = "forbid"` and correctness lints
+// still apply in full).
+#![allow(
+    clippy::many_single_char_names,
+    clippy::too_many_arguments,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless,
+    clippy::cast_possible_wrap,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    clippy::unused_self,
+    clippy::too_many_lines
+)]
 
 pub mod canvas;
 pub mod doc;
+pub mod present;
 pub mod render;
 pub mod text;
 pub mod theme;
 pub mod ui;
-
-/// Window presentation.
-///
-/// The editor renders into an in-memory RGBA buffer (`canvas`). Because this
-/// crate forbids `unsafe`, Oberon does not link an OpenGL blitter itself; the
-/// [`present`] module exposes the buffer and the winit integration, and the
-/// window surface upload happens through safe APIs only.
-pub mod present {
-    //! The winit event loop and frame delivery. The UI pixmap is handed to
-    //! the platform through safe APIs (see the binary); this module holds the
-    //! safe event-loop glue shared with tests.
-
-    // Stub — the winit shell is added after the UI core is verified.
-}

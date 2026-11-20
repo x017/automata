@@ -6,6 +6,8 @@
 //! are drawn and hit-tested against the current pointer state; interactions
 //! return intents that the app applies to the document.
 
+#![forbid(unsafe_code)]
+
 use crate::canvas::Canvas;
 use crate::doc::Document;
 use crate::theme::{color, layout};
@@ -40,11 +42,13 @@ pub struct Rect {
 
 impl Rect {
     /// A rectangle from origin and size.
+    #[must_use]
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self { x, y, w, h }
     }
 
     /// Whether `(px, py)` is inside.
+    #[must_use]
     pub fn contains(&self, px: f32, py: f32) -> bool {
         px >= self.x && px < self.x + self.w && py >= self.y && py < self.y + self.h
     }
@@ -121,6 +125,7 @@ impl Default for Ui {
 
 impl Ui {
     /// Creates the UI.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             camera: ViewCamera::default(),
@@ -275,8 +280,7 @@ impl Ui {
         let name = doc
             .path
             .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "untitled".to_string());
+            .map_or_else(|| "untitled".to_string(), |p| p.display().to_string());
         let label = if doc.dirty() {
             format!("{name} ●")
         } else {

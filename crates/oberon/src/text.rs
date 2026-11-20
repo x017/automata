@@ -5,6 +5,8 @@
 //! font lookup. Glyphs are rasterized as coverage and blended into the
 //! pixmap; this is per-frame UI text, not a shaping engine.
 
+#![forbid(unsafe_code)]
+
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use tiny_skia::{Color, Pixmap};
 
@@ -25,12 +27,14 @@ impl Default for TextRenderer {
 
 impl TextRenderer {
     /// Loads the embedded font. Panics only if the vendored font is corrupt.
+    #[must_use]
     pub fn new() -> Self {
         let font = FontRef::try_from_slice(FONT_BYTES).expect("embedded font parses");
         Self { font }
     }
 
     /// Measures the advance width of `text` at `size` (pixels).
+    #[must_use]
     pub fn measure(&self, size: f32, text: &str) -> f32 {
         let scaled = self.font.as_scaled(PxScale::from(size));
         let mut width = 0.0f32;
@@ -47,6 +51,7 @@ impl TextRenderer {
     }
 
     /// The line ascent at `size` (baseline offset from the top).
+    #[must_use]
     pub fn ascent(&self, size: f32) -> f32 {
         self.font.as_scaled(PxScale::from(size)).ascent()
     }

@@ -6,6 +6,8 @@
 //! editor UI. When no GPU adapter is available (headless CI), the viewport
 //! falls back to a software wireframe so the editor still shows the scene.
 
+#![forbid(unsafe_code)]
+
 use automata_renderer::{DrawList, Renderer};
 use automata_scene::Scene;
 
@@ -29,6 +31,7 @@ impl Default for ViewportRenderer {
 
 impl ViewportRenderer {
     /// Creates a viewport renderer. GPU init is deferred to first render.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             renderer: None,
@@ -78,6 +81,7 @@ pub mod render_wireframe {
     use crate::doc::Document;
 
     /// Renders the document's meshes as wireframes onto an RGBA buffer.
+    #[must_use]
     pub fn render(doc: &Document, width: u32, height: u32) -> Vec<u8> {
         let (w, h) = (width as usize, height as usize);
         let mut px = vec![0u8; w * h * 4];

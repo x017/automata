@@ -8,12 +8,13 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-# Oberon is an application binary that presents a window. The window/GL
-# boundary (glow context creation, winit) requires unsafe FFI, which the
-# engine's own crates forbid but an app shell cannot avoid. We therefore do
-# NOT inherit the workspace `unsafe_code = "forbid"` here; instead the safe
-# modules declare `#![forbid(unsafe_code)]` individually and the only unsafe
-# is contained to `present` (scoped `#![allow(unsafe_code)]`).
+# Oberon is a native windowed app, but it never needs `unsafe`: the UI is
+# drawn with tiny-skia, and presentation goes through the engine's own safe
+# wgpu surface (`Renderer::blit_rgba_to_surface`). So the whole crate can
+# inherit the workspace's `unsafe_code = "forbid"`. The coordinate-heavy UI
+# code relaxes a few pedantic clippy lints in-source (`#![allow]` per module).
+[lints]
+workspace = true
 
 [dependencies]
 automata-core = { path = "../automata-core" }
@@ -21,7 +22,6 @@ automata-renderer = { path = "../automata-renderer" }
 automata-scene = { path = "../automata-scene" }
 ab_glyph.workspace = true
 glam.workspace = true
-glow.workspace = true
 image.workspace = true
 tiny-skia.workspace = true
 winit.workspace = true

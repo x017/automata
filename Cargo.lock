@@ -1515,7 +1515,6 @@ dependencies = [
  "automata-renderer",
  "automata-scene",
  "glam 0.33.12",
- "glow",
  "image",
  "pollster",
  "tiny-skia",

@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use tracing::warn;
 use wgpu::util::DeviceExt;
 
 use crate::camera;
@@ -355,6 +356,50 @@ impl Renderer {
     #[must_use]
     pub fn read_texture_rgba(&self, target: &wgpu::Texture, size: (u32, u32)) -> Vec<u8> {
         read_texture_rgba(self, target, size)
+    }
+
+    /// Blits a tightly packed RGBA8 image to the window surface and presents.
+    ///
+    /// `size` is the surface's current drawable size and must match the
+    /// configured surface; `rgba.len()` must equal `width*height*4`. This is
+    /// how external UIs (Oberon) present a CPU-rendered frame through the
+    /// engine's existing surface — no OpenGL or `unsafe` needed.
+    ///
+    /// The image is written unscaled and must exactly cover the surface.
+    pub fn blit_rgba_to_surface(&mut self, rgba: &[u8], size: (u32, u32)) {
+        let (width, height) = (size.0.max(1), size.1.max(1));
+        if rgba.len() != (width * height * 4) as usize {
+            warn!(
+                expected = width * height * 4,
+                got = rgba.len(),
+                "blit_rgba_to_surface: buffer size mismatch; frame skipped"
+            );
+            return;
+        }
+        let Some(texture) = self.ctx.acquire_frame().ok().flatten() else {
+            return; // occluded / outdated — skip this frame
+        };
+        let queue = self.ctx.queue();
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.ctx.present(texture);
     }
 
     /// Builds a camera bind group from a view-projection matrix and the

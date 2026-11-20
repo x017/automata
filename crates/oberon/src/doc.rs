@@ -6,6 +6,8 @@
 //! record undo and mark the document dirty, so the UI never touches the
 //! file data directly.
 
+#![forbid(unsafe_code)]
+
 use std::path::{Path, PathBuf};
 
 use automata_core::{EntityData, MeshVisualData, PrimitiveData, SceneFile, TransformData};
@@ -24,6 +26,7 @@ pub struct EntityEntry {
 
 impl EntityEntry {
     /// The display name (or a placeholder for unnamed entities).
+    #[must_use]
     pub fn name(&self) -> &str {
         self.data.name.as_deref().unwrap_or("(unnamed)")
     }
@@ -52,6 +55,7 @@ impl Default for Document {
 
 impl Document {
     /// An empty document with one default entity selected.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             entities: Vec::new(),
@@ -65,6 +69,7 @@ impl Document {
     }
 
     /// A starter scene (a sun, a ground plane, and a cube) for a fresh file.
+    #[must_use]
     pub fn starter() -> Self {
         let mut doc = Self::new();
         let sun = doc.add_entity_named("Sun");
@@ -103,21 +108,25 @@ impl Document {
     }
 
     /// The number of entities.
+    #[must_use]
     pub fn entity_count(&self) -> usize {
         self.entities.len()
     }
 
     /// Whether the document has unsaved changes.
+    #[must_use]
     pub fn dirty(&self) -> bool {
         self.dirty
     }
 
     /// Finds an entity's index by id.
+    #[must_use]
     pub fn index_of(&self, id: u64) -> Option<usize> {
         self.entities.iter().position(|e| e.id == id)
     }
 
     /// The selected entity's index, if it still exists.
+    #[must_use]
     pub fn selected_index(&self) -> Option<usize> {
         self.selected.and_then(|id| self.index_of(id))
     }
@@ -146,7 +155,7 @@ impl Document {
     }
 
     fn unique_name(&self, base: &str) -> String {
-        let existing: Vec<&str> = self.entities.iter().map(|e| e.name()).collect();
+        let existing: Vec<&str> = self.entities.iter().map(EntityEntry::name).collect();
         if !existing.contains(&base) {
             return base.to_string();
         }
@@ -288,11 +297,13 @@ impl Document {
     }
 
     /// Whether undo is available.
+    #[must_use]
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
 
     /// Whether redo is available.
+    #[must_use]
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
     }
@@ -335,14 +346,13 @@ impl Document {
             .into_iter()
             .map(|data| {
                 let name = data.name.clone().unwrap_or_default();
-                let id = old_ids
-                    .iter()
-                    .find(|(n, _)| *n == name)
-                    .map(|(_, id)| *id)
-                    .unwrap_or_else(|| {
+                let id = old_ids.iter().find(|(n, _)| *n == name).map_or_else(
+                    || {
                         self.next_id += 1;
                         self.next_id - 1
-                    });
+                    },
+                    |(_, id)| *id,
+                );
                 EntityEntry { id, data }
             })
             .collect();
@@ -360,6 +370,7 @@ impl Document {
     }
 
     /// Builds the engine [`SceneFile`] from the document.
+    #[must_use]
     pub fn to_scene_file(&self) -> SceneFile {
         SceneFile {
             version: automata_core::SCENE_FILE_VERSION,
@@ -489,7 +500,7 @@ mod tests {
         let doc = Document::starter();
         assert_eq!(doc.entity_count(), 3);
         assert!(!doc.dirty());
-        let names: Vec<&str> = doc.entities.iter().map(|e| e.name()).collect();
+        let names: Vec<&str> = doc.entities.iter().map(super::EntityEntry::name).collect();
         assert!(names.contains(&"Sun") && names.contains(&"Ground") && names.contains(&"Cube"));
     }
 }

@@ -5,6 +5,8 @@
 //! (the viewport's engine frames). The window shell uploads the pixmap to
 //! the screen each frame.
 
+#![forbid(unsafe_code)]
+
 use tiny_skia::{
     Color, FillRule, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform,
 };
@@ -20,6 +22,7 @@ pub struct Canvas {
 
 impl Canvas {
     /// Creates a canvas of `width`×`height` physical pixels.
+    #[must_use]
     pub fn new(width: u32, height: u32) -> Self {
         Self {
             pixmap: Pixmap::new(width.max(1), height.max(1)).expect("pixmap allocation"),
@@ -28,6 +31,7 @@ impl Canvas {
     }
 
     /// The canvas size in pixels.
+    #[must_use]
     pub fn size(&self) -> (u32, u32) {
         (self.pixmap.width(), self.pixmap.height())
     }
@@ -178,6 +182,7 @@ impl Canvas {
     }
 
     /// The raw premultiplied RGBA pixels (for the window upload).
+    #[must_use]
     pub fn pixels(&self) -> &[u8] {
         self.pixmap.data()
     }
