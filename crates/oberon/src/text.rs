@@ -1,8 +1,8 @@
 //! Text rendering for Oberon: glyph rasterization into the canvas pixmap.
 //!
-//! Uses `ab_glyph` with an embedded font (the vendored Cantarell regular)
-//! so the editor renders text identically on any platform with no system
-//! font lookup. Glyphs are rasterized as coverage and blended into the
+//! Uses `ab_glyph` with an embedded font (Fira Code Regular, vendored into
+//! the crate) so the editor renders text identically on any platform with no
+//! system font lookup. Glyphs are rasterized as coverage and blended into the
 //! pixmap; this is per-frame UI text, not a shaping engine.
 
 #![forbid(unsafe_code)]
@@ -10,9 +10,10 @@
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use tiny_skia::{Color, Pixmap};
 
-/// The embedded UI font (vendored Cantarell regular).
-const FONT_BYTES: &[u8] =
-    include_bytes!("../../../vendor/sctk-adwaita/src/title/Cantarell-Regular.ttf");
+/// The embedded UI font: Fira Code Regular (SIL OFL), vendored in-crate so
+/// the build never depends on a system font or an external vendor path.
+/// The license ships alongside the font at `assets/FiraCode-LICENSE.txt`.
+const FONT_BYTES: &[u8] = include_bytes!("../assets/FiraCode-Regular.ttf");
 
 /// Rasterizes and draws text into a pixmap.
 pub struct TextRenderer {
