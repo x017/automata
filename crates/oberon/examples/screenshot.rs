@@ -56,9 +56,49 @@ fn main() {
         "menu" => ui.open_bar_menu(0, &doc),
         "dialog" => ui.open_dialog_kind(oberon::ui::DialogKind::SaveSceneAs, &doc),
         "project" => ui.bottom_tab = oberon::ui::BottomTab::Project,
-        "code" => {
-            let path = std::path::Path::new("examples/python/oop_platformer.py");
-            ui.open_code(path, Some(150));
+        "code" | "code-complete" => {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/python/oop_platformer.py");
+            ui.open_code(&path, Some(40));
+            ui.code.focused = true;
+            if let Some(tab) = ui.code.current_mut() {
+                tab.diagnostics.push(oberon::code::Diagnostic {
+                    start: oberon::code::Pos::new(44, 8),
+                    end: oberon::code::Pos::new(44, 20),
+                    severity: oberon::code::Severity::Error,
+                    message: "\"velocty\" is not defined".to_string(),
+                });
+                tab.diagnostics.push(oberon::code::Diagnostic {
+                    start: oberon::code::Pos::new(30, 4),
+                    end: oberon::code::Pos::new(30, 10),
+                    severity: oberon::code::Severity::Warning,
+                    message: "Import \"math\" is not accessed".to_string(),
+                });
+            }
+            if scene == "code-complete" {
+                ui.code_text("\n        self.");
+                let item = |label: &str, detail: &str, kind| oberon::code::CompletionItem {
+                    label: label.to_string(),
+                    detail: detail.to_string(),
+                    insert: label.to_string(),
+                    kind,
+                };
+                ui.code.show_completions(vec![
+                    item("entity", "Entity", 'v'),
+                    item("on_update", "(self, ctx) -> None", 'm'),
+                    item("speed", "float", 'v'),
+                    item("jump", "(self) -> None", 'm'),
+                ]);
+            } else {
+                ui.code_key(
+                    oberon::code::Key::Char('f'),
+                    oberon::code::Mods {
+                        ctrl: true,
+                        ..Default::default()
+                    },
+                );
+                ui.code_text("ctx");
+            }
         }
         _ => {}
     }

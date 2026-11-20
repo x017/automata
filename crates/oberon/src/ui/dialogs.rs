@@ -25,6 +25,8 @@ pub enum Dialog {
     Unsaved {
         /// What to do after saving or discarding.
         then: Box<Intent>,
+        /// Whether the scene has unsaved changes (else only scripts do).
+        scene: bool,
     },
     /// Read-only text (shortcuts, about).
     Message {
@@ -247,11 +249,12 @@ impl Ui {
     }
 
     /// Asks whether to save before running `then` (which discards the scene).
-    pub fn ask_unsaved(&mut self, then: Intent) {
+    pub fn ask_unsaved(&mut self, then: Intent, scene: bool) {
         self.menu = None;
         self.picker = None;
         self.dialog = Some(Dialog::Unsaved {
             then: Box::new(then),
+            scene,
         });
     }
 
@@ -391,7 +394,17 @@ impl Ui {
                     self.dialog = None;
                 }
             }
-            Dialog::Unsaved { then } => {
+            Dialog::Unsaved { then, scene } => {
+                let scripts = if matches!(*then, Intent::Quit) {
+                    self.code.dirty_count()
+                } else {
+                    0
+                };
+                let what = match (scene, scripts) {
+                    (true, 0) => "Save the scene before continuing?".to_string(),
+                    (true, n) => format!("Save the scene and {n} script(s) before quitting?"),
+                    (false, n) => format!("Save {n} modified script(s) before quitting?"),
+                };
                 canvas.text(
                     r.x + 18.0,
                     r.y + 18.0,
@@ -403,7 +416,7 @@ impl Ui {
                     r.x + 18.0,
                     r.y + 50.0,
                     layout::FONT_SIZE,
-                    "Save the scene before continuing?",
+                    &what,
                     color::text(),
                 );
                 let by = r.y + r.h - 42.0;
@@ -431,8 +444,16 @@ impl Ui {
                     ButtonStyle::Accent,
                 ) {
                     self.dialog = None;
-                    self.out.push(Intent::Save);
-                    self.out.push(Intent::Force(then));
+                    if scripts > 0 {
+                        self.code.save_all();
+                        self.drain_code_events();
+                    }
+                    if scene {
+                        self.out.push(Intent::Save);
+                    }
+                    if self.code.dirty_count() == 0 || scripts == 0 {
+                        self.out.push(Intent::Force(then));
+                    }
                 }
             }
             Dialog::File(fd) => self.draw_file_dialog(canvas, r, fd),

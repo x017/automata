@@ -30,7 +30,7 @@ separate app that drives the engine.
 | Is | Is not |
 |---|---|
 | A Python desktop app built with **nexa-ui** | An in-game debug overlay |
-| A scene authoring + inspection tool | A code editor (VS Code owns that, like Unity) |
+| A scene authoring + inspection tool, and a Python IDE (§3.2.1) | A replacement for a general-purpose editor |
 | A client of the **public engine API** | A fork or privileged build of the engine |
 | The place you *arrange* a game | The place you *program* a game |
 
@@ -109,6 +109,40 @@ Recorded decisions (both stand):
   (tabs, Python highlighting, find/replace) with an LSP client
   (basedpyright / pylsp / jedi-language-server over hand-written JSON-RPC)
   rather than a webview or a Code-OSS fork.
+
+#### 3.2.1 The script editor *(shipped: editor; LSP client next)*
+
+Scripts open as document tabs next to the **Scene** tab over the center area
+(double-click a `.py` in Project, *Edit Script* in the Inspector, or click a
+`File "…", line N` traceback in the Console). While a script tab is visible
+the 3D view isn't rendered.
+
+- Model (`crates/oberon/src/code/`): `Buffer` (line vector, char columns,
+  grouped undo/redo, Python-aware auto-indent / dedent / auto-close),
+  an incremental line-state Python highlighter (`syntax.rs`; triple-quoted
+  strings span lines), and the system clipboard (`clipboard.rs`: X11
+  `CLIPBOARD` via x11rb, `wl-copy`/`wl-paste` on Wayland, in-process
+  fallback).
+- View (`ui/code_view.rs`): gutter with line numbers and diagnostic marks,
+  current-line, selection, word-occurrence and bracket-match highlights,
+  diagnostic squiggles with hover tooltips, find/replace and go-to-line
+  bars, completion popup, a status line, and a Save / Don't Save / Cancel
+  bar when closing a modified tab. Mouse: click, drag, Shift-click,
+  double-click word, triple-click / gutter line, Ctrl-click definition.
+- Keys: Ctrl+S / Ctrl+Shift+S (save / save all), Ctrl+W, Ctrl+Tab,
+  Ctrl+Z/Y, Ctrl+X/C/V (whole line with no selection), Ctrl+D, Ctrl+/,
+  Ctrl+Shift+K, Ctrl+L, Ctrl+] / Ctrl+[, Tab / Shift+Tab, Alt+Up/Down,
+  Ctrl+Enter, Ctrl+Backspace/Delete, Ctrl+F / Ctrl+H / Ctrl+G, F3 /
+  Shift+F3, Ctrl+Space (complete), F12 (definition), Ctrl+Shift+I (hover),
+  Esc (back to the scene shortcuts). Keys the editor doesn't use (Ctrl+P,
+  Ctrl+Q, F1) stay global.
+- Saving is all the running game needs: the bridge's mtime hot reload
+  (§8) picks the file up. Files changed on disk reload automatically when
+  the tab is clean. Quitting with modified scripts asks first.
+- Language features arrive as `CodeEvent::{Complete, Definition, Hover}`
+  requests; the LSP client answers them by filling
+  `CodeTab::diagnostics`, `CodeEditor::show_completions` and
+  `CodeEditor::hover`.
 
 ## 4. Engine work required (the embedding hooks)
 

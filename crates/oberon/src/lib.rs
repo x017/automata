@@ -37,6 +37,7 @@
 
 pub mod bridge;
 pub mod canvas;
+pub mod code;
 pub mod doc;
 pub mod fields;
 pub mod json;

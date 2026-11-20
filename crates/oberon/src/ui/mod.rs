@@ -26,6 +26,7 @@ use crate::theme::{color, layout};
 use crate::view::{self, Gizmo, GizmoMode, Projector};
 
 pub mod attributes;
+mod code_view;
 pub mod dialogs;
 pub mod menus;
 pub mod picker;
@@ -597,6 +598,16 @@ pub struct Ui {
     clip: (f32, f32),
     /// Intents produced this frame.
     out: Vec<Intent>,
+    /// The built-in script editor.
+    pub code: crate::code::CodeEditor,
+    /// Editor requests waiting for the app (language server, …).
+    code_requests: Vec<crate::code::CodeEvent>,
+    /// Drag-selecting text (`true` = whole lines from the gutter).
+    code_drag: Option<bool>,
+    /// The completion popup's rectangle this frame.
+    code_popup: Option<Rect>,
+    /// Last click time, click count and line (double / triple click).
+    code_clicks: Option<(std::time::Instant, u8, usize)>,
 }
 
 impl Default for Ui {
@@ -644,6 +655,11 @@ impl Ui {
             p: Pointer::default(),
             clip: (0.0, f32::INFINITY),
             out: Vec::new(),
+            code: crate::code::CodeEditor::new(),
+            code_requests: Vec::new(),
+            code_drag: None,
+            code_popup: None,
+            code_clicks: None,
         }
     }
 
@@ -821,7 +837,14 @@ impl Ui {
     /// The current layout for a `w`×`h` logical window.
     #[must_use]
     pub fn layout(&self, w: f32, h: f32) -> Layout {
-        Layout::with_panels(w, h, &self.panels)
+        let mut lay = Layout::with_panels(w, h, &self.panels);
+        if !self.code.tabs.is_empty() {
+            // Document tabs (Scene / scripts) sit on top of the center area.
+            let tabs = code_view::DOC_TABS_H.min(lay.viewport.h);
+            lay.viewport.y += tabs;
+            lay.viewport.h -= tabs;
+        }
+        lay
     }
 
     /// Whether a popup, picker, or dialog is open (Escape closes it).
@@ -851,8 +874,10 @@ impl Ui {
 
     /// Opens a script in the code editor (optionally at a 1-based line).
     pub fn open_code(&mut self, path: &std::path::Path, line: Option<u32>) {
-        let at = line.map_or_else(String::new, |l| format!(":{l}"));
-        self.log(LogLevel::Info, format!("Script: {}{at}", path.display()));
+        if let Err(e) = self.code.open(path, line) {
+            self.log(LogLevel::Error, e);
+        }
+        self.drain_code_events();
     }
 
     /// Opens the color picker for an entity's color (tools / screenshots).
@@ -958,7 +983,14 @@ impl Ui {
         canvas.clear(color::background());
         // Scene view first: its overlays may spill outside its rect and are
         // covered by the panels drawn after it.
-        self.scene_view(canvas, doc, lay.viewport, viewport);
+        if self.code.active.is_some() {
+            self.code_view(canvas, lay.viewport);
+        } else {
+            self.scene_view(canvas, doc, lay.viewport, viewport);
+        }
+        if let Some(r) = self.doc_tabs_rect(lay.viewport) {
+            self.doc_tabs(canvas, r);
+        }
         if self.panels.show_bottom {
             self.bottom_dock(canvas, doc, lay.console);
         }

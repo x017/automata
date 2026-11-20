@@ -31,4 +31,9 @@ tracing.workspace = true
 serde.workspace = true
 ron.workspace = true
 
+# The code editor's system clipboard (pure-Rust X11 connection; winit
+# already depends on it).
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+x11rb = { version = "0.13", default-features = false }
+
 [dev-dependencies]

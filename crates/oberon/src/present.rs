@@ -30,6 +30,7 @@ use automata_renderer::Renderer;
 
 use crate::bridge::{self, BridgeMsg, ScriptBridge};
 use crate::canvas::Canvas;
+use crate::code;
 use crate::doc::Document;
 use crate::fields;
 use crate::play::{PlayInput, PlaySession};
@@ -221,8 +222,12 @@ impl EditorApp {
     /// Applies a UI intent to the document (or play state).
     fn apply(&mut self, intent: Intent) {
         // Actions that discard the scene ask about unsaved changes first.
-        if matches!(intent, Intent::New | Intent::Open(_) | Intent::Quit) && self.doc.dirty() {
-            self.ui.ask_unsaved(intent);
+        let scripts_dirty = matches!(intent, Intent::Quit) && self.ui.code.dirty_count() > 0;
+        if matches!(intent, Intent::New | Intent::Open(_) | Intent::Quit)
+            && (self.doc.dirty() || scripts_dirty)
+        {
+            let scene = self.doc.dirty();
+            self.ui.ask_unsaved(intent, scene);
             return;
         }
         let intent = match intent {
@@ -830,6 +835,7 @@ impl EditorApp {
             && (is_game_key(code) || script_key)
             && !self.input.ctrl()
             && !self.ui.is_editing_text()
+            && !self.ui.code_has_focus()
         {
             return;
         }
@@ -881,6 +887,29 @@ impl EditorApp {
 
         let ctrl = self.input.ctrl();
         let shift = self.input.modifiers.shift_key();
+
+        // The script editor takes the keyboard when focused; keys it doesn't
+        // use (Ctrl+P, Ctrl+Q, F1, …) fall through to the global shortcuts.
+        if self.ui.code_has_focus() {
+            let alt = self.input.modifiers.alt_key();
+            let mods = code::Mods { ctrl, shift, alt };
+            if let Some(key) = code_key(code, mods) {
+                if self.ui.code_key(key, mods) {
+                    return;
+                }
+            } else if !ctrl && !alt {
+                if let Some(text) = &event.text {
+                    self.ui.code_text(text);
+                }
+                if code != KeyCode::F1 {
+                    return;
+                }
+            }
+            if !ctrl && code != KeyCode::F1 {
+                return;
+            }
+        }
+
         let selected = self.doc.selected_index().map(|i| self.doc.entities[i].id);
 
         // Nudging repeats while held.
@@ -981,6 +1010,25 @@ impl EditorApp {
         })
     }
 
+    // ----- script editor ---------------------------------------------------
+
+    /// Handles requests from the script editor. Saved scripts reach a running
+    /// game through the bridge's hot reload; language features are served by
+    /// the language server once one is running.
+    fn handle_code_requests(&mut self) {
+        for ev in self.ui.take_code_requests() {
+            match ev {
+                code::CodeEvent::Saved(_)
+                | code::CodeEvent::Closed(_)
+                | code::CodeEvent::Complete(..)
+                | code::CodeEvent::Definition(..)
+                | code::CodeEvent::Hover(..)
+                | code::CodeEvent::Info(_)
+                | code::CodeEvent::Error(_) => {}
+            }
+        }
+    }
+
     // ----- frame ---------------------------------------------------------
 
     /// Steps play mode, renders one frame, applies the UI's intents, and
@@ -1040,6 +1088,11 @@ impl EditorApp {
 
             let cam = ui.camera;
             match play {
+                // A script tab covers the scene view: skip the 3D render.
+                Some(session) if !ui.scene_visible() => {
+                    ui.frame(canvas, &session.doc, pointer, None)
+                }
+                None if !ui.scene_visible() => ui.frame(canvas, doc, pointer, None),
                 Some(session) => {
                     let (frame, fw, fh) =
                         viewport.render_play(renderer.as_mut(), session, cam, vw, vh);
@@ -1062,6 +1115,7 @@ impl EditorApp {
         for intent in intents {
             self.apply(intent);
         }
+        self.handle_code_requests();
 
         if let (Some(renderer), Some(canvas)) = (&mut self.renderer, &self.canvas) {
             renderer.blit_rgba_to_surface(canvas.pixels(), canvas.size());
@@ -1296,4 +1350,83 @@ impl ApplicationHandler for EditorApp {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
         }
     }
+}
+
+/// Maps a key to the script editor's key model (letters, digits and
+/// punctuation only when Ctrl / Alt is held; plain typing arrives as text).
+fn code_key(code: KeyCode, m: code::Mods) -> Option<code::Key> {
+    use code::Key;
+    let key = match code {
+        KeyCode::ArrowLeft => Key::Left,
+        KeyCode::ArrowRight => Key::Right,
+        KeyCode::ArrowUp => Key::Up,
+        KeyCode::ArrowDown => Key::Down,
+        KeyCode::Home => Key::Home,
+        KeyCode::End => Key::End,
+        KeyCode::PageUp => Key::PageUp,
+        KeyCode::PageDown => Key::PageDown,
+        KeyCode::Backspace => Key::Backspace,
+        KeyCode::Delete => Key::Delete,
+        KeyCode::Enter | KeyCode::NumpadEnter => Key::Enter,
+        KeyCode::Tab => Key::Tab,
+        KeyCode::Escape => Key::Escape,
+        KeyCode::F3 => Key::F3,
+        KeyCode::F12 => Key::F12,
+        _ if m.ctrl || m.alt => Key::Char(code_char(code)?),
+        _ => return None,
+    };
+    Some(key)
+}
+
+/// The unshifted character of a physical key (US layout).
+fn code_char(code: KeyCode) -> Option<char> {
+    let letters = [
+        (KeyCode::KeyA, 'a'),
+        (KeyCode::KeyB, 'b'),
+        (KeyCode::KeyC, 'c'),
+        (KeyCode::KeyD, 'd'),
+        (KeyCode::KeyE, 'e'),
+        (KeyCode::KeyF, 'f'),
+        (KeyCode::KeyG, 'g'),
+        (KeyCode::KeyH, 'h'),
+        (KeyCode::KeyI, 'i'),
+        (KeyCode::KeyJ, 'j'),
+        (KeyCode::KeyK, 'k'),
+        (KeyCode::KeyL, 'l'),
+        (KeyCode::KeyM, 'm'),
+        (KeyCode::KeyN, 'n'),
+        (KeyCode::KeyO, 'o'),
+        (KeyCode::KeyP, 'p'),
+        (KeyCode::KeyQ, 'q'),
+        (KeyCode::KeyR, 'r'),
+        (KeyCode::KeyS, 's'),
+        (KeyCode::KeyT, 't'),
+        (KeyCode::KeyU, 'u'),
+        (KeyCode::KeyV, 'v'),
+        (KeyCode::KeyW, 'w'),
+        (KeyCode::KeyX, 'x'),
+        (KeyCode::KeyY, 'y'),
+        (KeyCode::KeyZ, 'z'),
+        (KeyCode::Digit0, '0'),
+        (KeyCode::Digit1, '1'),
+        (KeyCode::Digit2, '2'),
+        (KeyCode::Digit3, '3'),
+        (KeyCode::Digit4, '4'),
+        (KeyCode::Digit5, '5'),
+        (KeyCode::Digit6, '6'),
+        (KeyCode::Digit7, '7'),
+        (KeyCode::Digit8, '8'),
+        (KeyCode::Digit9, '9'),
+        (KeyCode::Slash, '/'),
+        (KeyCode::NumpadDivide, '/'),
+        (KeyCode::BracketLeft, '['),
+        (KeyCode::BracketRight, ']'),
+        (KeyCode::Space, ' '),
+        (KeyCode::Comma, ','),
+        (KeyCode::Period, '.'),
+        (KeyCode::Minus, '-'),
+        (KeyCode::Equal, '='),
+        (KeyCode::Backquote, '`'),
+    ];
+    letters.iter().find(|(k, _)| *k == code).map(|(_, c)| *c)
 }

@@ -1523,6 +1523,7 @@ dependencies = [
  "tiny-skia",
  "tracing",
  "winit",
+ "x11rb",
 ]
 
 [[package]]
