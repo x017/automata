@@ -22,6 +22,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use automata_renderer::Renderer;
@@ -164,6 +165,12 @@ impl EditorApp {
             Intent::Zoom(amount) => {
                 self.ui.camera.distance = (self.ui.camera.distance - amount * 0.5).clamp(2.0, 60.0);
             }
+            Intent::NudgeSelected(delta) => {
+                if let Some(idx) = self.doc.selected_index() {
+                    let id = self.doc.entities[idx].id;
+                    self.doc.nudge_entity(id, delta);
+                }
+            }
         }
     }
 
@@ -196,9 +203,11 @@ impl EditorApp {
                 scroll: self.scroll_pending,
             };
 
-            // Render the live viewport, then composite the whole UI over it.
+            // Render the live viewport (driven by the editor orbit camera),
+            // then composite the whole UI over it.
             let (vw, vh) = viewport_pixels(w, h);
-            let (frame, fw, fh) = self.viewport.render(&self.doc, vw, vh);
+            let cam = self.ui.camera;
+            let (frame, fw, fh) = self.viewport.render(&self.doc, cam, vw, vh);
             self.ui
                 .frame(canvas, &self.doc, pointer, Some((&frame, fw, fh)))
         };
@@ -321,6 +330,31 @@ impl ApplicationHandler for EditorApp {
             }
             WindowEvent::RedrawRequested => {
                 self.render_frame();
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                // Arrow keys nudge the selected entity in the camera's view
+                // plane; PageUp/PageDown move it along world Y.
+                if event.state == ElementState::Pressed {
+                    let step = 0.25;
+                    let cam = self.ui.camera;
+                    let (sy, cy) = cam.yaw.sin_cos();
+                    let delta = match event.physical_key {
+                        // Camera-relative horizontal move on the ground plane.
+                        PhysicalKey::Code(KeyCode::ArrowLeft) => Some([-cy * step, 0.0, sy * step]),
+                        PhysicalKey::Code(KeyCode::ArrowRight) => Some([cy * step, 0.0, -sy * step]),
+                        PhysicalKey::Code(KeyCode::ArrowUp) => Some([-sy * step, 0.0, -cy * step]),
+                        PhysicalKey::Code(KeyCode::ArrowDown) => Some([sy * step, 0.0, cy * step]),
+                        PhysicalKey::Code(KeyCode::PageUp) => Some([0.0, step, 0.0]),
+                        PhysicalKey::Code(KeyCode::PageDown) => Some([0.0, -step, 0.0]),
+                        _ => None,
+                    };
+                    if let Some(d) = delta {
+                        self.apply(&Intent::NudgeSelected(d));
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                    }
+                }
             }
             _ => {}
         }

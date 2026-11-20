@@ -49,9 +49,16 @@ impl ViewportRenderer {
         }
     }
 
-    /// Renders the document into an RGBA8 buffer. Returns `None` only when
-    /// even the fallback cannot run (never in practice).
-    pub fn render(&mut self, doc: &Document, width: u32, height: u32) -> (Vec<u8>, u32, u32) {
+    /// Renders the document into an RGBA8 buffer. `cam` is the editor viewport
+    /// orbit camera (yaw/pitch/distance); it drives the 3D view so dragging in
+    /// the viewport actually moves the camera. Returns the frame plus its size.
+    pub fn render(
+        &mut self,
+        doc: &Document,
+        cam: crate::ui::ViewCamera,
+        width: u32,
+        height: u32,
+    ) -> (Vec<u8>, u32, u32) {
         let width = width.max(1);
         let height = height.max(1);
         // GPU path (lazy-init; the editor may start before a GPU is ready).
@@ -83,6 +90,9 @@ impl ViewportRenderer {
             let mut draw = DrawList::new();
             draw.set_clear_color(wgpu_color(0.05, 0.055, 0.07, 1.0));
             automata_scene::record_draw_list(self.scene.world(), &mut draw);
+            // The editor's orbit camera overrides the scene camera so the
+            // viewport is freely navigable regardless of scene contents.
+            draw.set_camera_3d(cam.to_camera3d());
             renderer.render_offscreen(&draw, target);
             // Reuse the readback buffer (clobbered each frame, not grown).
             renderer.read_texture_rgba_into(target, (width, height), &mut self.frame);

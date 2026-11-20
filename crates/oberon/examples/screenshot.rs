@@ -25,7 +25,7 @@ fn main() {
 
     // Render the viewport frame (wireframe fallback; no GPU headless here).
     let mut renderer = oberon::render::ViewportRenderer::new();
-    let (frame, fw, fh) = renderer.render(&doc, 1024, 640);
+    let (frame, fw, fh) = renderer.render(&doc, ui.camera, 1024, 640);
 
     let pointer = Pointer::default();
     let _intents = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));

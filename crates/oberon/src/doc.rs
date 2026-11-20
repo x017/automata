@@ -50,6 +50,8 @@ pub struct Document {
     /// instead of clearing + respawning the ECS world (and re-uploading every
     /// mesh) every frame — which is what drove memory use up without bound.
     change_counter: u64,
+    /// True while a move gesture is in progress (coalesces nudge undo).
+    mid_gesture: bool,
 }
 
 impl Default for Document {
@@ -71,6 +73,7 @@ impl Document {
             undo: Vec::new(),
             redo: Vec::new(),
             change_counter: 0,
+            mid_gesture: false,
         }
     }
 
@@ -162,6 +165,9 @@ impl Document {
     }
 
     fn push_undo(&mut self) {
+        // A discrete edit ends any in-progress move gesture, so the next
+        // nudge snapshots fresh.
+        self.mid_gesture = false;
         self.undo.push(self.snapshot());
         if self.undo.len() > UNDO_LIMIT {
             self.undo.remove(0);
@@ -327,6 +333,30 @@ impl Document {
     #[must_use]
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
+    }
+
+    /// Translates an entity by `delta` in world space. The first nudge after
+    /// any other edit pushes one undo snapshot (capturing the pre-move state);
+    /// subsequent nudges in the same gesture coalesce into that entry, so held
+    /// arrow keys don't flood the undo stack. Returns true when moved.
+    pub fn nudge_entity(&mut self, id: u64, delta: [f32; 3]) -> bool {
+        let Some(idx) = self.index_of(id) else {
+            return false;
+        };
+        if self.entities[idx].data.transform.is_none() {
+            return false;
+        }
+        // Coalesce: only snapshot on the first nudge of a gesture.
+        if !self.mid_gesture {
+            self.push_undo();
+            self.mid_gesture = true;
+        }
+        let t = self.entities[idx].data.transform.as_mut().unwrap();
+        t.position[0] += delta[0];
+        t.position[1] += delta[1];
+        t.position[2] += delta[2];
+        self.touch();
+        true
     }
 
     /// Undoes the last edit, restoring the prior snapshot.
@@ -523,5 +553,49 @@ mod tests {
         assert!(!doc.dirty());
         let names: Vec<&str> = doc.entities.iter().map(super::EntityEntry::name).collect();
         assert!(names.contains(&"Sun") && names.contains(&"Ground") && names.contains(&"Cube"));
+    }
+
+    #[test]
+    fn change_counter_bumps_on_edit() {
+        let mut doc = Document::new();
+        let c0 = doc.change_counter();
+        doc.add_entity();
+        assert!(doc.change_counter() > c0);
+    }
+
+    #[test]
+    fn nudge_moves_entity_and_coalesces_undo() {
+        let mut doc = Document::starter();
+        let id = doc.entities.iter().find(|e| e.name() == "Cube").unwrap().id;
+        let before = doc.entities[doc.index_of(id).unwrap()]
+            .data
+            .transform
+            .unwrap()
+            .position;
+        let c0 = doc.change_counter();
+        let undo0 = doc.undo.len();
+
+        // A gesture of several nudges = one undo entry.
+        doc.nudge_entity(id, [1.0, 0.0, 0.0]);
+        doc.nudge_entity(id, [1.0, 0.0, 0.0]);
+        doc.nudge_entity(id, [0.0, 2.0, 0.0]);
+
+        let after = doc.entities[doc.index_of(id).unwrap()]
+            .data
+            .transform
+            .unwrap()
+            .position;
+        assert_eq!(after, [before[0] + 2.0, before[1] + 2.0, before[2]]);
+        assert!(doc.change_counter() > c0);
+        assert_eq!(doc.undo.len(), undo0 + 1, "gesture coalesced to one undo");
+
+        // Undo restores the pre-gesture position.
+        assert!(doc.undo());
+        let restored = doc.entities[doc.index_of(id).unwrap()]
+            .data
+            .transform
+            .unwrap()
+            .position;
+        assert_eq!(restored, before);
     }
 }

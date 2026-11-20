@@ -85,6 +85,8 @@ pub enum Intent {
     Orbit(f32, f32),
     /// Zoom the viewport camera.
     Zoom(f32),
+    /// Nudge the selected entity by a world-space delta (keyboard move).
+    NudgeSelected([f32; 3]),
 }
 
 /// The viewport camera (orbit state), shared with the app.
@@ -105,6 +107,22 @@ impl Default for ViewCamera {
             pitch: 0.5,
             distance: 9.0,
         }
+    }
+}
+
+impl ViewCamera {
+    /// Builds the engine [`automata_renderer::Camera3D`] for this orbit state:
+    /// an eye orbiting the origin at `distance`, looking at the world origin.
+    #[must_use]
+    pub fn to_camera3d(&self) -> automata_renderer::Camera3D {
+        let (cy, sy) = (self.yaw.cos(), self.yaw.sin());
+        let (cp, sp) = (self.pitch.cos(), self.pitch.sin());
+        let eye = glam::Vec3::new(
+            self.distance * cp * sy,
+            self.distance * sp,
+            self.distance * cp * cy,
+        );
+        automata_renderer::Camera3D::new(eye, glam::Vec3::ZERO)
     }
 }
 
