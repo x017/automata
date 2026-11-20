@@ -438,9 +438,21 @@ impl Renderer {
             );
             return;
         }
+        // Keep the surface in step with the caller's frame size (a resize
+        // event may not have been delivered yet).
+        if self.ctx.size() != (width, height) {
+            self.resize(width, height);
+        }
         let Some(texture) = self.ctx.acquire_frame().ok().flatten() else {
             return; // occluded / outdated — skip this frame
         };
+        // The swapchain image must exactly match the upload; otherwise
+        // `write_texture` fails validation. Drop the frame (unpresented) and
+        // try again next frame.
+        if (texture.texture.width(), texture.texture.height()) != (width, height) {
+            drop(texture);
+            return;
+        }
 
         // Swap R<->B when the surface is BGR-ordered so colors stay correct.
         let needs_bgr = matches!(

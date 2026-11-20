@@ -1,6 +1,6 @@
 //! GPU device, surface, and frame presentation.
 
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::error::{Error, Result};
 
@@ -22,6 +22,10 @@ pub struct RenderContext {
     size: (u32, u32),
     /// The target format (surface format, or the offscreen format).
     format: wgpu::TextureFormat,
+    /// Set when the last acquired frame was suboptimal. The surface is
+    /// reconfigured at the start of the next acquire — never while a
+    /// `SurfaceTexture` is still alive, which wgpu rejects.
+    needs_reconfigure: bool,
 }
 
 impl RenderContext {
@@ -104,6 +108,7 @@ impl RenderContext {
             queue,
             config: Some(config),
             size: (width, height),
+            needs_reconfigure: false,
         })
     }
 
@@ -149,6 +154,7 @@ impl RenderContext {
             config: None,
             size: (width, height),
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            needs_reconfigure: false,
         })
     }
 
@@ -186,14 +192,26 @@ impl RenderContext {
     ///
     /// Returns [`Error::SurfaceValidation`] on a validation failure.
     pub(crate) fn acquire_frame(&mut self) -> Result<Option<wgpu::SurfaceTexture>> {
+        if self.surface.is_none() {
+            return Ok(None);
+        }
+        // A previous frame was suboptimal: reconfigure now, while no surface
+        // texture is outstanding (the previous one was presented or dropped).
+        if self.needs_reconfigure {
+            self.needs_reconfigure = false;
+            self.reconfigure();
+        }
         let Some(surface) = &self.surface else {
             return Ok(None);
         };
         let texture = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t) => t,
             wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
-                warn!("surface suboptimal; reconfiguring");
-                self.reconfigure();
+                // Still presentable: use it this frame and reconfigure before
+                // the next acquire. Reconfiguring here, while `t` is alive, is
+                // a wgpu validation error (and panics in a destructor).
+                debug!("surface suboptimal; reconfiguring next frame");
+                self.needs_reconfigure = true;
                 t
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
