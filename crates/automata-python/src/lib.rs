@@ -16,6 +16,7 @@
 //!   stale but harmless.
 
 mod actions;
+mod attributes;
 mod audio;
 mod components;
 mod context;
@@ -41,6 +42,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     m.add_class::<game::PyGame>()?;
     m.add_class::<scene::PyScene>()?;
+    m.add_class::<attributes::PyAttributes>()?;
+    m.add_class::<attributes::PyPrefab>()?;
     m.add_class::<scene::PyEntity>()?;
     m.add_class::<scene::SceneView>()?;
     m.add_class::<scene::EntityView>()?;

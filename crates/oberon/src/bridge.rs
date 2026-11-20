@@ -1,0 +1,695 @@
+//! The Python script bridge: Play mode runs behaviour scripts out of process.
+//!
+//! Oberon never embeds a Python interpreter. When a scene with scripts
+//! enters Play mode, it starts the project's `python3` on a small runner
+//! (`bridge.py`, compiled into the editor and written to
+//! `<project>/.oberon/bridge.py`) and exchanges one JSON object per line:
+//!
+//! * Oberon → runner: `frame` (time, held keys, every entity's transform,
+//!   character velocity, grounded flag, attributes and script path), and
+//!   `stop`.
+//! * runner → Oberon: `ready`, `log` (`print` output), `error` (with the
+//!   script file and line, so the Console can jump there), `reloaded` (hot
+//!   reload after a save) and `frame` (the writes scripts made).
+//!
+//! Frames are pipelined, never awaited: Oberon sends the next frame only
+//! after the previous reply arrived and applies replies as they come, so a
+//! slow script lowers the script tick rate instead of freezing the editor.
+
+use std::collections::BTreeMap;
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::time::{Duration, Instant};
+
+use automata_core::AttributeValue;
+
+use crate::json::Json;
+
+/// The runner script (pure standard-library Python).
+pub const RUNNER: &str = include_str!("bridge.py");
+
+/// The default interpreter when the preferences don't name one.
+#[must_use]
+pub fn default_python() -> &'static str {
+    if cfg!(windows) {
+        "python"
+    } else {
+        "python3"
+    }
+}
+
+/// One entity's state, sent to scripts every frame.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EntityState {
+    /// Document entity id (stable for the session).
+    pub id: u64,
+    /// Entity name.
+    pub name: String,
+    /// Absolute path of the attached script, if any.
+    pub script: Option<PathBuf>,
+    /// Local position.
+    pub position: [f32; 3],
+    /// Euler rotation (XYZ, radians).
+    pub rotation: [f32; 3],
+    /// Scale.
+    pub scale: [f32; 3],
+    /// Character velocity, for character-controlled entities.
+    pub velocity: Option<[f32; 3]>,
+    /// Whether a character stands on something.
+    pub grounded: bool,
+    /// Custom attributes.
+    pub attributes: BTreeMap<String, AttributeValue>,
+}
+
+/// What a script changed on one entity.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EntityWrite {
+    /// Document entity id.
+    pub id: u64,
+    /// New position.
+    pub position: Option<[f32; 3]>,
+    /// New Euler rotation (radians).
+    pub rotation: Option<[f32; 3]>,
+    /// New scale.
+    pub scale: Option<[f32; 3]>,
+    /// New character velocity.
+    pub velocity: Option<[f32; 3]>,
+    /// The full new attribute map.
+    pub attributes: Option<BTreeMap<String, AttributeValue>>,
+}
+
+/// A message from the runner.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BridgeMsg {
+    /// The runner started.
+    Ready {
+        /// Interpreter version, e.g. `3.12.1`.
+        python: String,
+    },
+    /// Script output (`print`) or a runner notice.
+    Log {
+        /// `info`, `warn` or `error`.
+        level: String,
+        /// The line.
+        msg: String,
+    },
+    /// A script raised.
+    Error {
+        /// One-line summary.
+        msg: String,
+        /// The script file.
+        file: PathBuf,
+        /// 1-based line in `file` (0 when unknown).
+        line: u32,
+        /// The (user-frames-only) traceback.
+        traceback: String,
+    },
+    /// A script file was hot-reloaded.
+    Reloaded(PathBuf),
+    /// The scripts' writes for one frame.
+    Frame(Vec<EntityWrite>),
+    /// The runner finished its stop hooks and is exiting.
+    Bye,
+    /// The runner exited (or could not be talked to).
+    Exited(String),
+}
+
+enum Event {
+    Line(String),
+    Stderr(String),
+    Eof,
+}
+
+/// A running script runner process.
+pub struct ScriptBridge {
+    child: Child,
+    stdin: Option<ChildStdin>,
+    rx: Receiver<Event>,
+    in_flight: Option<Instant>,
+    frame: u64,
+    exited: bool,
+    /// Frames answered (for the status readout).
+    pub answered: u64,
+}
+
+impl ScriptBridge {
+    /// Writes the runner into `runtime_dir` and starts `python` on it with
+    /// `cwd` as the working directory (the scene's folder, so relative
+    /// paths in scripts behave as in the game).
+    ///
+    /// # Errors
+    ///
+    /// Fails when the runner can't be written or the interpreter can't be
+    /// started (not installed / wrong path in preferences).
+    pub fn start(python: &str, runtime_dir: &Path, cwd: &Path) -> std::io::Result<Self> {
+        std::fs::create_dir_all(runtime_dir)?;
+        let runner = runtime_dir.join("bridge.py");
+        if std::fs::read_to_string(&runner).ok().as_deref() != Some(RUNNER) {
+            std::fs::write(&runner, RUNNER)?;
+        }
+        let mut child = Command::new(python)
+            .arg("-u")
+            .arg(&runner)
+            .current_dir(cwd)
+            .env("PYTHONDONTWRITEBYTECODE", "1")
+            .env("PYTHONIOENCODING", "utf-8")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let (tx, rx) = mpsc::channel();
+        if let Some(out) = child.stdout.take() {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                for line in BufReader::new(out).lines() {
+                    let Ok(line) = line else { break };
+                    if tx.send(Event::Line(line)).is_err() {
+                        return;
+                    }
+                }
+                let _ = tx.send(Event::Eof);
+            });
+        }
+        if let Some(err) = child.stderr.take() {
+            std::thread::spawn(move || {
+                for line in BufReader::new(err).lines() {
+                    let Ok(line) = line else { break };
+                    if tx.send(Event::Stderr(line)).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+        let stdin = child.stdin.take();
+        Ok(Self {
+            child,
+            stdin,
+            rx,
+            in_flight: None,
+            frame: 0,
+            exited: false,
+            answered: 0,
+        })
+    }
+
+    /// Whether a frame is awaiting its reply.
+    #[must_use]
+    pub fn busy(&self) -> bool {
+        self.in_flight.is_some()
+    }
+
+    /// How long the current frame has been awaiting its reply.
+    #[must_use]
+    pub fn waiting_for(&self) -> Option<Duration> {
+        self.in_flight.map(|t| t.elapsed())
+    }
+
+    /// Whether the runner process is gone.
+    #[must_use]
+    pub fn exited(&self) -> bool {
+        self.exited
+    }
+
+    fn send(&mut self, msg: &Json) -> bool {
+        let Some(stdin) = &mut self.stdin else {
+            return false;
+        };
+        let mut line = msg.dump();
+        line.push('\n');
+        stdin
+            .write_all(line.as_bytes())
+            .and_then(|()| stdin.flush())
+            .is_ok()
+    }
+
+    /// Sends a frame unless the previous one is still being processed.
+    /// Returns whether it was sent.
+    pub fn send_frame(
+        &mut self,
+        dt: f32,
+        time: f32,
+        keys: &[&str],
+        entities: &[EntityState],
+    ) -> bool {
+        if self.busy() || self.exited {
+            return false;
+        }
+        self.frame += 1;
+        #[allow(clippy::cast_possible_wrap)]
+        let msg = Json::obj([
+            ("op", Json::from("frame")),
+            ("frame", Json::Int(self.frame as i64)),
+            ("dt", Json::Float(f64::from(dt))),
+            ("time", Json::Float(f64::from(time))),
+            (
+                "keys",
+                Json::Arr(keys.iter().map(|k| Json::from(*k)).collect()),
+            ),
+            (
+                "entities",
+                Json::Arr(entities.iter().map(state_json).collect()),
+            ),
+        ]);
+        if self.send(&msg) {
+            self.in_flight = Some(Instant::now());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Drains the runner's messages.
+    pub fn poll(&mut self) -> Vec<BridgeMsg> {
+        let mut out = Vec::new();
+        loop {
+            match self.rx.try_recv() {
+                Ok(Event::Line(line)) => {
+                    if let Some(msg) = parse_msg(&line) {
+                        if matches!(msg, BridgeMsg::Frame(_)) {
+                            self.in_flight = None;
+                            self.answered += 1;
+                        }
+                        out.push(msg);
+                    } else if !line.trim().is_empty() {
+                        // Something wrote to the real stdout (e.g. a C
+                        // extension); show it rather than lose it.
+                        out.push(BridgeMsg::Log {
+                            level: "info".into(),
+                            msg: line,
+                        });
+                    }
+                }
+                Ok(Event::Stderr(line)) => out.push(BridgeMsg::Log {
+                    level: "error".into(),
+                    msg: line,
+                }),
+                Ok(Event::Eof) | Err(TryRecvError::Disconnected) => {
+                    if !self.exited {
+                        self.exited = true;
+                        self.in_flight = None;
+                        let status = self
+                            .child
+                            .try_wait()
+                            .ok()
+                            .flatten()
+                            .map_or_else(|| "closed".to_string(), |s| s.to_string());
+                        out.push(BridgeMsg::Exited(status));
+                    }
+                    break;
+                }
+                Err(TryRecvError::Empty) => break,
+            }
+        }
+        out
+    }
+
+    /// Asks the runner to call `stop` hooks and exit, then makes sure it
+    /// is gone. Returns the messages it sent while stopping.
+    #[must_use]
+    pub fn stop(mut self) -> Vec<BridgeMsg> {
+        let _ = self.send(&Json::obj([("op", Json::from("stop"))]));
+        self.stdin = None; // EOF also ends the runner's read loop
+        let deadline = Instant::now() + Duration::from_millis(400);
+        while Instant::now() < deadline {
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+        let mut out = self.poll();
+        out.retain(|m| {
+            !matches!(
+                m,
+                BridgeMsg::Exited(_) | BridgeMsg::Frame(_) | BridgeMsg::Bye
+            )
+        });
+        out
+    }
+}
+
+impl Drop for ScriptBridge {
+    fn drop(&mut self) {
+        if !matches!(self.child.try_wait(), Ok(Some(_))) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+/// An attribute value as JSON (vectors and colors become arrays).
+#[must_use]
+pub fn attr_json(value: &AttributeValue) -> Json {
+    match value {
+        AttributeValue::Bool(b) => Json::Bool(*b),
+        AttributeValue::Int(i) => Json::Int(*i),
+        AttributeValue::Float(f) => Json::Float(*f),
+        AttributeValue::Text(s) => Json::Str(s.clone()),
+        AttributeValue::Vec3(v) => Json::floats(v),
+        AttributeValue::Color(c) => Json::floats(c),
+    }
+}
+
+/// An attribute value from JSON (`None` for unsupported shapes).
+#[must_use]
+pub fn attr_from_json(value: &Json) -> Option<AttributeValue> {
+    Some(match value {
+        Json::Bool(b) => AttributeValue::Bool(*b),
+        Json::Int(i) => AttributeValue::Int(*i),
+        Json::Float(f) => AttributeValue::Float(*f),
+        Json::Str(s) => AttributeValue::Text(s.clone()),
+        Json::Arr(a) if a.len() == 3 => AttributeValue::Vec3(value.as_floats::<3>()?),
+        Json::Arr(a) if a.len() == 4 => AttributeValue::Color(value.as_floats::<4>()?),
+        _ => return None,
+    })
+}
+
+fn state_json(e: &EntityState) -> Json {
+    #[allow(clippy::cast_possible_wrap)]
+    let mut obj = Json::obj([
+        ("id", Json::Int(e.id as i64)),
+        ("name", Json::from(e.name.as_str())),
+        ("p", Json::floats(&e.position)),
+        ("r", Json::floats(&e.rotation)),
+        ("s", Json::floats(&e.scale)),
+        ("g", Json::Bool(e.grounded)),
+        (
+            "attrs",
+            Json::Obj(
+                e.attributes
+                    .iter()
+                    .map(|(k, v)| (k.clone(), attr_json(v)))
+                    .collect(),
+            ),
+        ),
+    ]);
+    if let Some(v) = e.velocity {
+        obj.set("v", Json::floats(&v));
+    }
+    if let Some(script) = &e.script {
+        obj.set("script", Json::from(script.display().to_string()));
+    }
+    obj
+}
+
+fn parse_write(w: &Json) -> Option<EntityWrite> {
+    let id = u64::try_from(w.get("id")?.as_i64()?).ok()?;
+    Some(EntityWrite {
+        id,
+        position: w.get("p").and_then(Json::as_floats::<3>),
+        rotation: w.get("r").and_then(Json::as_floats::<3>),
+        scale: w.get("s").and_then(Json::as_floats::<3>),
+        velocity: w.get("v").and_then(Json::as_floats::<3>),
+        attributes: w.get("attrs").and_then(Json::as_obj).map(|pairs| {
+            pairs
+                .iter()
+                .filter_map(|(k, v)| Some((k.clone(), attr_from_json(v)?)))
+                .collect()
+        }),
+    })
+}
+
+/// Parses one runner line (`None` for anything that isn't a message).
+#[must_use]
+pub fn parse_msg(line: &str) -> Option<BridgeMsg> {
+    let v = Json::parse(line).ok()?;
+    let text = |key: &str| {
+        v.get(key)
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    Some(match v.get("op")?.as_str()? {
+        "ready" => BridgeMsg::Ready {
+            python: text("python"),
+        },
+        "log" => BridgeMsg::Log {
+            level: text("level"),
+            msg: text("msg"),
+        },
+        "error" => BridgeMsg::Error {
+            msg: text("msg"),
+            file: PathBuf::from(text("file")),
+            line: v
+                .get("line")
+                .and_then(Json::as_i64)
+                .and_then(|l| u32::try_from(l).ok())
+                .unwrap_or(0),
+            traceback: text("traceback"),
+        },
+        "reloaded" => BridgeMsg::Reloaded(PathBuf::from(text("file"))),
+        "frame" => BridgeMsg::Frame(
+            v.get("writes")
+                .and_then(Json::as_arr)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(parse_write)
+                .collect(),
+        ),
+        "bye" => BridgeMsg::Bye,
+        _ => return None,
+    })
+}
+
+/// The Python key name (`"a"`, `"space"`, `"arrow_left"` …) of a physical
+/// key — the same names the `automata` runtime uses.
+#[must_use]
+pub fn key_name(code: winit::keyboard::KeyCode) -> Option<&'static str> {
+    use winit::keyboard::KeyCode as K;
+    Some(match code {
+        K::KeyA => "a",
+        K::KeyB => "b",
+        K::KeyC => "c",
+        K::KeyD => "d",
+        K::KeyE => "e",
+        K::KeyF => "f",
+        K::KeyG => "g",
+        K::KeyH => "h",
+        K::KeyI => "i",
+        K::KeyJ => "j",
+        K::KeyK => "k",
+        K::KeyL => "l",
+        K::KeyM => "m",
+        K::KeyN => "n",
+        K::KeyO => "o",
+        K::KeyP => "p",
+        K::KeyQ => "q",
+        K::KeyR => "r",
+        K::KeyS => "s",
+        K::KeyT => "t",
+        K::KeyU => "u",
+        K::KeyV => "v",
+        K::KeyW => "w",
+        K::KeyX => "x",
+        K::KeyY => "y",
+        K::KeyZ => "z",
+        K::Digit0 => "0",
+        K::Digit1 => "1",
+        K::Digit2 => "2",
+        K::Digit3 => "3",
+        K::Digit4 => "4",
+        K::Digit5 => "5",
+        K::Digit6 => "6",
+        K::Digit7 => "7",
+        K::Digit8 => "8",
+        K::Digit9 => "9",
+        K::ArrowLeft => "arrow_left",
+        K::ArrowRight => "arrow_right",
+        K::ArrowUp => "arrow_up",
+        K::ArrowDown => "arrow_down",
+        K::Space => "space",
+        K::Enter => "enter",
+        K::Escape => "escape",
+        K::Tab => "tab",
+        K::Backspace => "backspace",
+        K::ShiftLeft => "shift_left",
+        K::ShiftRight => "shift_right",
+        K::ControlLeft => "ctrl_left",
+        K::ControlRight => "ctrl_right",
+        K::AltLeft => "alt_left",
+        K::AltRight => "alt_right",
+        K::F1 => "f1",
+        K::F2 => "f2",
+        K::F3 => "f3",
+        K::F4 => "f4",
+        K::F5 => "f5",
+        K::F6 => "f6",
+        K::F7 => "f7",
+        K::F8 => "f8",
+        K::F9 => "f9",
+        K::F10 => "f10",
+        K::F11 => "f11",
+        K::F12 => "f12",
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_runner_messages() {
+        assert_eq!(
+            parse_msg(r#"{"op":"ready","protocol":1,"python":"3.12.1"}"#),
+            Some(BridgeMsg::Ready {
+                python: "3.12.1".into()
+            })
+        );
+        let frame = parse_msg(
+            r#"{"op":"frame","frame":3,"writes":[{"id":7,"p":[1.0,2.0,3.0],"attrs":{"hp":2,"tint":[1.0,0.0,0.0,1.0]}}]}"#,
+        );
+        let Some(BridgeMsg::Frame(writes)) = frame else {
+            panic!("{frame:?}");
+        };
+        assert_eq!(writes[0].id, 7);
+        assert_eq!(writes[0].position, Some([1.0, 2.0, 3.0]));
+        assert_eq!(writes[0].velocity, None);
+        let attrs = writes[0].attributes.as_ref().unwrap();
+        assert_eq!(attrs["hp"], AttributeValue::Int(2));
+        assert_eq!(attrs["tint"], AttributeValue::Color([1.0, 0.0, 0.0, 1.0]));
+        assert!(parse_msg("not json").is_none());
+        assert!(parse_msg(r#"{"op":"???"}"#).is_none());
+    }
+
+    #[test]
+    fn attribute_values_round_trip_through_json() {
+        for v in [
+            AttributeValue::Bool(true),
+            AttributeValue::Int(-4),
+            AttributeValue::Float(2.0),
+            AttributeValue::Text("hi \"there\"".into()),
+            AttributeValue::Vec3([1.0, 2.0, 3.0]),
+            AttributeValue::Color([0.5, 0.25, 0.0, 1.0]),
+        ] {
+            let text = attr_json(&v).dump();
+            assert_eq!(attr_from_json(&Json::parse(&text).unwrap()), Some(v));
+        }
+    }
+
+    fn python() -> Option<&'static str> {
+        Command::new(default_python())
+            .arg("--version")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|_| default_python())
+    }
+
+    fn pump(bridge: &mut ScriptBridge, until: impl Fn(&BridgeMsg) -> bool) -> Vec<BridgeMsg> {
+        let mut all = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            let msgs = bridge.poll();
+            let done = msgs.iter().any(&until);
+            all.extend(msgs);
+            if done {
+                return all;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("timed out; got {all:?}");
+    }
+
+    /// End to end with a real interpreter (skipped when none is installed).
+    #[test]
+    fn runs_scripts_and_reports_errors() {
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("oberon_bridge_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mover = dir.join("mover.py");
+        std::fs::write(
+            &mover,
+            "def start(entity, ctx):\n    print('hello', entity.name)\n\n\
+             def update(entity, ctx):\n    x, y, z = entity.transform.position\n    \
+             entity.transform.position = (x + 1.0, y, z)\n    \
+             entity.attributes['ticks'] = entity.attributes.get('ticks', 0) + 1\n    \
+             if ctx.input.pressed('space'):\n        entity.character_velocity = (0, 5, 0)\n",
+        )
+        .unwrap();
+        let broken = dir.join("broken.py");
+        std::fs::write(&broken, "def update(entity, ctx):\n    return 1 / 0\n").unwrap();
+
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        let msgs = pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+        assert!(msgs.iter().any(|m| matches!(m, BridgeMsg::Ready { .. })));
+
+        let entities = vec![
+            EntityState {
+                id: 1,
+                name: "Hero".into(),
+                script: Some(mover.clone()),
+                velocity: Some([0.0; 3]),
+                scale: [1.0; 3],
+                ..EntityState::default()
+            },
+            EntityState {
+                id: 2,
+                name: "Bad".into(),
+                script: Some(broken.clone()),
+                ..EntityState::default()
+            },
+        ];
+        assert!(bridge.send_frame(0.016, 0.016, &["space"], &entities));
+        assert!(bridge.busy());
+        assert!(
+            !bridge.send_frame(0.016, 0.032, &[], &entities),
+            "one frame in flight"
+        );
+        let msgs = pump(&mut bridge, |m| matches!(m, BridgeMsg::Frame(_)));
+        assert!(!bridge.busy());
+        assert!(
+            msgs.iter()
+                .any(|m| matches!(m, BridgeMsg::Log { msg, .. } if msg == "hello Hero")),
+            "{msgs:?}"
+        );
+        let err = msgs
+            .iter()
+            .find_map(|m| match m {
+                BridgeMsg::Error {
+                    file,
+                    line,
+                    traceback,
+                    ..
+                } => Some((file.clone(), *line, traceback.clone())),
+                _ => None,
+            })
+            .expect("error reported");
+        assert_eq!(err.0, broken);
+        assert_eq!(err.1, 2);
+        assert!(
+            err.2.contains("ZeroDivisionError") && !err.2.contains("bridge.py"),
+            "{}",
+            err.2
+        );
+        let writes = msgs
+            .iter()
+            .find_map(|m| match m {
+                BridgeMsg::Frame(w) => Some(w.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let hero = writes.iter().find(|w| w.id == 1).unwrap();
+        assert_eq!(hero.position, Some([1.0, 0.0, 0.0]));
+        assert_eq!(hero.velocity, Some([0.0, 5.0, 0.0]));
+        assert_eq!(
+            hero.attributes.as_ref().unwrap()["ticks"],
+            AttributeValue::Int(1)
+        );
+        assert!(
+            writes.iter().all(|w| w.id != 2),
+            "a broken script writes nothing"
+        );
+
+        let leftover = bridge.stop();
+        assert!(leftover
+            .iter()
+            .all(|m| !matches!(m, BridgeMsg::Error { .. })));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

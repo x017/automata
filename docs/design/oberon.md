@@ -104,9 +104,11 @@ Recorded decisions (both stand):
 
 - In-game overlay editors fight the game for input, screen space, and the
   render pass. A separate window is the Unity model and the right model.
-- An in-engine code editor with LSP is not worth building: VS Code with
-  the Python extension is strictly better. Oberon opens files in the
-  user's `$EDITOR` instead.
+- ~~An in-engine code editor with LSP is not worth building.~~ **Revised
+  (2026-11):** Oberon is a full IDE. It gets a native Rust code editor
+  (tabs, Python highlighting, find/replace) with an LSP client
+  (basedpyright / pylsp / jedi-language-server over hand-written JSON-RPC)
+  rather than a webview or a Code-OSS fork.
 
 ## 4. Engine work required (the embedding hooks)
 
@@ -242,10 +244,31 @@ mode; the game's own `Camera3D` entity takes over in play mode.
 
 ## 8. Code changes during play
 
-**No hot reload — decided.** Oberon does not watch files. Code changes
-apply the manual way: stop (■) and play (▶) again. Stopping restores the
-pre-play snapshot (§6), so a stop/play cycle is a clean, complete reload
-of both code and scene.
+**Revised (2026-11): scripts hot-reload through the Python bridge.**
+
+Behaviour scripts (`start/update/stop(entity, ctx)` modules attached in
+the Inspector) never run inside the editor process. On Play, Oberon starts
+the configured interpreter (`prefs.ron` → `python`, default `python3`) on
+`bridge.py`, a pure-stdlib runner compiled into the editor and written to
+`<project>/.oberon/`. The two sides exchange JSON lines:
+
+| Direction | Message | Contents |
+|---|---|---|
+| → runner | `frame` | dt, time, held keys, every entity's transform / character velocity / grounded / attributes / script |
+| → runner | `stop` | call `stop` hooks and exit |
+| ← runner | `ready` | Python version |
+| ← runner | `log` | `print` output (Console) |
+| ← runner | `error` | summary, script file + line, user-frame traceback |
+| ← runner | `reloaded` | a script file changed and was re-imported |
+| ← runner | `frame` | per-entity writes: transform, velocity, attributes |
+
+Frames are pipelined, not awaited: the next frame is sent only after the
+previous reply, so a slow script lowers the script tick rate instead of
+freezing the editor (a 2 s stall is reported). The runner checks script
+mtimes every ~0.4 s and re-imports changed files, keeping each entity's
+`state`; a failing script reports once and pauses until its file changes.
+Stop still restores the pre-play snapshot (§6). `automata.run_scene()`
+runs the same scripts in the engine.
 
 ## 9. Project & repo model
 

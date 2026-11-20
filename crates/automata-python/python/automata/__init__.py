@@ -69,6 +69,7 @@ from . import _core
 from .enums import GamepadAxis, GamepadButton, GraphicsQuality, Key, MouseButton
 from ._core import (
     ActionMap,
+    Attributes,
     Audio,
     AxisBinding,
     Binding,
@@ -92,6 +93,7 @@ from ._core import (
     Modifiers,
     Physics,
     Physics2D,
+    Prefab,
     Resources,
     RigidBody,
     SceneView,
@@ -182,12 +184,16 @@ class Scene(_core.Scene):
     def __init__(self) -> None:
         pass
 
-    def add(self, entity: Entity) -> "Scene":
-        """Stages an entity; returns the scene so calls can chain."""
+    def add(self, entity: Union[Entity, Prefab]) -> "Scene":
+        """Stages an entity (or a prefab's entities); returns the scene."""
         return cast("Scene", super().add(entity))
 
 __all__ = [
+    "ScriptContext",
+    "ScriptEntity",
+    "run_scene",
     "ActionMap",
+    "Attributes",
     "Audio",
     "AxisBinding",
     "Binding",
@@ -219,6 +225,7 @@ __all__ = [
     "Modifiers",
     "Physics",
     "Physics2D",
+    "Prefab",
     "Resources",
     "RigidBody",
     "Scene",
@@ -392,3 +399,7 @@ class Game(_core.Game):
                         callback(payload)
 
         return super().run(tick, max_frames)
+
+
+# Behaviour scripts (Oberon's Inspector → Script) in the real runtime.
+from .scripting import ScriptContext, ScriptEntity, run_scene  # noqa: E402

@@ -115,13 +115,73 @@ gameplay (input → movement, cameras) is your Python code.
 `examples/python/play_oberon_scene.py scene.ron` reproduces Oberon's Play
 mode (WASD/arrows, Space, Shift, follow camera) as a starting point.
 
+### Behaviour scripts
+
+Attach a script to an entity in Oberon (Inspector → **Script → New…**).
+A script is a plain module with optional `start(entity, ctx)`,
+`update(entity, ctx)` and `stop(entity, ctx)` functions:
+
+```python
+# scripts/spinner.py
+def start(entity, ctx):
+    entity.state["speed"] = entity.attributes.get("speed", 1.5)
+
+def update(entity, ctx):
+    rx, ry, rz = entity.transform.rotation_euler
+    entity.transform.rotation_euler = (rx, ry + entity.state["speed"] * ctx.time.delta, rz)
+    if ctx.input.just_pressed("space"):
+        print("boing")                      # → Oberon's Console
+```
+
+In Oberon's Play mode the scripts run in a separate Python process bridged
+to the editor (any `python3`; set `python` in `~/.config/oberon/prefs.ron`
+to pick one). Saving a script while playing hot-reloads it, and errors show
+in the Console with a clickable `File "…", line N`. The same files run in
+the engine with:
+
+```python
+at.run_scene("level.ron")                  # Game options as keywords
+```
+
+`entity` has `name`, `transform`, `character_velocity`, `attributes`,
+`grounded` and a persistent `state` dict; `ctx` has `input`, `time`,
+`physics`, `scene`, `log(...)` (plus `events`, `resources`, `quit()` in
+the engine). Scripted characters skip Oberon's built-in WASD controller.
+
+### Attributes and prefabs
+
+Custom **attributes** added in Oberon's inspector (bool, int, float, text,
+vector, color) travel with the scene file and read like a dict — on staged
+entities and live ones alike:
+
+```python
+enemy = ctx.scene["Enemy"]
+hp = enemy.attributes.get("health", 100)
+enemy.attributes["health"] = hp - 10      # buffered, like transform writes
+enemy.script                              # "scripts/enemy.py" if attached
+```
+
+Values map to `bool`, `int`, `float`, `str`, `(x, y, z)` and `(r, g, b, a)`.
+
+**Prefabs** (`.prefab` files saved from Oberon's Hierarchy, or
+`Prefab(entity).save(path)` from code) are reusable entity templates:
+
+```python
+crate = at.Prefab.load("prefabs/crate.prefab")
+scene.add(crate.instantiate(position=(2, 0, 0), name="crate_1"))   # staged
+ctx.scene.spawn(crate, position=(0, 5, 0))                         # at runtime
+```
+
 ### Reference
 
 | Item | Purpose |
 |---|---|
 | `Game(title, resolution, headless, resizable, vsync, log_filter, target_fps, clear_color, graphics)` | Owns the engine; `run(update=None, max_frames=None)` drives the loop, `load_scene(scene)` replaces the scene, `quit()` requests shutdown, `state` reports the lifecycle; `@game.update` and `@game.on_event(name)` register callbacks; `clear_color=(r, g, b, a)` sets the window background (default very dark blue); `graphics=GraphicsQuality.HIGH` picks a quality preset (`LOW` disables shadows) |
 | `Key` / `MouseButton` / `GamepadButton` / `GamepadAxis` / `GraphicsQuality` | Typed `str` enums for every bindable input and quality preset — `Binding.key(Key.SPACE)`, `AxisBinding.key_pair(Key.A, Key.D)`; plain strings (`"space"`) keep working everywhere |
-| `Scene` / `Entity(name)` | Scene staging: `entity.add(component)`, `scene.add(entity)` |
+| `Scene` / `Entity(name)` | Scene staging: `entity.add(component)`, `scene.add(entity_or_prefab)`, `scene.find(name)`, `scene.entities()`; `entity.attributes` (dict-like), `entity.script` |
+| `run_scene(path, max_frames=None, update=None, **game_options)` | Runs an Oberon scene with its behaviour scripts (`start/update/stop(entity, ctx)`) |
+| `Attributes` | Dict-like custom values: `[key]`, `get`, `in`, `del`, `keys/values/items`, `update`, `clear`, `to_dict` |
+| `Prefab(entity_or_list)` | Entity template: `Prefab.load(path)`, `save(path)`, `instantiate(position, name)`, `instantiate_all(position)`, `entities()` |
 | `Transform(position, rotation_euler, scale)` | Local transform; angles in radians (XYZ order) |
 | `Camera3D(position, target, fov)` / `Camera2D(center, half_height)` | Frame cameras (first entity wins) |
 | `MeshRenderer` | `MeshRenderer.cube(size=…, color=…)` / `.quad(…)` — plain-data visuals; the windowed loop materializes them on the GPU, headless runs ignore them |
@@ -131,7 +191,7 @@ mode (WASD/arrows, Space, Shift, follow camera) as a starting point.
 | `ctx.input` | `pressed` / `just_pressed` / `just_released(key)`, `mouse_*` variants, `cursor`, `scroll`, `modifiers`, `gamepads` |
 | `ctx.input.gamepads` | Connected pads: `ids()`, `get(id)`, `primary()`, `len()`, iteration; state: `pressed(id, btn)` / `pressed_any(btn)`, `axis(id, ax)` / `axis_any(ax)`; `pad.left_stick()` / `right_stick()`; `events` — this frame's gamepad events |
 | `ActionMap` / `Binding` / `AxisBinding` | Action-based input: `map.bind("jump", Binding.key("space"))`, `map.bind_axis("move_x", AxisBinding.key_pair("a", "d"))`, then `map.pressed("jump", ctx.input)` / `map.axis("move_x", ctx.input)`; repeated `bind`/`bind_axis` calls stack (WASD + arrows + stick can share one axis; values sum, clamped to -1..1); `rebind` / `unbind` / `unbind_axis` for remapping |
-| `ctx.scene` | `find(name)`, `["name"]`, `spawn(entity)`, `despawn(id)`, `entity_count`, `names()`, iteration; `EntityView.transform` get/set (attribute writes via `TransformRef`), `EntityView.character_velocity` get/set (per-frame drive for character controllers), `EntityView.camera_3d` get/set (follow cameras: assign a fresh `Camera3D` each frame) |
+| `ctx.scene` | `find(name)`, `["name"]`, `spawn(entity_or_prefab, position=None)`, `despawn(id)`, `entity_count`, `names()`, iteration; `EntityView.transform` get/set (attribute writes via `TransformRef`), `EntityView.character_velocity` get/set (per-frame drive for character controllers), `EntityView.camera_3d` get/set (follow cameras: assign a fresh `Camera3D` each frame), `EntityView.attributes` (buffered writes), `EntityView.script` |
 | `ctx.events` | `send(name, payload)` / `read(name)` — buffered: sent events are readable the next frame, then expire |
 | `ctx.resources` | Immediate `set` / `get` / `remove` of arbitrary Python objects, keyed by name |
 | `ctx.physics` (3D) | `cast_ray(origin, dir, max_distance, exclude)` → result key (read next frame via `ray_result(key)`), `apply_impulse` / `apply_force` / `set_velocity(entity, vec)`, `velocity(entity)`, `grounded(entity)`, `gravity()` / `set_gravity(vec)`, `body_count()` |

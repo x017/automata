@@ -4,7 +4,8 @@
 //! converts between its plain data and the engine's staged-component list.
 
 use automata_core::scene_file::{
-    EntityData, MeshVisualData, SceneFile, SceneFileError, TransformData, SCENE_FILE_VERSION,
+    EntityData, MeshVisualData, SceneFile, SceneFileError, Script, TransformData,
+    SCENE_FILE_VERSION,
 };
 
 use crate::components::StagedComponent;
@@ -14,6 +15,8 @@ use crate::scene::StagedEntity;
 pub fn staged_to_entity_data(entity: &StagedEntity) -> EntityData {
     let mut data = EntityData {
         name: entity.name.clone(),
+        attributes: entity.attributes.clone(),
+        script: entity.script.clone().map(|path| Script { path }),
         ..EntityData::default()
     };
     for component in &entity.components {
@@ -75,6 +78,8 @@ pub fn entity_data_to_staged(data: &EntityData) -> StagedEntity {
     StagedEntity {
         name: data.name.clone(),
         components,
+        attributes: data.attributes.clone(),
+        script: data.script.as_ref().map(|s| s.path.clone()),
     }
 }
 

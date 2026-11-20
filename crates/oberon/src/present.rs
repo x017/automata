@@ -28,6 +28,7 @@ use winit::window::{CursorIcon, Window, WindowId};
 
 use automata_renderer::Renderer;
 
+use crate::bridge::{self, BridgeMsg, ScriptBridge};
 use crate::canvas::Canvas;
 use crate::doc::Document;
 use crate::fields;
@@ -143,6 +144,10 @@ struct EditorApp {
     input: Input,
     /// The running simulation while in play mode.
     play: Option<PlaySession>,
+    /// The Python script runner while playing a scene with scripts.
+    bridge: Option<ScriptBridge>,
+    /// Whether the "scripts are slow" warning was shown this session.
+    bridge_slow_warned: bool,
     /// The editor camera to restore when play mode ends.
     edit_camera: Option<ViewCamera>,
     last_frame: Instant,
@@ -192,6 +197,8 @@ impl EditorApp {
             renderer: None,
             input: Input::default(),
             play: None,
+            bridge: None,
+            bridge_slow_warned: false,
             edit_camera: None,
             last_frame: Instant::now(),
             last_title: String::new(),
@@ -608,9 +615,13 @@ impl EditorApp {
                     self.ui.camera.distance = 9.0;
                     self.ui.camera.pitch = 0.4;
                 }
+                let scripts = session.script_count();
                 self.play = Some(session);
                 self.ui.play = PlayState::Playing;
                 self.input.held.clear();
+                if scripts > 0 {
+                    self.start_bridge(scripts);
+                }
                 if characters > 0 {
                     self.ui.log(
                         LogLevel::Info,
@@ -651,7 +662,140 @@ impl EditorApp {
         }
     }
 
+    /// Starts the Python script runner for the session's scripts.
+    fn start_bridge(&mut self, scripts: usize) {
+        let python = self
+            .prefs
+            .python
+            .clone()
+            .filter(|p| !p.trim().is_empty())
+            .unwrap_or_else(|| bridge::default_python().to_string());
+        let runtime = self.ui.project_root.join(".oberon");
+        let cwd = self.doc.base_dir();
+        self.bridge_slow_warned = false;
+        match ScriptBridge::start(&python, &runtime, &cwd) {
+            Ok(b) => {
+                self.bridge = Some(b);
+                self.ui.log(
+                    LogLevel::Info,
+                    format!(
+                        "Running {scripts} script{} with {python}…",
+                        if scripts == 1 { "" } else { "s" }
+                    ),
+                );
+            }
+            Err(err) => self.ui.log(
+                LogLevel::Error,
+                format!(
+                    "Could not start Python ({python}): {err}. Install Python 3 or set \
+                     `python` in ~/.config/oberon/prefs.ron. Scripts are disabled."
+                ),
+            ),
+        }
+    }
+
+    /// Shows one runner message in the Console (and applies frame writes).
+    fn handle_bridge_msg(&mut self, msg: BridgeMsg) {
+        match msg {
+            BridgeMsg::Ready { python } => {
+                self.ui.log(
+                    LogLevel::Info,
+                    format!("Scripts running (Python {python})."),
+                );
+            }
+            BridgeMsg::Log { level, msg } => {
+                let level = match level.as_str() {
+                    "warn" => LogLevel::Warn,
+                    "error" => LogLevel::Error,
+                    _ => LogLevel::Info,
+                };
+                self.ui.log(level, msg);
+            }
+            BridgeMsg::Error {
+                msg,
+                file,
+                line,
+                traceback,
+            } => {
+                self.ui.log(LogLevel::Error, msg);
+                for l in traceback.lines() {
+                    self.ui.log(LogLevel::Error, l.to_string());
+                }
+                if line > 0 {
+                    self.ui.log(
+                        LogLevel::Error,
+                        format!(
+                            "  File \"{}\", line {line}  (click to open; fix and save to reload)",
+                            file.display()
+                        ),
+                    );
+                }
+            }
+            BridgeMsg::Reloaded(_) | BridgeMsg::Bye => {}
+            BridgeMsg::Frame(writes) => {
+                if let Some(play) = &mut self.play {
+                    play.apply_script_writes(&writes);
+                }
+            }
+            BridgeMsg::Exited(status) => {
+                self.ui.log(
+                    LogLevel::Error,
+                    format!("The script runner exited ({status}). Scripts stopped."),
+                );
+            }
+        }
+    }
+
+    /// Exchanges one frame with the script runner: applies its replies,
+    /// then sends the current state (when the previous frame is answered).
+    fn tick_scripts(&mut self, dt: f32) {
+        let Some(bridge) = &mut self.bridge else {
+            return;
+        };
+        let msgs = bridge.poll();
+        let slow = bridge
+            .waiting_for()
+            .is_some_and(|w| w > Duration::from_secs(2));
+        let gone = bridge.exited();
+        for msg in msgs {
+            self.handle_bridge_msg(msg);
+        }
+        if gone {
+            self.bridge = None;
+            return;
+        }
+        if slow && !self.bridge_slow_warned {
+            self.bridge_slow_warned = true;
+            self.ui.log(
+                LogLevel::Warn,
+                "A script has not finished its frame for 2 s (an endless loop?). Stop to \
+                 restart the scripts.",
+            );
+        }
+        let (Some(play), Some(bridge)) = (&self.play, &mut self.bridge) else {
+            return;
+        };
+        if play.paused || bridge.busy() {
+            return;
+        }
+        let doc = &self.doc;
+        let states = play.script_states(|rel| doc.resolve(rel));
+        let mut keys: Vec<&str> = self
+            .input
+            .held
+            .iter()
+            .filter_map(|&k| bridge::key_name(k))
+            .collect();
+        keys.sort_unstable();
+        bridge.send_frame(dt, play.elapsed, &keys, &states);
+    }
+
     fn stop(&mut self) {
+        if let Some(bridge) = self.bridge.take() {
+            for msg in bridge.stop() {
+                self.handle_bridge_msg(msg);
+            }
+        }
         if let Some(play) = self.play.take() {
             self.ui.log(
                 LogLevel::Info,
@@ -676,8 +820,17 @@ impl EditorApp {
         } else {
             self.input.held.remove(&code);
         }
-        // While simulating, movement keys drive the player, not the editor.
-        if self.play.is_some() && is_game_key(code) && !self.ui.is_editing_text() {
+        // While simulating, movement keys drive the player, not the editor;
+        // with scripts running, every key scripts can read does (Ctrl
+        // shortcuts like Ctrl+P still reach the editor).
+        let script_key = self.bridge.is_some()
+            && bridge::key_name(code).is_some()
+            && !matches!(code, KeyCode::Escape | KeyCode::F1 | KeyCode::Delete);
+        if self.play.is_some()
+            && (is_game_key(code) || script_key)
+            && !self.input.ctrl()
+            && !self.ui.is_editing_text()
+        {
             return;
         }
         if event.state == ElementState::Released {
@@ -844,6 +997,7 @@ impl EditorApp {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
+        self.tick_scripts(dt);
         if let Some(play) = &mut self.play {
             play.input = self.input.play_input(self.ui.camera.yaw);
             play.update(dt);

@@ -10,15 +10,17 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
-use automata_core::TransformData;
+use automata_core::{Attributes, TransformData};
 use automata_physics::{
     BodyType, CharacterController, CharacterVelocity, PhysicsWorld3D, RigidBody,
 };
 use automata_scene::{Entity, Name, Scene, Transform};
 use glam::Vec3;
 
+use crate::bridge::{EntityState, EntityWrite};
 use crate::doc::Document;
 
 /// The fixed physics timestep (seconds).
@@ -76,6 +78,9 @@ pub struct PlaySession {
     /// The player's controls (applied to every character controller).
     pub input: PlayInput,
     characters: Vec<Character>,
+    /// Entities with a behaviour script: Python drives them (characters
+    /// with a script skip the built-in WASD controller).
+    scripted: HashSet<Entity>,
 }
 
 impl PlaySession {
@@ -108,6 +113,12 @@ impl PlaySession {
             }
         }
 
+        let scripted = map
+            .iter()
+            .filter(|(i, _)| display.entities[*i].data.script.is_some())
+            .map(|&(_, entity)| entity)
+            .collect();
+
         let characters = scene
             .world()
             .query::<(Entity, &CharacterController)>()
@@ -131,7 +142,93 @@ impl PlaySession {
             steps: 0,
             input: PlayInput::default(),
             characters,
+            scripted,
         }
+    }
+
+    /// Number of entities with a behaviour script.
+    #[must_use]
+    pub fn script_count(&self) -> usize {
+        self.scripted.len()
+    }
+
+    /// Every simulated entity's state for the script runner; `resolve`
+    /// turns scene-relative script paths into absolute ones.
+    #[must_use]
+    pub fn script_states(&self, resolve: impl Fn(&str) -> PathBuf) -> Vec<EntityState> {
+        let world = self.scene.world();
+        self.map
+            .iter()
+            .filter_map(|&(i, entity)| {
+                let entry = self.doc.entities.get(i)?;
+                let t = TransformData::from(*world.get::<&Transform>(entity).ok()?);
+                let character = world.get::<&CharacterController>(entity).is_ok();
+                let velocity = character.then(|| {
+                    world
+                        .get::<&CharacterVelocity>(entity)
+                        .map_or([0.0; 3], |v| v.velocity.to_array())
+                });
+                Some(EntityState {
+                    id: entry.id,
+                    name: entry.name().to_string(),
+                    script: entry.data.script.as_ref().map(|s| resolve(&s.path)),
+                    position: t.position,
+                    rotation: t.rotation_euler,
+                    // The display document keeps the authored (or
+                    // script-set) scale; physics never changes it.
+                    scale: entry.data.transform.map_or(t.scale, |d| d.scale),
+                    velocity,
+                    grounded: character && self.physics.grounded(entity),
+                    attributes: entry.data.attributes.clone(),
+                })
+            })
+            .collect()
+    }
+
+    /// Applies what scripts changed (transforms, character velocities,
+    /// attributes) to the simulation and the display document.
+    pub fn apply_script_writes(&mut self, writes: &[EntityWrite]) {
+        if writes.is_empty() {
+            return;
+        }
+        for w in writes {
+            let Some(&(i, entity)) = self
+                .map
+                .iter()
+                .find(|(i, _)| self.doc.entities.get(*i).is_some_and(|e| e.id == w.id))
+            else {
+                continue;
+            };
+            let world = self.scene.world_mut();
+            if w.position.is_some() || w.rotation.is_some() || w.scale.is_some() {
+                if let Ok(mut t) = world.get::<&mut Transform>(entity) {
+                    let mut data = TransformData::from(*t);
+                    if let Some(p) = w.position {
+                        data.position = p;
+                    }
+                    if let Some(r) = w.rotation {
+                        data.rotation_euler = r;
+                    }
+                    if let Some(s) = w.scale {
+                        data.scale = s;
+                    }
+                    *t = Transform::from(data);
+                }
+                if let (Some(s), Some(slot)) =
+                    (w.scale, self.doc.entities[i].data.transform.as_mut())
+                {
+                    slot.scale = s;
+                }
+            }
+            if let Some(v) = w.velocity {
+                let _ = world.insert_one(entity, CharacterVelocity::new(Vec3::from(v)));
+            }
+            if let Some(attributes) = &w.attributes {
+                let _ = world.insert_one(entity, Attributes(attributes.clone()));
+                self.doc.entities[i].data.attributes.clone_from(attributes);
+            }
+        }
+        self.write_back();
     }
 
     /// Number of player-controllable characters.
@@ -216,6 +313,9 @@ impl PlaySession {
         };
         let world = self.scene.world_mut();
         for c in &mut self.characters {
+            if self.scripted.contains(&c.entity) {
+                continue; // its script sets the velocity
+            }
             let grounded = self.physics.grounded(c.entity);
             c.vertical = if grounded && input.jump {
                 JUMP_SPEED
@@ -322,5 +422,133 @@ mod tests {
         play.paused = true;
         play.update(1.0);
         assert_eq!(play.steps, 0);
+    }
+
+    fn player_index(doc: &Document) -> usize {
+        doc.entities
+            .iter()
+            .position(|e| e.name() == "Player")
+            .unwrap()
+    }
+
+    #[test]
+    fn scripted_entities_are_reported_and_take_script_writes() {
+        let mut doc = Document::starter();
+        let idx = player_index(&doc);
+        let id = doc.entities[idx].id;
+        doc.entities[idx].data.script = Some(automata_core::Script {
+            path: "scripts/player.py".into(),
+        });
+        doc.entities[idx]
+            .data
+            .attributes
+            .insert("hp".into(), automata_core::AttributeValue::Int(3));
+        let mut play = PlaySession::start(&doc);
+        assert_eq!(play.script_count(), 1);
+
+        let states = play.script_states(|rel| PathBuf::from("/game").join(rel));
+        let me = states.iter().find(|s| s.id == id).unwrap();
+        assert_eq!(me.script, Some(PathBuf::from("/game/scripts/player.py")));
+        assert_eq!(me.attributes["hp"], automata_core::AttributeValue::Int(3));
+        assert!(me.velocity.is_some(), "characters report their velocity");
+        assert!(
+            states.iter().any(|s| s.script.is_none()),
+            "other entities come along"
+        );
+
+        // A scripted character ignores the built-in WASD controller.
+        play.input = PlayInput {
+            forward: 1.0,
+            ..PlayInput::default()
+        };
+        let start = play.doc.entities[idx].data.transform.unwrap().position;
+        let mut attrs = std::collections::BTreeMap::new();
+        attrs.insert("hp".to_string(), automata_core::AttributeValue::Int(2));
+        play.apply_script_writes(&[EntityWrite {
+            id,
+            velocity: Some([2.0, 0.0, 0.0]),
+            attributes: Some(attrs),
+            scale: Some([2.0, 2.0, 2.0]),
+            ..EntityWrite::default()
+        }]);
+        for _ in 0..30 {
+            play.update(TIMESTEP);
+        }
+        let end = play.doc.entities[idx].data.transform.unwrap();
+        assert!(
+            end.position[0] > start[0] + 0.5,
+            "moved along +X by the script: {end:?}"
+        );
+        assert!(
+            (end.position[2] - start[2]).abs() < 0.1,
+            "not by WASD: {end:?}"
+        );
+        assert_eq!(end.scale, [2.0, 2.0, 2.0]);
+        assert_eq!(
+            play.doc.entities[idx].data.attributes["hp"],
+            automata_core::AttributeValue::Int(2)
+        );
+        // The edited document is untouched.
+        assert_eq!(
+            doc.entities[idx].data.attributes["hp"],
+            automata_core::AttributeValue::Int(3)
+        );
+    }
+
+    /// The whole loop with a real interpreter: Oberon state → Python script
+    /// → writes applied to the simulation (skipped without python3).
+    #[test]
+    fn a_python_script_drives_the_player_end_to_end() {
+        use crate::bridge::{BridgeMsg, ScriptBridge};
+        let python = crate::bridge::default_python();
+        if std::process::Command::new(python)
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("oberon_play_bridge_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("player.py");
+        std::fs::write(&script, crate::project::script_template(&script)).unwrap();
+
+        let mut doc = Document::starter();
+        doc.path = Some(dir.join("level.ron"));
+        let idx = player_index(&doc);
+        doc.entities[idx].data.script = Some(automata_core::Script {
+            path: "player.py".into(),
+        });
+        let start = doc.entities[idx].data.transform.unwrap().position;
+        let mut play = PlaySession::start(&doc);
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        let mut errors = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while bridge.answered < 40 && std::time::Instant::now() < deadline {
+            for msg in bridge.poll() {
+                match msg {
+                    BridgeMsg::Frame(w) => play.apply_script_writes(&w),
+                    BridgeMsg::Error { msg, .. } => errors.push(msg),
+                    _ => {}
+                }
+            }
+            let states = play.script_states(|rel| doc.resolve(rel));
+            // Hold "d": the template walks right (+X).
+            bridge.send_frame(TIMESTEP, play.elapsed, &["d"], &states);
+            play.update(TIMESTEP);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(errors.is_empty(), "{errors:?}");
+        let end = play.doc.entities[idx].data.transform.unwrap().position;
+        assert!(
+            end[0] > start[0] + 1.0,
+            "the script walked the player: {start:?} -> {end:?}"
+        );
+        assert!(
+            end[1] > 0.5 && end[1] < 1.5,
+            "and kept it on the ground: {end:?}"
+        );
     }
 }

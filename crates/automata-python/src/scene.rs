@@ -13,12 +13,14 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use automata_core::scene_file::{Attributes, Script};
 use automata_physics::CharacterVelocity;
 use automata_renderer::Camera3D;
 use automata_scene::{EntityId, Name, Scene, Transform};
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 
+use crate::attributes::{map_from_py, AttributeMap, PyAttributes, PyPrefab};
 use crate::components::{extract_component, PyCamera3D, PyTransform, StagedComponent};
 
 /// A staged entity: a name plus the components to insert.
@@ -28,6 +30,10 @@ pub struct StagedEntity {
     pub name: Option<String>,
     /// Components to insert for the entity.
     pub components: Vec<StagedComponent>,
+    /// Custom attributes (Oberon's inspector "Attributes" section).
+    pub attributes: AttributeMap,
+    /// Path of the behaviour script attached in Oberon, if any.
+    pub script: Option<String>,
 }
 
 /// A game object builder. Attach components with [`Entity.add`], then place
@@ -48,9 +54,35 @@ impl PyEntity {
         Self {
             staged: StagedEntity {
                 name,
-                components: Vec::new(),
+                ..StagedEntity::default()
             },
         }
+    }
+
+    /// The entity's custom attributes, used like a dict
+    /// (`entity.attributes["health"] = 100`). Assign a dict to replace them
+    /// all.
+    #[getter]
+    fn attributes(slf: &Bound<'_, Self>) -> PyAttributes {
+        PyAttributes::staged(slf.clone().unbind())
+    }
+
+    #[setter]
+    fn set_attributes(&mut self, values: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.staged.attributes = map_from_py(values)?;
+        Ok(())
+    }
+
+    /// Path of the attached behaviour script (`.py`, relative to the scene
+    /// file), or `None`.
+    #[getter]
+    fn script(&self) -> Option<String> {
+        self.staged.script.clone()
+    }
+
+    #[setter]
+    fn set_script(&mut self, path: Option<String>) {
+        self.staged.script = path;
     }
 
     /// The entity's name, if any.
@@ -157,10 +189,15 @@ impl PyScene {
     }
 
     /// Stages an entity (the builder is copied; later edits to it do not
-    /// affect the scene). Returns the scene so calls can chain.
-    fn add<'py>(mut slf: PyRefMut<'py, Self>, entity: &PyEntity) -> PyRefMut<'py, Self> {
-        slf.entities.push(entity.staged.clone());
-        slf
+    /// affect the scene), or every entity of a `Prefab`. Returns the scene
+    /// so calls can chain.
+    fn add<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        entity: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let staged = staged_from_py(entity, None)?;
+        slf.entities.extend(staged);
+        Ok(slf)
     }
 
     /// The number of staged entities.
@@ -182,6 +219,15 @@ impl PyScene {
                 staged: staged.clone(),
             })
             .collect()
+    }
+
+    /// Finds the first staged entity named `name` (a copy), or `None`.
+    fn find(&self, name: &str) -> Option<PyEntity> {
+        self.entities
+            .iter()
+            .find(|e| e.name.as_deref() == Some(name))
+            .cloned()
+            .map(PyEntity::from_staged)
     }
 
     /// Serializes the staged scene to RON text (the scene-file format).
@@ -218,6 +264,54 @@ impl PyScene {
             .map_err(|err| pyo3::exceptions::PyIOError::new_err(err.to_string()))?;
         Self::from_ron(cls, &text)
     }
+}
+
+impl PyEntity {
+    /// Wraps staged data in a Python-visible builder.
+    pub fn from_staged(staged: StagedEntity) -> Self {
+        Self { staged }
+    }
+
+    /// The staged data.
+    pub fn staged(&self) -> &StagedEntity {
+        &self.staged
+    }
+
+    /// The staged data, mutably.
+    pub fn staged_mut(&mut self) -> &mut StagedEntity {
+        &mut self.staged
+    }
+}
+
+/// Staged entities from an `Entity` or a `Prefab` argument, the prefab
+/// optionally placed at `position`.
+fn staged_from_py(
+    obj: &Bound<'_, PyAny>,
+    position: Option<(f32, f32, f32)>,
+) -> PyResult<Vec<StagedEntity>> {
+    if let Ok(prefab) = obj.cast::<PyPrefab>() {
+        return Ok(prefab.borrow().instances(position, None));
+    }
+    let entity = obj
+        .cast::<PyEntity>()
+        .map_err(|_| PyTypeError::new_err("expected an Entity or a Prefab"))?;
+    let mut staged = entity.borrow().staged.clone();
+    if let Some((x, y, z)) = position {
+        let at = glam::Vec3::new(x, y, z);
+        let mut found = false;
+        for component in &mut staged.components {
+            if let StagedComponent::Transform(t) = component {
+                t.position = at;
+                found = true;
+            }
+        }
+        if !found {
+            staged
+                .components
+                .push(StagedComponent::Transform(Transform::from_position(at)));
+        }
+    }
+    Ok(vec![staged])
 }
 
 impl PyScene {
@@ -276,6 +370,16 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
             }
         }
     }
+    if !staged.attributes.is_empty() {
+        let _ = scene
+            .world_mut()
+            .insert_one(id, Attributes(staged.attributes.clone()));
+    }
+    if let Some(path) = &staged.script {
+        let _ = scene
+            .world_mut()
+            .insert_one(id, Script { path: path.clone() });
+    }
     id
 }
 
@@ -291,6 +395,9 @@ pub struct FrameWrites {
     pub character_velocities: HashMap<u64, CharacterVelocity>,
     /// Pending 3D camera replacements, keyed by entity bits.
     pub cameras_3d: HashMap<u64, Camera3D>,
+    /// Pending attribute maps (whole-map replacements), keyed by entity
+    /// bits.
+    pub attributes: HashMap<u64, AttributeMap>,
     /// Entities to spawn.
     pub spawns: Vec<StagedEntity>,
     /// Entities to despawn (recursively).
@@ -323,6 +430,13 @@ pub fn apply_writes(scene: &mut Scene, writes: &WriteQueue) {
             let _ = scene.world_mut().insert_one(entity, camera);
         }
     }
+    for (bits, map) in drained.attributes {
+        if let Some(entity) = EntityId::from_bits(bits) {
+            if scene.world().contains(entity) {
+                let _ = scene.world_mut().insert_one(entity, Attributes(map));
+            }
+        }
+    }
     for staged in drained.spawns {
         spawn_staged(scene, &staged);
     }
@@ -341,6 +455,8 @@ struct EntitySnapshot {
     transform: Option<Transform>,
     character_velocity: Option<CharacterVelocity>,
     camera_3d: Option<Camera3D>,
+    attributes: AttributeMap,
+    script: Option<String>,
 }
 
 /// Read access to the scene during the update callback.
@@ -367,15 +483,21 @@ impl SceneView {
                 Option<&Transform>,
                 Option<&CharacterVelocity>,
                 Option<&Camera3D>,
+                Option<&Attributes>,
+                Option<&Script>,
             )>()
             .iter()
-            .map(|(id, name, transform, velocity, camera)| EntitySnapshot {
-                id,
-                name: name.map(|n| n.0.clone()),
-                transform: transform.copied(),
-                character_velocity: velocity.copied(),
-                camera_3d: camera.copied(),
-            })
+            .map(
+                |(id, name, transform, velocity, camera, attributes, script)| EntitySnapshot {
+                    id,
+                    name: name.map(|n| n.0.clone()),
+                    transform: transform.copied(),
+                    character_velocity: velocity.copied(),
+                    camera_3d: camera.copied(),
+                    attributes: attributes.map(|a| a.0.clone()).unwrap_or_default(),
+                    script: script.map(|s| s.path.clone()),
+                },
+            )
             .collect();
         Self { snapshot, writes }
     }
@@ -422,10 +544,14 @@ impl SceneView {
             .collect()
     }
 
-    /// Spawns a staged entity (applied after the callback returns; look it
-    /// up by name from the next frame onward).
-    fn spawn(&self, entity: &PyEntity) {
-        self.writes.borrow_mut().spawns.push(entity.staged.clone());
+    /// Spawns a staged entity, or every entity of a `Prefab` (applied
+    /// after the callback returns; look it up by name from the next frame
+    /// onward). `position` places the entity / the prefab's root.
+    #[pyo3(signature = (entity, position=None))]
+    fn spawn(&self, entity: &Bound<'_, PyAny>, position: Option<(f32, f32, f32)>) -> PyResult<()> {
+        let staged = staged_from_py(entity, position)?;
+        self.writes.borrow_mut().spawns.extend(staged);
+        Ok(())
     }
 
     /// Despawns an entity by id (applied after the callback returns).
@@ -445,6 +571,8 @@ pub struct EntityView {
     transform: Option<Transform>,
     character_velocity: Option<CharacterVelocity>,
     camera_3d: Option<Camera3D>,
+    attributes: AttributeMap,
+    script: Option<String>,
     writes: WriteQueue,
 }
 
@@ -456,6 +584,8 @@ impl EntityView {
             transform: snapshot.transform,
             character_velocity: snapshot.character_velocity,
             camera_3d: snapshot.camera_3d,
+            attributes: snapshot.attributes.clone(),
+            script: snapshot.script.clone(),
             writes,
         }
     }
@@ -555,6 +685,20 @@ impl EntityView {
         };
         self.writes.borrow_mut().cameras_3d.insert(self.id, camera);
         Ok(())
+    }
+
+    /// The entity's custom attributes, used like a dict. Reads see the
+    /// start-of-frame values plus this frame's writes; writes apply after
+    /// the callback returns.
+    #[getter]
+    fn attributes(&self) -> PyAttributes {
+        PyAttributes::live(self.id, self.attributes.clone(), Rc::clone(&self.writes))
+    }
+
+    /// Path of the behaviour script attached in Oberon, or `None`.
+    #[getter]
+    fn script(&self) -> Option<String> {
+        self.script.clone()
     }
 
     /// Queues the entity (and its children) for despawn after the callback.

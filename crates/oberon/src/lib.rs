@@ -35,9 +35,11 @@
     clippy::single_match_else
 )]
 
+pub mod bridge;
 pub mod canvas;
 pub mod doc;
 pub mod fields;
+pub mod json;
 pub mod play;
 pub mod present;
 pub mod project;
