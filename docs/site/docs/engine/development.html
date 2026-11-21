@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="../_static/docs.css">
 <script>window.DOCS_ROOT = "../";</script>
 <script defer src="../_static/search-index.js"></script>
+<script defer src="../../dither.js"></script>
 <script defer src="../_static/docs.js"></script>
 </head>
 <body>
@@ -88,6 +89,15 @@ python3 -m http.server -d docs 8000     # preview at http://localhost:8000/site/
 <p>New pages must be added to <code>NAV</code> in the script to get a sidebar entry. The
 page styles and scripts live in <code>scripts/site/</code> and are copied into
 <code>docs/site/docs/_static/</code>.</p>
+<p>The art direction is editorial type (Geist with Instrument Serif for display,
+both OFL and vendored in <code>docs/site/fonts/</code>) with one-bit dithered art.
+<code>docs/site/dither.js</code> holds the shared art: the live ray-marched hero scene,
+the dither-to-colour "develop" effect on screenshots, and the swatch, moon,
+and wordmark drawings. The static stills in <code>docs/site/img/</code> (hero fallback
+and section banners) are exported from the same shader with
+<code>scripts/site/export-art.html</code>; its header lists the parameters for each.
+Everything honours <code>prefers-reduced-motion</code>, and the pages work without
+JavaScript or WebGL.</p>
 <h2 id="coding-conventions">Coding conventions<a class="anchor" href="#coding-conventions" aria-label="Link to this section">#</a></h2>
 <ul><li><strong>Edition 2021</strong>, MSRV 1.86 (bumped deliberately, not casually).</li><li><strong>No <code>unsafe</code></strong> in engine crates — enforced workspace-wide.</li><li><strong>Document every public item.</strong> <code>missing_docs</code> is a workspace lint and CI
 denies warnings. Document why, not just what.</li><li><strong>Errors</strong>: libraries define a crate-local <code>Error</code> enum with <code>thiserror</code>

@@ -1,0 +1,37 @@
+<!doctype html>
+<!--
+  Exports the one-bit stills used by the site (docs/site/img/*.png) from the
+  live shader in docs/site/dither.js, so the static art and the live hero
+  always match. Serve the repository root and open, for example:
+
+    python3 -m http.server 8000
+    http://localhost:8000/scripts/site/export-art.html?name=banner-docs&w=1520&h=480&t=3&o=0.35&sx=0.2
+
+  Parameters: w/h (CSS size), px (CSS px per dot, 2), t (time), o (orbit),
+  sx/sy (sun, -1..1). Then click the link to download the PNG.
+
+  Current stills:
+    hero-dither        w=1240 h=540  t=3
+    banner-docs        w=1520 h=480  t=3 o=0.35 sx=0.2
+    banner-tutorials   w=1520 h=480  t=9 o=1.6  sx=0.6  sy=0.4
+    banner-oberon      w=1520 h=480  t=6 o=-1.3 sx=-0.7 sy=0.6
+-->
+<html lang="en">
+<head><meta charset="utf-8"><title>Export dither art</title></head>
+<body style="margin:24px;background:#000;color:#f2f0eb;font:15px sans-serif">
+<canvas id="c" style="display:block;image-rendering:pixelated"></canvas>
+<p><a id="dl" style="color:inherit" download>Download PNG</a></p>
+<script src="../../docs/site/dither.js"></script>
+<script>
+  const q = new URLSearchParams(location.search);
+  const n = (k, d) => +(q.get(k) ?? d);
+  const c = document.getElementById("c");
+  c.style.width = n("w", 1240) + "px";
+  c.style.height = n("h", 540) + "px";
+  Dither.scene(c, { still: true, pixel: n("px", 2), time: n("t", 3), orbit: n("o", 0), sun: [n("sx", 0), n("sy", 0)] });
+  const dl = document.getElementById("dl");
+  dl.href = c.toDataURL("image/png");
+  dl.download = (q.get("name") || "dither") + ".png";
+</script>
+</body>
+</html>

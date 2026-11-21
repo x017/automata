@@ -44,6 +44,13 @@
     byId.forEach((_, id) => { const h = document.getElementById(id); if (h) observer.observe(h); });
   }
 
+  // ---------- screenshots develop from a dither (docs/site/dither.js) ----------
+  if (window.Dither) {
+    document.querySelectorAll(".prose img").forEach((img) => {
+      if (!img.closest(".banner")) window.Dither.develop(img, { hold: 200, duration: 800 });
+    });
+  }
+
   // ---------- search ----------
   const input = document.getElementById("search");
   const results = document.getElementById("results");

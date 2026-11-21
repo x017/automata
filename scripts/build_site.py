@@ -563,6 +563,7 @@ PAGE = """<!doctype html>
 <link rel="stylesheet" href="{static}/docs.css">
 <script>window.DOCS_ROOT = "{root}";</script>
 <script defer src="{static}/search-index.js"></script>
+<script defer src="{site}dither.js"></script>
 <script defer src="{static}/docs.js"></script>
 </head>
 <body>
@@ -585,7 +586,7 @@ PAGE = """<!doctype html>
   <nav class="sidebar" id="sidebar" aria-label="Documentation">{nav}</nav>
   <main id="content" class="article">
     <article class="prose">
-{body}
+{banner}{body}
     </article>
     <footer class="pager">{pager}</footer>
     <p class="edit"><a href="{edit}" rel="noopener">Edit this page on GitHub</a></p>
@@ -595,6 +596,25 @@ PAGE = """<!doctype html>
 </body>
 </html>
 """
+
+
+# Section home pages open with a dithered still of the scene renderer
+# (exported from docs/site/dither.js; see docs/development.md).
+BANNERS = {
+    "wiki/README.md": "banner-docs.png",
+    "wiki/tutorials/README.md": "banner-tutorials.png",
+    "wiki/oberon/README.md": "banner-oberon.png",
+}
+
+
+def banner_html(src: str, out_dir: Path) -> str:
+    name = BANNERS.get(src)
+    if not name:
+        return ""
+    href = os.path.relpath(SITE / "img" / name, out_dir).replace(os.sep, "/")
+    return (
+        f'<figure class="banner" aria-hidden="true"><img src="{href}" width="760" height="240" alt=""></figure>\n'
+    )
 
 
 def pager_html(index: int, flat: list[tuple[str, str]], out_dir: Path) -> str:
@@ -654,6 +674,8 @@ def build() -> dict[Path, str]:
             title=html.escape(ctx.title or label),
             description=html.escape(description[:200], quote=True),
             static=f"{root}_static",
+            site=os.path.relpath(SITE, out_dir).replace(os.sep, "/") + "/",
+            banner=banner_html(src, out_dir),
             root=root,
             home=os.path.relpath(SITE / "index.html", out_dir).replace(os.sep, "/"),
             repo=REPO_URL,

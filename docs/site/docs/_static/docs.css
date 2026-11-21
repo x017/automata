@@ -6,6 +6,17 @@
   font-display: swap;
 }
 @font-face {
+  font-family: "Instrument Serif";
+  src: url("../../fonts/InstrumentSerif-Regular.woff2") format("woff2");
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("../../fonts/InstrumentSerif-Italic.woff2") format("woff2");
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
   font-family: "Geist Mono";
   src: url("../../fonts/GeistMono-Variable.woff2") format("woff2");
   font-weight: 100 900;
@@ -23,6 +34,9 @@
   --dim: #a19f98;    /* 7.9:1 */
   --faint: #7c7a75;  /* 4.6:1: small labels only */
   --top: 60px;
+  --serif: "Instrument Serif", ui-serif, Georgia, serif;
+  /* one-bit dither tile (12.5%) for rules */
+  --dots-sparse: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' shape-rendering='crispEdges'%3E%3Crect width='1' height='1' fill='%23f2f0eb'/%3E%3C/svg%3E");
   --ease: cubic-bezier(.2, .7, .2, 1);
   color-scheme: dark;
 }
@@ -54,7 +68,10 @@ code, kbd, pre { font-family: "Geist Mono", ui-monospace, monospace; }
   display: flex; align-items: center; gap: 18px;
   padding: 0 24px;
   background: rgba(0, 0, 0, .94);
-  border-bottom: 1px solid var(--line);
+}
+.top::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+  background: var(--dots-sparse); opacity: .6; pointer-events: none;
 }
 .wordmark { font-weight: 700; letter-spacing: .14em; font-size: 14px; color: var(--text); text-decoration: none; }
 .section { color: var(--dim); text-decoration: none; font-size: 15px; padding-left: 18px; border-left: 1px solid var(--line); }
@@ -107,6 +124,7 @@ code, kbd, pre { font-family: "Geist Mono", ui-monospace, monospace; }
   padding: 28px 16px 48px 24px;
 }
 .nav-group + .nav-group { margin-top: 26px; }
+.nav-group h2::after { content: ""; display: block; height: 1px; margin-top: 8px; background: var(--dots-sparse); opacity: .5; }
 .nav-group h2 { margin: 0 0 6px 10px; font-size: 13px; font-weight: 500; color: var(--faint); letter-spacing: 0; }
 .nav-group ul { list-style: none; margin: 0; padding: 0; }
 .nav-group a {
@@ -152,8 +170,29 @@ code, kbd, pre { font-family: "Geist Mono", ui-monospace, monospace; }
   color: var(--text); font-weight: 600; letter-spacing: -0.02em; text-wrap: balance;
   position: relative;
 }
-.prose h1 { font-size: clamp(32px, 4vw, 44px); line-height: 1.1; letter-spacing: -0.035em; margin: 0 0 24px; }
-.prose h2 { font-size: 26px; line-height: 1.25; margin: 56px 0 14px; }
+.prose h1 {
+  font-family: var(--serif); font-weight: 400;
+  font-size: clamp(44px, 5.4vw, 64px); line-height: 1; letter-spacing: -0.02em; margin: 0 0 22px;
+}
+.prose h1 + p { font-size: 19.5px; line-height: 1.6; color: var(--text); margin-bottom: 28px; }
+.prose h2 { padding-top: 34px; }
+.prose h2::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: var(--dots-sparse); opacity: .45;
+}
+.prose h1 + h2, .prose h1 + p + h2 { padding-top: 0; }
+.prose h1 + h2::before, .prose h1 + p + h2::before { display: none; }
+
+.banner {
+  margin: 0 0 36px; border-radius: 14px; overflow: hidden; aspect-ratio: 760 / 240;
+  background: #000; box-shadow: 0 0 0 1px var(--line);
+}
+.prose .banner img { width: 100%; height: 100%; margin: 0; border-radius: 0; box-shadow: none; image-rendering: pixelated; object-fit: cover; }
+
+.develop { position: relative; display: block; margin: 28px 0; }
+.develop img { margin: 0 !important; }
+.develop canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 12px; image-rendering: pixelated; pointer-events: none; }
+.prose h2 { font-size: 26px; line-height: 1.25; margin: 52px 0 14px; }
 .prose h3 { font-size: 20px; line-height: 1.35; margin: 40px 0 10px; }
 .prose h4 { font-size: 17px; margin: 32px 0 8px; }
 .prose .anchor {
