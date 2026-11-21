@@ -1262,9 +1262,9 @@ mod tests {
         );
     }
 
-    /// Renders the shadow test scene with the given sun, returning the
-    /// average pixel luminance.
-    fn shadow_scene_luminance(renderer: &mut Renderer, sun: crate::Sun) -> f32 {
+    /// Renders the shadow test scene with the given sun, returning each
+    /// pixel's brightness (R + G + B).
+    fn shadow_scene_brightness(renderer: &mut Renderer, sun: crate::Sun) -> Vec<u32> {
         let size = renderer.size();
         let target = target(renderer.context().device(), size);
 
@@ -1295,12 +1295,10 @@ mod tests {
         );
         renderer.render_offscreen(&draw, &target);
 
-        let pixels = read_pixels(renderer, &target, size);
-        let sum: u64 = pixels
+        read_pixels(renderer, &target, size)
             .chunks_exact(4)
-            .map(|p| u64::from(p[0]) + u64::from(p[1]) + u64::from(p[2]))
-            .sum();
-        sum as f32 / (pixels.len() / 4) as f32
+            .map(|p| u32::from(p[0]) + u32::from(p[1]) + u32::from(p[2]))
+            .collect()
     }
 
     #[test]
@@ -1310,9 +1308,11 @@ mod tests {
             return;
         };
 
-        let sun = crate::Sun::new(glam::Vec3::new(-0.35, -1.0, -0.2));
-        let lit = shadow_scene_luminance(&mut renderer, sun);
-        let shadowed = shadow_scene_luminance(
+        // A low sun behind the blocker throws a long shadow across the
+        // ground towards the camera, where it isn't hidden by the blocker.
+        let sun = crate::Sun::new(glam::Vec3::new(-1.0, -0.5, 0.5));
+        let lit = shadow_scene_brightness(&mut renderer, sun);
+        let shadowed = shadow_scene_brightness(
             &mut renderer,
             crate::Sun {
                 shadows: true,
@@ -1320,9 +1320,26 @@ mod tests {
             },
         );
 
+        // Shadows only ever remove sunlight: a good share of the image gets
+        // clearly darker, and nothing gets brighter.
+        let darker = lit
+            .iter()
+            .zip(&shadowed)
+            .filter(|(l, s)| **s + 45 < **l)
+            .count();
+        let brighter = lit
+            .iter()
+            .zip(&shadowed)
+            .filter(|(l, s)| **s > **l + 45)
+            .count();
+        let pixels = lit.len();
         assert!(
-            shadowed < lit * 0.97,
-            "shadowed scene should be darker: lit={lit}, shadowed={shadowed}"
+            darker * 25 >= pixels,
+            "the shadow should cover at least 4% of the image: {darker} of {pixels} pixels darker"
+        );
+        assert!(
+            brighter * 100 <= pixels,
+            "shadows made {brighter} of {pixels} pixels brighter"
         );
     }
 }

@@ -196,7 +196,16 @@ pub(crate) fn create_sprite_pipeline(
             topology: wgpu::PrimitiveTopology::TriangleList,
             ..wgpu::PrimitiveState::default()
         },
-        depth_stencil: None,
+        // The main pass always has a depth buffer, so the pipeline must
+        // declare one too. Sprites draw on top of the 3D scene in submission
+        // order: they ignore depth and never write it.
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: crate::renderer::DEPTH_FORMAT,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Always),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: &shared.sprite_shader,
