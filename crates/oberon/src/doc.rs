@@ -1244,17 +1244,22 @@ impl Document {
         self.base_dir().join(p)
     }
 
-    /// The directory scene-relative paths are resolved against.
+    /// The directory scene-relative paths are resolved against, always
+    /// absolute (a scene opened as `oberon examples/fps/level.ron` must
+    /// not hand the script runner, which runs inside this folder, paths
+    /// relative to Oberon's own working directory).
     #[must_use]
     pub fn base_dir(&self) -> PathBuf {
-        self.path
+        let dir = self
+            .path
             .as_ref()
             .and_then(|p| p.parent())
             .filter(|p| !p.as_os_str().is_empty())
             .map_or_else(
                 || std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
                 Path::to_path_buf,
-            )
+            );
+        std::path::absolute(&dir).unwrap_or(dir)
     }
 
     /// `path` relative to [`Document::base_dir`] when inside it (forward
@@ -1420,6 +1425,19 @@ pub(crate) mod tests {
         )
         .unwrap();
         path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn relative_scene_paths_resolve_to_absolute_ones() {
+        // `oberon examples/fps/level.ron` from the repository root.
+        let mut doc = Document::new();
+        doc.path = Some(PathBuf::from("examples/fps/level.ron"));
+        let base = doc.base_dir();
+        assert!(base.is_absolute(), "{}", base.display());
+        assert!(base.ends_with("examples/fps"));
+        let script = doc.resolve("scripts/player.py");
+        assert!(script.is_absolute());
+        assert!(script.ends_with("examples/fps/scripts/player.py"));
     }
 
     #[test]

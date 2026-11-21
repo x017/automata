@@ -324,6 +324,9 @@ impl ScriptBridge {
     /// Fails when the runner can't be written or the interpreter can't be
     /// started (not installed / wrong path in preferences).
     pub fn start(python: &str, runtime_dir: &Path, cwd: &Path) -> std::io::Result<Self> {
+        // The interpreter runs in `cwd`, so a relative runner path would be
+        // looked up from there instead of from here.
+        let runtime_dir = &std::path::absolute(runtime_dir)?;
         std::fs::create_dir_all(runtime_dir)?;
         let runner = runtime_dir.join("bridge.py");
         for (path, text) in [
@@ -1062,6 +1065,30 @@ mod tests {
     }
 
     /// End to end with a real interpreter (skipped when none is installed).
+    #[test]
+    fn a_relative_runtime_dir_still_starts_the_runner() {
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        // Python runs in `cwd`; the runner path must not be relative to us.
+        let cwd = std::env::temp_dir().join(format!("oberon_bridge_cwd_{}", std::process::id()));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let runtime = PathBuf::from(format!(
+            "../../target/oberon_bridge_rel_{}",
+            std::process::id()
+        ));
+        let mut bridge = ScriptBridge::start(python, &runtime, &cwd).unwrap();
+        let msgs = pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+        assert!(
+            msgs.iter().any(|m| matches!(m, BridgeMsg::Ready { .. })),
+            "{msgs:?}"
+        );
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&runtime);
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
     #[test]
     fn runs_scripts_and_reports_errors() {
         let Some(python) = python() else {
