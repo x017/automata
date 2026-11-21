@@ -20,8 +20,10 @@ the full `ctx.physics` / `ctx.audio` / `ctx.scene` APIs, which accept
 script entities wherever they take an entity.
 """
 
+import json
 import os
 import sys
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 from . import _core
@@ -299,6 +301,59 @@ class SceneScripts:
         self.host.stop()
 
 
+class _FrameStats:
+    """Times frames for benchmarks (``examples/bench``).
+
+    Enabled by the ``AUTOMATA_FRAME_STATS`` environment variable (a JSON
+    file to write when the run ends), so exported builds can be measured
+    too. ``AUTOMATA_FRAME_STATS_WARMUP`` frames (default 30) are skipped;
+    after ``AUTOMATA_FRAME_STATS_SECONDS`` of measuring (default: no limit)
+    the game quits. A frame runs from one script tick to the next, so it
+    holds the scripts plus everything the engine does in between.
+    """
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.warmup = int(os.environ.get("AUTOMATA_FRAME_STATS_WARMUP", "30"))
+        seconds = os.environ.get("AUTOMATA_FRAME_STATS_SECONDS")
+        self.seconds = float(seconds) if seconds else None
+        self.frame_ms: List[float] = []
+        self.script_ms: List[float] = []
+        self._frames = 0
+        self._last: Optional[float] = None
+        self._last_script = 0.0
+        self._since: Optional[float] = None
+
+    @classmethod
+    def from_env(cls) -> "Optional[_FrameStats]":
+        path = os.environ.get("AUTOMATA_FRAME_STATS")
+        return cls(path) if path else None
+
+    def begin(self) -> float:
+        now = time.perf_counter()
+        if self._last is not None and self._frames > self.warmup:
+            self.frame_ms.append((now - self._last) * 1000.0)
+            self.script_ms.append(self._last_script * 1000.0)
+            if self._since is None:
+                self._since = self._last
+        self._last = now
+        self._frames += 1
+        return now
+
+    def end(self, started: float, ctx: Any) -> None:
+        self._last_script = time.perf_counter() - started
+        if self.seconds is not None and self._since is not None:
+            if time.perf_counter() - self._since > self.seconds:
+                ctx.quit()
+
+    def write(self) -> None:
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(
+                {"runner": "run_scene", "frame_ms": self.frame_ms, "script_ms": self.script_ms},
+                f,
+            )
+
+
 def run_scene(
     path: str,
     *,
@@ -322,9 +377,13 @@ def run_scene(
     game = Game(**game_options)
     game.load_scene(scene)
     scripts = SceneScripts(os.path.dirname(os.path.abspath(path)))
+    stats = _FrameStats.from_env()
 
     def tick(ctx: Any) -> None:
+        started = stats.begin() if stats is not None else 0.0
         scripts.tick(ctx)
+        if stats is not None:
+            stats.end(started, ctx)
         if update is not None:
             update(ctx)
 
@@ -332,3 +391,5 @@ def run_scene(
         return game.run(tick, max_frames=max_frames)
     finally:
         scripts.stop()
+        if stats is not None:
+            stats.write()

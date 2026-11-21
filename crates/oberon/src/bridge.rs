@@ -230,6 +230,9 @@ pub struct FrameReply {
     pub hud: Vec<HudItem>,
     /// A cursor lock request.
     pub lock: Option<bool>,
+    /// How long the scripts took to run this frame, in milliseconds (as
+    /// the runner measured it, without the trip over the pipe).
+    pub script_ms: Option<f32>,
 }
 
 /// What a script changed on one entity.
@@ -471,44 +474,71 @@ impl ScriptBridge {
         let mut out = Vec::new();
         loop {
             match self.rx.try_recv() {
-                Ok(Event::Line(line)) => {
-                    if let Some(msg) = parse_msg(&line) {
-                        if matches!(msg, BridgeMsg::Frame(_)) {
-                            self.in_flight = None;
-                            self.answered += 1;
-                        }
-                        out.push(msg);
-                    } else if !line.trim().is_empty() {
-                        // Something wrote to the real stdout (e.g. a C
-                        // extension); show it rather than lose it.
-                        out.push(BridgeMsg::Log {
-                            level: "info".into(),
-                            msg: line,
-                        });
-                    }
-                }
-                Ok(Event::Stderr(line)) => out.push(BridgeMsg::Log {
-                    level: "error".into(),
-                    msg: line,
-                }),
-                Ok(Event::Eof) | Err(TryRecvError::Disconnected) => {
-                    if !self.exited {
-                        self.exited = true;
-                        self.in_flight = None;
-                        let status = self
-                            .child
-                            .try_wait()
-                            .ok()
-                            .flatten()
-                            .map_or_else(|| "closed".to_string(), |s| s.to_string());
-                        out.push(BridgeMsg::Exited(status));
-                    }
+                Ok(event) => self.handle(event, &mut out),
+                Err(TryRecvError::Disconnected) => {
+                    self.handle(Event::Eof, &mut out);
                     break;
                 }
                 Err(TryRecvError::Empty) => break,
             }
+            if self.exited {
+                break;
+            }
         }
         out
+    }
+
+    /// Like [`poll`](Self::poll), but first blocks up to `timeout` for the
+    /// runner to say something (for tools that run frames in lock-step).
+    pub fn wait(&mut self, timeout: Duration) -> Vec<BridgeMsg> {
+        let mut out = Vec::new();
+        match self.rx.recv_timeout(timeout) {
+            Ok(event) => self.handle(event, &mut out),
+            Err(mpsc::RecvTimeoutError::Disconnected) => self.handle(Event::Eof, &mut out),
+            Err(mpsc::RecvTimeoutError::Timeout) => return out,
+        }
+        if !self.exited {
+            out.extend(self.poll());
+        }
+        out
+    }
+
+    fn handle(&mut self, event: Event, out: &mut Vec<BridgeMsg>) {
+        match event {
+            Event::Line(line) => {
+                if let Some(msg) = parse_msg(&line) {
+                    if matches!(msg, BridgeMsg::Frame(_)) {
+                        self.in_flight = None;
+                        self.answered += 1;
+                    }
+                    out.push(msg);
+                } else if !line.trim().is_empty() {
+                    // Something wrote to the real stdout (e.g. a C
+                    // extension); show it rather than lose it.
+                    out.push(BridgeMsg::Log {
+                        level: "info".into(),
+                        msg: line,
+                    });
+                }
+            }
+            Event::Stderr(line) => out.push(BridgeMsg::Log {
+                level: "error".into(),
+                msg: line,
+            }),
+            Event::Eof => {
+                if !self.exited {
+                    self.exited = true;
+                    self.in_flight = None;
+                    let status = self
+                        .child
+                        .try_wait()
+                        .ok()
+                        .flatten()
+                        .map_or_else(|| "closed".to_string(), |s| s.to_string());
+                    out.push(BridgeMsg::Exited(status));
+                }
+            }
+        }
     }
 
     /// Asks the runner to call `stop` hooks and exit, then makes sure it
@@ -831,6 +861,8 @@ pub fn parse_msg(line: &str) -> Option<BridgeMsg> {
                     Some(Json::Bool(b)) => Some(*b),
                     _ => None,
                 },
+                #[allow(clippy::cast_possible_truncation)]
+                script_ms: v.get("ms").and_then(Json::as_f64).map(|ms| ms as f32),
             })
         }
         "bye" => BridgeMsg::Bye,

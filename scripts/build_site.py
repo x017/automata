@@ -79,6 +79,7 @@ NAV: list[tuple[str, list[tuple[str, str]]]] = [
         ("wiki/guides/scene-files.md", "Scene files"),
         ("wiki/guides/project-structure.md", "Project structure"),
         ("wiki/guides/testing.md", "Testing"),
+        ("wiki/guides/performance.md", "Performance"),
     ]),
     ("Reference", [
         ("wiki/api-reference.md", "API reference"),

@@ -80,6 +80,7 @@ hours.
 | Pass messages and store game state | [Guide: Events & Resources](guides/events-and-resources.md) |
 | Structure a big game with classes | [Guide: OOP Style](guides/oop-style.md) |
 | Test my game headlessly in CI | [Guide: Testing](guides/testing.md) |
+| Know how many scripted entities a frame can afford | [Guide: Performance](guides/performance.md) |
 | Organize a project past one file | [Guide: Project Structure](guides/project-structure.md) |
 | Save and load scenes as files | [Guide: Scene Files](guides/scene-files.md) |
 

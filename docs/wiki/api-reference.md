@@ -23,6 +23,7 @@ at.Game(
     target_fps=None,                    # int fps cap; None = engine default 60
     clear_color=None,                   # (r, g, b, a) window background
     graphics=None,                      # at.GraphicsQuality.HIGH etc.
+    fixed_delta=None,                   # headless: every frame advances exactly this many seconds
 )
 ```
 

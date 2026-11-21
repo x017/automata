@@ -55,6 +55,16 @@ pub struct EngineConfig {
     /// keeping simulation deterministic. Set to `None` to disable the
     /// physics step entirely (e.g. turn-based games).
     pub physics_timestep: Option<f32>,
+
+    /// Headless only: advance every frame by exactly this many seconds
+    /// instead of the measured wall-clock time (default `None`).
+    ///
+    /// Makes headless runs deterministic however fast or slow the machine
+    /// is: `ctx.time` moves by the same amount each frame and physics takes
+    /// exactly one fixed step per frame when this equals
+    /// [`physics_timestep`](Self::physics_timestep). Benchmarks use it so a
+    /// slow frame doesn't trigger catch-up physics steps.
+    pub fixed_delta: Option<f32>,
 }
 
 impl EngineConfig {
@@ -85,6 +95,7 @@ impl Default for EngineConfig {
             },
             graphics_quality: automata_renderer::GraphicsQuality::default(),
             physics_timestep: Some(1.0 / 60.0),
+            fixed_delta: None,
         }
     }
 }

@@ -303,6 +303,7 @@ class Game(_core.Game):
     target_fps: Optional[int] = None
     clear_color: Optional[Tuple[float, float, float, float]] = None
     graphics: Optional[GraphicsQuality] = None
+    fixed_delta: Optional[float] = None
 
     _CONFIG_KEYS = (
         "title",
@@ -314,6 +315,7 @@ class Game(_core.Game):
         "target_fps",
         "clear_color",
         "graphics",
+        "fixed_delta",
     )
 
     def __new__(cls, **kwargs: Any) -> "Game":

@@ -499,8 +499,13 @@ impl Application {
         let mut draw = automata_renderer::DrawList::new();
         let mut frame_start = Instant::now();
 
+        let fixed = self
+            .config
+            .fixed_delta
+            .filter(|d| d.is_finite() && *d > 0.0)
+            .map(Duration::from_secs_f32);
         while !self.quit_requested {
-            let delta = frame_start.elapsed();
+            let delta = fixed.unwrap_or_else(|| frame_start.elapsed());
             frame_start = Instant::now();
             self.time.advance(delta);
             self.world.events.update();
@@ -599,6 +604,24 @@ mod tests {
         // the loop body never executes.
         app.run(|ctx| ctx.request_quit()).unwrap();
         assert_eq!(app.time().frame_count(), 0);
+    }
+
+    #[test]
+    fn a_fixed_delta_advances_every_headless_frame_by_the_same_amount() {
+        let mut app = Application::new(EngineConfig {
+            fixed_delta: Some(0.25),
+            ..test_config()
+        });
+        let mut frames = 0;
+        app.run(|ctx| {
+            frames += 1;
+            if frames == 8 {
+                ctx.request_quit();
+            }
+        })
+        .unwrap();
+        assert_eq!(app.time().frame_count(), 8);
+        assert!((app.time().elapsed_seconds() - 2.0).abs() < 1e-9);
     }
 
     #[test]

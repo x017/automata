@@ -703,6 +703,7 @@ class Game:
         target_fps: Optional[int] = None,
         clear_color: Optional[tuple[float, float, float, float]] = None,
         graphics: Optional[str] = None,
+        fixed_delta: Optional[float] = None,
     ) -> None: ...
     @property
     def state(self) -> str: ...

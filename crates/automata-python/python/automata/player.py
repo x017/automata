@@ -8,8 +8,10 @@ project's scenes, scripts, and assets.
 ``oop_platformer.py``) or a ``start_scene`` (an Oberon project, run with its
 behaviour scripts through ``automata.run_scene``).
 
-Options: ``--headless`` (no window) and ``--frames N`` (stop after N frames).
-Anything else is passed on to a ``main`` script in ``sys.argv``.
+Options: ``--headless`` (no window), ``--frames N`` (stop after N frames)
+and ``--fixed-delta SECONDS`` (headless: every frame advances by exactly
+that much; benchmarks use it). Anything else is passed on to a ``main``
+script in ``sys.argv``.
 """
 
 import json
@@ -20,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 
 def _options(argv: List[str]) -> Dict[str, Any]:
-    opts: Dict[str, Any] = {"headless": False, "frames": None, "rest": []}
+    opts: Dict[str, Any] = {"headless": False, "frames": None, "fixed_delta": None, "rest": []}
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -31,6 +33,11 @@ def _options(argv: List[str]) -> Dict[str, Any]:
             i += 1
         elif arg.startswith("--frames="):
             opts["frames"] = int(arg.split("=", 1)[1])
+        elif arg == "--fixed-delta" and i + 1 < len(argv):
+            opts["fixed_delta"] = float(argv[i + 1])
+            i += 1
+        elif arg.startswith("--fixed-delta="):
+            opts["fixed_delta"] = float(arg.split("=", 1)[1])
         else:
             opts["rest"].append(arg)
         i += 1
@@ -72,6 +79,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         game_options["resolution"] = (int(resolution[0]), int(resolution[1]))
     if opts["headless"]:
         game_options["headless"] = True
+        if opts["fixed_delta"] is not None:
+            game_options["fixed_delta"] = opts["fixed_delta"]
     frames = at.run_scene(scene, max_frames=opts["frames"], **game_options)
     if opts["headless"]:
         print(f"ran {frames} frames of {manifest['start_scene']}")

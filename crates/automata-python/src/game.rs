@@ -41,9 +41,12 @@ impl PyGame {
     /// `clear_color=(r, g, b, a)` sets the color the window is cleared to
     /// each frame (components 0.0..=1.0); the default is a very dark blue.
     /// `graphics` is a quality preset: `"low"` (no shadows), `"medium"`,
-    /// `"high"` (default), or `"ultra"`.
+    /// `"high"` (default), or `"ultra"`. `fixed_delta` (headless only)
+    /// advances every frame by exactly that many seconds instead of the
+    /// measured time: deterministic tests, and benchmarks where a slow frame
+    /// mustn't trigger catch-up physics steps.
     #[new]
-    #[pyo3(signature = (title="AUTOMATA", resolution=(1280, 720), headless=false, resizable=true, vsync=true, log_filter=None, target_fps=None, clear_color=None, graphics=None))]
+    #[pyo3(signature = (title="AUTOMATA", resolution=(1280, 720), headless=false, resizable=true, vsync=true, log_filter=None, target_fps=None, clear_color=None, graphics=None, fixed_delta=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         title: &str,
@@ -55,10 +58,16 @@ impl PyGame {
         target_fps: Option<u32>,
         clear_color: Option<(f64, f64, f64, f64)>,
         graphics: Option<&str>,
+        fixed_delta: Option<f32>,
     ) -> PyResult<Self> {
         if target_fps == Some(0) {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "target_fps must be positive; omit it to disable frame pacing",
+            ));
+        }
+        if fixed_delta.is_some_and(|d| !(d.is_finite() && d > 0.0)) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "fixed_delta must be a positive number of seconds",
             ));
         }
         let mut config = EngineConfig {
@@ -72,6 +81,7 @@ impl PyGame {
                 })
             },
             target_fps,
+            fixed_delta,
             ..EngineConfig::new(title)
         };
         if let Some(filter) = log_filter {

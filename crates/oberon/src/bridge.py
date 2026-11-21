@@ -20,6 +20,7 @@ import json
 import math
 import os
 import sys
+import time
 
 import _automata_script_api as api
 
@@ -201,14 +202,143 @@ def _ray_mesh(o, d, mesh):
     return best
 
 
-def raycast_shapes(shapes, origin, direction, max_distance, ignore_id=None, meshes=None):
+def _hit_shape(s, o, d, meshes):
+    """Ray ``o + t·d`` (unit ``d``) against one shape: ``(t, normal)`` or None."""
+    kind = s[1]
+    c = (s[2], s[3], s[4])
+    if kind == "ball":
+        return _ray_sphere(o, d, c, s[5])
+    q = (s[5], s[6], s[7], s[8])
+    qi = _qinv(q)
+    lo = _qrot(qi, (o[0] - c[0], o[1] - c[1], o[2] - c[2]))
+    ld = _qrot(qi, d)
+    if kind == "box":
+        hit = _ray_box(lo, ld, (s[9], s[10], s[11]))
+    elif kind == "mesh":
+        hit = _ray_mesh(lo, ld, (meshes or {}).get(s[9]))
+    else:
+        hit = _ray_capsule(lo, ld, s[9], s[10])
+    if hit:
+        hit = (hit[0], _qrot(q, hit[1]))
+    return hit
+
+
+def _bound(s, meshes):
+    """A sphere radius around a shape's centre that contains all of it."""
+    kind = s[1]
+    if kind == "ball":
+        return s[5]
+    if kind == "box":
+        return math.sqrt(s[9] * s[9] + s[10] * s[10] + s[11] * s[11])
+    if kind == "capsule":
+        return s[9] + s[10]
+    mesh = (meshes or {}).get(s[9])
+    if mesh is None:
+        return 0.0
+    return math.sqrt(sum(v * v for v in mesh.center)) + math.sqrt(sum(v * v for v in mesh.half))
+
+
+class ShapeIndex:
+    """The frame's colliders, bucketed in a uniform grid so a ray only tests
+    the shapes it passes near (scenes with thousands of colliders cast
+    thousands of rays a frame). Small scenes skip the grid."""
+
+    GRID_FROM = 32
+
+    def __init__(self, shapes, meshes=None):
+        self.shapes = shapes
+        self.meshes = meshes
+        self.bounds = [_bound(s, meshes) for s in shapes]
+        self.cells = None
+        self.big = []
+        if len(shapes) < self.GRID_FROM:
+            return
+        radii = sorted(self.bounds)
+        self.cell = max(0.5, 2.0 * radii[len(radii) // 2])
+        inv = 1.0 / self.cell
+        cells = {}
+        for i, s in enumerate(shapes):
+            r = self.bounds[i]
+            if r > 4.0 * self.cell:
+                self.big.append(i)
+                continue
+            lo = [math.floor((s[2 + k] - r) * inv) for k in range(3)]
+            hi = [math.floor((s[2 + k] + r) * inv) for k in range(3)]
+            for x in range(lo[0], hi[0] + 1):
+                for y in range(lo[1], hi[1] + 1):
+                    for z in range(lo[2], hi[2] + 1):
+                        cells.setdefault((x, y, z), []).append(i)
+        self.cells = cells
+
+    def _test(self, i, o, d, max_distance, ignore_id, best):
+        s = self.shapes[i]
+        if ignore_id is not None and s[0] == ignore_id:
+            return best
+        # Cheap reject: the ray misses the shape's bounding sphere.
+        r = self.bounds[i]
+        cx, cy, cz = s[2] - o[0], s[3] - o[1], s[4] - o[2]
+        along = cx * d[0] + cy * d[1] + cz * d[2]
+        limit = max_distance if best is None else best[3]
+        if along + r < 0.0 or along - r > limit:
+            return best
+        if cx * cx + cy * cy + cz * cz - along * along > r * r + 1e-6:
+            return best
+        hit = _hit_shape(s, o, d, self.meshes)
+        if hit is None or hit[0] > limit:
+            return best
+        t, n = hit
+        return (s[0], (o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t), n, t)
+
+    def raycast(self, o, d, max_distance, ignore_id=None):
+        """The closest hit along a unit-direction ray: ``(id, point, normal, t)``."""
+        best = None
+        if self.cells is None:
+            for i in range(len(self.shapes)):
+                best = self._test(i, o, d, max_distance, ignore_id, best)
+            return best
+        for i in self.big:
+            best = self._test(i, o, d, max_distance, ignore_id, best)
+        # Walk the grid cells along the ray (Amanatides & Woo), nearest first;
+        # stop once a hit is closer than the next cell.
+        size = self.cell
+        cell = [math.floor(o[k] / size) for k in range(3)]
+        step = [0, 0, 0]
+        t_max = [math.inf] * 3
+        t_delta = [math.inf] * 3
+        for k in range(3):
+            if d[k] > 1e-12:
+                step[k] = 1
+                t_max[k] = ((cell[k] + 1) * size - o[k]) / d[k]
+                t_delta[k] = size / d[k]
+            elif d[k] < -1e-12:
+                step[k] = -1
+                t_max[k] = (cell[k] * size - o[k]) / d[k]
+                t_delta[k] = -size / d[k]
+        seen = set()
+        t = 0.0
+        while t <= max_distance:
+            for i in self.cells.get((cell[0], cell[1], cell[2]), ()):
+                if i not in seen:
+                    seen.add(i)
+                    best = self._test(i, o, d, max_distance, ignore_id, best)
+            k = 0 if t_max[0] <= t_max[1] and t_max[0] <= t_max[2] else (1 if t_max[1] <= t_max[2] else 2)
+            t = t_max[k]
+            if best is not None and best[3] <= t:
+                break
+            cell[k] += step[k]
+            t_max[k] += t_delta[k]
+        return best
+
+
+def raycast_shapes(shapes, origin, direction, max_distance, ignore_id=None, meshes=None, index=None):
     """The closest hit among collider shapes: ``(id, point, normal, t)``.
 
     Shapes are ``[id, "box", cx, cy, cz, qx, qy, qz, qw, hx, hy, hz]``,
     ``[id, "ball", cx, cy, cz, r]``,
     ``[id, "capsule", cx, cy, cz, qx, qy, qz, qw, half_height, r]`` or
     ``[id, "mesh", cx, cy, cz, qx, qy, qz, qw, key]``, where ``key`` names
-    a :class:`Mesh` in ``meshes``.
+    a :class:`Mesh` in ``meshes``. Pass a :class:`ShapeIndex` of the same
+    shapes to reuse it across rays.
     """
     o = tuple(float(v) for v in origin)[:3]
     d = tuple(float(v) for v in direction)[:3]
@@ -216,34 +346,9 @@ def raycast_shapes(shapes, origin, direction, max_distance, ignore_id=None, mesh
     if length < 1e-9:
         return None
     d = (d[0] / length, d[1] / length, d[2] / length)
-    best = None
-    for s in shapes:
-        sid, kind = s[0], s[1]
-        if ignore_id is not None and sid == ignore_id:
-            continue
-        c = (s[2], s[3], s[4])
-        if kind == "ball":
-            hit = _ray_sphere(o, d, c, s[5])
-        else:
-            q = (s[5], s[6], s[7], s[8])
-            qi = _qinv(q)
-            lo = _qrot(qi, (o[0] - c[0], o[1] - c[1], o[2] - c[2]))
-            ld = _qrot(qi, d)
-            if kind == "box":
-                hit = _ray_box(lo, ld, (s[9], s[10], s[11]))
-            elif kind == "mesh":
-                hit = _ray_mesh(lo, ld, (meshes or {}).get(s[9]))
-            else:
-                hit = _ray_capsule(lo, ld, s[9], s[10])
-            if hit:
-                hit = (hit[0], _qrot(q, hit[1]))
-        if hit is None or hit[0] > max_distance:
-            continue
-        if best is None or hit[0] < best[3]:
-            t, n = hit
-            p = (o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t)
-            best = (sid, p, n, t)
-    return best
+    if index is None:
+        index = ShapeIndex(shapes, meshes)
+    return index.raycast(o, d, float(max_distance), ignore_id)
 
 
 # --------------------------------------------------------------------------
@@ -258,9 +363,18 @@ class BridgeBackend(api.Backend):
         self.shapes = []
         self.meshes = {}
         self.playing = set()
+        self.index = None
+
+    def set_shapes(self, shapes):
+        self.shapes = shapes
+        self.index = None  # rebuilt by the frame's first ray cast
 
     def raycast(self, origin, direction, max_distance, ignore_id):
-        return raycast_shapes(self.shapes, origin, direction, max_distance, ignore_id, self.meshes)
+        if self.index is None:
+            self.index = ShapeIndex(self.shapes, self.meshes)
+        return raycast_shapes(
+            self.shapes, origin, direction, max_distance, ignore_id, self.meshes, self.index
+        )
 
     def source_playing(self, entity):
         return entity.id in self.playing
@@ -306,11 +420,12 @@ class Runner:
             mouse.get("delta", (0.0, 0.0)),
             mouse.get("locked", False),
         )
-        self.backend.shapes = msg.get("cols", [])
         # Mesh geometry arrives once per session, keyed for "mesh" shapes.
         for key, verts, indices in msg.get("meshes", []):
             self.backend.meshes[key] = Mesh(verts, indices)
+        self.backend.set_shapes(msg.get("cols", []))
         self.backend.playing = set(msg.get("playing", []))
+        started = time.perf_counter()
         out = self.host.frame(
             msg.get("entities", []),
             delta=msg.get("dt", 0.0),
@@ -319,7 +434,13 @@ class Runner:
             screen=msg.get("screen"),
         )
         sys.stdout.flush()
-        reply = {"op": "frame", "frame": self.host.ctx.time.frame, "writes": out.writes}
+        reply = {
+            "op": "frame",
+            "frame": self.host.ctx.time.frame,
+            "writes": out.writes,
+            # Time spent in scripts (ms), for profiling the frame.
+            "ms": round((time.perf_counter() - started) * 1000.0, 3),
+        }
         if out.sounds:
             reply["sounds"] = out.sounds
         if out.hud:

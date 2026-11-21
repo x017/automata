@@ -314,7 +314,34 @@ supports both natively.
 
 ---
 
-## 6. Performance baseline 🟢 decided (not started)
+## 6. Performance baseline ✅ done
+
+**Shipped:** `examples/bench/` (scene generator, the shared `bench.py`
+script, and `run.py`, which prints the table), plus `oberon --bench`, a
+headless Play harness. `run_scene` and exported games write frame stats
+when `AUTOMATA_FRAME_STATS` is set. The bridge reports its script time in
+each frame reply. `at.Game(fixed_delta=…)` and the player's
+`--fixed-delta` make every frame advance 1/60 s, so physics doesn't run
+catch-up steps. The numbers and limits are in the *Performance* guide
+(`docs/wiki/guides/performance.md`).
+
+Two fixes came out of the first run:
+
+- **Ray casts were linear in the collider count** in both runners, so
+  thousands of ray-casting scripts were quadratic. `ColliderSnapshot` now
+  builds a BVH once it has 32 or more colliders, and the bridge buckets
+  colliders in a grid. Physics at 5,000 entities in `run_scene` went from
+  1,066 ms to 274 ms per frame. In Oberon Play, physics at 100 entities
+  went from 24 ms to 7 ms.
+- **Unpaced headless runs did catch-up physics steps** on slow frames, up
+  to four per frame, which made the bench measure a spiral rather than a
+  frame. Fixed with `fixed_delta`.
+
+Baseline (2-thread Xeon VM): about 15 µs per plain scripted entity and
+50 µs per scripted character controller in a game. Oberon Play takes 1.5
+to 2 times as long.
+
+The original decision:
 
 **Decision: run on demand and publish the numbers in the docs** (no CI
 tracking or failures).
@@ -338,10 +365,10 @@ tracking or failures).
 
 Agreed: **quick wins first.**
 
-1. **Shared scripting API** (#2). Everything else touches the script API.
-2. **HUD text** (#3, phase 1).
-3. **Mesh colliders** (#5).
-4. **Performance baseline** (#6).
+1. **Shared scripting API** (#2) ✅. Everything else touches the script API.
+2. **HUD text** (#3, phase 1) ✅.
+3. **Mesh colliders** (#5) ✅.
+4. **Performance baseline** (#6) ✅.
 5. **Skeletal animation** (#4, phases 1–4).
 6. **Game UI**, the rest (#3, phases 2–5).
 7. **Android** (#1), then the web.

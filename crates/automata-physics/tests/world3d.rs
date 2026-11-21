@@ -392,6 +392,69 @@ fn collider_snapshots_answer_raycasts_and_list_world_shapes() {
     }
 }
 
+/// Big snapshots answer through a bounding-volume tree; the answers must
+/// be the ones testing every collider gives (closest hit, exclusions,
+/// sensors, the distance limit).
+#[test]
+fn big_collider_snapshots_answer_raycasts_like_small_ones() {
+    let mut scene = SceneWorld::new();
+    let mut balls = Vec::new();
+    for i in 0..200_u16 {
+        let x = f32::from(i % 20) * 2.0;
+        let z = f32::from(i / 20) * 2.0;
+        let mut collider = Collider3D::ball(0.5);
+        if i == 3 {
+            collider.sensor = true;
+        }
+        balls.push(scene.spawn((Transform::from_position(Vec3::new(x, 0.0, z)), collider)));
+    }
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 1);
+    let snap = physics.collider_snapshot();
+    assert_eq!(snap.len(), 200);
+    let solid = RayFilter::no_sensors();
+
+    // Along the first row: the nearest ball, then past an excluded one.
+    let hit = snap
+        .cast_ray(Vec3::new(-5.0, 0.0, 0.0), Vec3::X, 100.0, &solid)
+        .unwrap();
+    assert_eq!(hit.entity, balls[0]);
+    assert!((hit.distance - 4.5).abs() < 1e-3, "{}", hit.distance);
+    assert!((hit.normal.x + 1.0).abs() < 1e-3);
+    let next = snap
+        .cast_ray(
+            Vec3::new(-5.0, 0.0, 0.0),
+            Vec3::X,
+            100.0,
+            &solid.clone().excluding(balls[0]),
+        )
+        .unwrap();
+    assert_eq!(next.entity, balls[1]);
+    assert!((next.distance - 6.5).abs() < 1e-3);
+    // Straight down onto every ball; the sensor is skipped unless asked for.
+    for (i, ball) in balls.iter().enumerate() {
+        let position = scene.get::<&Transform>(*ball).unwrap().position;
+        let from = position + Vec3::Y * 3.0;
+        let hit = snap.cast_ray(from, -Vec3::Y, 10.0, &solid);
+        if i == 3 {
+            assert!(hit.is_none());
+            let any = snap
+                .cast_ray(from, -Vec3::Y, 10.0, &RayFilter::everything())
+                .unwrap();
+            assert_eq!(any.entity, *ball);
+        } else {
+            let hit = hit.unwrap();
+            assert_eq!(hit.entity, *ball);
+            assert!((hit.distance - 2.5).abs() < 1e-3);
+        }
+        assert!(snap.cast_ray(from, -Vec3::Y, 2.0, &solid).is_none());
+    }
+    // Between the rows: nothing.
+    assert!(snap
+        .cast_ray(Vec3::new(-5.0, 0.0, 1.0), Vec3::X, 100.0, &solid)
+        .is_none());
+}
+
 #[test]
 fn a_collider_without_a_body_is_static_scenery_that_scripts_can_move() {
     let mut scene = SceneWorld::new();

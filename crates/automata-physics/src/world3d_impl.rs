@@ -720,7 +720,10 @@ impl PhysicsWorld3D {
                 })
             })
             .collect();
-        ColliderSnapshot { colliders }
+        ColliderSnapshot {
+            colliders,
+            tree: std::sync::OnceLock::new(),
+        }
     }
 
     /// Shape-cast: sweep a shape from `origin` along `direction` and report
@@ -817,12 +820,20 @@ struct SnapshotCollider {
 #[derive(Clone, Default)]
 pub struct ColliderSnapshot {
     colliders: Vec<SnapshotCollider>,
+    /// A bounding-volume tree over `colliders`, built by the first ray cast
+    /// once there are enough colliders for it to pay off (scripts in big
+    /// scenes cast thousands of rays a frame).
+    tree: std::sync::OnceLock<r3::parry::partitioning::Bvh>,
 }
+
+/// Colliders below this count are simply all tested.
+const SNAPSHOT_TREE_FROM: usize = 32;
 
 impl std::fmt::Debug for ColliderSnapshot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ColliderSnapshot")
             .field("colliders", &self.colliders.len())
+            .field("tree", &self.tree.get().is_some())
             .finish()
     }
 }
@@ -895,22 +906,50 @@ impl ColliderSnapshot {
         }
         let dir = direction / len;
         let ray = r3::geometry::Ray::new(origin, dir);
-        let mut best: Option<RayHit> = None;
-        for c in &self.colliders {
-            if (filter.exclude_sensors && c.sensor) || filter.exclude_entity == Some(c.entity) {
-                continue;
-            }
-            let limit = best.as_ref().map_or(max_distance, |b| b.distance);
-            if let Some(hit) = c
-                .shape
+        let skip = |c: &SnapshotCollider| {
+            (filter.exclude_sensors && c.sensor) || filter.exclude_entity == Some(c.entity)
+        };
+        let hit_at = |c: &SnapshotCollider, limit: f32| {
+            c.shape
                 .cast_ray_and_get_normal(&c.pose, &ray, limit, filter.solid)
-            {
-                best = Some(RayHit {
+                .map(|hit| RayHit {
                     entity: c.entity,
                     point: origin + dir * hit.time_of_impact,
                     normal: hit.normal,
                     distance: hit.time_of_impact,
-                });
+                })
+        };
+        if self.colliders.len() >= SNAPSHOT_TREE_FROM {
+            let tree = self.tree.get_or_init(|| {
+                let leaves: Vec<_> = self
+                    .colliders
+                    .iter()
+                    .map(|c| c.shape.compute_aabb(&c.pose))
+                    .collect();
+                r3::parry::partitioning::Bvh::from_leaves(
+                    r3::parry::partitioning::BvhBuildStrategy::default(),
+                    &leaves,
+                )
+            });
+            let (index, toi) = tree.cast_ray(&ray, max_distance, |i, limit| {
+                let c = &self.colliders[i as usize];
+                if skip(c) {
+                    return None;
+                }
+                c.shape.cast_ray(&c.pose, &ray, limit, filter.solid)
+            })?;
+            // The tree reports the distance; ask the winner for its normal.
+            let c = &self.colliders[index as usize];
+            return hit_at(c, toi + 1e-4);
+        }
+        let mut best: Option<RayHit> = None;
+        for c in &self.colliders {
+            if skip(c) {
+                continue;
+            }
+            let limit = best.as_ref().map_or(max_distance, |b| b.distance);
+            if let Some(hit) = hit_at(c, limit) {
+                best = Some(hit);
             }
         }
         best

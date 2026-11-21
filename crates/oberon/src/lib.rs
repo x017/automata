@@ -35,6 +35,7 @@
     clippy::single_match_else
 )]
 
+pub mod bench;
 pub mod bridge;
 pub mod build;
 pub mod canvas;
