@@ -549,9 +549,9 @@ pub fn complete(buf: &Buffer, pos: Pos, names: &SceneNames) -> Option<Vec<Comple
             ArgKind::Attribute => names.attributes.clone(),
         };
         let (kind_char, detail) = match kind {
-            ArgKind::Key => ('k', "key"),
-            ArgKind::EntityName => ('c', "entity"),
-            ArgKind::Attribute => ('v', "attribute"),
+            ArgKind::Key => (super::CompletionKind::Key, "key"),
+            ArgKind::EntityName => (super::CompletionKind::Entity, "entity"),
+            ArgKind::Attribute => (super::CompletionKind::Property, "attribute"),
         };
         return Some(
             list.into_iter()
@@ -577,7 +577,11 @@ pub fn complete(buf: &Buffer, pos: Pos, names: &SceneNames) -> Option<Vec<Comple
                 label: m.name.to_string(),
                 detail: m.sig.to_string(),
                 insert: m.name.to_string(),
-                kind: if m.method { 'm' } else { 'v' },
+                kind: if m.method {
+                    super::CompletionKind::Method
+                } else {
+                    super::CompletionKind::Property
+                },
             })
             .collect(),
     )

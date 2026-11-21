@@ -77,6 +77,8 @@ struct Input {
     pressed: bool,
     /// A right press happened since the last frame.
     right_pressed: bool,
+    /// The middle button was pressed since the last frame.
+    middle_pressed: bool,
     /// That press was a double click.
     double_click: bool,
     last_press: Option<(Instant, (f32, f32))>,
@@ -87,8 +89,20 @@ struct Input {
 }
 
 impl Input {
+    /// The command modifier: Ctrl, or ⌘ on macOS. On Linux and Windows the
+    /// Super / Windows key belongs to the window manager (Super+D, Super+1,
+    /// …), so it must never trigger editor shortcuts.
     fn ctrl(&self) -> bool {
-        self.modifiers.control_key() || self.modifiers.super_key()
+        self.modifiers.control_key() || (cfg!(target_os = "macos") && self.modifiers.super_key())
+    }
+
+    /// Forgets every held key, button and modifier (focus changes).
+    fn release_all(&mut self) {
+        self.left = false;
+        self.right = false;
+        self.middle = false;
+        self.modifiers = ModifiersState::empty();
+        self.held.clear();
     }
 
     fn held_any(&self, keys: &[KeyCode]) -> bool {
@@ -1029,10 +1043,14 @@ impl EditorApp {
         let PhysicalKey::Code(code) = event.physical_key else {
             return;
         };
-        if event.state == ElementState::Pressed {
-            self.input.held.insert(code);
-        } else {
+        if event.state == ElementState::Released {
             self.input.held.remove(&code);
+        } else if !cfg!(target_os = "macos") && self.input.modifiers.super_key() {
+            // Super+key is a window-manager shortcut (tile, switch
+            // workspace, launch): ignore it entirely.
+            return;
+        } else {
+            self.input.held.insert(code);
         }
         // While simulating, movement keys drive the player, not the editor;
         // with scripts running, every key scripts can read does (Ctrl
@@ -1124,10 +1142,14 @@ impl EditorApp {
 
         // The script editor takes the keyboard when focused; keys it doesn't
         // use (Ctrl+P, Ctrl+Q, F1, …) fall through to the global shortcuts.
+        let alt = self.input.modifiers.alt_key();
+        let mods = code::Mods { ctrl, shift, alt };
+        // The second key of a Ctrl+K chord arrives as a key, not as text.
+        let chord = self.ui.code.chord_pending();
+        let editor_key =
+            code_key(code, mods).or_else(|| chord.then(|| code_char(code).map(code::Key::Char))?);
         if self.ui.code_has_focus() {
-            let alt = self.input.modifiers.alt_key();
-            let mods = code::Mods { ctrl, shift, alt };
-            if let Some(key) = code_key(code, mods) {
+            if let Some(key) = editor_key {
                 if self.ui.code_key(key, mods) {
                     return;
                 }
@@ -1141,6 +1163,15 @@ impl EditorApp {
             }
             if !ctrl && code != KeyCode::F1 {
                 return;
+            }
+        }
+
+        // Tab navigation works from the Scene tab and unfocused editors too.
+        if ctrl || alt || chord {
+            if let Some(key) = editor_key {
+                if self.ui.code_tab_key(key, mods) {
+                    return;
+                }
             }
         }
 
@@ -1163,6 +1194,10 @@ impl EditorApp {
                 None
             }
             (KeyCode::KeyB, true) if shift => Some(Intent::Build(None)),
+            (KeyCode::KeyE, true) if !shift => {
+                self.ui.open_quick_open();
+                None
+            }
             (KeyCode::Comma, true) => {
                 self.ui.open_settings();
                 None
@@ -1439,6 +1474,7 @@ impl EditorApp {
         // Per-frame transient input is consumed.
         self.input.pressed = false;
         self.input.right_pressed = false;
+        self.input.middle_pressed = false;
         self.input.double_click = false;
         self.input.scroll = 0.0;
 
@@ -1470,6 +1506,7 @@ impl EditorApp {
             double_click: i.double_click,
             right_down: i.right,
             right_pressed: i.right_pressed,
+            middle_pressed: i.middle_pressed,
             middle_down: i.middle,
             scroll: i.scroll,
             shift: i.modifiers.shift_key(),
@@ -1606,17 +1643,24 @@ impl ApplicationHandler for EditorApp {
                 }
             }
             WindowEvent::ScaleFactorChanged { .. } => {}
-            WindowEvent::Focused(false) => {
-                // Buttons released outside the window never report; don't
-                // leave a drag stuck.
-                self.input.left = false;
-                self.input.right = false;
-                self.input.middle = false;
-                self.input.modifiers = ModifiersState::empty();
-                self.input.held.clear();
+            WindowEvent::Focused(focused) => {
+                // Buttons and keys released outside the window never report;
+                // don't leave a drag or a modifier stuck. On regaining focus
+                // start clean too: the shortcut that switched windows (Alt+Tab,
+                // Super+…) must not leak in. Real modifier state follows in
+                // a ModifiersChanged event.
+                self.input.release_all();
+                self.ui.code_commit_switch();
+                if !focused {
+                    self.doc.end_gesture();
+                }
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.input.modifiers = modifiers.state();
+                // Releasing Ctrl settles the Ctrl+Tab switcher, like VS Code.
+                if !self.input.ctrl() {
+                    self.ui.code_commit_switch();
+                }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.input.cursor = (position.x as f32, position.y as f32);
@@ -1646,7 +1690,12 @@ impl ApplicationHandler for EditorApp {
                             self.input.right_pressed = true;
                         }
                     }
-                    MouseButton::Middle => self.input.middle = down,
+                    MouseButton::Middle => {
+                        self.input.middle = down;
+                        if down {
+                            self.input.middle_pressed = true;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1656,7 +1705,20 @@ impl ApplicationHandler for EditorApp {
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 60.0,
                 };
             }
-            WindowEvent::KeyboardInput { event, .. } => {
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic,
+                ..
+            } => {
+                // winit fakes presses for keys already held when the window
+                // gains focus (X11, Windows) — e.g. the Tab of Alt+Tab. They
+                // were meant for the window manager, not Oberon.
+                if is_synthetic {
+                    if let PhysicalKey::Code(code) = event.physical_key {
+                        self.input.held.remove(&code);
+                    }
+                    return;
+                }
                 self.keyboard(&event);
             }
             WindowEvent::RedrawRequested => {
@@ -1705,6 +1767,7 @@ fn code_key(code: KeyCode, m: code::Mods) -> Option<code::Key> {
         KeyCode::Tab => Key::Tab,
         KeyCode::Escape => Key::Escape,
         KeyCode::F3 => Key::F3,
+        KeyCode::F4 => Key::F4,
         KeyCode::F12 => Key::F12,
         _ if m.ctrl || m.alt => Key::Char(code_char(code)?),
         _ => return None,
@@ -1761,6 +1824,9 @@ fn code_char(code: KeyCode) -> Option<char> {
         (KeyCode::Minus, '-'),
         (KeyCode::Equal, '='),
         (KeyCode::Backquote, '`'),
+        (KeyCode::Backslash, '\\'),
+        (KeyCode::Semicolon, ';'),
+        (KeyCode::Quote, '\''),
     ];
     letters.iter().find(|(k, _)| *k == code).map(|(_, c)| *c)
 }

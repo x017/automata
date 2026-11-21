@@ -90,8 +90,35 @@ pub enum UiAction {
     Settings,
     /// Open the command palette.
     CommandPalette,
+    /// Open Go to File (scripts by name).
+    QuickOpen,
     /// Open Settings on the Build page.
     BuildSettings,
+    /// A script tab's context menu command.
+    Tab(TabCommand),
+}
+
+/// Commands from a script tab's context menu (VS Code's set).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabCommand {
+    /// Close this tab.
+    Close(usize),
+    /// Close every other tab.
+    CloseOthers(usize),
+    /// Close the tabs to the right of this one.
+    CloseRight(usize),
+    /// Close the tabs without unsaved changes.
+    CloseSaved,
+    /// Close every tab.
+    CloseAll,
+    /// Copy the file's absolute path.
+    CopyPath(usize),
+    /// Copy the path relative to the project.
+    CopyRelativePath(usize),
+    /// Show the file in the Files panel.
+    Reveal(usize),
+    /// Reopen the most recently closed tab.
+    ReopenClosed,
 }
 
 /// What a menu item does.
@@ -117,7 +144,7 @@ pub struct MenuItem {
 }
 
 impl MenuItem {
-    fn new(
+    pub(super) fn new(
         label: impl Into<String>,
         shortcut: &'static str,
         action: Action,
@@ -327,6 +354,7 @@ impl Ui {
                     UiAction::CommandPalette,
                     true,
                 ),
+                MenuItem::ui("Go to File…", "Ctrl+E", UiAction::QuickOpen, true),
                 MenuItem::ui("Settings…", "Ctrl+,", UiAction::Settings, true),
             ],
             2 => CreateKind::ALL
@@ -600,6 +628,8 @@ impl Ui {
             }
             UiAction::Settings => self.open_settings(),
             UiAction::CommandPalette => self.open_palette(doc),
+            UiAction::QuickOpen => self.open_quick_open(),
+            UiAction::Tab(cmd) => self.tab_command(cmd),
         }
     }
 

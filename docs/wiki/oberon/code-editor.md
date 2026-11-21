@@ -12,7 +12,25 @@ leaving the scene. Scripts open as tabs next to the **Scene** tab. Press
 - **File → New Script…** / **Open Script…**.
 - Right-click an entity → **Edit Script**.
 - Click a **file:line** link in the Console.
-- Search for the file name in the command palette (Ctrl+Shift+P).
+- **Ctrl+E** (Go to File): type part of a script name. Open scripts come
+  first, most recent first. The command palette (Ctrl+Shift+P) finds
+  scripts too.
+
+## Tabs
+
+The keys are the same as in VS Code, and they also work while the Scene
+tab is showing:
+- **Ctrl+Tab** shows your open tabs in the order you last used them. Keep
+  Ctrl held and press Tab again to go further back; let go to switch.
+- **Ctrl+PgUp / Ctrl+PgDn** steps through the tabs in strip order.
+  **Alt+1…9** jumps to a tab by position (the Scene is Alt+1).
+- **Ctrl+W** closes a tab, and **Ctrl+Shift+T** brings back the last one
+  you closed. When you close the active tab, Oberon shows the tab you used
+  before it.
+- Middle-click a tab to close it, or drag it to reorder. Right-click a tab
+  for **Close Others**, **Close to the Right**, **Close Saved**, **Copy
+  Path** and **Reveal in Files**. When there are too many tabs to fit,
+  scroll the strip with the wheel.
 
 ## Editing
 
@@ -24,6 +42,10 @@ You get what you'd expect from a modern editor:
 - indentation guides
 - current-line highlight
 - multi-line paste that keeps relative indentation
+- multiple carets: **Ctrl+D** adds the next match of the selected word,
+  **Ctrl+Shift+L** selects every match, **Alt+click** adds a caret, and
+  **Ctrl+Alt+↑/↓** adds one above or below. Every caret types at once, and
+  one Ctrl+Z undoes the whole edit.
 
 The full key list is in [Keyboard shortcuts](shortcuts.md#code-editor).
 
@@ -44,6 +66,10 @@ Completion is built in and needs no setup. It knows the scripting API:
 - inside `ctx.input.pressed("`: every key name
 - inside `ctx.scene["`: the names of the entities in your scene
 - inside `entity.attributes["`: the attribute names you've defined
+
+Each suggestion has an icon for its kind: a cube for functions and methods,
+`[▪]` for variables, linked boxes for classes, a tag for properties,
+`{ }` for modules, a boxed `=` for constants, and lines for keywords.
 
 Suggestions appear as you type. Turn that off in **Settings → Script
 Editor** if you'd rather press **Ctrl+Space**. Hover a name for its
@@ -72,6 +98,10 @@ has a **Restart server** button.
 
 **Settings → Script Editor** has these options:
 - font size
+- **Editor scale**: zooms only the code editor (text, gutter, find bar,
+  popups and status line) and leaves the rest of the interface alone. You
+  can also hold Ctrl and use the wheel over the editor. The whole-interface
+  zoom is **Settings → Appearance → Interface scale**.
 - current-line highlight
 - indentation guides
 - whitespace markers

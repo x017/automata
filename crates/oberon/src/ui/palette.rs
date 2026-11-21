@@ -64,6 +64,8 @@ pub struct Palette {
     pub query: String,
     selected: usize,
     items: Vec<PaletteItem>,
+    /// Go to File mode (Ctrl+E): scripts only.
+    pub files_only: bool,
 }
 
 impl Palette {
@@ -239,10 +241,66 @@ impl Ui {
         }
         self.menu = None;
         self.picker = None;
+        items.push(PaletteItem {
+            label: format!("Settings: {}", settings_title(SettingsPage::Build)),
+            group: "Settings",
+            hint: String::new(),
+            action: PaletteAction::Menu(Action::Ui(super::menus::UiAction::BuildSettings)),
+        });
         self.palette = Some(Palette {
             query: String::new(),
             selected: 0,
             items,
+            files_only: false,
+        });
+    }
+
+    /// Go to File (Ctrl+E, VS Code's Quick Open): open scripts first in
+    /// most-recently-used order, then every script in the project.
+    pub fn open_quick_open(&mut self) {
+        let root = self.project_root.clone();
+        let rel = |p: &Path| p.strip_prefix(&root).unwrap_or(p).display().to_string();
+        let name = |p: &Path| {
+            p.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        };
+        let mut items: Vec<PaletteItem> = Vec::new();
+        let active = self.code.active;
+        for i in self.code.mru_order().into_iter().flatten() {
+            // The active file is last in VS Code's list; skip it here.
+            if Some(i) == active {
+                continue;
+            }
+            if let Some(t) = self.code.tabs.get(i) {
+                items.push(PaletteItem {
+                    label: name(&t.path),
+                    group: "Open",
+                    hint: rel(&t.path),
+                    action: PaletteAction::Script(t.path.clone()),
+                });
+            }
+        }
+        let open: std::collections::HashSet<PathBuf> =
+            self.code.tabs.iter().map(|t| t.path.clone()).collect();
+        for path in project_scripts(&root, 2000) {
+            if open.contains(&path) && Some(&path) != self.code.current().map(|t| &t.path) {
+                continue;
+            }
+            items.push(PaletteItem {
+                label: name(&path),
+                group: "Script",
+                hint: rel(&path),
+                action: PaletteAction::Script(path),
+            });
+        }
+        self.menu = None;
+        self.picker = None;
+        self.palette = Some(Palette {
+            query: String::new(),
+            selected: 0,
+            items,
+            files_only: true,
         });
     }
 
@@ -337,7 +395,11 @@ impl Ui {
                 tx,
                 r.y + 17.0,
                 14.0,
-                "Search commands, entities, scripts, settings…",
+                if p.files_only {
+                    "Go to script by name…"
+                } else {
+                    "Search commands, entities, scripts, settings…"
+                },
                 color::text_faint(),
             );
         }

@@ -31,6 +31,39 @@ impl Pos {
     }
 }
 
+/// An additional caret (multi-cursor editing): a position plus an
+/// optional selection anchor, like the primary caret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Caret {
+    /// The caret.
+    pub cursor: Pos,
+    /// The selection's fixed end, when selecting.
+    pub anchor: Option<Pos>,
+}
+
+impl Caret {
+    /// The ordered, non-empty selection.
+    #[must_use]
+    pub fn selection(&self) -> Option<(Pos, Pos)> {
+        let a = self.anchor?;
+        match a.cmp(&self.cursor) {
+            std::cmp::Ordering::Less => Some((a, self.cursor)),
+            std::cmp::Ordering::Greater => Some((self.cursor, a)),
+            std::cmp::Ordering::Equal => None,
+        }
+    }
+
+    /// The furthest of caret and anchor.
+    fn end(&self) -> Pos {
+        self.anchor.map_or(self.cursor, |a| a.max(self.cursor))
+    }
+
+    /// The nearest of caret and anchor.
+    fn start(&self) -> Pos {
+        self.anchor.map_or(self.cursor, |a| a.min(self.cursor))
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Snapshot {
     lines: Vec<String>,
@@ -65,6 +98,9 @@ pub struct Buffer {
     pub crlf: bool,
     /// Whether typing an opening bracket / quote inserts its closer.
     pub auto_close: bool,
+    /// Extra carets besides the primary one (Ctrl+D, Alt+click, …), in
+    /// document order.
+    pub extra: Vec<Caret>,
 }
 
 impl Default for Buffer {
@@ -153,6 +189,7 @@ impl Buffer {
             saved_version: 0,
             crlf,
             auto_close: true,
+            extra: Vec::new(),
         }
     }
 
@@ -206,6 +243,7 @@ impl Buffer {
         self.lines = fresh.lines;
         self.crlf = fresh.crlf;
         self.anchor = None;
+        self.extra.clear();
         self.cursor = self.clamp(self.cursor);
         self.changed();
     }
@@ -280,11 +318,303 @@ impl Buffer {
     }
 
     fn restore(&mut self, snap: Snapshot) {
+        self.extra.clear();
         self.lines = snap.lines;
         self.cursor = self.clamp(snap.cursor);
         self.anchor = snap.anchor.map(|a| self.clamp(a));
         self.last_edit = None;
         self.changed();
+    }
+
+    // ----- multiple carets ----------------------------------------------
+
+    /// Every caret, primary first.
+    #[must_use]
+    pub fn carets(&self) -> Vec<Caret> {
+        let mut v = vec![Caret {
+            cursor: self.cursor,
+            anchor: self.anchor,
+        }];
+        v.extend(self.extra.iter().copied());
+        v
+    }
+
+    /// Whether more than one caret is active.
+    #[must_use]
+    pub fn multi(&self) -> bool {
+        !self.extra.is_empty()
+    }
+
+    /// Drops the extra carets. Returns whether there were any.
+    pub fn single(&mut self) -> bool {
+        let had = !self.extra.is_empty();
+        self.extra.clear();
+        had
+    }
+
+    /// The char offset of `p` from the start of the buffer.
+    fn offset(&self, p: Pos) -> usize {
+        self.lines[..p.line.min(self.lines.len())]
+            .iter()
+            .map(|l| char_len(l) + 1)
+            .sum::<usize>()
+            + p.col
+    }
+
+    /// The position of char offset `off`.
+    fn pos_of(&self, mut off: usize) -> Pos {
+        for (i, l) in self.lines.iter().enumerate() {
+            let n = char_len(l);
+            if off <= n {
+                return Pos::new(i, off);
+            }
+            off -= n + 1;
+        }
+        let last = self.lines.len() - 1;
+        Pos::new(last, char_len(&self.lines[last]))
+    }
+
+    fn total_len(&self) -> usize {
+        self.lines.iter().map(|l| char_len(l) + 1).sum()
+    }
+
+    /// Runs `op` once per caret, bottom-up so an edit never moves a caret
+    /// that is still to be processed. `op` gets the caret's index in
+    /// document order. With `edit`, all carets' changes form one undo step
+    /// (consecutive typing still coalesces).
+    pub fn each_caret(&mut self, edit: bool, mut op: impl FnMut(&mut Self, usize)) {
+        if self.extra.is_empty() {
+            op(self, 0);
+            return;
+        }
+        let kind = EditKind::Typing;
+        if edit {
+            self.anchor_free_checkpoint(kind);
+        }
+        let undo_len = self.undo.len();
+        let primary = Caret {
+            cursor: self.cursor,
+            anchor: self.anchor,
+        };
+        let mut all: Vec<(bool, Caret)> = std::iter::once((true, primary))
+            .chain(self.extra.drain(..).map(|c| (false, c)))
+            .collect();
+        all.sort_by_key(|(_, c)| std::cmp::Reverse(c.end()));
+        let n = all.len();
+        // Processed carets as offsets in the current text.
+        let mut done: Vec<(bool, usize, Option<usize>)> = Vec::with_capacity(n);
+        for (k, (is_primary, c)) in all.into_iter().enumerate() {
+            let before = self.total_len();
+            self.cursor = self.clamp(c.cursor);
+            self.anchor = c.anchor.map(|a| self.clamp(a));
+            self.want_col = None;
+            op(self, n - 1 - k);
+            let after = self.total_len();
+            for d in &mut done {
+                d.1 = (d.1 + after).saturating_sub(before);
+                d.2 = d.2.map(|o| (o + after).saturating_sub(before));
+            }
+            done.push((
+                is_primary,
+                self.offset(self.cursor),
+                self.anchor.map(|a| self.offset(a)),
+            ));
+        }
+        if edit {
+            self.undo.truncate(undo_len);
+            self.redo.clear();
+        }
+        let mut primary = None;
+        let mut extra = Vec::with_capacity(n);
+        for (is_primary, c, a) in done {
+            let caret = Caret {
+                cursor: self.pos_of(c),
+                anchor: a.map(|a| self.pos_of(a)),
+            };
+            if is_primary {
+                primary = Some(caret);
+            } else {
+                extra.push(caret);
+            }
+        }
+        let p = primary.expect("the primary caret is processed");
+        self.cursor = p.cursor;
+        self.anchor = p.anchor.filter(|a| *a != p.cursor);
+        extra.retain(|c| c.cursor != p.cursor);
+        extra.sort_by_key(|c| c.cursor);
+        extra.dedup_by_key(|c| c.cursor);
+        for c in &mut extra {
+            c.anchor = c.anchor.filter(|a| *a != c.cursor);
+        }
+        self.extra = extra;
+        if edit {
+            self.last_edit = Some((kind, Instant::now(), self.cursor));
+        }
+    }
+
+    /// An undo checkpoint for a multi-caret edit (coalesces with the
+    /// previous keystroke even when carets hold selections).
+    fn anchor_free_checkpoint(&mut self, kind: EditKind) {
+        let now = Instant::now();
+        let continues = self.last_edit.is_some_and(|(k, t, at)| {
+            k == kind
+                && now.duration_since(t) < Duration::from_millis(1200)
+                && at == self.cursor
+                && self.anchor.is_none()
+        });
+        if !continues {
+            self.undo.push(self.snapshot());
+            if self.undo.len() > UNDO_LIMIT {
+                self.undo.remove(0);
+            }
+        }
+        self.redo.clear();
+    }
+
+    /// Adds a caret at `p`, or removes the one already there (Alt+click).
+    pub fn toggle_caret(&mut self, p: Pos) {
+        let p = self.clamp(p);
+        if let Some(i) = self.extra.iter().position(|c| c.cursor == p) {
+            self.extra.remove(i);
+            return;
+        }
+        if p == self.cursor {
+            // Clicking the primary promotes the newest extra caret.
+            if let Some(c) = self.extra.pop() {
+                self.cursor = c.cursor;
+                self.anchor = c.anchor;
+            }
+            return;
+        }
+        self.extra.push(Caret {
+            cursor: self.cursor,
+            anchor: self.anchor,
+        });
+        self.extra.sort_by_key(|c| c.cursor);
+        self.cursor = p;
+        self.anchor = None;
+        self.last_edit = None;
+    }
+
+    /// Adds a caret on the line above the topmost caret (or below the
+    /// bottommost), at the same visual column (Ctrl+Alt+Up / Down).
+    pub fn add_caret_vertical(&mut self, down: bool) {
+        let carets = self.carets();
+        let edge = if down {
+            carets.iter().map(|c| c.cursor).max()
+        } else {
+            carets.iter().map(|c| c.cursor).min()
+        }
+        .unwrap_or(self.cursor);
+        let line = if down {
+            if edge.line + 1 >= self.lines.len() {
+                return;
+            }
+            edge.line + 1
+        } else {
+            if edge.line == 0 {
+                return;
+            }
+            edge.line - 1
+        };
+        let vcol = visual_col(&self.lines[self.cursor.line], self.cursor.col);
+        let p = Pos::new(line, col_at_visual(&self.lines[line], vcol));
+        self.extra.push(Caret {
+            cursor: self.cursor,
+            anchor: self.anchor,
+        });
+        self.extra.sort_by_key(|c| c.cursor);
+        self.cursor = p;
+        self.anchor = None;
+        self.extra.retain(|c| c.cursor != p);
+    }
+
+    /// Ctrl+D: selects the word at the caret, or adds a caret on the next
+    /// occurrence of the selected text. Returns false when nothing new was
+    /// found.
+    pub fn add_next_occurrence(&mut self) -> bool {
+        let Some((a, b)) = self.selection() else {
+            let (wa, wb) = self.word_range(self.cursor);
+            if wa == wb {
+                return false;
+            }
+            self.select(wa, wb);
+            return true;
+        };
+        if a.line != b.line {
+            return false;
+        }
+        let needle = self.text_range(a, b);
+        let whole = needle.chars().all(is_word);
+        let matches = self.find_all(&needle, true, whole);
+        let carets = self.carets();
+        let taken = |s: Pos| carets.iter().any(|c| c.start() == s);
+        let last = carets.iter().map(Caret::end).max().unwrap_or(b);
+        let next = matches
+            .iter()
+            .find(|(s, _)| *s >= last && !taken(*s))
+            .or_else(|| matches.iter().find(|(s, _)| !taken(*s)))
+            .copied();
+        let Some((s, e)) = next else {
+            return false;
+        };
+        self.extra.push(Caret {
+            cursor: self.cursor,
+            anchor: self.anchor,
+        });
+        self.extra.sort_by_key(|c| c.cursor);
+        self.anchor = Some(s);
+        self.cursor = e;
+        self.last_edit = None;
+        true
+    }
+
+    /// Ctrl+Shift+L: a caret on every occurrence of the selection (or the
+    /// word at the caret). Returns how many carets there are.
+    pub fn select_all_occurrences(&mut self) -> usize {
+        let (a, b) = match self.selection() {
+            Some(r) => r,
+            None => self.word_range(self.cursor),
+        };
+        if a == b || a.line != b.line {
+            return 1;
+        }
+        let needle = self.text_range(a, b);
+        let whole = self.selection().is_none() || needle.chars().all(is_word);
+        let matches = self.find_all(&needle, true, whole);
+        if matches.is_empty() {
+            return 1;
+        }
+        let primary = matches.iter().position(|(s, _)| *s == a).unwrap_or(0);
+        self.extra = matches
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != primary)
+            .map(|(_, (s, e))| Caret {
+                cursor: *e,
+                anchor: Some(*s),
+            })
+            .collect();
+        let (s, e) = matches[primary];
+        self.anchor = Some(s);
+        self.cursor = e;
+        self.last_edit = None;
+        matches.len()
+    }
+
+    /// Every caret's selected text, in document order (empty for carets
+    /// without a selection).
+    #[must_use]
+    pub fn selections_text(&self) -> Vec<String> {
+        let mut carets = self.carets();
+        carets.sort_by_key(|c| c.cursor);
+        carets
+            .iter()
+            .map(|c| {
+                c.selection()
+                    .map_or_else(String::new, |(a, b)| self.text_range(a, b))
+            })
+            .collect()
     }
 
     // ----- selection -----------------------------------------------------
@@ -1106,6 +1436,25 @@ impl Buffer {
         all.len()
     }
 
+    /// Whether every non-blank line the caret / selection touches is a
+    /// `#` comment.
+    #[must_use]
+    pub fn lines_commented(&self) -> bool {
+        let (first, last) = self.touched_lines();
+        let mut any = false;
+        for l in &self.lines[first..=last.min(self.lines.len() - 1)] {
+            let t = l.trim_start();
+            if t.is_empty() {
+                continue;
+            }
+            if !t.starts_with('#') {
+                return false;
+            }
+            any = true;
+        }
+        any
+    }
+
     /// The bracket matching the one at (or just before) the caret.
     #[must_use]
     pub fn matching_bracket(&self) -> Option<(Pos, Pos)> {
@@ -1164,6 +1513,56 @@ mod tests {
 
     fn buf(text: &str) -> Buffer {
         Buffer::from_text(text)
+    }
+
+    #[test]
+    fn typing_at_several_carets_is_one_undo_step() {
+        let mut b = buf("a\nb\nc");
+        b.add_caret_vertical(true);
+        b.add_caret_vertical(true);
+        assert_eq!(b.carets().len(), 3);
+        b.each_caret(true, |b, _| b.insert("-"));
+        assert_eq!(b.text(), "-a\n-b\n-c");
+        assert!(b.undo());
+        assert_eq!(b.text(), "a\nb\nc");
+        // Undo restores a single caret.
+        assert!(!b.multi());
+    }
+
+    #[test]
+    fn ctrl_d_adds_the_next_occurrence_and_edits_all() {
+        let mut b = buf("hp = 1\nhp += hp\n");
+        assert!(b.add_next_occurrence(), "first press selects the word");
+        assert_eq!(b.selections_text(), vec!["hp"]);
+        assert!(b.add_next_occurrence());
+        assert!(b.add_next_occurrence());
+        assert_eq!(b.carets().len(), 3);
+        b.each_caret(true, |b, _| b.insert("health"));
+        assert_eq!(b.text(), "health = 1\nhealth += health\n");
+    }
+
+    #[test]
+    fn select_all_occurrences_and_toggle_caret() {
+        let mut b = buf("x x y x");
+        b.move_to(Pos::new(0, 0), false);
+        assert_eq!(b.select_all_occurrences(), 3);
+        b.each_caret(true, |b, _| b.insert("z"));
+        assert_eq!(b.text(), "z z y z");
+        b.single();
+        b.move_to(Pos::new(0, 0), false);
+        b.toggle_caret(Pos::new(0, 4));
+        assert!(b.multi());
+        b.toggle_caret(Pos::new(0, 4));
+        assert!(!b.multi(), "Alt+clicking a caret again removes it");
+    }
+
+    #[test]
+    fn lines_commented_reports_the_selection() {
+        let mut b = buf("# a\n# b\nc");
+        b.select(Pos::new(0, 0), Pos::new(1, 1));
+        assert!(b.lines_commented());
+        b.select(Pos::new(1, 0), Pos::new(2, 1));
+        assert!(!b.lines_commented());
     }
 
     #[test]

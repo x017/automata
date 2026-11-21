@@ -339,6 +339,19 @@ impl Ui {
             self.prefs_dirty = true;
         }
         *y += ROW;
+        let pct = (self.editor_scale() * 100.0).round();
+        if let Some(d) = self.setting_stepper(
+            canvas,
+            body,
+            *y,
+            "Editor scale",
+            "Zooms the script editor only, independent of the interface scale. Ctrl+wheel.",
+            &format!("{pct}%"),
+        ) {
+            self.prefs.editor.scale = ((pct + d * 10.0) / 100.0).clamp(0.5, 3.0);
+            self.prefs_dirty = true;
+        }
+        *y += ROW;
         let rows: [ToggleRow; 7] = [
             (
                 "Highlight current line",
@@ -997,10 +1010,11 @@ mod tests {
         ui.open_settings();
         ui.frame(&mut c, &doc, Pointer::default(), None);
         let r = ui.dialog_rect(1600.0, 950.0).unwrap();
-        // First toggle row ("Highlight current line") below the font size.
+        // First toggle row ("Highlight current line") below the font size
+        // and editor scale steppers.
         let body_x = r.x + 190.0 + 24.0;
         let body_w = r.w - 190.0 - 48.0;
-        let y = r.y + 54.0 + 18.0 + 54.0 + ROW;
+        let y = r.y + 54.0 + 18.0 + 54.0 + 2.0 * ROW;
         assert!(ui.prefs.editor.highlight_line);
         assert!(!ui.take_prefs_dirty());
         click(&mut ui, &mut c, &doc, body_x + body_w - 20.0, y + 15.0);

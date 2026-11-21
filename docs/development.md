@@ -94,8 +94,9 @@ page styles and scripts live in `scripts/site/` and are copied into
 `docs/site/docs/_static/`.
 
 **Landing page** (`docs/site/index.html` + `docs/site/landing.js`). It is
-set in Bricolage Grotesque, with JetBrains Mono for code. Both are OFL and
-vendored in `docs/site/fonts/`. `landing.js` is a tiny hidden-line 3D
+set in Michroma for the wordmark and headlines, Bricolage Grotesque for body
+text, and JetBrains Mono for code. All three are OFL and vendored in
+`docs/site/fonts/`. `landing.js` is a tiny hidden-line 3D
 renderer on a 2D canvas, styled after Oberon's scene view. It draws the hero
 scene and the `coin.py` playground, whose yellow numbers are draggable
 sliders running the same logic as the tutorial script. It also drives the

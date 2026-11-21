@@ -38,10 +38,26 @@ leaving the scene. Scripts open as tabs next to the <strong>Scene</strong> tab. 
 <strong>Esc</strong> to go back to the scene view; the tab stays open.</p>
 <p><img src="../../../assets/oberon/code.png" alt="Editing a script with find" loading="lazy" decoding="async"></p>
 <h2 id="open-a-script">Open a script<a class="anchor" href="#open-a-script" aria-label="Link to this section">#</a></h2>
-<ul><li>Double-click a <code>.py</code> file in <strong>Files</strong> (left sidebar).</li><li><strong>File → New Script…</strong> / <strong>Open Script…</strong>.</li><li>Right-click an entity → <strong>Edit Script</strong>.</li><li>Click a <strong>file:line</strong> link in the Console.</li><li>Search for the file name in the command palette (Ctrl+Shift+P).</li></ul>
+<ul><li>Double-click a <code>.py</code> file in <strong>Files</strong> (left sidebar).</li><li><strong>File → New Script…</strong> / <strong>Open Script…</strong>.</li><li>Right-click an entity → <strong>Edit Script</strong>.</li><li>Click a <strong>file:line</strong> link in the Console.</li><li><strong>Ctrl+E</strong> (Go to File): type part of a script name. Open scripts come
+first, most recent first. The command palette (Ctrl+Shift+P) finds
+scripts too.</li></ul>
+<h2 id="tabs">Tabs<a class="anchor" href="#tabs" aria-label="Link to this section">#</a></h2>
+<p>The keys are the same as in VS Code, and they also work while the Scene
+tab is showing:</p>
+<ul><li><strong>Ctrl+Tab</strong> shows your open tabs in the order you last used them. Keep
+Ctrl held and press Tab again to go further back; let go to switch.</li><li><strong>Ctrl+PgUp / Ctrl+PgDn</strong> steps through the tabs in strip order.
+<strong>Alt+1…9</strong> jumps to a tab by position (the Scene is Alt+1).</li><li><strong>Ctrl+W</strong> closes a tab, and <strong>Ctrl+Shift+T</strong> brings back the last one
+you closed. When you close the active tab, Oberon shows the tab you used
+before it.</li><li>Middle-click a tab to close it, or drag it to reorder. Right-click a tab
+for <strong>Close Others</strong>, <strong>Close to the Right</strong>, <strong>Close Saved</strong>, <strong>Copy
+Path</strong> and <strong>Reveal in Files</strong>. When there are too many tabs to fit,
+scroll the strip with the wheel.</li></ul>
 <h2 id="editing">Editing<a class="anchor" href="#editing" aria-label="Link to this section">#</a></h2>
 <p>You get what you'd expect from a modern editor:</p>
-<ul><li>Python syntax highlighting</li><li>auto-indent after <code>:</code></li><li>bracket and quote pairing</li><li>line moves, duplicates, and comments</li><li>indentation guides</li><li>current-line highlight</li><li>multi-line paste that keeps relative indentation</li></ul>
+<ul><li>Python syntax highlighting</li><li>auto-indent after <code>:</code></li><li>bracket and quote pairing</li><li>line moves, duplicates, and comments</li><li>indentation guides</li><li>current-line highlight</li><li>multi-line paste that keeps relative indentation</li><li>multiple carets: <strong>Ctrl+D</strong> adds the next match of the selected word,
+<strong>Ctrl+Shift+L</strong> selects every match, <strong>Alt+click</strong> adds a caret, and
+<strong>Ctrl+Alt+↑/↓</strong> adds one above or below. Every caret types at once, and
+one Ctrl+Z undoes the whole edit.</li></ul>
 <p>The full key list is in <a href="shortcuts.html#code-editor">Keyboard shortcuts</a>.</p>
 <p><strong>Find / Replace</strong> (Ctrl+F / Ctrl+H) supports case-sensitive and
 whole-word matching, shows match counts, and can replace all at once.</p>
@@ -51,6 +67,9 @@ counts, indentation, encoding, and line endings.</p>
 <p>Completion is built in and needs no setup. It knows the scripting API:</p>
 <ul><li><code>ctx.</code> → <code>time</code>, <code>input</code>, <code>scene</code>, <code>camera</code>, <code>physics</code>, <code>log</code>, …</li><li><code>entity.transform.</code> → <code>position</code>, <code>rotation_euler</code>, <code>scale</code>, …</li><li><code>ctx.camera.</code> / <code>entity.camera.</code> → <code>position</code>, <code>target</code>, <code>fov</code>,
 <code>look_at</code>, <code>follow</code></li><li>inside <code>ctx.input.pressed(&quot;</code>: every key name</li><li>inside <code>ctx.scene[&quot;</code>: the names of the entities in your scene</li><li>inside <code>entity.attributes[&quot;</code>: the attribute names you've defined</li></ul>
+<p>Each suggestion has an icon for its kind: a cube for functions and methods,
+<code>[▪]</code> for variables, linked boxes for classes, a tag for properties,
+<code>{ }</code> for modules, a boxed <code>=</code> for constants, and lines for keywords.</p>
 <p>Suggestions appear as you type. Turn that off in <strong>Settings → Script
 Editor</strong> if you'd rather press <strong>Ctrl+Space</strong>. Hover a name for its
 documentation.</p>
@@ -65,7 +84,10 @@ a script. It adds:</p>
 has a <strong>Restart server</strong> button.</p>
 <h2 id="settings">Settings<a class="anchor" href="#settings" aria-label="Link to this section">#</a></h2>
 <p><strong>Settings → Script Editor</strong> has these options:</p>
-<ul><li>font size</li><li>current-line highlight</li><li>indentation guides</li><li>whitespace markers</li><li>suggest while typing</li><li>trim trailing whitespace on save</li><li><strong>Save scripts before Play</strong>, on by default, so Play always runs what
+<ul><li>font size</li><li><strong>Editor scale</strong>: zooms only the code editor (text, gutter, find bar,
+popups and status line) and leaves the rest of the interface alone. You
+can also hold Ctrl and use the wheel over the editor. The whole-interface
+zoom is <strong>Settings → Appearance → Interface scale</strong>.</li><li>current-line highlight</li><li>indentation guides</li><li>whitespace markers</li><li>suggest while typing</li><li>trim trailing whitespace on save</li><li><strong>Save scripts before Play</strong>, on by default, so Play always runs what
 you see</li></ul>
 <p>Prefer another editor? Edit the files in VS Code, Vim, or anything else.
 Oberon hot-reloads saved scripts during Play either way.</p>
@@ -73,7 +95,7 @@ Oberon hot-reloads saved scripts during Play either way.</p>
     <footer class="pager"><a class="prev" href="graphics.html"><small>Previous</small>Graphics</a><a class="next" href="prefabs-and-attributes.html"><small>Next</small>Prefabs &amp; attributes</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/code-editor.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#open-a-script">Open a script</a></li><li class="l2"><a href="#editing">Editing</a></li><li class="l2"><a href="#completion">Completion</a></li><li class="l2"><a href="#language-servers">Language servers</a></li><li class="l2"><a href="#settings">Settings</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#open-a-script">Open a script</a></li><li class="l2"><a href="#tabs">Tabs</a></li><li class="l2"><a href="#editing">Editing</a></li><li class="l2"><a href="#completion">Completion</a></li><li class="l2"><a href="#language-servers">Language servers</a></li><li class="l2"><a href="#settings">Settings</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

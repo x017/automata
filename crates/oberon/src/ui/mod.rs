@@ -66,6 +66,8 @@ pub struct Pointer {
     pub scroll: f32,
     /// Whether the right button was pressed since the last frame.
     pub right_pressed: bool,
+    /// Whether the middle button was pressed since the last frame.
+    pub middle_pressed: bool,
     /// Shift held (fine scrubbing).
     pub shift: bool,
     /// Ctrl held (coarse scrubbing).
@@ -703,6 +705,13 @@ pub struct Ui {
     code_clicks: Option<(std::time::Instant, u8, usize)>,
     /// Mouse rest for hover info: since, word start, request sent.
     code_dwell: Option<(std::time::Instant, crate::code::Pos, bool)>,
+    /// How far the script tabs are scrolled (pixels).
+    tab_scroll: f32,
+    /// The active tab the strip last scrolled into view (`None` = Scene;
+    /// starts at an impossible index so the first frame reveals).
+    tab_revealed: Option<usize>,
+    /// Dragging a script tab: its index and the press x.
+    tab_drag: Option<(usize, f32)>,
 }
 
 impl Default for Ui {
@@ -767,6 +776,9 @@ impl Ui {
             code_drag: None,
             code_popup: None,
             code_clicks: None,
+            tab_scroll: 0.0,
+            tab_revealed: Some(usize::MAX),
+            tab_drag: None,
             code_dwell: None,
         }
     }
@@ -1192,6 +1204,7 @@ impl Ui {
         self.draw_picker(canvas, doc, w, h);
         self.draw_menu(canvas, doc, w, h);
         self.draw_palette(canvas, doc, w);
+        self.draw_switcher(canvas, w);
         self.draw_dialog(canvas, w, h);
         self.draw_tooltip(canvas, w, h);
 
@@ -1202,6 +1215,7 @@ impl Ui {
     fn mask_pointer(&mut self) {
         self.p.pressed = false;
         self.p.right_pressed = false;
+        self.p.middle_pressed = false;
         self.p.double_click = false;
         self.p.scroll = 0.0;
         self.p.x = -1.0e6;

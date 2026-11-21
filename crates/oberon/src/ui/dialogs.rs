@@ -161,7 +161,13 @@ pub fn shortcut_lines() -> Vec<String> {
         "Code editor",
         "  Ctrl+S save · Ctrl+F find · Ctrl+H replace · Ctrl+G go to line",
         "  Ctrl+/ comment · Tab / Shift+Tab indent · Ctrl+Space complete",
-        "  F12 go to definition · Shift+Alt+F format · Ctrl+W close tab",
+        "  F12 go to definition · Shift+Alt+F format · Ctrl+E go to file",
+        "  Ctrl+D add next match · Ctrl+Shift+L all matches · Alt+click add caret",
+        "  Ctrl+Alt+↑/↓ caret above / below · Alt+↑/↓ move line · Shift+Alt+↑/↓ copy line",
+        "Tabs",
+        "  Ctrl+Tab recent tabs (hold Ctrl) · Ctrl+PgUp/PgDn previous / next · Alt+1…9 go to tab",
+        "  Ctrl+Shift+PgUp/PgDn move tab · Ctrl+W / Ctrl+F4 close · Ctrl+Shift+T reopen",
+        "  Ctrl+K W close all · Ctrl+K U close saved · Middle-click close · Drag to reorder",
     ]
     .iter()
     .map(|s| (*s).to_string())

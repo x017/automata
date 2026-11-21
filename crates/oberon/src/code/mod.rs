@@ -11,7 +11,7 @@ pub mod clipboard;
 pub mod syntax;
 
 use std::path::{Path, PathBuf};
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 pub use buffer::{Buffer, Pos};
 use clipboard::Clipboard;
@@ -52,8 +52,75 @@ pub struct CompletionItem {
     pub detail: String,
     /// Text inserted in place of the typed prefix.
     pub insert: String,
-    /// A one-letter kind badge (`f` function, `v` variable, `c` class …).
-    pub kind: char,
+    /// What kind of symbol it is (drawn as an icon).
+    pub kind: CompletionKind,
+}
+
+/// The kind of a completion proposal; the popup draws an icon for each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CompletionKind {
+    /// A plain word.
+    Text,
+    /// A variable or value.
+    Variable,
+    /// A function.
+    Function,
+    /// A method.
+    Method,
+    /// A class, struct or type.
+    Class,
+    /// A module or package.
+    Module,
+    /// A field, property or custom attribute.
+    Property,
+    /// A constant or enum member.
+    Constant,
+    /// A language keyword.
+    Keyword,
+    /// A snippet.
+    Snippet,
+    /// An input key name (`"space"`, `"w"`, …).
+    Key,
+    /// An entity in the open scene.
+    Entity,
+}
+
+impl CompletionKind {
+    /// The kind for an LSP `CompletionItemKind` number.
+    #[must_use]
+    pub fn from_lsp(kind: i64) -> Self {
+        match kind {
+            2 => Self::Method,
+            3 | 4 => Self::Function,
+            5 | 10 => Self::Property,
+            7 | 8 | 13 | 22 | 25 => Self::Class,
+            9 | 17 | 19 => Self::Module,
+            12 | 20 | 21 => Self::Constant,
+            14 => Self::Keyword,
+            15 => Self::Snippet,
+            1 => Self::Text,
+            _ => Self::Variable,
+        }
+    }
+
+    /// A short name (tooltips, tests).
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Variable => "variable",
+            Self::Function => "function",
+            Self::Method => "method",
+            Self::Class => "class",
+            Self::Module => "module",
+            Self::Property => "property",
+            Self::Constant => "constant",
+            Self::Keyword => "keyword",
+            Self::Snippet => "snippet",
+            Self::Key => "key",
+            Self::Entity => "entity",
+        }
+    }
 }
 
 /// The completion popup.
@@ -210,6 +277,8 @@ pub enum Key {
     Escape,
     /// F3 (find next).
     F3,
+    /// F4 (Ctrl+F4 closes the tab).
+    F4,
     /// F12 (go to definition).
     F12,
     /// A character key pressed with Ctrl or Alt (lowercase).
@@ -223,6 +292,9 @@ pub enum Key {
 pub struct EditorSettings {
     /// Code font size in logical pixels.
     pub font_size: f32,
+    /// Zoom of the whole script editor (text, gutter, find bar, popups,
+    /// status bar) on top of the interface scale; 1.0 = 100%.
+    pub scale: f32,
     /// Highlight the line with the caret.
     pub highlight_line: bool,
     /// Draw vertical guides at each indentation level.
@@ -243,6 +315,7 @@ impl Default for EditorSettings {
     fn default() -> Self {
         Self {
             font_size: 13.0,
+            scale: 1.0,
             highlight_line: true,
             indent_guides: true,
             show_whitespace: false,
@@ -347,8 +420,29 @@ pub struct CodeEditor {
     /// Entity and attribute names from the open scene, for completing
     /// `ctx.scene["…"]` and `entity.attributes["…"]` (set by the UI).
     pub scene_names: api::SceneNames,
+    /// The Ctrl+Tab switcher while Ctrl is held.
+    pub switcher: Option<Switcher>,
+    /// Center tabs, most recently used first (`None` = the Scene).
+    mru: Vec<Option<PathBuf>>,
+    /// Recently closed files with their caret, newest last (Ctrl+Shift+T).
+    closed: Vec<(PathBuf, Pos)>,
+    /// When Ctrl+K started a two-key chord.
+    chord: Option<Instant>,
     last_disk_check: Option<Instant>,
 }
+
+/// The Ctrl+Tab switcher: the tabs in most-recently-used order and the one
+/// that will open when Ctrl is released.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Switcher {
+    /// Center tabs (`None` = the Scene), most recent first.
+    pub order: Vec<Option<usize>>,
+    /// The highlighted entry.
+    pub index: usize,
+}
+
+/// How many closed tabs Ctrl+Shift+T remembers.
+const CLOSED_LIMIT: usize = 20;
 
 impl CodeEditor {
     /// An editor with no tabs.
@@ -404,6 +498,8 @@ impl CodeEditor {
         self.focused = true;
         self.focus = Focus::Text;
         self.completion = None;
+        self.switcher = None;
+        self.touch();
         if let Some(line) = line.filter(|l| *l > 0) {
             let tab = &mut self.tabs[idx];
             let target = tab.buf.clamp(Pos::new(line as usize - 1, 0));
@@ -418,9 +514,244 @@ impl CodeEditor {
 
     /// Shows the Scene tab.
     pub fn show_scene(&mut self) {
-        self.active = None;
-        self.focused = false;
+        self.activate(None);
+    }
+
+    /// Shows a center tab (`None` = the Scene) and remembers it as the most
+    /// recently used.
+    pub fn activate(&mut self, idx: Option<usize>) {
+        let idx = idx.filter(|i| *i < self.tabs.len());
+        self.active = idx;
+        self.focused = idx.is_some();
+        if idx.is_some() {
+            self.focus = Focus::Text;
+        }
         self.completion = None;
+        self.hover = None;
+        self.switcher = None;
+        self.touch();
+    }
+
+    fn tab_id(&self, idx: Option<usize>) -> Option<PathBuf> {
+        idx.and_then(|i| self.tabs.get(i)).map(|t| t.path.clone())
+    }
+
+    /// Moves the active tab to the front of the MRU list.
+    fn touch(&mut self) {
+        let id = self.tab_id(self.active);
+        self.mru.retain(|m| *m != id);
+        self.mru.insert(0, id);
+        self.mru.truncate(64);
+    }
+
+    /// Center tabs in most-recently-used order (active first); tabs never
+    /// visited follow in strip order.
+    #[must_use]
+    pub fn mru_order(&self) -> Vec<Option<usize>> {
+        let index_of = |id: &Option<PathBuf>| -> Option<Option<usize>> {
+            match id {
+                None => Some(None),
+                Some(p) => self.tabs.iter().position(|t| t.path == *p).map(Some),
+            }
+        };
+        let mut order: Vec<Option<usize>> = vec![self.active];
+        for id in &self.mru {
+            if let Some(i) = index_of(id) {
+                if !order.contains(&i) {
+                    order.push(i);
+                }
+            }
+        }
+        for i in std::iter::once(None).chain((0..self.tabs.len()).map(Some)) {
+            if !order.contains(&i) {
+                order.push(i);
+            }
+        }
+        order
+    }
+
+    /// Ctrl+Tab / Ctrl+Shift+Tab: steps through the tabs in MRU order while
+    /// Ctrl is held; [`Self::commit_switch`] (Ctrl released) settles.
+    pub fn mru_step(&mut self, dir: isize) {
+        if self.switcher.is_none() {
+            let order = self.mru_order();
+            if order.len() < 2 {
+                return;
+            }
+            self.switcher = Some(Switcher { order, index: 0 });
+        }
+        let tabs = self.tabs.len();
+        let Some(sw) = self.switcher.as_mut() else {
+            return;
+        };
+        let n = sw.order.len().cast_signed_compat();
+        let next = (sw.index.cast_signed_compat() + dir).rem_euclid(n);
+        sw.index = usize::try_from(next).unwrap_or(0);
+        self.active = sw.order[sw.index].filter(|i| *i < tabs);
+        self.focused = self.active.is_some();
+        self.completion = None;
+    }
+
+    /// Ctrl was released: keep the tab the switcher landed on.
+    pub fn commit_switch(&mut self) {
+        if self.switcher.take().is_some() {
+            self.touch();
+        }
+    }
+
+    /// Ctrl+PgDn / Ctrl+PgUp: the next / previous tab in strip order (the
+    /// Scene is the first tab), wrapping.
+    pub fn cycle_tab(&mut self, dir: isize) {
+        let n = self.tabs.len() + 1;
+        let pos = self.active.map_or(0, |i| i + 1).cast_signed_compat();
+        let next = usize::try_from((pos + dir).rem_euclid(n.cast_signed_compat())).unwrap_or(0);
+        self.activate(next.checked_sub(1));
+    }
+
+    /// Alt+1…9: the tab at strip position `pos` (0 = Scene); `usize::MAX`
+    /// is the last tab (Alt+0).
+    pub fn activate_position(&mut self, pos: usize) {
+        let last = self.tabs.len();
+        let pos = if pos == usize::MAX { last } else { pos };
+        if pos <= last {
+            self.activate(pos.checked_sub(1));
+        }
+    }
+
+    /// Ctrl+Shift+`PgUp` / `PgDn`: moves the active script tab left / right.
+    pub fn move_tab(&mut self, dir: isize) {
+        let Some(i) = self.active else { return };
+        let j = i.cast_signed_compat() + dir;
+        if let Ok(j) = usize::try_from(j) {
+            if j < self.tabs.len() {
+                self.reorder(i, j);
+            }
+        }
+    }
+
+    /// Moves tab `from` to index `to` (drag and drop), keeping the active
+    /// tab active.
+    pub fn reorder(&mut self, from: usize, to: usize) {
+        if from >= self.tabs.len() || to >= self.tabs.len() || from == to {
+            return;
+        }
+        let active = self.tab_id(self.active);
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        if let Some(p) = active {
+            self.active = self.tabs.iter().position(|t| t.path == p);
+        }
+        self.confirm_close = None;
+    }
+
+    /// Ctrl+Shift+T: reopens the most recently closed file.
+    pub fn reopen_closed(&mut self) -> bool {
+        while let Some((path, caret)) = self.closed.pop() {
+            if self.tabs.iter().any(|t| t.path == path) || !path.is_file() {
+                continue;
+            }
+            if self.open(&path, None).is_ok() {
+                if let Some(tab) = self.current_mut() {
+                    tab.buf.move_to(caret, false);
+                    tab.reveal = true;
+                }
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Closes every unmodified tab for which `close` holds. Modified tabs
+    /// stay open (they would need a save prompt each). Returns how many
+    /// modified tabs were kept.
+    pub fn close_where(&mut self, close: impl Fn(usize, &CodeTab) -> bool) -> usize {
+        let mut kept = 0;
+        let mut i = self.tabs.len();
+        while i > 0 {
+            i -= 1;
+            if close(i, &self.tabs[i]) {
+                if self.tabs[i].buf.dirty() {
+                    kept += 1;
+                } else {
+                    self.close(i, true);
+                }
+            }
+        }
+        if kept > 0 {
+            self.events.push(CodeEvent::Info(format!(
+                "Kept {kept} tab(s) with unsaved changes open"
+            )));
+        }
+        kept
+    }
+
+    /// Ctrl+K was pressed and the editor waits for the chord's second key.
+    #[must_use]
+    pub fn chord_pending(&self) -> bool {
+        self.chord
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(3))
+    }
+
+    /// The Ctrl+Tab switcher is open (Ctrl still held).
+    #[must_use]
+    pub fn switching(&self) -> bool {
+        self.switcher.is_some()
+    }
+
+    /// Tab navigation and closing shortcuts (VS Code bindings). They work
+    /// from the Scene tab too. Returns false when `key` isn't one.
+    pub fn tab_key(&mut self, key: Key, m: Mods) -> bool {
+        // The second key of a Ctrl+K chord.
+        if let Some(t) = self.chord.take() {
+            if t.elapsed() < Duration::from_secs(3) {
+                match (key, m.ctrl) {
+                    (Key::Char('w'), _) => {
+                        self.close_where(|_, _| true);
+                    }
+                    (Key::Char('u'), false) => {
+                        self.close_where(|_, t| !t.buf.dirty());
+                    }
+                    (Key::Char('s'), false) => {
+                        let n = self.save_all();
+                        self.events
+                            .push(CodeEvent::Info(format!("Saved {n} file(s)")));
+                    }
+                    (Key::Char('c' | 'u'), true) => {
+                        let comment = key == Key::Char('c');
+                        if let Some(tab) = self.current_mut() {
+                            let b = &mut tab.buf;
+                            b.single();
+                            if b.lines_commented() != comment {
+                                b.toggle_comment();
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return true;
+            }
+        }
+        match (key, m.ctrl, m.shift, m.alt) {
+            (Key::Tab, true, shift, _) => self.mru_step(if shift { -1 } else { 1 }),
+            (Key::PageDown, true, false, _) => self.cycle_tab(1),
+            (Key::PageUp, true, false, _) => self.cycle_tab(-1),
+            (Key::PageDown, true, true, _) => self.move_tab(1),
+            (Key::PageUp, true, true, _) => self.move_tab(-1),
+            (Key::Char(d @ '1'..='9'), false, false, true) => {
+                self.activate_position(d as usize - '1' as usize);
+            }
+            (Key::Char('0'), false, false, true) => self.activate_position(usize::MAX),
+            (Key::Char('t'), true, true, _) => {
+                self.reopen_closed();
+            }
+            (Key::Char('w'), true, false, _) | (Key::F4, true, _, _) => match self.active {
+                Some(i) => self.close(i, false),
+                None => return false,
+            },
+            (Key::Char('k'), true, false, false) => self.chord = Some(Instant::now()),
+            _ => return false,
+        }
+        true
     }
 
     /// Closes tab `idx`; a dirty tab asks first unless `force`.
@@ -433,19 +764,43 @@ impl CodeEditor {
             self.active = Some(idx);
             return;
         }
+        let was_active = self.active == Some(idx);
         let tab = self.tabs.remove(idx);
+        self.closed.retain(|(p, _)| *p != tab.path);
+        self.closed.push((tab.path.clone(), tab.buf.cursor));
+        if self.closed.len() > CLOSED_LIMIT {
+            self.closed.remove(0);
+        }
+        self.mru.retain(|m| m.as_ref() != Some(&tab.path));
         self.events.push(CodeEvent::Closed(tab.path));
         self.confirm_close = None;
         self.completion = None;
-        self.active = match self.active {
-            _ if self.tabs.is_empty() => None,
-            Some(a) if a > idx => Some(a - 1),
-            Some(a) if a == idx => Some(idx.min(self.tabs.len() - 1)),
-            other => other,
-        };
+        self.switcher = None;
+        if was_active {
+            // Like VS Code: fall back to the most recently used tab.
+            let next = self.mru_order_after_close();
+            self.active = next;
+        } else if let Some(a) = self.active {
+            if a > idx {
+                self.active = Some(a - 1);
+            }
+        }
         if self.active.is_none() {
             self.focused = false;
         }
+    }
+
+    /// The tab to show after the active one closed: the most recently used
+    /// remaining tab.
+    fn mru_order_after_close(&self) -> Option<usize> {
+        for id in &self.mru {
+            // The Scene tab was used more recently than any remaining script.
+            let p = id.as_ref()?;
+            if let Some(i) = self.tabs.iter().position(|t| t.path == *p) {
+                return Some(i);
+            }
+        }
+        (!self.tabs.is_empty()).then(|| self.tabs.len() - 1)
     }
 
     /// Saves tab `idx`.
@@ -564,7 +919,16 @@ impl CodeEditor {
         };
         if let Some(tab) = self.current_mut() {
             let cursor = tab.buf.cursor;
-            tab.buf.replace_range(c.anchor, cursor, &item);
+            if tab.buf.multi() && c.anchor.line == cursor.line {
+                // Every caret completes the same word prefix.
+                let len = cursor.col.saturating_sub(c.anchor.col);
+                tab.buf.each_caret(true, |b, _| {
+                    let at = b.cursor;
+                    b.replace_range(Pos::new(at.line, at.col.saturating_sub(len)), at, &item);
+                });
+            } else {
+                tab.buf.replace_range(c.anchor, cursor, &item);
+            }
             tab.reveal = true;
         }
         true
@@ -597,13 +961,16 @@ impl CodeEditor {
                             label: word.to_string(),
                             detail: detail.to_string(),
                             insert: word.to_string(),
-                            kind: 'v',
+                            kind: CompletionKind::Text,
                         });
                     }
                 }
             }
         }
-        for (words, kind) in [(syntax::KEYWORDS, 'k'), (syntax::BUILTINS, 'f')] {
+        for (words, kind) in [
+            (syntax::KEYWORDS, CompletionKind::Keyword),
+            (syntax::BUILTINS, CompletionKind::Function),
+        ] {
             for w in words {
                 if seen.insert(w) {
                     out.push(CompletionItem {
@@ -701,7 +1068,7 @@ impl CodeEditor {
                 let Some(tab) = self.current_mut() else {
                     return;
                 };
-                tab.buf.type_text(s);
+                tab.buf.each_caret(true, |b, _| b.type_text(s));
                 tab.reveal = true;
                 let word_char = s.chars().last().is_some_and(buffer::is_word);
                 let after_dot = s.ends_with('.');
@@ -779,25 +1146,15 @@ impl CodeEditor {
     /// may treat it as a global shortcut).
     #[allow(clippy::too_many_lines)]
     pub fn key(&mut self, key: Key, m: Mods) -> bool {
+        // Tab switching and closing work from any field (and from the Scene
+        // tab).
+        if self.tab_key(key, m) {
+            return true;
+        }
         if self.current().is_none() {
             return false;
         }
-        // Tab switching and closing work from any field.
         match (key, m.ctrl, m.shift) {
-            (Key::Tab | Key::PageDown, true, false) | (Key::PageDown, true, true) => {
-                self.cycle_tab(1);
-                return true;
-            }
-            (Key::Tab, true, true) | (Key::PageUp, true, _) => {
-                self.cycle_tab(-1);
-                return true;
-            }
-            (Key::Char('w'), true, _) => {
-                if let Some(i) = self.active {
-                    self.close(i, false);
-                }
-                return true;
-            }
             (Key::Char('s'), true, false) => {
                 if let Some(i) = self.active {
                     self.save(i);
@@ -868,72 +1225,132 @@ impl CodeEditor {
             let b = &mut tab.buf;
             let sel = m.shift;
             match (key, m.ctrl, m.alt) {
-                (Key::Left, false, false) => b.left(sel),
-                (Key::Right, false, false) => b.right(sel),
-                (Key::Left, true, false) => b.word(false, sel),
-                (Key::Right, true, false) => b.word(true, sel),
-                (Key::Up, false, false) => b.vertical(-1, sel),
-                (Key::Down, false, false) => b.vertical(1, sel),
+                (Key::Left, false, false) => b.each_caret(false, |b, _| b.left(sel)),
+                (Key::Right, false, false) => b.each_caret(false, |b, _| b.right(sel)),
+                (Key::Left, true, false) => b.each_caret(false, |b, _| b.word(false, sel)),
+                (Key::Right, true, false) => b.each_caret(false, |b, _| b.word(true, sel)),
+                (Key::Up, false, false) => b.each_caret(false, |b, _| b.vertical(-1, sel)),
+                (Key::Down, false, false) => b.each_caret(false, |b, _| b.vertical(1, sel)),
+                // Add a caret above / below (VS Code: Ctrl+Alt+↑↓ on
+                // Windows, Ctrl+Shift+↑↓ on Linux — both work).
+                (Key::Up, true, true) => b.add_caret_vertical(false),
+                (Key::Down, true, true) => b.add_caret_vertical(true),
+                (Key::Up, true, false) if m.shift => b.add_caret_vertical(false),
+                (Key::Down, true, false) if m.shift => b.add_caret_vertical(true),
                 (Key::Up, true, false) => tab.scroll = (tab.scroll - 1.0).max(0.0),
                 (Key::Down, true, false) => tab.scroll += 1.0,
-                (Key::Up, false, true) => b.move_lines(false),
-                (Key::Down, false, true) => b.move_lines(true),
-                (Key::Home, false, _) => b.home(sel),
-                (Key::End, false, _) => b.end(sel),
-                (Key::Home, true, _) => b.doc_edge(false, sel),
-                (Key::End, true, _) => b.doc_edge(true, sel),
+                // Shift+Alt+↑↓ copies lines; Alt+↑↓ moves them.
+                (Key::Up, false, true) if m.shift => {
+                    b.single();
+                    b.duplicate_lines();
+                    b.vertical(-1, false);
+                }
+                (Key::Down, false, true) if m.shift => {
+                    b.single();
+                    b.duplicate_lines();
+                }
+                (Key::Up, false, true) => {
+                    b.single();
+                    b.move_lines(false);
+                }
+                (Key::Down, false, true) => {
+                    b.single();
+                    b.move_lines(true);
+                }
+                (Key::Home, false, _) => b.each_caret(false, |b, _| b.home(sel)),
+                (Key::End, false, _) => b.each_caret(false, |b, _| b.end(sel)),
+                (Key::Home, true, _) => {
+                    b.single();
+                    b.doc_edge(false, sel);
+                }
+                (Key::End, true, _) => {
+                    b.single();
+                    b.doc_edge(true, sel);
+                }
                 (Key::PageUp, false, _) => {
+                    b.single();
                     b.vertical(-page_i, sel);
                     tab.scroll = (tab.scroll - page as f32).max(0.0);
                 }
                 (Key::PageDown, false, _) => {
+                    b.single();
                     b.vertical(page_i, sel);
                     tab.scroll += page as f32;
                 }
                 (Key::Backspace, ctrl, _) => {
-                    if ctrl {
-                        b.delete_word(false);
-                    } else {
-                        b.backspace();
-                    }
+                    b.each_caret(true, |b, _| {
+                        if ctrl {
+                            b.delete_word(false);
+                        } else {
+                            b.backspace();
+                        }
+                    });
                     keep_completion = true;
                 }
-                (Key::Delete, ctrl, _) => {
+                (Key::Delete, ctrl, _) => b.each_caret(true, |b, _| {
                     if ctrl {
                         b.delete_word(true);
                     } else {
                         b.delete();
                     }
+                }),
+                (Key::Enter, false, _) => b.each_caret(true, |b, _| b.newline()),
+                (Key::Enter, true, _) if m.shift => {
+                    // Ctrl+Shift+Enter: new line above.
+                    b.each_caret(true, |b, _| {
+                        let line = b.cursor.line;
+                        let indent = buffer::indent_of(b.line(line)).to_string();
+                        b.move_to(Pos::new(line, 0), false);
+                        b.insert(&format!("{indent}\n"));
+                        b.move_to(Pos::new(line, indent.chars().count()), false);
+                    });
                 }
-                (Key::Enter, false, _) => b.newline(),
                 (Key::Enter, true, _) => {
                     // Ctrl+Enter: new line below without splitting.
-                    b.end(false);
-                    b.newline();
+                    b.each_caret(true, |b, _| {
+                        b.end(false);
+                        b.newline();
+                    });
                 }
                 (Key::Tab, false, _) => {
-                    if m.shift {
-                        b.untab();
+                    if b.multi() && b.selection().is_none() && !m.shift {
+                        b.each_caret(true, |b, _| b.tab());
                     } else {
-                        b.tab();
+                        b.single();
+                        if m.shift {
+                            b.untab();
+                        } else {
+                            b.tab();
+                        }
                     }
                 }
                 (Key::Escape, _, _) => {
-                    if b.selection().is_some() {
+                    if b.single() {
+                        // Escape first drops the extra carets.
+                    } else if b.selection().is_some() {
                         b.anchor = None;
                     } else {
                         handled = false;
                     }
                 }
-                (Key::Char('a'), true, _) => b.select_all(),
+                (Key::Char('a'), true, _) => {
+                    b.single();
+                    b.select_all();
+                }
                 (Key::Char('c'), true, _) => {
-                    let text = b
-                        .selected_text()
-                        .unwrap_or_else(|| format!("{}\n", b.line(b.cursor.line)));
+                    let text = if b.multi() {
+                        b.selections_text().join("\n")
+                    } else {
+                        b.selected_text()
+                            .unwrap_or_else(|| format!("{}\n", b.line(b.cursor.line)))
+                    };
                     clipboard.set(&text);
                 }
                 (Key::Char('x'), true, _) => {
-                    if let Some(text) = b.selected_text() {
+                    if b.multi() {
+                        clipboard.set(&b.selections_text().join("\n"));
+                        b.each_caret(true, |b, _| b.insert(""));
+                    } else if let Some(text) = b.selected_text() {
                         clipboard.set(&text);
                         b.insert("");
                     } else {
@@ -944,7 +1361,14 @@ impl CodeEditor {
                 (Key::Char('v'), true, _) => {
                     let text = clipboard.get();
                     if !text.is_empty() {
-                        b.insert(&text);
+                        // One line per caret when the counts match (VS Code).
+                        let n = b.extra.len() + 1;
+                        let parts: Vec<&str> = text.trim_end_matches('\n').split('\n').collect();
+                        if n > 1 && parts.len() == n {
+                            b.each_caret(true, |b, i| b.insert(parts[i]));
+                        } else {
+                            b.each_caret(true, |b, _| b.insert(&text));
+                        }
                     }
                 }
                 (Key::Char('z'), true, _) if m.shift => {
@@ -956,10 +1380,23 @@ impl CodeEditor {
                 (Key::Char('y'), true, _) => {
                     b.redo();
                 }
-                (Key::Char('/'), true, _) => b.toggle_comment(),
-                (Key::Char('d'), true, _) => b.duplicate_lines(),
-                (Key::Char('k'), true, _) if m.shift => b.delete_lines(),
+                (Key::Char('/'), true, _) => {
+                    b.single();
+                    b.toggle_comment();
+                }
+                // Ctrl+D: select the word, then add the next occurrence.
+                (Key::Char('d'), true, _) => {
+                    b.add_next_occurrence();
+                }
+                (Key::Char('l'), true, _) if m.shift => {
+                    b.select_all_occurrences();
+                }
+                (Key::Char('k'), true, _) if m.shift => {
+                    b.single();
+                    b.delete_lines();
+                }
                 (Key::Char('l'), true, _) => {
+                    b.single();
                     let (first, last) = b.touched_lines();
                     if b.selection().is_some() {
                         b.select(Pos::new(first, 0), Pos::new(last + 1, 0));
@@ -968,6 +1405,7 @@ impl CodeEditor {
                     }
                 }
                 (Key::Char(']'), true, _) => {
+                    b.single();
                     let (first, last) = b.touched_lines();
                     let had = b.selection();
                     b.select(
@@ -979,7 +1417,17 @@ impl CodeEditor {
                         b.anchor = None;
                     }
                 }
-                (Key::Char('['), true, _) => b.untab(),
+                (Key::Char('['), true, _) => {
+                    b.single();
+                    b.untab();
+                }
+                // Ctrl+Shift+\: jump to the matching bracket.
+                (Key::Char('\\'), true, _) => {
+                    if let Some((_, target)) = b.matching_bracket() {
+                        b.single();
+                        b.move_to(target, false);
+                    }
+                }
                 _ => handled = false,
             }
             if handled {
@@ -1022,18 +1470,6 @@ impl CodeEditor {
             _ => return false,
         }
         true
-    }
-
-    fn cycle_tab(&mut self, dir: isize) {
-        let n = self.tabs.len();
-        if n == 0 {
-            return;
-        }
-        let cur = self.active.unwrap_or(0);
-        let next = (cur.cast_signed_compat() + dir).rem_euclid(n.cast_signed_compat());
-        self.active = usize::try_from(next).ok();
-        self.completion = None;
-        self.focused = true;
     }
 
     fn find_key(&mut self, key: Key, m: Mods) -> bool {
@@ -1184,6 +1620,135 @@ mod tests {
         alt: false,
     };
 
+    /// An editor with one tab per name, opened in order (the last active).
+    fn editor_files(tag: &str, names: &[&str]) -> (CodeEditor, Vec<PathBuf>) {
+        let dir = std::env::temp_dir().join(format!("oberon_tabs_{}_{tag}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut ed = CodeEditor::new();
+        let mut paths = Vec::new();
+        for n in names {
+            let p = dir.join(n);
+            std::fs::write(&p, format!("# {n}\n")).unwrap();
+            ed.open(&p, None).unwrap();
+            paths.push(p);
+        }
+        (ed, paths)
+    }
+
+    const ALT: Mods = Mods {
+        ctrl: false,
+        shift: false,
+        alt: true,
+    };
+
+    #[test]
+    fn ctrl_tab_walks_tabs_in_mru_order_and_settles_on_release() {
+        let (mut ed, _) = editor_files("mru", &["a.py", "b.py", "c.py"]);
+        ed.activate(Some(0)); // visit a: MRU = a, c, b, …
+        assert!(ed.key(Key::Tab, CTRL));
+        assert_eq!(
+            ed.active,
+            Some(2),
+            "first Ctrl+Tab goes to the previous file"
+        );
+        assert!(ed.switching());
+        assert!(ed.key(Key::Tab, CTRL));
+        assert_eq!(ed.active, Some(1));
+        ed.commit_switch();
+        assert!(!ed.switching());
+        // Now b is most recent, a second: one Ctrl+Tab flips back to a.
+        ed.key(Key::Tab, CTRL);
+        ed.commit_switch();
+        assert_eq!(ed.active, Some(0));
+        // Ctrl+Shift+Tab walks backwards (wrapping to the oldest).
+        ed.key(
+            Key::Tab,
+            Mods {
+                shift: true,
+                ..CTRL
+            },
+        );
+        assert_ne!(ed.active, Some(0));
+    }
+
+    #[test]
+    fn page_keys_and_alt_digits_include_the_scene_tab() {
+        let (mut ed, _) = editor_files("pos", &["a.py", "b.py"]);
+        assert_eq!(ed.active, Some(1));
+        assert!(ed.key(Key::PageDown, CTRL));
+        assert_eq!(ed.active, None, "wraps to the Scene tab");
+        assert!(!ed.has_focus());
+        // Tab keys still work from the Scene tab.
+        assert!(ed.key(Key::PageDown, CTRL));
+        assert_eq!(ed.active, Some(0));
+        assert!(ed.key(Key::PageUp, CTRL));
+        assert_eq!(ed.active, None);
+        assert!(ed.key(Key::Char('3'), ALT));
+        assert_eq!(ed.active, Some(1));
+        assert!(ed.key(Key::Char('1'), ALT));
+        assert_eq!(ed.active, None);
+        assert!(ed.key(Key::Char('0'), ALT));
+        assert_eq!(ed.active, Some(1), "Alt+0 is the last tab");
+        // Ctrl+Shift+PgUp moves the tab left.
+        let title = ed.current().unwrap().title();
+        ed.key(
+            Key::PageUp,
+            Mods {
+                shift: true,
+                ..CTRL
+            },
+        );
+        assert_eq!(ed.active, Some(0));
+        assert_eq!(ed.current().unwrap().title(), title);
+    }
+
+    #[test]
+    fn closing_falls_back_to_the_last_used_tab_and_reopens() {
+        let (mut ed, paths) = editor_files("close", &["a.py", "b.py", "c.py"]);
+        ed.activate(Some(0));
+        ed.activate(Some(2));
+        // Closing c returns to a (used before c), not to b (its neighbour).
+        assert!(ed.key(Key::F4, CTRL));
+        assert_eq!(ed.current().unwrap().path, paths[0]);
+        assert!(ed.key(
+            Key::Char('t'),
+            Mods {
+                shift: true,
+                ..CTRL
+            }
+        ));
+        assert_eq!(ed.tabs.len(), 3);
+        assert_eq!(ed.current().unwrap().path, paths[2]);
+    }
+
+    #[test]
+    fn ctrl_k_chords_close_saved_and_all() {
+        let (mut ed, _) = editor_files("chord", &["a.py", "b.py", "c.py"]);
+        ed.activate(Some(1));
+        ed.text("dirty ");
+        assert!(ed.key(Key::Char('k'), CTRL));
+        assert!(ed.chord_pending());
+        assert!(ed.key(Key::Char('u'), Mods::default()));
+        assert!(!ed.chord_pending());
+        assert_eq!(ed.tabs.len(), 1, "only the unsaved tab stays");
+        assert!(ed.current().unwrap().buf.dirty());
+        ed.key(Key::Char('k'), CTRL);
+        ed.key(Key::Char('w'), Mods::default());
+        assert_eq!(ed.tabs.len(), 1, "unsaved tabs are kept by Close All");
+    }
+
+    #[test]
+    fn completion_kinds_from_the_language_server() {
+        assert_eq!(CompletionKind::from_lsp(2), CompletionKind::Method);
+        assert_eq!(CompletionKind::from_lsp(3), CompletionKind::Function);
+        assert_eq!(CompletionKind::from_lsp(7), CompletionKind::Class);
+        assert_eq!(CompletionKind::from_lsp(9), CompletionKind::Module);
+        assert_eq!(CompletionKind::from_lsp(14), CompletionKind::Keyword);
+        assert_eq!(CompletionKind::from_lsp(21), CompletionKind::Constant);
+        assert_eq!(CompletionKind::from_lsp(6), CompletionKind::Variable);
+        assert_eq!(CompletionKind::from_lsp(99).label(), "variable");
+    }
+
     #[test]
     fn opening_saving_and_closing_tabs() {
         let (mut ed, path) = editor_with("x = 1\n");
@@ -1255,13 +1820,13 @@ mod tests {
                 label: "input".into(),
                 detail: String::new(),
                 insert: "input".into(),
-                kind: 'v',
+                kind: CompletionKind::Variable,
             },
             CompletionItem {
                 label: "time".into(),
                 detail: String::new(),
                 insert: "time".into(),
-                kind: 'v',
+                kind: CompletionKind::Variable,
             },
         ]);
         ed.text("ti");

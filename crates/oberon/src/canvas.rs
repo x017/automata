@@ -267,7 +267,25 @@ impl Canvas {
         self.stroke_path(&path, color, width);
     }
 
+    /// Whether a path (logical units, `pad` = stroke allowance) lies wholly
+    /// outside the clip; such paths are skipped. Paths straddling the clip
+    /// edge still draw in full.
+    fn clipped_out(&self, path: &tiny_skia::Path, pad: f32) -> bool {
+        let Some([x0, y0, x1, y1]) = self.clip else {
+            return false;
+        };
+        let s = self.scale;
+        let b = path.bounds();
+        b.right() + pad < x0 as f32 / s
+            || b.left() - pad > x1 as f32 / s
+            || b.bottom() + pad < y0 as f32 / s
+            || b.top() - pad > y1 as f32 / s
+    }
+
     fn fill_path(&mut self, path: &tiny_skia::Path, color: Color) {
+        if self.clipped_out(path, 0.0) {
+            return;
+        }
         let mut paint = Paint::default();
         paint.set_color(color);
         paint.anti_alias = true;
@@ -277,6 +295,9 @@ impl Canvas {
     }
 
     fn stroke_path(&mut self, path: &tiny_skia::Path, color: Color, width: f32) {
+        if self.clipped_out(path, width) {
+            return;
+        }
         let mut paint = Paint::default();
         paint.set_color(color);
         paint.anti_alias = true;

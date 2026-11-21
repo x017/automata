@@ -4,11 +4,12 @@
 
 use tiny_skia::Color;
 
+use super::menus::{Action, MenuItem, TabCommand, UiAction};
 use super::{ButtonStyle, CursorHint, LogLevel, Rect, Ui};
 use crate::canvas::Canvas;
 use crate::code::buffer::{col_at_visual, visual_col};
 use crate::code::syntax::{self, Tok};
-use crate::code::{CodeEvent, Focus, Pos, Severity};
+use crate::code::{CodeEvent, CodeTab, CompletionKind, Focus, Pos, Severity};
 use crate::theme::{color, layout};
 
 /// Height of the document tab strip.
@@ -121,6 +122,20 @@ impl Ui {
         handled
     }
 
+    /// Tab navigation keys (Ctrl+Tab, Ctrl+PgUp/PgDn, Alt+1…9, Ctrl+W,
+    /// Ctrl+K chords, …) when the editor isn't focused, e.g. from the Scene
+    /// tab; false when the key isn't one of them.
+    pub fn code_tab_key(&mut self, key: crate::code::Key, mods: crate::code::Mods) -> bool {
+        let handled = self.code.tab_key(key, mods);
+        self.drain_code_events();
+        handled
+    }
+
+    /// Ctrl was released: settles the Ctrl+Tab switcher on its tab.
+    pub fn code_commit_switch(&mut self) {
+        self.code.commit_switch();
+    }
+
     /// Forwards typed text to the code editor.
     pub fn code_text(&mut self, text: &str) {
         self.code.hover = None;
@@ -152,7 +167,163 @@ impl Ui {
         }
     }
 
-    /// Draws the Scene / script tabs.
+    /// The Ctrl+Tab switcher: open tabs in most-recently-used order while
+    /// Ctrl is held; releasing Ctrl keeps the highlighted one.
+    pub(super) fn draw_switcher(&mut self, canvas: &mut Canvas, w: f32) {
+        const ROW: f32 = 30.0;
+        const MAX_ROWS: usize = 12;
+        let Some(sw) = &self.code.switcher else {
+            return;
+        };
+        let (order, index) = (sw.order.clone(), sw.index);
+        let width = (w * 0.5).clamp(320.0, 520.0);
+        let rows = order.len().min(MAX_ROWS);
+        let height = 34.0 + rows as f32 * ROW + 8.0;
+        let r = Rect::new(((w - width) / 2.0).round(), 64.0, width, height);
+        canvas.fill_rounded(r.x + 3.0, r.y + 8.0, r.w, r.h, 10.0, color::shadow());
+        canvas.fill_rounded(r.x, r.y, r.w, r.h, 10.0, color::surface());
+        canvas.stroke_rounded(r.x, r.y, r.w, r.h, 10.0, color::border(), 1.0);
+        canvas.text(
+            r.x + 16.0,
+            r.y + 10.0,
+            layout::SMALL_SIZE,
+            "Open editors, most recent first",
+            color::text_dim(),
+        );
+        let start = index.saturating_sub(MAX_ROWS - 1);
+        for (k, id) in order.iter().enumerate().skip(start).take(MAX_ROWS) {
+            let row = Rect::new(
+                r.x + 6.0,
+                r.y + 34.0 + (k - start) as f32 * ROW,
+                r.w - 12.0,
+                ROW - 2.0,
+            );
+            if k == index {
+                canvas.fill_rounded(row.x, row.y, row.w, row.h, 6.0, color::select());
+            }
+            let (title, detail, dirty) = match id.and_then(|i| self.code.tabs.get(i)) {
+                Some(t) => {
+                    let dir = t
+                        .path
+                        .parent()
+                        .map(|d| d.strip_prefix(&self.project_root).unwrap_or(d))
+                        .map(|d| d.display().to_string())
+                        .unwrap_or_default();
+                    (t.title(), dir, t.buf.dirty())
+                }
+                None => ("Scene".to_string(), "scene view".to_string(), false),
+            };
+            let fg = if k == index {
+                color::text()
+            } else {
+                color::text_dim()
+            };
+            let tw = canvas.text(row.x + 12.0, row.y + 7.0, layout::FONT_SIZE, &title, fg);
+            if dirty {
+                canvas.fill_circle(row.x + 12.0 + tw + 8.0, row.y + row.h / 2.0, 3.0, fg);
+            }
+            let dx = row.x + 12.0 + tw + if dirty { 20.0 } else { 12.0 };
+            canvas.text_clipped(
+                dx,
+                row.y + 8.5,
+                layout::SMALL_SIZE,
+                &detail,
+                color::text_faint(),
+                row.x + row.w - 10.0 - dx,
+            );
+        }
+    }
+
+    /// Runs a script tab context menu command.
+    pub(super) fn tab_command(&mut self, cmd: TabCommand) {
+        let path = |ui: &Self, i: usize| ui.code.tabs.get(i).map(|t| t.path.clone());
+        match cmd {
+            TabCommand::Close(i) => self.code.close(i, false),
+            TabCommand::CloseOthers(keep) => {
+                let keep = path(self, keep);
+                self.code.close_where(|_, t| Some(&t.path) != keep.as_ref());
+                if let Some(p) = keep {
+                    let i = self.code.tabs.iter().position(|t| t.path == p);
+                    self.code.activate(i);
+                }
+            }
+            TabCommand::CloseRight(i) => {
+                self.code.close_where(|j, _| j > i);
+            }
+            TabCommand::CloseSaved => {
+                self.code.close_where(|_, t| !t.buf.dirty());
+            }
+            TabCommand::CloseAll => {
+                self.code.close_where(|_, _| true);
+            }
+            TabCommand::CopyPath(i) => {
+                if let Some(p) = path(self, i) {
+                    self.code.clipboard.set(&p.display().to_string());
+                }
+            }
+            TabCommand::CopyRelativePath(i) => {
+                if let Some(p) = path(self, i) {
+                    let rel = p.strip_prefix(&self.project_root).unwrap_or(&p);
+                    self.code.clipboard.set(&rel.display().to_string());
+                }
+            }
+            TabCommand::Reveal(i) => {
+                if let Some(p) = path(self, i) {
+                    self.reveal_in_files(&p);
+                }
+            }
+            TabCommand::ReopenClosed => {
+                self.code.reopen_closed();
+            }
+        }
+        self.drain_code_events();
+    }
+
+    /// The context menu of script tab `i`.
+    fn tab_menu(&self, i: usize) -> Vec<MenuItem> {
+        let n = self.code.tabs.len();
+        let any_saved = self.code.tabs.iter().any(|t| !t.buf.dirty());
+        let tab = |c| Action::Ui(UiAction::Tab(c));
+        vec![
+            MenuItem::new("Close", "Ctrl+W", tab(TabCommand::Close(i)), true),
+            MenuItem::new("Close Others", "", tab(TabCommand::CloseOthers(i)), n > 1),
+            MenuItem::new(
+                "Close to the Right",
+                "",
+                tab(TabCommand::CloseRight(i)),
+                i + 1 < n,
+            ),
+            MenuItem::new(
+                "Close Saved",
+                "Ctrl+K U",
+                tab(TabCommand::CloseSaved),
+                any_saved,
+            ),
+            MenuItem::new("Close All", "Ctrl+K W", tab(TabCommand::CloseAll), true),
+            MenuItem::separator(),
+            MenuItem::new(
+                "Reopen Closed Tab",
+                "Ctrl+Shift+T",
+                tab(TabCommand::ReopenClosed),
+                true,
+            ),
+            MenuItem::separator(),
+            MenuItem::new("Copy Path", "", tab(TabCommand::CopyPath(i)), true),
+            MenuItem::new(
+                "Copy Relative Path",
+                "",
+                tab(TabCommand::CopyRelativePath(i)),
+                true,
+            ),
+            MenuItem::new("Reveal in Files", "", tab(TabCommand::Reveal(i)), true),
+        ]
+    }
+
+    /// Draws the Scene / script tabs. The Scene tab is pinned; script tabs
+    /// scroll (wheel) when they overflow, and the active one is kept in
+    /// view. Middle-click closes, right-click opens the tab menu, dragging
+    /// reorders.
+    #[allow(clippy::too_many_lines)]
     pub(super) fn doc_tabs(&mut self, canvas: &mut Canvas, r: Rect) {
         canvas.fill_rect(r.x, r.y, r.w, r.h, color::surface());
         canvas.line(
@@ -174,36 +345,119 @@ impl Ui {
             self.code.show_scene();
         }
         x += w + 2.0;
+
+        // The scrolling strip of script tabs.
+        let strip = Rect::new(x, r.y, (r.x + r.w - x).max(0.0), r.h);
+        let titles: Vec<String> = self.code.tabs.iter().map(CodeTab::title).collect();
+        let widths: Vec<f32> = titles
+            .iter()
+            .map(|t| canvas.measure_text(layout::FONT_SIZE, t) + 44.0)
+            .collect();
+        let starts: Vec<f32> = widths
+            .iter()
+            .scan(0.0, |acc, w| {
+                let s = *acc;
+                *acc += w + 2.0;
+                Some(s)
+            })
+            .collect();
+        let total = starts.last().zip(widths.last()).map_or(0.0, |(s, w)| s + w);
+        let max_scroll = (total - strip.w + 8.0).max(0.0);
+        if self.hot(strip) && self.p.scroll != 0.0 {
+            self.tab_scroll -= self.p.scroll * 40.0;
+        }
+        // Keep the active tab in view when it changes (keyboard switching).
+        if self.tab_revealed != self.code.active {
+            self.tab_revealed = self.code.active;
+            if let Some(i) = self.code.active.filter(|i| *i < starts.len()) {
+                let (s, w) = (starts[i], widths[i]);
+                if s < self.tab_scroll {
+                    self.tab_scroll = s;
+                } else if s + w > self.tab_scroll + strip.w - 8.0 {
+                    self.tab_scroll = s + w - strip.w + 8.0;
+                }
+            }
+        }
+        self.tab_scroll = self.tab_scroll.clamp(0.0, max_scroll);
+
+        // Dragging a tab past a neighbour's midpoint swaps them.
+        if let Some((from, press_x)) = self.tab_drag {
+            if !self.p.down || from >= starts.len() {
+                self.tab_drag = None;
+            } else if (self.p.x - press_x).abs() > 4.0 {
+                // The dragged tab lands after every other tab whose
+                // midpoint the pointer has passed.
+                let local = self.p.x - strip.x + self.tab_scroll;
+                let to = (0..starts.len())
+                    .filter(|&j| j != from && local > starts[j] + widths[j] / 2.0)
+                    .count();
+                if to != from {
+                    self.code.reorder(from, to);
+                    self.tab_drag = Some((to, press_x));
+                    self.tab_revealed = self.code.active;
+                }
+                self.cursor = CursorHint::Grab;
+            }
+        }
+
+        let prev_clip = canvas.set_clip(Some((strip.x, strip.y, strip.w, strip.h)));
         let mut activate = None;
         let mut close = None;
+        let mut menu = None;
         for i in 0..self.code.tabs.len() {
-            let title = self.code.tabs[i].title();
+            let x = strip.x + starts[i] - self.tab_scroll;
+            let w = widths[i];
+            if x + w < strip.x || x > strip.x + strip.w {
+                continue;
+            }
             let dirty = self.code.tabs[i].buf.dirty();
             let errors = self.code.tabs[i]
                 .diagnostics
                 .iter()
                 .any(|d| d.severity == Severity::Error);
-            let w = canvas.measure_text(layout::FONT_SIZE, &title) + 44.0;
-            if x + w > r.x + r.w {
-                break;
-            }
+            // Chips cut off by the strip edge don't take clicks outside it.
             let tab = Rect::new(x, r.y + 3.0, w, r.h - 3.0);
+            let inside = self.hot(strip);
             let active = self.code.active == Some(i);
-            let (clicked, closed) = self.tab_chip(canvas, tab, &title, active, dirty, errors);
-            if closed {
+            let (clicked, closed) = self.tab_chip(canvas, tab, &titles[i], active, dirty, errors);
+            let hot = inside && self.hot(tab);
+            if inside && closed || hot && self.p.middle_pressed {
                 close = Some(i);
-            } else if clicked {
+            } else if inside && clicked {
                 activate = Some(i);
+                self.tab_drag = Some((i, self.p.x));
+            } else if hot && self.p.right_pressed {
+                menu = Some(i);
             }
-            x += w + 2.0;
         }
+        canvas.restore_clip(prev_clip);
+        // Fades hint at tabs scrolled out of view.
+        let fade = |canvas: &mut Canvas, x: f32, dir: f32| {
+            for k in 0..24u8 {
+                let a = 250 - k * 10;
+                let xx = x + dir * f32::from(k);
+                let mut c = color::surface();
+                c.set_alpha(f32::from(a) / 255.0);
+                canvas.fill_rect(xx, r.y, 1.0, r.h - 1.0, c);
+            }
+        };
+        if self.tab_scroll > 0.5 {
+            fade(canvas, strip.x, 1.0);
+        }
+        if self.tab_scroll < max_scroll - 0.5 {
+            fade(canvas, strip.x + strip.w - 1.0, -1.0);
+        }
+
         if let Some(i) = close {
+            self.tab_drag = None;
             self.code.close(i, false);
             self.drain_code_events();
         } else if let Some(i) = activate {
-            self.code.active = Some(i);
-            self.code.focused = true;
-            self.code.completion = None;
+            self.code.activate(Some(i));
+        }
+        if let Some(i) = menu {
+            let items = self.tab_menu(i);
+            self.open_menu(self.p.x, self.p.y, items);
         }
     }
 
@@ -274,6 +528,41 @@ impl Ui {
     /// The code editor for the active script tab.
     #[allow(clippy::too_many_lines)]
     pub(super) fn code_view(&mut self, canvas: &mut Canvas, rect: Rect) {
+        // The editor's own zoom: draw in a space scaled by `k` on top of the
+        // interface scale, with the pointer and clip band mapped into it, so
+        // layout, hit-testing and clipping all stay consistent.
+        let k = self.editor_scale();
+        if (k - 1.0).abs() < 0.001 {
+            self.code_view_scaled(canvas, rect);
+            return;
+        }
+        let (p, clip, base) = (self.p, self.clip, canvas.scale());
+        canvas.set_scale(base * k);
+        // The canvas clamps its scale; use what it actually applied.
+        let k = canvas.scale() / base;
+        self.p.x /= k;
+        self.p.y /= k;
+        self.clip = (clip.0 / k, clip.1 / k);
+        let inner = Rect::new(rect.x / k, rect.y / k, rect.w / k, rect.h / k);
+        self.code_view_scaled(canvas, inner);
+        canvas.set_scale(base);
+        self.p = p;
+        self.clip = clip;
+    }
+
+    /// The script editor's zoom (Settings › Editor › Editor scale).
+    #[must_use]
+    pub fn editor_scale(&self) -> f32 {
+        let k = self.prefs.editor.scale;
+        if k.is_finite() {
+            k.clamp(0.5, 3.0)
+        } else {
+            1.0
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn code_view_scaled(&mut self, canvas: &mut Canvas, rect: Rect) {
         let (font, lh) = self.code_metrics();
         self.code.settings.clone_from(&self.prefs.editor);
         let opts = self.prefs.editor.clone();
@@ -325,7 +614,13 @@ impl Ui {
         {
             let hot = self.hot(area);
             let tab = &mut self.code.tabs[idx];
-            if hot && self.p.scroll != 0.0 {
+            if hot && self.p.scroll != 0.0 && self.p.ctrl {
+                // Ctrl+wheel zooms the editor (Settings › Editor scale).
+                let k = self.prefs.editor.scale;
+                let step = if self.p.scroll > 0.0 { 0.1 } else { -0.1 };
+                self.prefs.editor.scale = ((k + step) * 10.0).round().clamp(5.0, 30.0) / 10.0;
+                self.prefs_dirty = true;
+            } else if hot && self.p.scroll != 0.0 {
                 if self.p.shift {
                     tab.scroll_x = (tab.scroll_x - self.p.scroll * cell * 6.0).max(0.0);
                 } else {
@@ -382,6 +677,7 @@ impl Ui {
         let buf = &tab.buf;
         let cursor = buf.cursor;
         let selection = buf.selection();
+        let carets = buf.carets();
 
         // Current line.
         if selection.is_none() && opts.highlight_line {
@@ -449,13 +745,16 @@ impl Ui {
                 *c,
             );
         }
-        // Selection.
-        if let Some((a, b)) = selection {
-            let sel = if focused {
-                rgb(52, 52, 50)
-            } else {
-                rgb(32, 32, 31)
-            };
+        // Selections (every caret's).
+        let sel = if focused {
+            rgb(52, 52, 50)
+        } else {
+            rgb(32, 32, 31)
+        };
+        for (a, b) in carets
+            .iter()
+            .filter_map(crate::code::buffer::Caret::selection)
+        {
             for line in a.line.max(first)..=b.line.min(last.saturating_sub(1)) {
                 let start = if line == a.line { a.col } else { 0 };
                 let l = buf.line(line);
@@ -566,16 +865,21 @@ impl Ui {
                 canvas.polyline(&pts, severity_color(d.severity), 1.0);
             }
         }
-        // Caret.
-        if focused && self.code.focus == Focus::Text && cursor.line >= first && cursor.line < last {
-            let x = geom.x_of(buf, cursor);
-            canvas.fill_rect(
-                x - 0.5,
-                geom.y_of(cursor.line) + 1.0,
-                2.0,
-                lh - 2.0,
-                color::accent_soft(),
-            );
+        // Carets.
+        if focused && self.code.focus == Focus::Text {
+            for c in &carets {
+                let p = c.cursor;
+                if p.line >= first && p.line < last {
+                    let x = geom.x_of(buf, p);
+                    canvas.fill_rect(
+                        x - 0.5,
+                        geom.y_of(p.line) + 1.0,
+                        2.0,
+                        lh - 2.0,
+                        color::accent_soft(),
+                    );
+                }
+            }
         }
         canvas.restore_clip(clip);
 
@@ -657,6 +961,13 @@ impl Ui {
                 clicks
             };
             self.code_clicks = Some((now, clicks, pos.line));
+            // Alt+click adds (or removes) a caret, like VS Code.
+            if p.alt && over_text && clicks == 1 {
+                tab.buf.toggle_caret(pos);
+                self.code_drag = None;
+                return;
+            }
+            tab.buf.single();
             if over_gutter || clicks >= 3 {
                 tab.buf.select_line(pos.line);
                 self.code_drag = Some(true);
@@ -745,7 +1056,10 @@ impl Ui {
             .filter(|d| d.severity == Severity::Warning)
             .count();
         let mut left = format!("Ln {}, Col {}", c.line + 1, c.col + 1);
-        if let Some(sel) = tab.buf.selected_text() {
+        if tab.buf.multi() {
+            // Like VS Code: the caret count, not the primary's selection.
+            left = format!("{left}  ({} selections)", tab.buf.carets().len());
+        } else if let Some(sel) = tab.buf.selected_text() {
             left = format!("{left}  ({} selected)", sel.chars().count());
         }
         canvas.text(
@@ -1116,21 +1430,7 @@ impl Ui {
             } else if self.hot(row) {
                 canvas.fill_rounded(row.x, row.y, row.w, row.h, 3.0, color::hover());
             }
-            let badge = match item.kind {
-                'f' | 'm' => tok_color(Tok::Function),
-                'c' => tok_color(Tok::Class),
-                'k' => tok_color(Tok::Keyword),
-                'M' => tok_color(Tok::Str),
-                _ => color::text_dim(),
-            };
-            canvas.fill_rounded(row.x + 5.0, row.y + 4.0, 14.0, 13.0, 3.0, rgba(0, 0, 0, 60));
-            canvas.text(
-                row.x + 8.5,
-                row.y + 3.0,
-                layout::SMALL_SIZE,
-                &item.kind.to_string(),
-                badge,
-            );
+            draw_kind_icon(canvas, item.kind, row.x + 12.0, row.y + row_h / 2.0);
             let lw = canvas.text(
                 row.x + 26.0,
                 row.y + 3.0,
@@ -1227,6 +1527,186 @@ impl Ui {
 }
 
 /// Wraps text to `width` columns (keeps explicit line breaks).
+/// The accent color of a completion kind's icon.
+fn kind_color(kind: CompletionKind) -> Color {
+    match kind {
+        CompletionKind::Function | CompletionKind::Method => tok_color(Tok::Function),
+        CompletionKind::Class => tok_color(Tok::Class),
+        CompletionKind::Variable => rgb(138, 190, 245),
+        CompletionKind::Property => tok_color(Tok::Str),
+        CompletionKind::Constant => tok_color(Tok::Constant),
+        CompletionKind::Keyword | CompletionKind::Text => rgb(150, 148, 142),
+        CompletionKind::Module | CompletionKind::Snippet => rgb(205, 202, 195),
+        CompletionKind::Key => color::warn(),
+        CompletionKind::Entity => color::camera_icon(),
+    }
+}
+
+/// Draws a 14 px symbol icon for a completion kind centered on `(cx, cy)`
+/// (VS Code-style: shapes, not letters).
+fn draw_kind_icon(canvas: &mut Canvas, kind: CompletionKind, cx: f32, cy: f32) {
+    let c = kind_color(kind);
+    let w = 1.3;
+    match kind {
+        // A cube: functions and methods.
+        CompletionKind::Function | CompletionKind::Method => {
+            let top = [
+                (cx, cy - 6.0),
+                (cx + 5.5, cy - 3.0),
+                (cx, cy),
+                (cx - 5.5, cy - 3.0),
+            ];
+            if kind == CompletionKind::Method {
+                canvas.fill_polygon(&top, rgba(255, 199, 153, 90));
+            }
+            canvas.polyline(
+                &[
+                    (cx - 5.5, cy - 3.0),
+                    (cx, cy - 6.0),
+                    (cx + 5.5, cy - 3.0),
+                    (cx + 5.5, cy + 3.0),
+                    (cx, cy + 6.0),
+                    (cx - 5.5, cy + 3.0),
+                    (cx - 5.5, cy - 3.0),
+                    (cx, cy),
+                    (cx + 5.5, cy - 3.0),
+                ],
+                c,
+                w,
+            );
+            canvas.line(cx, cy, cx, cy + 6.0, c, w);
+        }
+        // Two linked boxes: classes and types.
+        CompletionKind::Class => {
+            canvas.stroke_rect(cx - 6.0, cy - 5.5, 5.0, 5.0, c, w);
+            canvas.stroke_rect(cx + 1.0, cy + 0.5, 5.0, 5.0, c, w);
+            canvas.polyline(
+                &[
+                    (cx - 3.5, cy - 0.5),
+                    (cx - 3.5, cy + 3.0),
+                    (cx + 1.0, cy + 3.0),
+                ],
+                c,
+                w,
+            );
+        }
+        // [x]: variables.
+        CompletionKind::Variable => {
+            canvas.polyline(
+                &[
+                    (cx - 3.5, cy - 5.5),
+                    (cx - 6.0, cy - 5.5),
+                    (cx - 6.0, cy + 5.5),
+                    (cx - 3.5, cy + 5.5),
+                ],
+                c,
+                w,
+            );
+            canvas.polyline(
+                &[
+                    (cx + 3.5, cy - 5.5),
+                    (cx + 6.0, cy - 5.5),
+                    (cx + 6.0, cy + 5.5),
+                    (cx + 3.5, cy + 5.5),
+                ],
+                c,
+                w,
+            );
+            canvas.fill_rounded(cx - 2.5, cy - 1.5, 5.0, 3.0, 1.0, c);
+        }
+        // A tag: properties, fields and attributes.
+        CompletionKind::Property => {
+            canvas.polyline(
+                &[
+                    (cx - 6.0, cy - 4.0),
+                    (cx + 1.5, cy - 4.0),
+                    (cx + 6.0, cy),
+                    (cx + 1.5, cy + 4.0),
+                    (cx - 6.0, cy + 4.0),
+                    (cx - 6.0, cy - 4.0),
+                ],
+                c,
+                w,
+            );
+            canvas.fill_circle(cx - 2.5, cy, 1.4, c);
+        }
+        // A box with an equals sign: constants.
+        CompletionKind::Constant => {
+            canvas.stroke_rounded(cx - 6.0, cy - 5.0, 12.0, 10.0, 2.0, c, w);
+            canvas.line(cx - 3.0, cy - 1.5, cx + 3.0, cy - 1.5, c, w);
+            canvas.line(cx - 3.0, cy + 1.5, cx + 3.0, cy + 1.5, c, w);
+        }
+        // Stacked lines: keywords and plain words.
+        CompletionKind::Keyword | CompletionKind::Text => {
+            canvas.line(cx - 6.0, cy - 4.0, cx + 6.0, cy - 4.0, c, w);
+            canvas.line(cx - 6.0, cy, cx + 3.0, cy, c, w);
+            canvas.line(cx - 6.0, cy + 4.0, cx + 5.0, cy + 4.0, c, w);
+            if kind == CompletionKind::Keyword {
+                canvas.fill_rect(cx + 4.5, cy - 1.0, 2.0, 2.0, c);
+            }
+        }
+        // { }: modules.
+        CompletionKind::Module => {
+            for dir in [-1.0f32, 1.0] {
+                let x = cx + dir * 5.5;
+                let xi = cx + dir * 3.5;
+                canvas.polyline(
+                    &[
+                        (xi, cy - 6.0),
+                        (x - dir * 0.5, cy - 5.0),
+                        (x - dir * 0.5, cy - 1.5),
+                        (x + dir * 0.5, cy),
+                        (x - dir * 0.5, cy + 1.5),
+                        (x - dir * 0.5, cy + 5.0),
+                        (xi, cy + 6.0),
+                    ],
+                    c,
+                    w,
+                );
+            }
+        }
+        // A dashed square: snippets.
+        CompletionKind::Snippet => {
+            for (x0, y0, x1, y1) in [
+                (-6.0, -6.0, -2.0, -6.0),
+                (2.0, -6.0, 6.0, -6.0),
+                (-6.0, 6.0, -2.0, 6.0),
+                (2.0, 6.0, 6.0, 6.0),
+                (-6.0, -6.0, -6.0, 6.0),
+                (6.0, -6.0, 6.0, 6.0),
+            ] {
+                canvas.line(cx + x0, cy + y0, cx + x1, cy + y1, c, w);
+            }
+        }
+        // A keycap: input key names.
+        CompletionKind::Key => {
+            canvas.stroke_rounded(cx - 6.0, cy - 6.0, 12.0, 12.0, 2.5, c, w);
+            canvas.line(cx - 6.0, cy + 2.5, cx + 6.0, cy + 2.5, c, 1.0);
+            canvas.fill_rect(cx - 2.0, cy - 3.0, 4.0, 2.0, c);
+        }
+        // A solid cube: scene entities.
+        CompletionKind::Entity => {
+            canvas.fill_polygon(
+                &[
+                    (cx, cy - 6.0),
+                    (cx + 5.5, cy - 3.0),
+                    (cx + 5.5, cy + 3.0),
+                    (cx, cy + 6.0),
+                    (cx - 5.5, cy + 3.0),
+                    (cx - 5.5, cy - 3.0),
+                ],
+                rgba(140, 220, 170, 70),
+            );
+            canvas.polyline(
+                &[(cx - 5.5, cy - 3.0), (cx, cy), (cx + 5.5, cy - 3.0)],
+                c,
+                w,
+            );
+            canvas.line(cx, cy, cx, cy + 6.0, c, w);
+        }
+    }
+}
+
 fn wrap(text: &str, width: usize) -> Vec<String> {
     let mut out = Vec::new();
     for para in text.lines() {
@@ -1301,6 +1781,119 @@ mod tests {
         assert!(ui.scene_visible());
         assert!((ui.layout(1280.0, 800.0).viewport.y - before.y).abs() < 0.01);
         let _ = ui.frame(&mut canvas, &doc, Pointer::default(), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn scripts(tag: &str, names: &[&str]) -> (std::path::PathBuf, Vec<std::path::PathBuf>) {
+        let dir = std::env::temp_dir().join(format!("oberon-tabs-{}-{tag}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = names
+            .iter()
+            .map(|n| {
+                let p = dir.join(n);
+                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                std::fs::write(&p, "x = 1\nlonger_line = 2\n").unwrap();
+                p
+            })
+            .collect();
+        (dir, paths)
+    }
+
+    #[test]
+    fn tab_strip_middle_click_closes_and_right_click_offers_the_tab_menu() {
+        let (dir, paths) = scripts("strip", &["a.py", "b.py"]);
+        let mut ui = Ui::new();
+        let doc = Document::starter();
+        let mut canvas = Canvas::new(1280, 800);
+        for p in &paths {
+            ui.open_code(p, None);
+        }
+        let _ = ui.frame(&mut canvas, &doc, Pointer::default(), None);
+        let strip = ui.doc_tabs_rect(ui.layout(1280.0, 800.0).viewport).unwrap();
+        let scene_w = canvas.measure_text(layout::FONT_SIZE, "Scene") + 24.0;
+        let first = (strip.x + 4.0 + scene_w + 2.0 + 12.0, strip.y + 14.0);
+        let right = Pointer {
+            x: first.0,
+            y: first.1,
+            right_pressed: true,
+            ..Pointer::default()
+        };
+        let _ = ui.frame(&mut canvas, &doc, right, None);
+        let menu = ui.menu.as_ref().expect("tab context menu");
+        let labels: Vec<&str> = menu.items.iter().map(|i| i.label.as_str()).collect();
+        assert!(labels.contains(&"Close Others"), "{labels:?}");
+        assert!(labels.contains(&"Reveal in Files"));
+        ui.menu = None;
+        let middle = Pointer {
+            x: first.0,
+            y: first.1,
+            middle_pressed: true,
+            ..Pointer::default()
+        };
+        let _ = ui.frame(&mut canvas, &doc, middle, None);
+        assert_eq!(ui.code.tabs.len(), 1);
+        assert_eq!(ui.code.tabs[0].path, paths[1]);
+        // Close Others from the menu command.
+        ui.open_code(&paths[0], None);
+        let a = ui
+            .code
+            .tabs
+            .iter()
+            .position(|t| t.path == paths[0])
+            .unwrap();
+        ui.tab_command(TabCommand::CloseOthers(a));
+        assert_eq!(ui.code.tabs.len(), 1);
+        assert_eq!(ui.code.current().unwrap().path, paths[0]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn editor_scale_zooms_the_editor_and_maps_clicks() {
+        let (dir, paths) = scripts("scale", &["s.py"]);
+        let mut ui = Ui::new();
+        let doc = Document::starter();
+        let mut canvas = Canvas::new(1280, 800);
+        ui.prefs.editor.scale = 2.0;
+        ui.open_code(&paths[0], None);
+        let _ = ui.frame(&mut canvas, &doc, Pointer::default(), None);
+        let v = ui.layout(1280.0, 800.0).viewport;
+        let click = |y: f32| Pointer {
+            x: v.x + v.w - 40.0,
+            y,
+            pressed: true,
+            down: true,
+            ..Pointer::default()
+        };
+        // At 2x, the middle of line 2 is twice as far down.
+        let _ = ui.frame(&mut canvas, &doc, click(v.y + LINE_H * 2.0 * 1.5), None);
+        assert_eq!(ui.code.current().unwrap().buf.cursor.line, 1);
+        let _ = ui.frame(&mut canvas, &doc, Pointer::default(), None);
+        let _ = ui.frame(&mut canvas, &doc, click(v.y + LINE_H * 1.5), None);
+        assert_eq!(ui.code.current().unwrap().buf.cursor.line, 0);
+        assert!(
+            (canvas.scale() - 1.0).abs() < 1e-6,
+            "the canvas scale is restored"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn quick_open_lists_open_files_first_then_project_scripts() {
+        let (dir, paths) = scripts("quick", &["a.py", "b.py", "sub/c.py"]);
+        let mut ui = Ui::new();
+        ui.project_root.clone_from(&dir);
+        ui.open_code(&paths[0], None);
+        ui.open_code(&paths[1], None);
+        ui.open_quick_open();
+        let p = ui.palette.as_ref().unwrap();
+        let m = p.matches();
+        assert_eq!((m[0].label.as_str(), m[0].group), ("a.py", "Open"));
+        let labels: Vec<&str> = m.iter().map(|i| i.label.as_str()).collect();
+        assert!(
+            labels.contains(&"c.py") && labels.contains(&"b.py"),
+            "{labels:?}"
+        );
+        assert_eq!(labels.len(), 3, "no duplicates: {labels:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

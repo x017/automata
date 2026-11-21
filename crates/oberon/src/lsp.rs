@@ -687,14 +687,8 @@ fn completion_item(item: &Json) -> Option<(String, CompletionItem)> {
         .and_then(Json::as_str)
         .unwrap_or(&label)
         .to_string();
-    let kind = match item.get("kind").and_then(Json::as_i64) {
-        Some(2) => 'm',
-        Some(3 | 4) => 'f',
-        Some(7 | 8 | 22 | 25) => 'c',
-        Some(9) => 'M',
-        Some(14) => 'k',
-        _ => 'v',
-    };
+    let kind =
+        crate::code::CompletionKind::from_lsp(item.get("kind").and_then(Json::as_i64).unwrap_or(6));
     let detail = item
         .get("detail")
         .and_then(Json::as_str)
@@ -999,6 +993,9 @@ mod tests {
             ("detail", Json::str("(self, ctx) -> None")),
         ]);
         let (_, c) = completion_item(&item).unwrap();
-        assert_eq!((c.kind, c.insert.as_str()), ('m', "on_update"));
+        assert_eq!(
+            (c.kind, c.insert.as_str()),
+            (crate::code::CompletionKind::Method, "on_update")
+        );
     }
 }

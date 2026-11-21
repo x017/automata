@@ -95,6 +95,7 @@ fn main() {
                 });
             }
             if scene == "code-complete" {
+                use oberon::code::CompletionKind as K;
                 ui.code_text("\n        self.");
                 let item = |label: &str, detail: &str, kind| oberon::code::CompletionItem {
                     label: label.to_string(),
@@ -103,10 +104,14 @@ fn main() {
                     kind,
                 };
                 ui.code.show_completions(vec![
-                    item("entity", "Entity", 'v'),
-                    item("on_update", "(self, ctx) -> None", 'm'),
-                    item("speed", "float", 'v'),
-                    item("jump", "(self) -> None", 'm'),
+                    item("entity", "Entity", K::Class),
+                    item("on_update", "(self, ctx) -> None", K::Method),
+                    item("speed", "float", K::Variable),
+                    item("jump", "(self) -> None", K::Function),
+                    item("transform", "Transform", K::Property),
+                    item("MAX_SPEED", "int", K::Constant),
+                    item("math", "module", K::Module),
+                    item("return", "", K::Keyword),
                 ]);
             } else {
                 ui.code_key(
@@ -117,6 +122,42 @@ fn main() {
                     },
                 );
                 ui.code_text("ctx");
+            }
+        }
+        "code-tabs" | "code-switcher" => {
+            // Many tabs (the strip scrolls), multi-caret editing, and the
+            // Ctrl+Tab switcher.
+            let dir =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/python");
+            let mut files: Vec<_> = std::fs::read_dir(&dir)
+                .map(|d| d.flatten().map(|e| e.path()).collect())
+                .unwrap_or_default();
+            if let Ok(d) = std::fs::read_dir(dir.join("zero_to_hero")) {
+                files.extend(d.flatten().map(|e| e.path()));
+            }
+            files.retain(|p| p.extension().is_some_and(|e| e == "py"));
+            files.sort();
+            for f in files.iter().take(12) {
+                ui.open_code(f, None);
+            }
+            let platformer = dir.join("oop_platformer.py");
+            ui.open_code(&platformer, Some(60));
+            ui.code.focused = true;
+            if let Some(tab) = ui.code.current_mut() {
+                // On "self" of `self.add(at.Transform(...))`.
+                tab.buf.move_to(oberon::code::Pos::new(62, 9), false);
+            }
+            let ctrl = oberon::code::Mods {
+                ctrl: true,
+                ..Default::default()
+            };
+            if scene == "code-tabs" {
+                for _ in 0..3 {
+                    ui.code_key(oberon::code::Key::Char('d'), ctrl);
+                }
+            } else {
+                ui.code_key(oberon::code::Key::Tab, ctrl);
+                ui.code_key(oberon::code::Key::Tab, ctrl);
             }
         }
         "graphics" | "camera" => {
