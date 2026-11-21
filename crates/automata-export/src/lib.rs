@@ -684,7 +684,8 @@ fn copy_tree(from: &Path, to: &Path, keep: &dyn Fn(&str) -> bool) -> Result<usiz
             let dest = to.join(&rel);
             if kind.is_dir() {
                 stack.push(path);
-            } else if kind.is_file() {
+            } else if kind.is_file() || archive::is_file_link(&path) {
+                // Links are copied as the file they point at.
                 if let Some(parent) = dest.parent() {
                     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 }

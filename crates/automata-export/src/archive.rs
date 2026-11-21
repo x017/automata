@@ -4,6 +4,9 @@
 //! `.zip` (what Windows users expect). Templates are `.tar.gz` on every
 //! platform. Only what the exporter needs is implemented: regular files
 //! and directories, ustar with GNU long names, and deflated zip entries.
+//! Symlinks to files are stored as the file they point at (portable
+//! Pythons link `bin/python3` → `python3.12`); symlinked directories are
+//! skipped.
 
 use std::fs::File;
 use std::io::{self, BufWriter, Read, Write};
@@ -56,7 +59,7 @@ fn walk(
         let kind = item.file_type()?;
         if kind.is_dir() {
             walk(root, &path, prefix, executable, out)?;
-        } else if kind.is_file() {
+        } else if kind.is_file() || is_file_link(&path) {
             let rel = slash_path(path.strip_prefix(root).unwrap_or(&path));
             let exec = executable(&rel) || unix_executable(&path);
             let name = if prefix.is_empty() {
@@ -72,6 +75,14 @@ fn walk(
         }
     }
     Ok(())
+}
+
+/// Whether `path` is a symlink that resolves to a regular file (a dangling
+/// link or a link to a directory is not).
+#[must_use]
+pub fn is_file_link(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
+        && std::fs::metadata(path).is_ok_and(|m| m.is_file())
 }
 
 /// `a/b/c` from a relative path, whatever the host separator.
@@ -416,6 +427,35 @@ mod tests {
         assert_eq!(extract_tar_gz(&archive, &out).unwrap(), 2);
         assert_eq!(std::fs::read(out.join("pkg").join(&deep)).unwrap(), b"deep");
         assert!(unix_executable(&out.join("pkg/run")) || cfg!(not(unix)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_symlinks_are_archived_as_their_target() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("links");
+        let src = dir.join("src");
+        std::fs::create_dir_all(src.join("bin")).unwrap();
+        std::fs::create_dir_all(src.join("lib")).unwrap();
+        std::fs::write(src.join("bin/python3.12"), b"ELF").unwrap();
+        std::fs::set_permissions(
+            src.join("bin/python3.12"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink("python3.12", src.join("bin/python3")).unwrap();
+        // A directory link is skipped (no loops), a dangling one ignored.
+        std::os::unix::fs::symlink("../lib", src.join("bin/loop")).unwrap();
+        std::os::unix::fs::symlink("missing", src.join("bin/dangling")).unwrap();
+        let list = entries(&src, "", &|_| false).unwrap();
+        let names: Vec<&str> = list.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["bin/python3", "bin/python3.12"]);
+        let archive = dir.join("t.tar.gz");
+        write_tar_gz(&archive, &list).unwrap();
+        let out = dir.join("out");
+        assert_eq!(extract_tar_gz(&archive, &out).unwrap(), 2);
+        assert_eq!(std::fs::read(out.join("bin/python3")).unwrap(), b"ELF");
+        assert!(unix_executable(&out.join("bin/python3")));
     }
 
     #[test]
