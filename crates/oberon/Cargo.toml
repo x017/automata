@@ -18,6 +18,7 @@ workspace = true
 
 [dependencies]
 automata-core = { path = "../automata-core" }
+automata-export = { path = "../automata-export" }
 automata-physics = { path = "../automata-physics" }
 automata-renderer = { path = "../automata-renderer" }
 automata-scene = { path = "../automata-scene" }

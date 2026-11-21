@@ -447,6 +447,7 @@ fn settings_title(page: SettingsPage) -> &'static str {
         SettingsPage::Editor => "Script Editor",
         SettingsPage::Python => "Python",
         SettingsPage::Files => "Files",
+        SettingsPage::Build => "Build",
     }
 }
 

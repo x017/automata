@@ -163,6 +163,8 @@ struct EditorApp {
     /// Persistent preferences (recent files, layout, tool paths).
     /// When the scene was last autosaved (or loaded/saved).
     last_autosave: Instant,
+    /// The running game export or template download.
+    build: Option<crate::build::BuildJob>,
     /// The app should exit at the next opportunity.
     quit: bool,
 }
@@ -213,6 +215,7 @@ impl EditorApp {
             last_cursor: CursorHint::Default,
             fatal_error: None,
             last_autosave: Instant::now(),
+            build: None,
             quit: false,
         })
     }
@@ -374,6 +377,20 @@ impl EditorApp {
                 PlayState::Editing => {}
             },
             Intent::Stop => self.stop(),
+            Intent::Build(target) => self.start_build(target),
+            Intent::DownloadTemplates(target) => self.download_templates(target),
+            Intent::OpenBuildFolder => {
+                let cfg = crate::build::config_for(&self.ui.project_root, self.doc.path.as_deref());
+                let dir = self.ui.project_root.join(&cfg.output);
+                let dir = if dir.is_dir() {
+                    dir
+                } else {
+                    self.ui.project_root.clone()
+                };
+                if let Err(e) = crate::build::reveal(&dir) {
+                    self.ui.log(LogLevel::Error, e);
+                }
+            }
             other => self.apply_more(other),
         }
     }
@@ -675,6 +692,124 @@ impl EditorApp {
             Err(err) => {
                 tracing::error!(error = %err, "save failed");
                 self.ui.log(LogLevel::Error, format!("Save failed: {err}"));
+            }
+        }
+    }
+
+    // ----- export ----------------------------------------------------------
+
+    /// Exports the game for `target` (or the platforms in Build Settings).
+    fn start_build(&mut self, target: Option<crate::build::Target>) {
+        use crate::build::{BuildJob, Target};
+        if let Some(job) = &self.build {
+            self.ui
+                .log(LogLevel::Warn, format!("Busy: {}", job.label()));
+            return;
+        }
+        // Exports read the project from disk: save what's open first.
+        if self.doc.path.is_none() {
+            self.ui.log(
+                LogLevel::Error,
+                "Save the scene into a project folder before building (Ctrl+S).",
+            );
+            return;
+        }
+        if self.doc.dirty() {
+            self.save();
+        }
+        if self.ui.code.dirty_count() > 0 {
+            self.ui.code.save_all();
+        }
+        let root = self.ui.project_root.clone();
+        let cfg = crate::build::config_for(&root, self.doc.path.as_deref());
+        let targets = match target {
+            Some(t) => vec![t],
+            None if cfg.targets.is_empty() => Target::host().map_or_else(Vec::new, |t| vec![t]),
+            None => cfg.targets.clone(),
+        };
+        if targets.is_empty() {
+            self.ui
+                .log(LogLevel::Error, "No platforms ticked in Build Settings.");
+            return;
+        }
+        let job = BuildJob::export(root, cfg, targets);
+        self.ui.log(LogLevel::Info, job.label());
+        self.ui.build_status = Some(job.label());
+        self.build = Some(job);
+    }
+
+    /// Downloads export templates.
+    fn download_templates(&mut self, target: Option<crate::build::Target>) {
+        use crate::build::{BuildJob, Target};
+        if let Some(job) = &self.build {
+            self.ui
+                .log(LogLevel::Warn, format!("Busy: {}", job.label()));
+            return;
+        }
+        let targets = target.map_or_else(|| Target::ALL.to_vec(), |t| vec![t]);
+        let job = BuildJob::download(targets);
+        self.ui.build_status = Some(job.label());
+        self.build = Some(job);
+    }
+
+    /// Moves the running job's progress into the console.
+    fn poll_build(&mut self) {
+        use crate::build::{BuildEvent, JobKind, Level};
+        let Some(job) = &mut self.build else {
+            return;
+        };
+        let (events, done) = job.poll();
+        for e in events {
+            match e {
+                BuildEvent::Log(level, text) => {
+                    let level = match level {
+                        Level::Info => LogLevel::Info,
+                        Level::Warning => LogLevel::Warn,
+                        Level::Error => LogLevel::Error,
+                    };
+                    self.ui.log(level, text);
+                }
+                BuildEvent::Finished(target, Ok(path)) => {
+                    let what = if job.kind == JobKind::Export {
+                        "Built"
+                    } else {
+                        "Installed the template:"
+                    };
+                    self.ui.log(
+                        LogLevel::Info,
+                        format!("{} {what} {}", target.label(), path.display()),
+                    );
+                }
+                BuildEvent::Finished(target, Err(e)) => {
+                    self.ui
+                        .log(LogLevel::Error, format!("{} failed: {e}", target.label()));
+                }
+            }
+        }
+        if done {
+            let secs = job.started.elapsed().as_secs_f32();
+            let (ok, failed) = (job.succeeded.len(), job.failed.len());
+            let summary = match job.kind {
+                JobKind::Export if failed == 0 => {
+                    format!("Build finished in {secs:.1} s → {}", job.output.display())
+                }
+                JobKind::Export => format!("Build finished with errors ({ok} ok, {failed} failed)"),
+                JobKind::Download if failed == 0 => "Export templates installed".to_string(),
+                JobKind::Download => {
+                    format!("Template download failed ({failed} of {})", ok + failed)
+                }
+            };
+            let level = if failed == 0 {
+                LogLevel::Info
+            } else {
+                LogLevel::Error
+            };
+            self.ui.log(level, summary.clone());
+            self.ui.build_last = Some((failed == 0, summary));
+            self.ui.build_status = None;
+            self.build = None;
+            if failed > 0 {
+                self.ui.show_console();
             }
         }
     }
@@ -1027,6 +1162,7 @@ impl EditorApp {
                 self.ui.open_palette(doc);
                 None
             }
+            (KeyCode::KeyB, true) if shift => Some(Intent::Build(None)),
             (KeyCode::Comma, true) => {
                 self.ui.open_settings();
                 None
@@ -1213,6 +1349,7 @@ impl EditorApp {
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.tick_scripts(dt);
+        self.poll_build();
         let ms = dt * 1000.0;
         let prev = self.ui.stats.frame_ms;
         self.ui.stats.frame_ms = if prev <= 0.0 || ms > 250.0 {

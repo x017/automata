@@ -411,6 +411,14 @@ pub enum Intent {
     ClearTests,
     /// Move a camera entity to where the editor view is.
     AlignCameraToView(u64),
+    /// Export the game: one platform, or (`None`) the platforms ticked in
+    /// Build Settings.
+    Build(Option<crate::build::Target>),
+    /// Download and install the export template for a platform (`None` =
+    /// every platform).
+    DownloadTemplates(Option<crate::build::Target>),
+    /// Open the project's build folder in the system file manager.
+    OpenBuildFolder,
     /// Run an intent without the unsaved-changes prompt.
     Force(Box<Intent>),
 }
@@ -435,6 +443,9 @@ impl Intent {
                 | Self::Stop
                 | Self::Quit
                 | Self::RestartLanguageServer
+                | Self::Build(_)
+                | Self::DownloadTemplates(_)
+                | Self::OpenBuildFolder
         )
     }
 }
@@ -607,6 +618,13 @@ pub struct Ui {
     pub gizmo: GizmoMode,
     /// Edit / play state (set by the app).
     pub play: PlayState,
+    /// The running export / template download, for the status bar (set by
+    /// the app).
+    pub build_status: Option<String>,
+    /// The last finished build: success and summary (set by the app).
+    pub build_last: Option<(bool, String)>,
+    /// Build Settings being edited: the project folder and its `build.ron`.
+    build_cfg: Option<(PathBuf, crate::build::BuildConfig)>,
     console: Vec<LogLine>,
     drag: Drag,
     right_last: Option<(f32, f32)>,
@@ -711,6 +729,9 @@ impl Ui {
             dialog: None,
             recent: Vec::new(),
             project_root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            build_status: None,
+            build_last: None,
+            build_cfg: None,
             panels: PanelSizes::default(),
             bottom_tab: BottomTab::Console,
             right_tab: RightTab::Inspector,
@@ -751,6 +772,12 @@ impl Ui {
     }
 
     // ----- public API used by the app -------------------------------------
+
+    /// Shows the Console tab in the bottom dock.
+    pub fn show_console(&mut self) {
+        self.panels.show_bottom = true;
+        self.bottom_tab = BottomTab::Console;
+    }
 
     /// Appends a console message.
     pub fn log(&mut self, level: LogLevel, text: impl Into<String>) {
@@ -2992,6 +3019,15 @@ impl Ui {
             &left,
             color::text_dim(),
         );
+        if let Some(status) = self.build_status.clone() {
+            let tw = canvas.measure_text(layout::SMALL_SIZE, &status);
+            let x = rect.x + rect.w - tw - layout::PAD;
+            if x > rect.x + lw + 2.0 * layout::PAD {
+                canvas.fill_circle(x - 10.0, rect.y + 11.5, 3.0, color::accent());
+                canvas.text(x, rect.y + 5.0, layout::SMALL_SIZE, &status, color::text());
+            }
+            return;
+        }
         if !self.prefs.status_hints {
             return;
         }

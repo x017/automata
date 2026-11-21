@@ -1,0 +1,23 @@
+[package]
+name = "automata-export"
+description = "Exports AUTOMATA games to standalone Windows and Linux builds (used by Oberon and the automata-export CLI)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+automata-core = { path = "../automata-core" }
+serde.workspace = true
+ron.workspace = true
+flate2 = "1.1"
+crc32fast = "1.5"
+
+[[bin]]
+name = "automata-export"
+path = "src/main.rs"

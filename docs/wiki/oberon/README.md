@@ -35,6 +35,7 @@ the editor.
 | [Graphics](graphics.md) | The Graphics panel: quality, sun, environment, fog, test scenes |
 | [The code editor](code-editor.md) | Writing scripts inside Oberon: completion, language servers, find/replace |
 | [Prefabs & attributes](prefabs-and-attributes.md) | Reusable objects and custom per-entity data |
+| [Exporting your game](exporting.md) | Building standalone Windows and Linux games (Ctrl+Shift+B) |
 
 New to Oberon? Do the [first scene tutorial](../tutorials/first-scene.md)
 first. It takes about ten minutes and covers the main ideas.

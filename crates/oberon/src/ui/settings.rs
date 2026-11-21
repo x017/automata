@@ -18,10 +18,18 @@ pub enum SettingsPage {
     Python,
     /// Autosave and recent files.
     Files,
+    /// Game export (this project's `build.ron`).
+    Build,
 }
 
 impl SettingsPage {
-    const ALL: [Self; 4] = [Self::Appearance, Self::Editor, Self::Python, Self::Files];
+    const ALL: [Self; 5] = [
+        Self::Appearance,
+        Self::Editor,
+        Self::Python,
+        Self::Files,
+        Self::Build,
+    ];
 
     fn title(self) -> &'static str {
         match self {
@@ -29,6 +37,7 @@ impl SettingsPage {
             Self::Editor => "Script Editor",
             Self::Python => "Python",
             Self::Files => "Files",
+            Self::Build => "Build",
         }
     }
 
@@ -38,6 +47,7 @@ impl SettingsPage {
             Self::Editor => "Typing, display and saving in the built-in script editor.",
             Self::Python => "The interpreter that runs Play mode scripts and the language server behind completions.",
             Self::Files => "Autosave and recently opened scenes.",
+            Self::Build => "Export this project as a game for Windows and Linux. Saved to build.ron in the project folder.",
         }
     }
 }
@@ -49,6 +59,14 @@ pub enum SettingText {
     Python,
     /// The language-server command line.
     LanguageServer,
+    /// Build: the game's name.
+    BuildName,
+    /// Build: the version.
+    BuildVersion,
+    /// Build: the start scene.
+    BuildScene,
+    /// Build: the output folder.
+    BuildOutput,
 }
 
 const ROW: f32 = 52.0;
@@ -88,6 +106,13 @@ impl Ui {
         let slot = match which {
             SettingText::Python => &mut self.prefs.python,
             SettingText::LanguageServer => &mut self.prefs.language_server,
+            SettingText::BuildName
+            | SettingText::BuildVersion
+            | SettingText::BuildScene
+            | SettingText::BuildOutput => {
+                self.commit_build_text(which, value);
+                return None;
+            }
         };
         if *slot == value {
             return None;
@@ -200,6 +225,7 @@ impl Ui {
             SettingsPage::Editor => self.page_editor(canvas, body, &mut y),
             SettingsPage::Python => self.page_python(canvas, body, &mut y),
             SettingsPage::Files => self.page_files(canvas, body, &mut y),
+            SettingsPage::Build => self.page_build(canvas, body, &mut y),
         }
 
         // Footer.
@@ -247,6 +273,17 @@ impl Ui {
                 self.prefs.language_server = None;
             }
             SettingsPage::Files => self.prefs.autosave_secs = d.autosave_secs,
+            SettingsPage::Build => {
+                let cfg = self.build_settings();
+                let fresh = crate::build::BuildConfig {
+                    name: cfg.name.clone(),
+                    ..crate::build::BuildConfig::default()
+                };
+                *cfg = fresh;
+                self.save_build_settings();
+                self.edit = None;
+                return;
+            }
         }
         self.edit = None;
         self.prefs_dirty = true;
@@ -469,6 +506,251 @@ impl Ui {
         self.setting_info(canvas, body, *y, "Preferences file", &path);
     }
 
+    // ----- build ---------------------------------------------------------
+
+    /// The Build page's settings, loaded from the project on first use.
+    fn build_settings(&mut self) -> &mut crate::build::BuildConfig {
+        let root = self.project_root.clone();
+        if self.build_cfg.as_ref().is_none_or(|(r, _)| *r != root) {
+            let cfg = crate::build::config_for(&root, None);
+            self.build_cfg = Some((root, cfg));
+        }
+        &mut self.build_cfg.as_mut().expect("just set").1
+    }
+
+    /// Loads Build Settings for the project, starting in `scene` when the
+    /// project has no `build.ron` yet.
+    pub(super) fn load_build_settings(&mut self, scene: Option<&std::path::Path>) {
+        let root = self.project_root.clone();
+        let cfg = crate::build::config_for(&root, scene);
+        self.build_cfg = Some((root, cfg));
+    }
+
+    fn save_build_settings(&mut self) {
+        let root = self.project_root.clone();
+        let result = self.build_settings().save(&root);
+        if let Err(e) = result {
+            self.log(super::LogLevel::Error, format!("Build settings: {e}"));
+        }
+    }
+
+    fn commit_build_text(&mut self, which: SettingText, value: Option<String>) {
+        let cfg = self.build_settings();
+        let defaults = crate::build::BuildConfig::default();
+        match which {
+            SettingText::BuildName => cfg.name = value.unwrap_or(defaults.name),
+            SettingText::BuildVersion => cfg.version = value.unwrap_or(defaults.version),
+            SettingText::BuildScene => {
+                cfg.start_scene = value.map(|v| v.replace('\\', "/"));
+                if cfg.start_scene.is_some() {
+                    cfg.main_script = None;
+                }
+            }
+            SettingText::BuildOutput => cfg.output = value.unwrap_or(defaults.output),
+            SettingText::Python | SettingText::LanguageServer => return,
+        }
+        self.save_build_settings();
+    }
+
+    fn page_build(&mut self, canvas: &mut Canvas, body: Rect, y: &mut f32) {
+        use crate::build::{Target, TemplateState};
+        let cfg = self.build_settings().clone();
+        let half = (body.w - 16.0) / 2.0;
+        let right = body.x + half + 16.0;
+        let pairs = [
+            (
+                "Game name",
+                SettingText::BuildName,
+                cfg.name.clone(),
+                "My Game",
+                "Version",
+                SettingText::BuildVersion,
+                cfg.version.clone(),
+                "0.1.0",
+            ),
+            (
+                "Start scene",
+                SettingText::BuildScene,
+                cfg.start_scene.clone().unwrap_or_default(),
+                cfg.main_script
+                    .as_deref()
+                    .map_or("The open scene", |_| "None — runs the main script"),
+                "Output folder",
+                SettingText::BuildOutput,
+                cfg.output.clone(),
+                "build",
+            ),
+        ];
+        for (l1, w1, v1, p1, l2, w2, v2, p2) in pairs {
+            canvas.text(body.x, *y, layout::FONT_SIZE, l1, color::text());
+            canvas.text(right, *y, layout::FONT_SIZE, l2, color::text());
+            self.setting_field(
+                canvas,
+                Rect::new(body.x, *y + 20.0, half, 26.0),
+                w1,
+                &v1,
+                p1,
+            );
+            self.setting_field(canvas, Rect::new(right, *y + 20.0, half, 26.0), w2, &v2, p2);
+            *y += 60.0;
+        }
+
+        // Platforms.
+        Self::setting_label(
+            canvas,
+            body,
+            *y,
+            "Platforms",
+            "Build (Ctrl+Shift+B) exports every ticked platform.",
+            190.0,
+        );
+        let mut x = body.x + body.w;
+        for t in [Target::Windows, Target::Linux] {
+            let on = cfg.targets.contains(&t);
+            let label = if on {
+                format!("✓ {}", t.label())
+            } else {
+                t.label().to_string()
+            };
+            let w = canvas.measure_text(layout::FONT_SIZE, &label) + 26.0;
+            x -= w;
+            let style = if on {
+                ButtonStyle::Active
+            } else {
+                ButtonStyle::Normal
+            };
+            if self.button(canvas, Rect::new(x, *y + 2.0, w, 26.0), &label, style) {
+                let targets = &mut self.build_settings().targets;
+                if on {
+                    targets.retain(|x| *x != t);
+                } else {
+                    targets.push(t);
+                    targets.sort_by_key(|t| t.name());
+                }
+                self.save_build_settings();
+            }
+            x -= 6.0;
+        }
+        *y += ROW;
+        if self.setting_toggle(
+            canvas,
+            body,
+            *y,
+            "Archive",
+            "Also write a .zip (Windows) or .tar.gz (Linux), ready to upload.",
+            cfg.archive,
+        ) {
+            self.build_settings().archive = !cfg.archive;
+            self.save_build_settings();
+        }
+        *y += ROW;
+
+        // Templates.
+        canvas.text(
+            body.x,
+            *y,
+            layout::FONT_SIZE,
+            "Export templates",
+            color::text(),
+        );
+        let dir = crate::build::templates_dir_label();
+        canvas.text_clipped(
+            body.x,
+            *y + 18.0,
+            layout::SMALL_SIZE,
+            &dir,
+            color::text_dim(),
+            body.w,
+        );
+        *y += 42.0;
+        let idle = self.build_status.is_none();
+        for t in Target::ALL {
+            let (state, c, action) = match crate::build::template_state(t) {
+                TemplateState::Ready => (
+                    "Ready — the game ships its own Python",
+                    color::success(),
+                    "Update",
+                ),
+                TemplateState::Development => (
+                    "Development — uses the Python on PATH",
+                    color::warn(),
+                    "Download",
+                ),
+                TemplateState::Missing => ("Not installed", color::text_faint(), "Download"),
+            };
+            canvas.fill_circle(body.x + 4.0, *y + 8.0, 3.5, c);
+            canvas.text(
+                body.x + 16.0,
+                *y + 1.0,
+                layout::FONT_SIZE,
+                t.label(),
+                color::text(),
+            );
+            canvas.text_clipped(
+                body.x + 96.0,
+                *y + 1.0,
+                layout::FONT_SIZE,
+                state,
+                color::text_dim(),
+                body.w - 96.0 - 110.0,
+            );
+            let style = if idle {
+                ButtonStyle::Normal
+            } else {
+                ButtonStyle::Disabled
+            };
+            if self.button(
+                canvas,
+                Rect::new(body.x + body.w - 100.0, *y - 4.0, 100.0, 24.0),
+                action,
+                style,
+            ) && idle
+            {
+                self.out.push(Intent::DownloadTemplates(Some(t)));
+            }
+            *y += 30.0;
+        }
+        *y += 10.0;
+
+        // Actions.
+        let style = if idle {
+            ButtonStyle::Accent
+        } else {
+            ButtonStyle::Disabled
+        };
+        if self.button(
+            canvas,
+            Rect::new(body.x, *y, 120.0, 28.0),
+            "Build now",
+            style,
+        ) && idle
+        {
+            self.out.push(Intent::Build(None));
+        }
+        if self.button(
+            canvas,
+            Rect::new(body.x + 128.0, *y, 150.0, 28.0),
+            "Open build folder",
+            ButtonStyle::Normal,
+        ) {
+            self.out.push(Intent::OpenBuildFolder);
+        }
+        let (status, c) = match (&self.build_status, &self.build_last) {
+            (Some(s), _) => (s.clone(), color::text()),
+            (None, Some((true, s))) => (s.clone(), color::success()),
+            (None, Some((false, s))) => (s.clone(), color::danger()),
+            (None, None) => (String::new(), color::text_dim()),
+        };
+        canvas.text_clipped(
+            body.x + 292.0,
+            *y + 7.0,
+            layout::SMALL_SIZE,
+            &status,
+            c,
+            body.w - 292.0,
+        );
+    }
+
     // ----- rows ------------------------------------------------------------
 
     fn setting_label(canvas: &mut Canvas, body: Rect, y: f32, label: &str, hint: &str, right: f32) {
@@ -605,6 +887,18 @@ impl Ui {
             body.w,
         );
         let field = Rect::new(body.x, y + 36.0, body.w, 26.0);
+        self.setting_field(canvas, field, which, value, placeholder);
+    }
+
+    /// A text field; click to edit, Enter (or clicking away) applies.
+    fn setting_field(
+        &mut self,
+        canvas: &mut Canvas,
+        field: Rect,
+        which: SettingText,
+        value: &str,
+        placeholder: &str,
+    ) {
         let editing = self
             .edit
             .as_ref()

@@ -169,3 +169,16 @@ jobs:
 
       - name: Headless demo
         run: python examples/python/headless_demo.py
+
+      # Export Coin Run with a development template (launcher only; uses
+      # this job's Python) and run the exported executable headless.
+      - name: Export a game (Linux, development template)
+        run: |
+          cargo build --release -p automata-player -p automata-export
+          export AUTOMATA_TEMPLATES="$RUNNER_TEMP/templates"
+          ./target/release/automata-export templates dev target/release/automata-player --target linux
+          cp -r examples/oberon/coin_run "$RUNNER_TEMP/coin_run"
+          ./target/release/automata-export init "$RUNNER_TEMP/coin_run" --scene level.ron --name "Coin Run"
+          ./target/release/automata-export build "$RUNNER_TEMP/coin_run" --target linux
+          AUTOMATA_PYTHON="$(command -v python)" "$RUNNER_TEMP/coin_run/build/linux/Coin Run/Coin Run" --headless --frames 30
+          tar tzf "$RUNNER_TEMP/coin_run/build/Coin Run-0.1.0-linux-x86_64.tar.gz" | grep -q "Coin Run/game/game.json"

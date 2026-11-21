@@ -191,6 +191,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "automata-export"
+version = "0.1.0"
+dependencies = [
+ "automata-core",
+ "crc32fast",
+ "flate2",
+ "ron",
+ "serde",
+]
+
+[[package]]
 name = "automata-input"
 version = "0.1.0"
 dependencies = [
@@ -210,6 +221,10 @@ dependencies = [
  "serde",
  "tracing",
 ]
+
+[[package]]
+name = "automata-player"
+version = "0.1.0"
 
 [[package]]
 name = "automata-python"
@@ -1512,6 +1527,7 @@ version = "0.1.0"
 dependencies = [
  "ab_glyph",
  "automata-core",
+ "automata-export",
  "automata-physics",
  "automata-renderer",
  "automata-scene",

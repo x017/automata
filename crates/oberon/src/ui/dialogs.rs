@@ -156,6 +156,8 @@ pub fn shortcut_lines() -> Vec<String> {
         "  Ctrl+N new · Ctrl+O open · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+Q quit",
         "Play mode",
         "  Ctrl+P play / stop · WASD / arrows move · Space jump · Shift sprint",
+        "Build",
+        "  Ctrl+Shift+B build the game (Build ▸ Build Settings picks platforms)",
         "Code editor",
         "  Ctrl+S save · Ctrl+F find · Ctrl+H replace · Ctrl+G go to line",
         "  Ctrl+/ comment · Tab / Shift+Tab indent · Ctrl+Space complete",

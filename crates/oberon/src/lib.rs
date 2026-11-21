@@ -36,6 +36,7 @@
 )]
 
 pub mod bridge;
+pub mod build;
 pub mod canvas;
 pub mod code;
 pub mod doc;

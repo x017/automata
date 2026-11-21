@@ -13,6 +13,7 @@ means ⌘.
 | Ctrl+Shift+S | Save scene as |
 | Ctrl+P | Play / Stop |
 | Ctrl+Shift+P | Command palette |
+| Ctrl+Shift+B | Build the game ([Exporting](exporting.md)) |
 | Ctrl+, | Settings |
 | Ctrl+= / Ctrl+− / Ctrl+0 | Interface zoom in / out / reset |
 | Ctrl+Q | Quit |

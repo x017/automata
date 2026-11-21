@@ -15,7 +15,15 @@ use crate::view::GizmoMode;
 pub const MENUBAR_H: f32 = 40.0;
 
 /// The menu bar's top-level menus.
-pub const BAR: [&str; 6] = ["File", "Edit", "GameObject", "Component", "Window", "Help"];
+pub const BAR: [&str; 7] = [
+    "File",
+    "Edit",
+    "GameObject",
+    "Component",
+    "Window",
+    "Build",
+    "Help",
+];
 
 /// A dockable panel that the Window menu can show or hide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -82,6 +90,8 @@ pub enum UiAction {
     Settings,
     /// Open the command palette.
     CommandPalette,
+    /// Open Settings on the Build page.
+    BuildSettings,
 }
 
 /// What a menu item does.
@@ -385,6 +395,35 @@ impl Ui {
                     MenuItem::ui("Reset Layout", "", UiAction::ResetLayout, true),
                 ]
             }
+            5 => {
+                use crate::build::Target;
+                let idle = self.build_status.is_none();
+                vec![
+                    MenuItem::intent("Build", "Ctrl+Shift+B", Intent::Build(None), idle),
+                    MenuItem::intent(
+                        "Build for Linux",
+                        "",
+                        Intent::Build(Some(Target::Linux)),
+                        idle,
+                    ),
+                    MenuItem::intent(
+                        "Build for Windows",
+                        "",
+                        Intent::Build(Some(Target::Windows)),
+                        idle,
+                    ),
+                    MenuItem::separator(),
+                    MenuItem::ui("Build Settings…", "", UiAction::BuildSettings, true),
+                    MenuItem::intent("Open Build Folder", "", Intent::OpenBuildFolder, true),
+                    MenuItem::separator(),
+                    MenuItem::intent(
+                        "Download Export Templates",
+                        "",
+                        Intent::DownloadTemplates(None),
+                        idle,
+                    ),
+                ]
+            }
             _ => vec![
                 MenuItem::ui(
                     "Keyboard Shortcuts",
@@ -555,6 +594,10 @@ impl Ui {
                 self.bottom_tab = super::BottomTab::Console;
             }
             UiAction::ShowFiles => self.panels.show_files = true,
+            UiAction::BuildSettings => {
+                self.load_build_settings(doc.path.as_deref());
+                self.open_settings_page(super::settings::SettingsPage::Build);
+            }
             UiAction::Settings => self.open_settings(),
             UiAction::CommandPalette => self.open_palette(doc),
         }

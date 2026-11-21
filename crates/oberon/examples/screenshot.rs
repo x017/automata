@@ -47,7 +47,7 @@ fn main() {
     let frame = frame.to_vec();
 
     // Optional scene: `picker`, `menu`, `dialog`, `project`, `code`,
-    // `code-complete`, `code-api`, `settings`, `palette`.
+    // `code-complete`, `code-api`, `settings`, `build`, `build-menu`, `palette`.
     let scene = std::env::args().nth(2).unwrap_or_default();
     let selected = doc.selected;
     let pointer = Pointer {
@@ -166,6 +166,11 @@ fn main() {
         "settings" => {
             ui.open_settings_page(oberon::ui::settings::SettingsPage::Editor);
         }
+        "build" => {
+            ui.open_settings_page(oberon::ui::settings::SettingsPage::Build);
+            ui.build_last = Some((true, "Build finished in 1.4 s → build".to_string()));
+        }
+        "build-menu" => ui.open_bar_menu(5, &doc),
         "palette" => {
             ui.open_palette(&doc);
             ui.palette_text("sa");

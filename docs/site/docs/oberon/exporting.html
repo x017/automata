@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exporting your game · AUTOMATA docs</title>
+<meta name="description" content="An export turns your project into a game other people can run. They don&#x27;t need Oberon, Rust or Python installed. AUTOMATA exports to Windows and Linux (64-bit). Android is planned.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../../dither.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="index.html">Introduction</a></li><li><a href="interface.html">The interface</a></li><li><a href="scripting.html">Scripting</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="graphics.html">Graphics</a></li><li><a href="code-editor.html">The code editor</a></li><li><a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="exporting.html" aria-current="page">Exporting your game</a></li><li><a href="shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Exporting your game</h1>
+<p>An export turns your project into a game other people can run. They don't
+need Oberon, Rust or Python installed. AUTOMATA exports to <strong>Windows</strong>
+and <strong>Linux</strong> (64-bit). Android is planned.</p>
+<p>Each export is a folder you can zip and share. You can also turn on
+<strong>Archive</strong> to get a ready-made <code>.zip</code> (Windows) or <code>.tar.gz</code> (Linux).</p>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>build/
+  windows/Coin Run/
+    Coin Run.exe        ← players double-click this
+    game/               ← your scenes, scripts and assets
+    runtime/            ← a private Python with the engine inside
+  linux/Coin Run/
+    Coin Run
+    game/
+    runtime/
+  Coin Run-0.1.0-windows-x86_64.zip
+  Coin Run-0.1.0-linux-x86_64.tar.gz</code></pre></div>
+<h2 id="build-from-oberon">Build from Oberon<a class="anchor" href="#build-from-oberon" aria-label="Link to this section">#</a></h2>
+<ol><li>Save your scene into the project folder (Ctrl+S).</li><li>Open <strong>Build ▸ Build Settings…</strong>. Set the game name and version, and
+pick the platforms.</li><li>Press <strong>Build now</strong>, or <strong>Ctrl+Shift+B</strong> anywhere in the editor.</li></ol>
+<p><img src="../../../assets/oberon/build.png" alt="The Build page in Settings" loading="lazy" decoding="async"></p>
+<p>The build runs in the background, so you can keep working while it runs.
+Its progress appears in the status bar and the Console. If anything
+fails, the Console opens and lists every problem: a missing script, a
+scene that won't load, or a missing template. <strong>Open build folder</strong> shows
+the result in your file manager.</p>
+<div class="table"><table><thead><tr><th>Setting</th><th>What it does</th></tr></thead><tbody><tr><td>Game name</td><td>Window title, executable name and folder name</td></tr><tr><td>Version</td><td>Used in archive names, e.g. <code>Coin Run-0.1.0-linux-x86_64.zip</code></td></tr><tr><td>Start scene</td><td>The scene the game opens. If empty, the build uses the scene open in Oberon.</td></tr><tr><td>Output folder</td><td>Where builds go, relative to the project (<code>build</code>)</td></tr><tr><td>Platforms</td><td>What <strong>Build</strong> / Ctrl+Shift+B exports. <strong>Build ▸ Build for Linux / Windows</strong> exports just one.</td></tr><tr><td>Archive</td><td>Also write a <code>.zip</code> / <code>.tar.gz</code> of each build</td></tr></tbody></table></div>
+<p>Settings are saved to <code>build.ron</code> in the project folder, so commit it with
+your project. Each build leaves out <code>.oberon/</code>, <code>__pycache__/</code>, version
+control folders, virtual environments, the output folder and <code>tests/</code>. To
+leave out more, add paths to <code>exclude</code> in <code>build.ron</code>. A trailing <code>/</code>
+means a folder:</p>
+<div class="codeblock" data-lang="ron"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-t">BuildConfig</span>(
+    name: <span class="tok-s">&quot;Coin Run&quot;</span>,
+    version: <span class="tok-s">&quot;1.0.0&quot;</span>,
+    start_scene: <span class="tok-k">Some</span>(<span class="tok-s">&quot;level.ron&quot;</span>),
+    targets: [<span class="tok-t">Linux</span>, <span class="tok-t">Windows</span>],
+    archive: <span class="tok-k">true</span>,
+    exclude: [<span class="tok-s">&quot;tests/&quot;</span>, <span class="tok-s">&quot;art/source/&quot;</span>],
+)</code></pre></div>
+<h2 id="export-templates">Export templates<a class="anchor" href="#export-templates" aria-label="Link to this section">#</a></h2>
+<p>An export doesn't compile anything. It copies a prebuilt <strong>export
+template</strong> (the game launcher plus a private Python with the engine
+installed), then adds your project. That's why a build takes seconds, and
+why you can export for Windows from Linux and the other way round.</p>
+<p>Templates are downloaded once per engine version. Use <strong>Build ▸ Download
+Export Templates</strong> or the <strong>Download</strong> buttons on the Build page. The
+Build page shows each template's state:</p>
+<ul><li><strong>Ready</strong>: the game ships its own Python. This is what you give to
+players.</li><li><strong>Development</strong>: the game uses the Python on <code>PATH</code>, which must have
+<code>automata</code> installed. Oberon sets one up automatically when you run a
+source checkout and no template is installed yet. It's fine for testing
+on your own machine, but don't ship it.</li><li><strong>Not installed</strong>: download it before building for that platform.</li></ul>
+<p>Templates live in <code>~/.local/share/automata/templates/&lt;version&gt;/</code> on Linux
+and <code>%APPDATA%\automata\templates\&lt;version&gt;\</code> on Windows. You can choose
+another folder by setting <code>AUTOMATA_TEMPLATES</code>.</p>
+<h2 id="build-from-the-command-line">Build from the command line<a class="anchor" href="#build-from-the-command-line" aria-label="Link to this section">#</a></h2>
+<p>The same exporter is available as <code>automata-export</code>. Use it in CI, or for
+code-first games that don't use Oberon:</p>
+<div class="codeblock" data-lang="bash"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>cargo build --release -p automata-export
+automata-export templates download             # once per engine version
+automata-export init my_game --scene level.ron # writes build.ron
+automata-export check my_game                  # validate without building
+automata-export build my_game --target all     # or linux / windows</code></pre></div>
+<p>A code-first game, written in Python with <code>at.Game</code> and no scene file,
+starts from a script instead of a scene:</p>
+<div class="codeblock" data-lang="bash"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>automata-export init my_game --main main.py</code></pre></div>
+<p>The exported game runs <code>main.py</code> exactly like <code>python main.py</code> would,
+with the game folder as the working directory. Load files with paths
+relative to that folder.</p>
+<h2 id="running-an-exported-game">Running an exported game<a class="anchor" href="#running-an-exported-game" aria-label="Link to this section">#</a></h2>
+<p>Players start the executable. It also accepts two flags, which help with
+smoke tests in CI:</p>
+<div class="table"><table><thead><tr><th>Flag</th><th>Effect</th></tr></thead><tbody><tr><td><code>--headless</code></td><td>Run without a window</td></tr><tr><td><code>--frames N</code></td><td>Quit after N frames</td></tr></tbody></table></div>
+<div class="codeblock" data-lang="bash"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>&quot;build/linux/Coin Run/Coin Run&quot; --headless --frames 60</code></pre></div>
+<p>Each run writes its output and any Python traceback to
+<code>logs/last_run.log</code> next to the executable. On Windows, the game has no
+console window, so when it crashes the log opens in Notepad.</p>
+<h2 id="how-it-works">How it works<a class="anchor" href="#how-it-works" aria-label="Link to this section">#</a></h2>
+<p><code>automata-player</code> is a small native launcher written in Rust. It finds
+<code>runtime/</code> and starts its Python with <code>python -m automata.player game/</code>.
+The player reads <code>game/game.json</code>, which holds the name, the start scene
+or main script, and the resolution, then runs the game. Scenes run through
+<code>at.run_scene</code> and scripts through <code>runpy</code>. Templates come from the
+<a href="https://github.com/x017/automata/actions/workflows/export.yml" rel="noopener">Export templates workflow</a>
+on GitHub. It builds the launcher and the engine wheel on Windows and
+Linux, installs them into a portable CPython 3.12, smoke-tests an export
+of <em>Coin Run</em>, and publishes the results to the <code>export-templates</code>
+release.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="prefabs-and-attributes.html"><small>Previous</small>Prefabs &amp; attributes</a><a class="next" href="shortcuts.html"><small>Next</small>Keyboard shortcuts</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/exporting.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#build-from-oberon">Build from Oberon</a></li><li class="l2"><a href="#export-templates">Export templates</a></li><li class="l2"><a href="#build-from-the-command-line">Build from the command line</a></li><li class="l2"><a href="#running-an-exported-game">Running an exported game</a></li><li class="l2"><a href="#how-it-works">How it works</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

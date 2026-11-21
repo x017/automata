@@ -58,6 +58,7 @@ hours.
 | Tune lighting, fog, and tone mapping, and test graphics | [Graphics](oberon/graphics.md) |
 | Use the built-in code editor and language servers | [The code editor](oberon/code-editor.md) |
 | Reuse objects and add custom data | [Prefabs & attributes](oberon/prefabs-and-attributes.md) |
+| Ship your game for Windows and Linux | [Exporting your game](oberon/exporting.md) |
 | Look up a shortcut | [Keyboard shortcuts](oberon/shortcuts.md) |
 
 ### Python
