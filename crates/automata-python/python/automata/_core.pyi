@@ -121,6 +121,38 @@ class DirectionalLight:
         shadows: bool = True,
     ) -> None: ...
 
+class Environment:
+    """Scene-wide look: ambient, background, exposure, tone mapping, fog.
+
+    Attach to any entity; the first entity carrying one sets the frame's look.
+    """
+
+    sky_color: tuple[float, float, float]
+    ground_color: tuple[float, float, float]
+    background: tuple[float, float, float]
+    exposure: float
+    tonemapping: str
+    fog: bool
+    fog_color: tuple[float, float, float]
+    fog_density: float
+    fog_start: float
+    def __init__(
+        self,
+        sky_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        ground_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        background: tuple[float, float, float] = (0.012, 0.012, 0.012),
+        exposure: float = 1.0,
+        tonemapping: str = "none",
+        fog: bool = False,
+        fog_color: tuple[float, float, float] = (0.5, 0.55, 0.6),
+        fog_density: float = 0.02,
+        fog_start: float = 0.0,
+    ) -> None: ...
+    @staticmethod
+    def preset(name: str) -> Environment:
+        """``"neutral"``, ``"daylight"``, ``"dusk"``, or ``"night"``."""
+        ...
+
 class Entity:
     """A game object builder: attach components, then add it to a Scene."""
 

@@ -154,6 +154,9 @@ impl PyEntity {
                     StagedComponent::DirectionalLight(v) => {
                         Py::new(py, PyDirectionalLight::from_inner(*v))?.into_any()
                     }
+                    StagedComponent::Environment(v) => {
+                        Py::new(py, crate::components::PyEnvironment::from_inner(*v))?.into_any()
+                    }
                 })
             })
             .collect()
@@ -366,6 +369,9 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }
             StagedComponent::DirectionalLight(c) => {
+                let _ = scene.world_mut().insert_one(id, *c);
+            }
+            StagedComponent::Environment(c) => {
                 let _ = scene.world_mut().insert_one(id, *c);
             }
         }

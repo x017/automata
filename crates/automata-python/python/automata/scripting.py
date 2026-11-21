@@ -9,17 +9,117 @@ In the editor's Play mode those scripts run in a bridged Python process;
 
 A behaviour script is a module with optional `start(entity, ctx)`,
 `update(entity, ctx)` and `stop(entity, ctx)` functions. `entity` offers
-`name`, `transform`, `character_velocity`, `attributes`, `grounded` and a
-per-entity `state` dict; `ctx` offers `input`, `time`, `physics`, `scene`,
-`events`, `resources`, `log(...)` and `quit()`.
+`name`, `transform`, `character_velocity`, `attributes`, `grounded`,
+`camera` and a per-entity `state` dict; `ctx` offers `input`, `time`,
+`physics`, `scene`, `camera`, `events`, `resources`, `log(...)` and `quit()`.
 """
 
 import importlib.util
+import math
 import os
 import sys
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import _core
+
+
+class ScriptCamera:
+    """An entity's perspective camera (``entity.camera`` / ``ctx.camera``).
+
+    The same API Oberon's Play mode offers: read or assign ``position``,
+    ``target`` and ``fov``, or call ``look_at`` / ``follow`` every frame.
+    Writes apply after the frame's callbacks, like every other write.
+    """
+
+    def __init__(self, view: Any, state: List[Any], delta: float) -> None:
+        self._view = view
+        self._state = state  # [x, y, z, tx, ty, tz, fov], shared per frame
+        self._delta = delta
+
+    def _set(self, start: int, values: Tuple[float, ...]) -> None:
+        self._state[start : start + len(values)] = [float(v) for v in values]
+        st = self._state
+        self._view.camera_3d = _core.Camera3D(
+            position=(st[0], st[1], st[2]), target=(st[3], st[4], st[5]), fov=st[6]
+        )
+
+    @property
+    def position(self) -> Tuple[float, float, float]:
+        """The eye position (x, y, z)."""
+        return (self._state[0], self._state[1], self._state[2])
+
+    @position.setter
+    def position(self, value: Any) -> None:
+        self._set(0, tuple(float(v) for v in value)[:3])
+
+    @property
+    def target(self) -> Tuple[float, float, float]:
+        """The point the camera looks at (x, y, z)."""
+        return (self._state[3], self._state[4], self._state[5])
+
+    @target.setter
+    def target(self, value: Any) -> None:
+        self._set(3, tuple(float(v) for v in value)[:3])
+
+    @property
+    def fov(self) -> float:
+        """Vertical field of view in degrees."""
+        return self._state[6]
+
+    @fov.setter
+    def fov(self, degrees: float) -> None:
+        self._set(6, (min(179.0, max(1.0, float(degrees))),))
+
+    def look_at(self, point: Any) -> None:
+        """Aims the camera at a point or an entity."""
+        if hasattr(point, "transform"):
+            point = point.transform.position
+        self.target = point
+
+    def follow(
+        self,
+        entity: Any,
+        offset: Any = (0.0, 3.0, 8.0),
+        smooth: float = 8.0,
+        look_height: float = 0.6,
+    ) -> None:
+        """Moves toward ``entity + offset`` and looks at it (0 smooth = snap)."""
+        p = entity.transform.position
+        goal = [p[i] + float(offset[i]) for i in range(3)]
+        k = 1.0 - math.exp(-float(smooth) * max(self._delta, 0.0)) if smooth > 0 else 1.0
+        cur = self.position
+        self._state[0:3] = [cur[i] + (goal[i] - cur[i]) * k for i in range(3)]
+        self.target = (p[0], p[1] + float(look_height), p[2])
+
+    def __repr__(self) -> str:
+        return f"Camera(position={self.position}, target={self.target}, fov={self.fov})"
+
+
+class _Cameras:
+    """Per-frame camera state, so several writes in one frame accumulate."""
+
+    def __init__(self) -> None:
+        self.delta = 0.0
+        self.states: Dict[int, List[Any]] = {}
+
+    def begin(self, delta: float) -> None:
+        self.delta = float(delta)
+        self.states = {}
+
+    def of(self, view: Any) -> Optional[ScriptCamera]:
+        if view is None:
+            return None
+        cam = view.camera_3d
+        if cam is None:
+            return None
+        key = int(view.id)
+        state = self.states.get(key)
+        if state is None:
+            state = self.states[key] = [*cam.position, *cam.target, cam.fov]
+        return ScriptCamera(view, state, self.delta)
+
+
+_CAMERAS = _Cameras()
 
 
 class ScriptEntity:
@@ -68,6 +168,11 @@ class ScriptEntity:
     @camera_3d.setter
     def camera_3d(self, value: Any) -> None:
         self._view.camera_3d = value
+
+    @property
+    def camera(self) -> Optional[ScriptCamera]:
+        """This entity's camera, or None if it has no Camera3D."""
+        return _CAMERAS.of(self._view)
 
     @property
     def attributes(self) -> Any:
@@ -140,6 +245,14 @@ class ScriptContext:
         self.physics = _Physics(ctx.physics)
         self.scene = _Scene(ctx.scene, handles)
 
+    @property
+    def camera(self) -> Optional[ScriptCamera]:
+        """The scene camera the frame renders through (None without one)."""
+        for view in self.raw.scene:
+            if view.camera_3d is not None:
+                return _CAMERAS.of(view)
+        return None
+
     def log(self, *parts: Any) -> None:
         print(*parts)
 
@@ -194,6 +307,7 @@ def run_scene(
     started: set = set()
 
     def tick(ctx: Any) -> None:
+        _CAMERAS.begin(ctx.time.delta)
         sctx = ScriptContext(ctx, handles)
         live = []
         for name, script_path in scripted:

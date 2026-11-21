@@ -30,6 +30,24 @@ pub enum Field {
     LightColor(u8),
     /// Light ambient fraction (0..1).
     LightAmbient,
+    /// Compass angle the sunlight comes from, degrees (0 = from +Z).
+    LightAzimuth,
+    /// Sun height above the horizon, degrees (90 = straight down).
+    LightElevation,
+    /// Environment sky ambient channel 0..3.
+    EnvSky(u8),
+    /// Environment ground ambient channel 0..3.
+    EnvGround(u8),
+    /// Environment background channel 0..3.
+    EnvBackground(u8),
+    /// Environment fog color channel 0..3.
+    EnvFogColor(u8),
+    /// Environment exposure multiplier.
+    EnvExposure,
+    /// Environment fog density per unit.
+    EnvFogDensity,
+    /// Distance where the fog starts.
+    EnvFogStart,
     /// Camera eye position, axis 0..3.
     CameraPosition(u8),
     /// Camera look-at target, axis 0..3.
@@ -73,6 +91,8 @@ pub enum Flag {
     ColliderSensor,
     /// Collider collides.
     ColliderEnabled,
+    /// Environment distance fog on/off.
+    EnvFog,
 }
 
 /// An enumerated property of an entity (cycled by a dropdown-style button).
@@ -84,6 +104,8 @@ pub enum Choice {
     BodyType,
     /// Box → Sphere → Capsule collider shape.
     ColliderShape,
+    /// Environment tone mapping curve.
+    Tonemapping,
 }
 
 fn axis(i: u8) -> usize {
@@ -106,6 +128,15 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::LightDirection(i) => data.directional_light?.direction.to_array()[axis(i)],
         F::LightColor(i) => data.directional_light?.color[axis(i)],
         F::LightAmbient => data.directional_light?.ambient,
+        F::LightAzimuth => sun_angles(data.directional_light?.direction).0,
+        F::LightElevation => sun_angles(data.directional_light?.direction).1,
+        F::EnvSky(i) => data.environment?.sky_color[axis(i)],
+        F::EnvGround(i) => data.environment?.ground_color[axis(i)],
+        F::EnvBackground(i) => data.environment?.background[axis(i)],
+        F::EnvFogColor(i) => data.environment?.fog_color[axis(i)],
+        F::EnvExposure => data.environment?.exposure,
+        F::EnvFogDensity => data.environment?.fog_density,
+        F::EnvFogStart => data.environment?.fog_start,
         F::CameraPosition(i) => data.camera_3d?.position.to_array()[axis(i)],
         F::CameraTarget(i) => data.camera_3d?.target.to_array()[axis(i)],
         F::CameraFov => data.camera_3d?.fov_y_degrees,
@@ -142,7 +173,19 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
 pub fn range(field: Field) -> (f32, f32) {
     use Field as F;
     match field {
-        F::MeshColor(_) | F::LightColor(_) | F::LightAmbient | F::ColliderRestitution => (0.0, 1.0),
+        F::MeshColor(_)
+        | F::LightColor(_)
+        | F::LightAmbient
+        | F::ColliderRestitution
+        | F::EnvSky(_)
+        | F::EnvGround(_)
+        | F::EnvBackground(_)
+        | F::EnvFogColor(_) => (0.0, 1.0),
+        F::LightAzimuth => (-180.0, 180.0),
+        F::LightElevation => (-89.0, 89.0),
+        F::EnvExposure => (0.0, 16.0),
+        F::EnvFogDensity => (0.0, 2.0),
+        F::EnvFogStart => (0.0, 100_000.0),
         F::MeshSize | F::ColliderRadius | F::ColliderExtents(_) | F::ColliderHalfHeight => {
             (0.001, 10_000.0)
         }
@@ -162,8 +205,19 @@ pub fn range(field: Field) -> (f32, f32) {
 pub fn scrub_step(field: Field) -> f32 {
     use Field as F;
     match field {
-        F::Rotation(_) | F::CameraFov | F::CharacterSlope => 0.5,
-        F::MeshColor(_) | F::LightColor(_) | F::LightAmbient | F::ColliderRestitution => 0.005,
+        F::Rotation(_) | F::CameraFov | F::CharacterSlope | F::LightAzimuth | F::LightElevation => {
+            0.5
+        }
+        F::EnvFogDensity => 0.0005,
+        F::MeshColor(_)
+        | F::LightColor(_)
+        | F::LightAmbient
+        | F::ColliderRestitution
+        | F::EnvSky(_)
+        | F::EnvGround(_)
+        | F::EnvBackground(_)
+        | F::EnvFogColor(_)
+        | F::EnvExposure => 0.005,
         F::Scale(_) | F::LightDirection(_) => 0.01,
         _ => 0.02,
     }
@@ -209,6 +263,35 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
         },
         F::LightAmbient => match &mut data.directional_light {
             Some(l) => l.ambient = v,
+            None => return false,
+        },
+        F::LightAzimuth | F::LightElevation => match &mut data.directional_light {
+            Some(l) => {
+                let (az, el) = sun_angles(l.direction);
+                l.direction = if field == F::LightAzimuth {
+                    sun_direction(v, el)
+                } else {
+                    sun_direction(az, v)
+                };
+            }
+            None => return false,
+        },
+        F::EnvSky(_)
+        | F::EnvGround(_)
+        | F::EnvBackground(_)
+        | F::EnvFogColor(_)
+        | F::EnvExposure
+        | F::EnvFogDensity
+        | F::EnvFogStart => match &mut data.environment {
+            Some(env) => match field {
+                F::EnvSky(i) => env.sky_color[axis(i)] = v,
+                F::EnvGround(i) => env.ground_color[axis(i)] = v,
+                F::EnvBackground(i) => env.background[axis(i)] = v,
+                F::EnvFogColor(i) => env.fog_color[axis(i)] = v,
+                F::EnvExposure => env.exposure = v,
+                F::EnvFogDensity => env.fog_density = v,
+                _ => env.fog_start = v,
+            },
             None => return false,
         },
         F::CameraPosition(i) => match &mut data.camera_3d {
@@ -283,6 +366,7 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::BodyEnabled => data.rigid_body.as_ref()?.enabled,
         Flag::ColliderSensor => data.collider_3d.as_ref()?.sensor,
         Flag::ColliderEnabled => data.collider_3d.as_ref()?.enabled,
+        Flag::EnvFog => data.environment?.fog,
     })
 }
 
@@ -303,6 +387,10 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
         },
         Flag::ColliderEnabled => match &mut data.collider_3d {
             Some(c) => c.enabled = !c.enabled,
+            None => return false,
+        },
+        Flag::EnvFog => match &mut data.environment {
+            Some(env) => env.fog = !env.fog,
             None => return false,
         },
     }
@@ -329,6 +417,7 @@ pub fn choice_label(data: &EntityData, choice: Choice) -> Option<&'static str> {
             Shape3D::Ball { .. } => "Sphere",
             Shape3D::Capsule { .. } => "Capsule",
         },
+        Choice::Tonemapping => data.environment?.tonemapping.label(),
     })
 }
 
@@ -378,6 +467,14 @@ pub fn cycle(data: &mut EntityData, choice: Choice) -> bool {
                         extents: glam::Vec3::splat(radius * 2.0),
                     },
                 };
+            }
+            None => return false,
+        },
+        Choice::Tonemapping => match &mut data.environment {
+            Some(env) => {
+                let all = automata_renderer::Tonemapping::ALL;
+                let i = all.iter().position(|t| *t == env.tonemapping).unwrap_or(0);
+                env.tonemapping = all[(i + 1) % all.len()];
             }
             None => return false,
         },
@@ -450,6 +547,27 @@ pub fn set_choice(data: &mut EntityData, choice: Choice, label: &str) -> bool {
     false
 }
 
+/// A light travel direction as `(azimuth, elevation)` in degrees, where
+/// the angles describe where the light comes **from** (the sun's position).
+#[must_use]
+pub fn sun_angles(direction: glam::Vec3) -> (f32, f32) {
+    let to_sun = -direction.try_normalize().unwrap_or(glam::Vec3::NEG_Y);
+    let elevation = to_sun.y.clamp(-1.0, 1.0).asin().to_degrees();
+    let azimuth = if to_sun.x.abs() + to_sun.z.abs() < 1e-6 {
+        0.0
+    } else {
+        to_sun.x.atan2(to_sun.z).to_degrees()
+    };
+    (azimuth, elevation)
+}
+
+/// The light travel direction for a sun at `azimuth` / `elevation` degrees.
+#[must_use]
+pub fn sun_direction(azimuth: f32, elevation: f32) -> glam::Vec3 {
+    let (az, el) = (azimuth.to_radians(), elevation.to_radians());
+    -glam::Vec3::new(el.cos() * az.sin(), el.sin(), el.cos() * az.cos())
+}
+
 /// Formats a value for display: up to 3 decimals, trailing zeros trimmed.
 #[must_use]
 pub fn format_value(v: f32) -> String {
@@ -508,6 +626,45 @@ mod tests {
         let mut d = entity();
         assert_eq!(get(&d, Field::LightAmbient), None);
         assert!(!set(&mut d, Field::LightAmbient, 0.5));
+    }
+
+    #[test]
+    fn sun_angles_round_trip() {
+        for (az, el) in [(0.0, 45.0), (120.0, 30.0), (-90.0, 10.0), (179.0, 80.0)] {
+            let (a, e) = sun_angles(sun_direction(az, el));
+            assert!(
+                (a - az).abs() < 1e-3 && (e - el).abs() < 1e-3,
+                "{az} {el} -> {a} {e}"
+            );
+        }
+        let mut d = entity();
+        crate::doc::ComponentKind::Light.add_to(&mut d);
+        assert!(set(&mut d, Field::LightElevation, 60.0));
+        assert!((get(&d, Field::LightElevation).unwrap() - 60.0).abs() < 1e-3);
+        assert!(
+            d.directional_light.unwrap().direction.y < 0.0,
+            "light shines down"
+        );
+    }
+
+    #[test]
+    fn environment_fields_edit_the_component() {
+        let mut d = entity();
+        assert_eq!(get(&d, Field::EnvExposure), None);
+        crate::doc::ComponentKind::Environment.add_to(&mut d);
+        assert!(set(&mut d, Field::EnvExposure, 2.0));
+        assert!(set(&mut d, Field::EnvFogColor(2), 0.25));
+        assert!(toggle(&mut d, Flag::EnvFog));
+        assert!(cycle(&mut d, Choice::Tonemapping));
+        let env = d.environment.unwrap();
+        assert!((env.exposure - 2.0).abs() < 1e-6);
+        assert!((env.fog_color[2] - 0.25).abs() < 1e-6);
+        assert!(
+            !env.fog,
+            "the daylight default has fog; the toggle turned it off"
+        );
+        assert_eq!(choice_options(&d, Choice::Tonemapping).len(), 4);
+        assert!(set_choice(&mut d, Choice::Tonemapping, "AgX"));
     }
 
     #[test]

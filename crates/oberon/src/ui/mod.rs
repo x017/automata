@@ -28,6 +28,7 @@ use crate::view::{self, Gizmo, GizmoMode, Projector};
 pub mod attributes;
 mod code_view;
 pub mod dialogs;
+pub mod graphics;
 pub mod menus;
 pub mod palette;
 pub mod picker;
@@ -35,6 +36,7 @@ pub mod project_panel;
 pub mod settings;
 
 use dialogs::Dialog;
+pub use graphics::{FrameStats, RightTab};
 use menus::MENUBAR_H;
 pub use menus::{DialogKind, Panel};
 use picker::ColorPicker;
@@ -373,6 +375,14 @@ pub enum Intent {
     Quit,
     /// Restart the language server (its settings changed).
     RestartLanguageServer,
+    /// Replace an entity's whole Environment (a preset).
+    SetEnvironment(u64, automata_renderer::Environment),
+    /// Add a graphics test arrangement.
+    SpawnTest(crate::doc::TestScene),
+    /// Remove every `Test …` entity.
+    ClearTests,
+    /// Move a camera entity to where the editor view is.
+    AlignCameraToView(u64),
     /// Run an intent without the unsaved-changes prompt.
     Force(Box<Intent>),
 }
@@ -585,6 +595,12 @@ pub struct Ui {
     pub panels: PanelSizes,
     /// Active bottom-dock tab.
     pub bottom_tab: BottomTab,
+    /// Active right-dock tab.
+    pub right_tab: RightTab,
+    /// Frame statistics for the Graphics panel (set by the app).
+    pub stats: FrameStats,
+    /// The selected camera's view, rendered by the app: RGBA, size.
+    camera_preview: Option<(Vec<u8>, u32, u32)>,
     recent_colors: Vec<[f32; 4]>,
     entity_clipboard: Vec<EntityData>,
     component_clipboard: Option<(ComponentKind, EntityData)>,
@@ -668,6 +684,9 @@ impl Ui {
             project_root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             panels: PanelSizes::default(),
             bottom_tab: BottomTab::Console,
+            right_tab: RightTab::Inspector,
+            stats: FrameStats::default(),
+            camera_preview: None,
             recent_colors: Vec::new(),
             entity_clipboard: Vec::new(),
             component_clipboard: None,
@@ -712,6 +731,49 @@ impl Ui {
         });
         if self.console.len() > 500 {
             self.console.drain(..100);
+        }
+    }
+
+    /// The camera the scene view wants a preview of, with the preview's
+    /// physical pixel size, or `None` (no camera selected, preview off, or
+    /// the scene view hidden). `scale` is the canvas scale; `(w, h)` the
+    /// window's logical size.
+    #[must_use]
+    pub fn camera_preview_request(
+        &self,
+        doc: &Document,
+        w: f32,
+        h: f32,
+        scale: f32,
+    ) -> Option<(automata_renderer::Camera3D, u32, u32)> {
+        if !self.prefs.camera_preview || !self.scene_visible() || self.play != PlayState::Editing {
+            return None;
+        }
+        let cam = doc
+            .selected_index()
+            .and_then(|i| doc.entities[i].data.camera_3d)?;
+        let view = self.layout(w, h).viewport;
+        let (pw, ph) = graphics::preview_size(view);
+        if view.w < 260.0 || view.h < 200.0 {
+            return None;
+        }
+        let px = |v: f32| (v * scale).round().max(1.0) as u32;
+        Some((cam, px(pw), px(ph)))
+    }
+
+    /// Hands the UI the rendered camera preview (`None` clears it).
+    pub fn set_camera_preview(&mut self, preview: Option<(&[u8], u32, u32)>) {
+        match preview {
+            Some((rgba, w, h)) => {
+                let slot = self
+                    .camera_preview
+                    .get_or_insert_with(|| (Vec::new(), 0, 0));
+                slot.0.clear();
+                slot.0.extend_from_slice(rgba);
+                slot.1 = w;
+                slot.2 = h;
+            }
+            None => self.camera_preview = None,
         }
     }
 
@@ -1650,6 +1712,9 @@ impl Ui {
         let w = rect.w - 2.0 * layout::PAD;
         let start = top + 10.0 - self.inspector_scroll;
         let end = match doc.selected_index() {
+            _ if self.right_tab == RightTab::Graphics => {
+                self.graphics_body(canvas, doc, x, start, w)
+            }
             Some(idx) => self.inspector_body(canvas, doc, &doc.entities[idx], x, start, w),
             None => {
                 canvas.text(
@@ -1681,10 +1746,10 @@ impl Ui {
         self.inspector_scroll = self.inspector_scroll.min(max_scroll);
 
         self.clip = (0.0, f32::INFINITY);
-        self.panel_title(canvas, rect, "Inspector");
+        self.right_tabs(canvas, rect);
         if self.play != PlayState::Editing {
             canvas.text(
-                rect.x + rect.w - 128.0,
+                rect.x + rect.w - 118.0,
                 rect.y + 8.0,
                 layout::SMALL_SIZE,
                 "read-only (playing)",
@@ -1751,6 +1816,8 @@ impl Ui {
             let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
             y = ny;
             if open {
+                y = self.float_row(canvas, x, y, w, e, "Azimuth", Field::LightAzimuth);
+                y = self.float_row(canvas, x, y, w, e, "Elevation", Field::LightElevation);
                 y = self.vec3_row(canvas, x, y, w, e, "Direction", Field::LightDirection);
                 y = self.color_row(canvas, x, y, w, e, "Color", ColorTarget::Light);
                 y = self.float_row(canvas, x, y, w, e, "Ambient", Field::LightAmbient);
@@ -1768,6 +1835,23 @@ impl Ui {
                 y = self.float_row(canvas, x, y, w, e, "Far Clip", Field::CameraFar);
                 y = self.vec3_row(canvas, x, y, w, e, "Eye", Field::CameraPosition);
                 y = self.vec3_row(canvas, x, y, w, e, "Look At", Field::CameraTarget);
+                y = self.camera_tools(canvas, x, y + 4.0, w, e);
+            }
+        }
+        if d.environment.is_some() {
+            let kind = ComponentKind::Environment;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                y = self.color_row(canvas, x, y, w, e, "Sky", ColorTarget::EnvSky);
+                y = self.color_row(canvas, x, y, w, e, "Ground", ColorTarget::EnvGround);
+                y = self.color_row(canvas, x, y, w, e, "Background", ColorTarget::EnvBackground);
+                y = self.choice_row(canvas, x, y, w, e, "Tone Mapping", Choice::Tonemapping);
+                y = self.float_row(canvas, x, y, w, e, "Exposure", Field::EnvExposure);
+                y = self.flag_row(canvas, x, y, w, e, "Fog", Flag::EnvFog);
+                y = self.color_row(canvas, x, y, w, e, "Fog Color", ColorTarget::EnvFog);
+                y = self.float_row(canvas, x, y, w, e, "Fog Density", Field::EnvFogDensity);
+                y = self.float_row(canvas, x, y, w, e, "Fog Start", Field::EnvFogStart);
                 y += 6.0;
             }
         }
@@ -2116,7 +2200,7 @@ impl Ui {
                         (b.x + 7.5, b.y + 13.0),
                         (b.x + 14.0, b.y + 5.0),
                     ],
-                    color::text(),
+                    color::on_accent(),
                     2.0,
                 );
             }
@@ -2554,6 +2638,7 @@ impl Ui {
 
         // --- Overlays. ---
         draw_markers(canvas, doc, &proj, rect);
+        draw_camera_frustums(canvas, doc, &proj, selected.map(|e| e.id));
         if let Some(e) = selected {
             draw_selection(canvas, &e.data, &proj);
         }
@@ -2564,6 +2649,7 @@ impl Ui {
 
         if editing {
             self.tool_group(canvas, rect);
+            self.draw_camera_preview(canvas, selected, rect);
         }
         if editing {
             canvas.stroke_rect(rect.x, rect.y, rect.w, rect.h, color::border(), 1.0);
@@ -2577,6 +2663,43 @@ impl Ui {
                 2.0,
             );
         }
+    }
+
+    /// The selected camera's view as an inset in the scene view's corner.
+    fn draw_camera_preview(
+        &mut self,
+        canvas: &mut Canvas,
+        selected: Option<&EntityEntry>,
+        rect: Rect,
+    ) {
+        let Some(e) = selected.filter(|e| e.data.camera_3d.is_some()) else {
+            return;
+        };
+        let Some((rgba, fw, fh)) = &self.camera_preview else {
+            return;
+        };
+        let s = canvas.scale();
+        let (lw, lh) = (*fw as f32 / s, *fh as f32 / s);
+        let r = graphics::preview_rect(rect, lw, lh);
+        canvas.fill_rounded(
+            r.x - 1.0,
+            r.y - 1.0,
+            r.w + 2.0,
+            r.h + 2.0,
+            layout::RADIUS,
+            color::border(),
+        );
+        canvas.blit_rgba(r.x, r.y, *fw, *fh, rgba);
+        let label = e.name().to_string();
+        let tw = canvas.measure_text(layout::SMALL_SIZE, &label) + 14.0;
+        canvas.fill_rounded(r.x + 6.0, r.y + 6.0, tw, 18.0, 4.0, color::surface());
+        canvas.text(
+            r.x + 13.0,
+            r.y + 8.0,
+            layout::SMALL_SIZE,
+            &label,
+            color::text(),
+        );
     }
 
     /// The orientation widget in the scene view's top-right corner.
@@ -2968,6 +3091,12 @@ fn entity_icon(canvas: &mut Canvas, cx: f32, cy: f32, d: &EntityData) {
                 1.2,
             );
         }
+    } else if d.environment.is_some() && d.mesh_visual.is_none() {
+        // A horizon: sky arc over a ground line.
+        let c = color::text_dim();
+        canvas.stroke_circle(cx, cy + 1.0, 6.0, c, 1.3);
+        canvas.fill_rect(cx - 8.0, cy + 1.0, 16.0, 7.0, color::surface());
+        canvas.fill_rect(cx - 8.0, cy + 1.0, 16.0, 1.3, c);
     } else if d.camera_3d.is_some() {
         canvas.fill_rounded(cx - 6.0, cy - 4.0, 9.0, 8.0, 1.5, color::camera_icon());
         canvas.fill_polygon(
@@ -3011,7 +3140,12 @@ fn entity_icon(canvas: &mut Canvas, cx: f32, cy: f32, d: &EntityData) {
 /// Icons for entities that have no visible mesh (lights, cameras, empties).
 fn draw_markers(canvas: &mut Canvas, doc: &Document, proj: &Projector, rect: Rect) {
     for e in &doc.entities {
-        if e.data.mesh_visual.is_some() {
+        // Meshes are their own marker; an environment has no position.
+        if e.data.mesh_visual.is_some()
+            || (e.data.environment.is_some()
+                && e.data.camera_3d.is_none()
+                && e.data.directional_light.is_none())
+        {
             continue;
         }
         let Some(t) = e.data.transform else {
@@ -3032,6 +3166,54 @@ fn draw_markers(canvas: &mut Canvas, doc: &Document, proj: &Projector, rect: Rec
             e.name(),
             color::text_dim(),
         );
+    }
+}
+
+/// Every camera's view pyramid (the selected one brighter).
+fn draw_camera_frustums(
+    canvas: &mut Canvas,
+    doc: &Document,
+    proj: &Projector,
+    selected: Option<u64>,
+) {
+    for e in &doc.entities {
+        let Some(cam) = e.data.camera_3d else {
+            continue;
+        };
+        let hot = selected == Some(e.id);
+        let depth = if hot { 1.6 } else { 0.9 };
+        let corners = view::camera_frustum(&cam, 16.0 / 9.0, depth);
+        let pts: Vec<Option<(f32, f32)>> = corners.iter().map(|c| proj.project(*c)).collect();
+        let c = if hot {
+            color::camera_icon()
+        } else {
+            color::text_faint()
+        };
+        let width = if hot { 1.5 } else { 1.0 };
+        for i in 1..5 {
+            let j = if i == 4 { 1 } else { i + 1 };
+            if let (Some(a), Some(b)) = (pts[0], pts[i]) {
+                canvas.line(a.0, a.1, b.0, b.1, c, width);
+            }
+            if let (Some(a), Some(b)) = (pts[i], pts[j]) {
+                canvas.line(a.0, a.1, b.0, b.1, c, width);
+            }
+        }
+        // A small notch marks the top edge (which way is up).
+        if let (Some(a), Some(b)) = (pts[1], pts[2]) {
+            let (mx, my) = (f32::midpoint(a.0, b.0), f32::midpoint(a.1, b.1));
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let len = (dx * dx + dy * dy).sqrt().max(1.0);
+            let (nx, ny) = (dy / len * 6.0, -dx / len * 6.0);
+            canvas.fill_polygon(
+                &[
+                    (mx - dx / len * 5.0, my - dy / len * 5.0),
+                    (mx + dx / len * 5.0, my + dy / len * 5.0),
+                    (mx + nx, my + ny),
+                ],
+                c,
+            );
+        }
     }
 }
 
@@ -3550,6 +3732,65 @@ mod tests {
         let out = click(&mut ui, &mut c, &doc, item.0, item.1);
         assert!(out.contains(&Intent::Create(CreateKind::Cube)), "{out:?}");
         assert!(ui.menu.is_none());
+    }
+
+    #[test]
+    fn graphics_tab_offers_scene_setup_and_tests() {
+        let mut c = canvas();
+        let mut doc = Document::starter();
+        let mut ui = Ui::new();
+        let insp = lay().inspector;
+        // Click the "Graphics" tab (second tab in the right dock's title).
+        let tab_x = insp.x + 2.0 + c.measure_text(layout::TITLE_SIZE, "Inspector") + 24.0 + 20.0;
+        click(
+            &mut ui,
+            &mut c,
+            &doc,
+            tab_x,
+            insp.y + layout::TITLEBAR_H / 2.0,
+        );
+        assert_eq!(ui.right_tab, RightTab::Graphics);
+        // No environment yet: the panel offers to create one; with one, the
+        // presets emit SetEnvironment.
+        let _ = ui.frame(&mut c, &doc, Pointer::default(), None);
+        doc.create(CreateKind::Environment);
+        let env_id = doc.entities.last().unwrap().id;
+        let _ = ui.frame(&mut c, &doc, Pointer::default(), None);
+        // Quality buttons edit the preference directly.
+        ui.prefs.graphics_quality = automata_renderer::GraphicsQuality::Low;
+        let mut found_preset = false;
+        // Scan the panel for the "Night" preset button by clicking along
+        // the preset row candidates.
+        for row in 0..40 {
+            let y = insp.y + layout::TITLEBAR_H + 10.0 + row as f32 * 12.0;
+            let x = insp.x + insp.w - layout::PAD - 20.0;
+            let out = click(&mut ui, &mut c, &doc, x, y);
+            // Other rows open pickers / menus or jump to the Inspector.
+            ui.right_tab = RightTab::Graphics;
+            ui.picker = None;
+            ui.menu = None;
+            if out.iter().any(|i| {
+                matches!(i, Intent::SetEnvironment(id, env)
+                    if *id == env_id && *env == automata_renderer::Environment::night())
+            }) {
+                found_preset = true;
+                break;
+            }
+        }
+        assert!(found_preset, "the Night preset is clickable");
+    }
+
+    #[test]
+    fn camera_preview_is_requested_only_for_a_selected_camera() {
+        let mut doc = Document::starter();
+        let ui = Ui::new();
+        assert!(ui
+            .camera_preview_request(&doc, 1600.0, 950.0, 1.0)
+            .is_none());
+        let id = doc.create(CreateKind::Camera);
+        doc.select(Some(id));
+        let (_, w, h) = ui.camera_preview_request(&doc, 1600.0, 950.0, 2.0).unwrap();
+        assert!(w > h && w >= 400, "{w}x{h} at 2x");
     }
 
     fn select_named(doc: &mut Document, name: &str) -> u64 {

@@ -1007,6 +1007,26 @@ def _kitchen_sink_scene():
     )
 
 
+def test_environment_component_and_presets():
+    env = at.Environment(tonemapping="aces", exposure=1.5, fog=True, fog_density=0.03)
+    assert env.tonemapping == "aces"
+    assert env.exposure == pytest.approx(1.5)
+    assert env.fog is True
+    assert at.Environment().tonemapping == "none"
+    dusk = at.Environment.preset("dusk")
+    assert dusk.tonemapping == "agx" and dusk.fog
+    with pytest.raises(ValueError):
+        at.Environment(tonemapping="filmic")
+    with pytest.raises(ValueError):
+        at.Environment.preset("noon")
+
+    scene = at.Scene().add(at.Entity("look").add(dusk))
+    text = scene.to_ron()
+    assert "environment" in text and "Agx" in text
+    back = at.Scene.from_ron(text)
+    assert back.to_ron() == text
+
+
 def test_scene_ron_round_trip_staged():
     scene = _kitchen_sink_scene()
     text = scene.to_ron()

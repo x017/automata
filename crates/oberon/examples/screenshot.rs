@@ -102,6 +102,42 @@ fn main() {
                 ui.code_text("ctx");
             }
         }
+        "graphics" | "camera" => {
+            let cam = doc.create(oberon::doc::CreateKind::Camera);
+            if let Some(i) = doc.index_of(cam) {
+                let d = &mut doc.entities[i].data;
+                d.name = Some("Main Camera".into());
+                d.camera_3d = Some(automata_renderer::Camera3D::new(
+                    glam::Vec3::new(6.0, 4.0, 8.0),
+                    glam::Vec3::new(0.0, 0.5, 0.0),
+                ));
+                if let Some(t) = &mut d.transform {
+                    t.position = [6.0, 4.0, 8.0];
+                }
+            }
+            if scene == "graphics" {
+                doc.create(oberon::doc::CreateKind::Environment);
+                ui.right_tab = oberon::ui::RightTab::Graphics;
+                ui.stats = oberon::ui::FrameStats {
+                    frame_ms: 4.2,
+                    meshes: 6,
+                };
+                doc.select(selected);
+            } else {
+                let c = doc.entities[doc.index_of(cam).unwrap()]
+                    .data
+                    .camera_3d
+                    .unwrap();
+                let (pw, ph) = (416u32, 234u32);
+                let px = oberon::render::render_wireframe::render(
+                    &doc,
+                    oberon::ui::ViewCamera::from_camera3d(&c),
+                    pw,
+                    ph,
+                );
+                ui.set_camera_preview(Some((&px, pw, ph)));
+            }
+        }
         "settings" => {
             ui.open_settings_page(oberon::ui::settings::SettingsPage::Editor);
         }

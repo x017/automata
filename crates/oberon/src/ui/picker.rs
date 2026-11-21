@@ -18,6 +18,14 @@ pub enum ColorTarget {
     Mesh,
     /// Light color (RGB).
     Light,
+    /// Environment sky ambient (RGB).
+    EnvSky,
+    /// Environment ground ambient (RGB).
+    EnvGround,
+    /// Environment background (RGB).
+    EnvBackground,
+    /// Environment fog color (RGB).
+    EnvFog,
     /// A custom `Color` attribute, by key index in sorted order.
     Attribute(usize),
 }
@@ -29,6 +37,10 @@ impl ColorTarget {
         match self {
             Self::Mesh => (0..4).map(Field::MeshColor).collect(),
             Self::Light => (0..3).map(Field::LightColor).collect(),
+            Self::EnvSky => (0..3).map(Field::EnvSky).collect(),
+            Self::EnvGround => (0..3).map(Field::EnvGround).collect(),
+            Self::EnvBackground => (0..3).map(Field::EnvBackground).collect(),
+            Self::EnvFog => (0..3).map(Field::EnvFogColor).collect(),
             Self::Attribute(_) => Vec::new(),
         }
     }
@@ -36,7 +48,7 @@ impl ColorTarget {
     /// Whether the color has an alpha channel.
     #[must_use]
     pub fn has_alpha(self) -> bool {
-        !matches!(self, Self::Light)
+        matches!(self, Self::Mesh | Self::Attribute(_))
     }
 
     /// Reads the current RGBA (alpha 1 for RGB colors).

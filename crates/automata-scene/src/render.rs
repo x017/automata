@@ -5,10 +5,11 @@
 //! entities; [`record_draw_list`] walks the world once per frame and emits
 //! draw commands using each entity's [`GlobalTransform`]. The first entity
 //! carrying a [`Camera3D`] or [`Camera2D`] component becomes the frame's
-//! camera, and the first [`DirectionalLight`] becomes the frame's sun.
+//! camera, the first [`DirectionalLight`] becomes the frame's sun, and the
+//! first [`Environment`] sets the frame's look (ambient, fog, tone mapping).
 
 use automata_renderer::{
-    Camera2D, Camera3D, DrawList, Material, Mesh, MeshData, Sprite, Sun, Texture,
+    Camera2D, Camera3D, DrawList, Environment, Material, Mesh, MeshData, Sprite, Sun, Texture,
 };
 use glam::{EulerRot, Vec2};
 
@@ -146,6 +147,12 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
     // Lighting: the first entity with a directional light becomes the sun.
     if let Some(light) = (&mut world.query::<&DirectionalLight>()).into_iter().next() {
         draw.set_sun((*light).into());
+    }
+    // Look: the first entity with an environment sets ambient, fog, tone
+    // mapping, and the background color.
+    if let Some(env) = (&mut world.query::<&Environment>()).into_iter().next() {
+        draw.set_environment(*env);
+        draw.set_clear_color(env.clear_color());
     }
 
     for (renderer, global) in &mut world.query::<(&MeshRenderer, &GlobalTransform)>() {
@@ -305,6 +312,17 @@ mod tests {
         assert!(draw.camera_2d().is_some());
         assert!(draw.camera_3d().is_some());
         assert_eq!(draw.camera_3d().unwrap().position, Vec3::new(0.0, 2.0, 8.0));
+    }
+
+    #[test]
+    fn environment_component_sets_the_frame_look() {
+        let mut scene = Scene::new();
+        let mut draw = DrawList::new();
+        record_draw_list(scene.world(), &mut draw);
+        assert!(draw.environment().is_none());
+        scene.spawn((Environment::night(),));
+        record_draw_list(scene.world(), &mut draw);
+        assert_eq!(draw.environment(), Some(Environment::night()));
     }
 
     #[test]

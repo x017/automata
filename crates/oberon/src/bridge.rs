@@ -61,6 +61,8 @@ pub struct EntityState {
     pub grounded: bool,
     /// Custom attributes.
     pub attributes: BTreeMap<String, AttributeValue>,
+    /// The entity's camera as `[eye xyz, target xyz, fov°]`, if it has one.
+    pub camera: Option<[f32; 7]>,
 }
 
 /// What a script changed on one entity.
@@ -78,6 +80,8 @@ pub struct EntityWrite {
     pub velocity: Option<[f32; 3]>,
     /// The full new attribute map.
     pub attributes: Option<BTreeMap<String, AttributeValue>>,
+    /// New camera `[eye xyz, target xyz, fov°]`.
+    pub camera: Option<[f32; 7]>,
 }
 
 /// A message from the runner.
@@ -388,6 +392,9 @@ fn state_json(e: &EntityState) -> Json {
     if let Some(v) = e.velocity {
         obj.set("v", Json::floats(&v));
     }
+    if let Some(c) = e.camera {
+        obj.set("cam", Json::floats(&c));
+    }
     if let Some(script) = &e.script {
         obj.set("script", Json::from(script.display().to_string()));
     }
@@ -402,6 +409,7 @@ fn parse_write(w: &Json) -> Option<EntityWrite> {
         rotation: w.get("r").and_then(Json::as_floats::<3>),
         scale: w.get("s").and_then(Json::as_floats::<3>),
         velocity: w.get("v").and_then(Json::as_floats::<3>),
+        camera: w.get("cam").and_then(Json::as_floats::<7>),
         attributes: w.get("attrs").and_then(Json::as_obj).map(|pairs| {
             pairs
                 .iter()
@@ -552,6 +560,26 @@ mod tests {
         assert_eq!(attrs["tint"], AttributeValue::Color([1.0, 0.0, 0.0, 1.0]));
         assert!(parse_msg("not json").is_none());
         assert!(parse_msg(r#"{"op":"???"}"#).is_none());
+    }
+
+    #[test]
+    fn camera_state_and_writes_cross_the_bridge() {
+        let state = EntityState {
+            id: 4,
+            camera: Some([0.0, 2.0, 6.0, 0.0, 0.0, 0.0, 60.0]),
+            ..EntityState::default()
+        };
+        let json = state_json(&state);
+        assert_eq!(
+            json.get("cam").and_then(Json::as_floats::<7>),
+            Some([0.0, 2.0, 6.0, 0.0, 0.0, 0.0, 60.0])
+        );
+        let msg =
+            parse_msg(r#"{"op":"frame","frame":1,"writes":[{"id":4,"cam":[1,2,3,4,5,6,50]}]}"#);
+        let Some(BridgeMsg::Frame(writes)) = msg else {
+            panic!("frame expected");
+        };
+        assert_eq!(writes[0].camera, Some([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 50.0]));
     }
 
     #[test]

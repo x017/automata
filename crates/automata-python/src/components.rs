@@ -2,7 +2,7 @@
 //! [`crate::scene::PyEntity`] and materialized into ECS components when the
 //! scene loads.
 
-use automata_renderer::{Camera2D, Camera3D};
+use automata_renderer::{Camera2D, Camera3D, Environment, Tonemapping};
 use automata_scene::{DirectionalLight, Transform};
 use glam::{EulerRot, Quat, Vec2, Vec3};
 use pyo3::exceptions::PyTypeError;
@@ -241,6 +241,180 @@ impl PyDirectionalLight {
     }
 }
 
+/// Scene-wide look: sky/ground ambient, background, exposure, tone mapping,
+/// and distance fog. The first entity carrying one sets the frame's look.
+///
+/// ```python
+/// scene.add(at.Entity("environment").add(at.Environment.preset("dusk")))
+/// scene.add(at.Entity("environment").add(at.Environment(
+///     tonemapping="aces", exposure=1.2, fog=True, fog_density=0.02)))
+/// ```
+#[pyclass(name = "Environment", module = "automata._core", frozen)]
+#[derive(Debug, Clone, Copy)]
+pub struct PyEnvironment {
+    inner: Environment,
+}
+
+fn tonemapping_of(name: &str) -> PyResult<Tonemapping> {
+    Ok(match name.to_ascii_lowercase().as_str() {
+        "none" | "" => Tonemapping::None,
+        "reinhard" => Tonemapping::Reinhard,
+        "aces" => Tonemapping::Aces,
+        "agx" => Tonemapping::Agx,
+        other => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "unknown tonemapping {other:?}; expected 'none', 'reinhard', 'aces', or 'agx'"
+            )))
+        }
+    })
+}
+
+#[pymethods]
+impl PyEnvironment {
+    /// Creates an environment. Defaults reproduce the plain look (white
+    /// ambient, no fog, no tone mapping).
+    #[new]
+    #[pyo3(signature = (
+        sky_color=(1.0, 1.0, 1.0),
+        ground_color=(1.0, 1.0, 1.0),
+        background=(0.012, 0.012, 0.012),
+        exposure=1.0,
+        tonemapping="none",
+        fog=false,
+        fog_color=(0.5, 0.55, 0.6),
+        fog_density=0.02,
+        fog_start=0.0,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        sky_color: (f32, f32, f32),
+        ground_color: (f32, f32, f32),
+        background: (f32, f32, f32),
+        exposure: f32,
+        tonemapping: &str,
+        fog: bool,
+        fog_color: (f32, f32, f32),
+        fog_density: f32,
+        fog_start: f32,
+    ) -> PyResult<Self> {
+        let rgb = |c: (f32, f32, f32)| [c.0, c.1, c.2];
+        Ok(Self {
+            inner: Environment {
+                sky_color: rgb(sky_color),
+                ground_color: rgb(ground_color),
+                background: rgb(background),
+                exposure,
+                tonemapping: tonemapping_of(tonemapping)?,
+                fog,
+                fog_color: rgb(fog_color),
+                fog_density,
+                fog_start,
+            },
+        })
+    }
+
+    /// A named look: ``"neutral"``, ``"daylight"``, ``"dusk"``, or ``"night"``.
+    #[staticmethod]
+    fn preset(name: &str) -> PyResult<Self> {
+        let inner = match name.to_ascii_lowercase().as_str() {
+            "neutral" | "default" => Environment::default(),
+            "daylight" | "day" => Environment::daylight(),
+            "dusk" => Environment::dusk(),
+            "night" => Environment::night(),
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unknown preset {other:?}; expected 'neutral', 'daylight', 'dusk', or 'night'"
+                )))
+            }
+        };
+        Ok(Self { inner })
+    }
+
+    /// Ambient light from above (linear RGB).
+    #[getter]
+    fn sky_color(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.sky_color;
+        (r, g, b)
+    }
+
+    /// Ambient light from below (linear RGB).
+    #[getter]
+    fn ground_color(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.ground_color;
+        (r, g, b)
+    }
+
+    /// The clear color behind all geometry (linear RGB).
+    #[getter]
+    fn background(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.background;
+        (r, g, b)
+    }
+
+    /// Brightness multiplier before tone mapping.
+    #[getter]
+    fn exposure(&self) -> f32 {
+        self.inner.exposure
+    }
+
+    /// The tone mapping curve: ``"none"``, ``"reinhard"``, ``"aces"``, ``"agx"``.
+    #[getter]
+    fn tonemapping(&self) -> &'static str {
+        match self.inner.tonemapping {
+            Tonemapping::None => "none",
+            Tonemapping::Reinhard => "reinhard",
+            Tonemapping::Aces => "aces",
+            Tonemapping::Agx => "agx",
+        }
+    }
+
+    /// Whether distance fog is on.
+    #[getter]
+    fn fog(&self) -> bool {
+        self.inner.fog
+    }
+
+    /// Fog color (linear RGB).
+    #[getter]
+    fn fog_color(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.fog_color;
+        (r, g, b)
+    }
+
+    /// Exponential fog density per world unit.
+    #[getter]
+    fn fog_density(&self) -> f32 {
+        self.inner.fog_density
+    }
+
+    /// Distance from the camera where fog starts.
+    #[getter]
+    fn fog_start(&self) -> f32 {
+        self.inner.fog_start
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Environment(tonemapping={:?}, exposure={:.2}, fog={})",
+            self.tonemapping(),
+            self.inner.exposure,
+            if self.inner.fog { "True" } else { "False" }
+        )
+    }
+}
+
+impl PyEnvironment {
+    /// The engine component value.
+    pub fn inner(&self) -> Environment {
+        self.inner
+    }
+
+    /// Wraps an engine environment for Python.
+    pub fn from_inner(inner: Environment) -> Self {
+        Self { inner }
+    }
+}
+
 /// An orthographic 2D camera. The first entity carrying one becomes the
 /// frame's 2D camera.
 #[pyclass(name = "Camera2D", module = "automata._core", frozen)]
@@ -380,6 +554,8 @@ pub enum StagedComponent {
     MeshVisual(automata_scene::MeshVisual),
     /// Directional sun light.
     DirectionalLight(DirectionalLight),
+    /// Scene look (ambient, fog, tone mapping).
+    Environment(Environment),
 }
 
 /// Extracts a staged component from an arbitrary Python object, raising a
@@ -415,11 +591,14 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(l) = obj.cast::<PyDirectionalLight>() {
         return Ok(StagedComponent::DirectionalLight(l.get().inner()));
     }
+    if let Ok(e) = obj.cast::<PyEnvironment>() {
+        return Ok(StagedComponent::Environment(e.get().inner()));
+    }
     let typename = obj.get_type().name()?.to_string();
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
-         MeshRenderer, or DirectionalLight"
+         MeshRenderer, DirectionalLight, or Environment"
     )))
 }
 

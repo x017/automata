@@ -183,6 +183,29 @@ impl Renderer {
         })
     }
 
+    /// Switches the quality preset at runtime (recreates the shadow map).
+    pub fn set_quality(&mut self, quality: GraphicsQuality) {
+        let size = quality.shadow_map_size();
+        if size != self.shadow_map_size {
+            let (texture, sampler) = create_shadow_resources(self.ctx.device(), size);
+            self.shadow_texture = texture;
+            self.shadow_sampler = sampler;
+            self.shadow_map_size = size;
+        }
+        self.shadows_enabled = quality.shadows_enabled();
+    }
+
+    /// The active quality preset.
+    #[must_use]
+    pub fn quality(&self) -> GraphicsQuality {
+        match (self.shadows_enabled, self.shadow_map_size) {
+            (false, _) => GraphicsQuality::Low,
+            (true, s) if s <= 1024 => GraphicsQuality::Medium,
+            (true, s) if s <= 2048 => GraphicsQuality::High,
+            _ => GraphicsQuality::Ultra,
+        }
+    }
+
     /// The underlying GPU context.
     #[must_use]
     pub fn context(&self) -> &RenderContext {
@@ -694,7 +717,9 @@ impl Renderer {
         let sun = draw.sun.unwrap_or_default();
         let light_view_proj = light_view_proj(draw, &sun);
         let render_shadows = sun.shadows && self.shadows_enabled && !draw.meshes.is_empty();
-        let light_bind = self.light_bind_group(&sun, light_view_proj, render_shadows, shadow_view);
+        let env = draw.environment.unwrap_or_default();
+        let light_bind =
+            self.light_bind_group(&sun, &env, light_view_proj, render_shadows, shadow_view);
 
         PreparedFrame {
             camera_2d_bind,
@@ -713,16 +738,18 @@ impl Renderer {
     fn light_bind_group(
         &self,
         sun: &Sun,
+        env: &crate::Environment,
         light_view_proj: glam::Mat4,
         render_shadows: bool,
         shadow_view: &wgpu::TextureView,
     ) -> wgpu::BindGroup {
         let device = self.ctx.device();
-        let light_uniform = LightUniform::new(
+        let light_uniform = LightUniform::with_environment(
             &Sun {
                 shadows: render_shadows,
                 ..*sun
             },
+            env,
             light_view_proj,
             1.0 / self.shadow_map_size as f32,
         );

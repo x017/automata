@@ -17,6 +17,7 @@ use automata_core::{Attributes, TransformData};
 use automata_physics::{
     BodyType, CharacterController, CharacterVelocity, PhysicsWorld3D, RigidBody,
 };
+use automata_renderer::Camera3D;
 use automata_scene::{Entity, Name, Scene, Transform};
 use glam::Vec3;
 
@@ -180,6 +181,10 @@ impl PlaySession {
                     velocity,
                     grounded: character && self.physics.grounded(entity),
                     attributes: entry.data.attributes.clone(),
+                    camera: world.get::<&Camera3D>(entity).ok().map(|c| {
+                        let (p, t) = (c.position, c.target);
+                        [p.x, p.y, p.z, t.x, t.y, t.z, c.fov_y_degrees]
+                    }),
                 })
             })
             .collect()
@@ -227,8 +232,28 @@ impl PlaySession {
                 let _ = world.insert_one(entity, Attributes(attributes.clone()));
                 self.doc.entities[i].data.attributes.clone_from(attributes);
             }
+            if let Some(c) = w.camera {
+                if let Ok(mut cam) = world.get::<&mut Camera3D>(entity) {
+                    cam.position = Vec3::new(c[0], c[1], c[2]);
+                    cam.target = Vec3::new(c[3], c[4], c[5]);
+                    cam.fov_y_degrees = c[6].clamp(1.0, 179.0);
+                    self.doc.entities[i].data.camera_3d = Some(*cam);
+                }
+            }
         }
         self.write_back();
+    }
+
+    /// The scene's camera (the first entity with one), as the simulation
+    /// currently has it (scripts may move it). Play mode renders through it.
+    #[must_use]
+    pub fn scene_camera(&self) -> Option<Camera3D> {
+        self.scene
+            .world()
+            .query::<&Camera3D>()
+            .iter()
+            .next()
+            .copied()
     }
 
     /// Number of player-controllable characters.

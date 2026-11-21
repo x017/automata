@@ -31,6 +31,11 @@ pub struct ViewportRenderer {
     /// The document change counter the GPU world was last built from. When it
     /// matches the document's current counter, the world is reused as-is.
     built_counter: Option<u64>,
+    /// Meshes drawn by the last scene-view render.
+    meshes: usize,
+    /// The camera preview's render target and pixels.
+    preview_target: Option<(RenderTarget, (u32, u32))>,
+    preview_frame: Vec<u8>,
 }
 
 impl Default for ViewportRenderer {
@@ -48,6 +53,52 @@ impl ViewportRenderer {
             target: None,
             frame: Vec::new(),
             built_counter: None,
+            meshes: 0,
+            preview_target: None,
+            preview_frame: Vec::new(),
+        }
+    }
+
+    /// Meshes drawn by the last scene-view render (0 for the wireframe).
+    #[must_use]
+    pub fn mesh_count(&self) -> usize {
+        self.meshes
+    }
+
+    /// Renders the edit-time world (as built by the last [`Self::sync`])
+    /// through `camera` into a separate `width`×`height` buffer: the
+    /// selected camera's preview. Returns `None` without a GPU renderer.
+    pub fn render_camera(
+        &mut self,
+        renderer: Option<&mut Renderer>,
+        camera: automata_renderer::Camera3D,
+        width: u32,
+        height: u32,
+    ) -> Option<(&[u8], u32, u32)> {
+        let renderer = renderer?;
+        self.built_counter?;
+        let size = (width.max(1), height.max(1));
+        Self::draw_world(
+            renderer,
+            &mut self.preview_target,
+            &mut self.preview_frame,
+            self.scene.world(),
+            Some(camera),
+            size,
+        );
+        Some((self.preview_frame.as_slice(), size.0, size.1))
+    }
+
+    /// Rebuilds the GPU world from the document if it changed since the
+    /// last build (called by [`Self::render`]; call it first when rendering
+    /// a camera preview before the main view).
+    pub fn sync(&mut self, renderer: &mut Renderer, doc: &Document) {
+        let counter = doc.change_counter();
+        if self.built_counter != Some(counter) {
+            let file = doc.to_scene_file();
+            file.apply_to_world(self.scene.world_mut());
+            automata_scene::materialize_visuals(self.scene.world_mut(), renderer);
+            self.built_counter = Some(counter);
         }
     }
 
@@ -77,23 +128,18 @@ impl ViewportRenderer {
                 // Rebuild the live world ONLY when the document changed.
                 // Rebuilding every frame respawned the ECS world and
                 // re-uploaded every mesh/material each frame.
-                let counter = doc.change_counter();
-                if self.built_counter != Some(counter) {
-                    let file = doc.to_scene_file();
-                    file.apply_to_world(self.scene.world_mut());
-                    automata_scene::materialize_visuals(self.scene.world_mut(), renderer);
-                    self.built_counter = Some(counter);
-                }
-                Self::draw_world(
+                self.sync(renderer, doc);
+                self.meshes = Self::draw_world(
                     renderer,
                     &mut self.target,
                     &mut self.frame,
                     self.scene.world(),
-                    cam,
+                    Some(cam.to_camera3d()),
                     (width, height),
                 );
             }
             None => {
+                self.meshes = 0;
                 render_wireframe::render_into(doc, cam, width, height, &mut self.frame);
             }
         }
@@ -102,6 +148,8 @@ impl ViewportRenderer {
 
     /// Renders a running play-mode simulation (its own live ECS world).
     ///
+    /// When the scene has a camera, the frame is rendered through it (what
+    /// the game will show); otherwise through the editor camera `cam`.
     /// Without a GPU renderer, the session's display document is drawn as a
     /// wireframe instead.
     pub fn render_play(
@@ -116,15 +164,16 @@ impl ViewportRenderer {
         let height = height.max(1);
         match renderer {
             Some(renderer) => {
+                let editor_cam = session.scene_camera().is_none().then(|| cam.to_camera3d());
                 let world = session.scene_mut().world_mut();
                 // Uploads only visuals not yet materialized (first frame).
                 automata_scene::materialize_visuals(world, renderer);
-                Self::draw_world(
+                self.meshes = Self::draw_world(
                     renderer,
                     &mut self.target,
                     &mut self.frame,
                     world,
-                    cam,
+                    editor_cam,
                     (width, height),
                 );
             }
@@ -136,29 +185,34 @@ impl ViewportRenderer {
     }
 
     /// Records `world`, renders it offscreen and reads the pixels back.
+    /// `camera` overrides the scene's own camera when given. Returns the
+    /// number of meshes drawn.
     fn draw_world(
         renderer: &mut Renderer,
         target: &mut Option<(RenderTarget, (u32, u32))>,
         frame: &mut Vec<u8>,
         world: &SceneWorld,
-        cam: ViewCamera,
+        camera: Option<automata_renderer::Camera3D>,
         size: (u32, u32),
-    ) {
+    ) -> usize {
         // Reuse the render target across frames (recreate on resize).
         if target.as_ref().map(|(_, s)| *s) != Some(size) {
             *target = Some((renderer.create_render_target(size), size));
         }
         let Some((texture, _)) = target.as_ref() else {
-            return;
+            return 0;
         };
         let mut draw = DrawList::new();
         draw.set_clear_color(wgpu_color(0.012, 0.012, 0.012, 1.0));
         automata_scene::record_draw_list(world, &mut draw);
         // The editor's orbit camera overrides any scene camera so the
         // viewport is freely navigable regardless of scene contents.
-        draw.set_camera_3d(cam.to_camera3d());
+        if let Some(camera) = camera {
+            draw.set_camera_3d(camera);
+        }
         renderer.render_offscreen(&draw, texture);
         renderer.read_texture_rgba_into(texture, size, frame);
+        draw.mesh_count()
     }
 }
 

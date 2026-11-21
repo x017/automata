@@ -62,6 +62,29 @@ impl ViewCamera {
         cam
     }
 
+    /// The orbit view that sees what `cam` sees (pivot at its look-at
+    /// point).
+    #[must_use]
+    pub fn from_camera3d(cam: &automata_renderer::Camera3D) -> Self {
+        let offset = cam.position - cam.target;
+        let distance = offset.length().max(0.05);
+        let pitch = (offset.y / distance)
+            .clamp(-1.0, 1.0)
+            .asin()
+            .clamp(-1.54, 1.54);
+        let yaw = if offset.x.abs() + offset.z.abs() < 1e-6 {
+            0.0
+        } else {
+            offset.x.atan2(offset.z)
+        };
+        Self {
+            yaw,
+            pitch,
+            distance,
+            target: cam.target.to_array(),
+        }
+    }
+
     /// Orbits by a mouse delta in pixels.
     pub fn orbit(&mut self, dx: f32, dy: f32) {
         self.yaw -= dx * 0.008;
@@ -518,9 +541,45 @@ pub fn dist_to_segment(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
     ((p.0 - cx).powi(2) + (p.1 - cy).powi(2)).sqrt()
 }
 
+/// The corners of a camera's view pyramid for drawing: the eye followed
+/// by the four corners of a slice `depth` units ahead (top-left, top-right,
+/// bottom-right, bottom-left), for an `aspect` = width / height view.
+#[must_use]
+pub fn camera_frustum(cam: &automata_renderer::Camera3D, aspect: f32, depth: f32) -> [Vec3; 5] {
+    let forward = (cam.target - cam.position).normalize_or(Vec3::NEG_Z);
+    let right = forward.cross(cam.up).normalize_or(Vec3::X);
+    let up = right.cross(forward);
+    let half_h = (cam.fov_y_degrees.to_radians() * 0.5).tan() * depth;
+    let half_w = half_h * aspect;
+    let center = cam.position + forward * depth;
+    [
+        cam.position,
+        center - right * half_w + up * half_h,
+        center + right * half_w + up * half_h,
+        center + right * half_w - up * half_h,
+        center - right * half_w - up * half_h,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn orbit_view_reproduces_a_scene_camera() {
+        let cam =
+            automata_renderer::Camera3D::new(Vec3::new(3.0, 4.0, 5.0), Vec3::new(0.0, 1.0, 0.0));
+        let view = ViewCamera::from_camera3d(&cam);
+        assert!(
+            (view.eye() - cam.position).length() < 1e-4,
+            "{:?}",
+            view.eye()
+        );
+        let f = camera_frustum(&cam, 16.0 / 9.0, 1.0);
+        assert_eq!(f[0], cam.position);
+        let center = (f[1] + f[3]) * 0.5;
+        assert!(((center - cam.position).length() - 1.0).abs() < 1e-4);
+    }
 
     fn rect() -> Rect {
         Rect::new(0.0, 0.0, 800.0, 600.0)

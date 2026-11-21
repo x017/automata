@@ -12,6 +12,7 @@
 mod camera;
 mod context;
 mod draw;
+mod environment;
 mod error;
 mod light;
 mod material;
@@ -24,6 +25,7 @@ mod texture;
 pub use camera::{Camera2D, Camera3D};
 pub use context::RenderContext;
 pub use draw::{DrawList, Sprite};
+pub use environment::{Environment, Tonemapping};
 pub use error::{Error, Result};
 pub use light::Sun;
 pub use material::Material;

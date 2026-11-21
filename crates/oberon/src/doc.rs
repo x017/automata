@@ -67,6 +67,8 @@ pub enum CreateKind {
     Light,
     /// A perspective camera.
     Camera,
+    /// Scene look settings (sky, fog, exposure, tone mapping).
+    Environment,
     /// A cube with a dynamic rigid body and a box collider.
     PhysicsCube,
     /// A playable character: WASD / arrows to move, Space to jump in Play
@@ -76,12 +78,13 @@ pub enum CreateKind {
 
 impl CreateKind {
     /// Every kind, in menu order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Empty,
         Self::Cube,
         Self::Plane,
         Self::Light,
         Self::Camera,
+        Self::Environment,
         Self::PhysicsCube,
         Self::Player,
     ];
@@ -95,6 +98,7 @@ impl CreateKind {
             Self::Plane => "Plane",
             Self::Light => "Directional Light",
             Self::Camera => "Camera",
+            Self::Environment => "Environment",
             Self::PhysicsCube => "Physics Cube",
             Self::Player => "Player",
         }
@@ -110,6 +114,8 @@ pub enum ComponentKind {
     Light,
     /// Perspective camera.
     Camera,
+    /// Scene look: ambient, fog, exposure, tone mapping.
+    Environment,
     /// Rigid body.
     RigidBody,
     /// 3D collider.
@@ -120,10 +126,11 @@ pub enum ComponentKind {
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Mesh,
         Self::Light,
         Self::Camera,
+        Self::Environment,
         Self::RigidBody,
         Self::Collider,
         Self::Character,
@@ -136,6 +143,7 @@ impl ComponentKind {
             Self::Mesh => "Mesh Renderer",
             Self::Light => "Directional Light",
             Self::Camera => "Camera",
+            Self::Environment => "Environment",
             Self::RigidBody => "Rigidbody",
             Self::Collider => "Collider",
             Self::Character => "Character Controller",
@@ -149,6 +157,7 @@ impl ComponentKind {
             Self::Mesh => data.mesh_visual.is_some(),
             Self::Light => data.directional_light.is_some(),
             Self::Camera => data.camera_3d.is_some(),
+            Self::Environment => data.environment.is_some(),
             Self::RigidBody => data.rigid_body.is_some(),
             Self::Collider => data.collider_3d.is_some(),
             Self::Character => data.character_controller.is_some(),
@@ -175,6 +184,10 @@ impl ComponentKind {
                         glam::Vec3::ZERO,
                     )
                 });
+            }
+            Self::Environment => {
+                data.environment
+                    .get_or_insert_with(automata_renderer::Environment::daylight);
             }
             Self::RigidBody => {
                 data.rigid_body
@@ -219,6 +232,7 @@ impl ComponentKind {
             Self::Mesh => dst.mesh_visual.clone_from(&src.mesh_visual),
             Self::Light => dst.directional_light = src.directional_light,
             Self::Camera => dst.camera_3d = src.camera_3d,
+            Self::Environment => dst.environment = src.environment,
             Self::RigidBody => dst.rigid_body.clone_from(&src.rigid_body),
             Self::Collider => dst.collider_3d.clone_from(&src.collider_3d),
             Self::Character => {
@@ -235,6 +249,7 @@ impl ComponentKind {
             Self::Mesh => data.mesh_visual = None,
             Self::Light => data.directional_light = None,
             Self::Camera => data.camera_3d = None,
+            Self::Environment => data.environment = None,
             Self::RigidBody => data.rigid_body = None,
             Self::Collider => data.collider_3d = None,
             Self::Character => {
@@ -242,6 +257,157 @@ impl ComponentKind {
                 data.character_velocity = None;
             }
         }
+    }
+}
+
+/// Built-in arrangements for checking the renderer (Graphics panel).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TestScene {
+    /// A grid of cubes sweeping hue and brightness: color, tone mapping,
+    /// and exposure response.
+    ColorChart,
+    /// Pillars and a floating slab on a floor: shadow shape, bias, and
+    /// softness.
+    Shadows,
+    /// A row of pillars receding 150 units: distance fog and far clipping.
+    Depth,
+    /// A 20×20 field of cubes (400 draws): frame-time stress.
+    Stress,
+}
+
+impl TestScene {
+    /// Every test, in panel order.
+    pub const ALL: [Self; 4] = [Self::ColorChart, Self::Shadows, Self::Depth, Self::Stress];
+
+    /// The button label.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ColorChart => "Color chart",
+            Self::Shadows => "Shadows",
+            Self::Depth => "Fog depth",
+            Self::Stress => "400 cubes",
+        }
+    }
+
+    /// One line on what the test is for.
+    #[must_use]
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::ColorChart => "Hue and brightness sweep: compare tone mapping curves",
+            Self::Shadows => "Pillars and a floating slab: check shadow shape and acne",
+            Self::Depth => "Pillars out to 150 m: tune fog density and start",
+            Self::Stress => "A 20×20 field of cubes: watch the frame time",
+        }
+    }
+}
+
+fn hsv(h: f32, s: f32, v: f32) -> [f32; 4] {
+    let h = h.rem_euclid(1.0) * 6.0;
+    let i = h.floor();
+    let f = h - i;
+    let (p, q, t) = (v * (1.0 - s), v * (1.0 - s * f), v * (1.0 - s * (1.0 - f)));
+    let (r, g, b) = match i as u8 {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    };
+    [r, g, b, 1.0]
+}
+
+fn test_box(pos: [f32; 3], scale: [f32; 3], color: [f32; 4]) -> EntityData {
+    EntityData {
+        transform: Some(TransformData {
+            position: pos,
+            scale,
+            ..TransformData::default()
+        }),
+        mesh_visual: Some(MeshVisualData {
+            primitive: PrimitiveData::Cube { size: 1.0 },
+            color,
+        }),
+        ..Default::default()
+    }
+}
+
+fn test_scene_entities(scene: TestScene) -> Vec<(String, EntityData)> {
+    let mut out = Vec::new();
+    match scene {
+        TestScene::ColorChart => {
+            for row in 0..4 {
+                for col in 0..8 {
+                    let value = 1.0 - row as f32 * 0.22;
+                    let sat = if col == 7 { 0.0 } else { 0.85 };
+                    let c = hsv(col as f32 / 7.0, sat, value);
+                    let pos = [col as f32 * 1.3 - 4.55, 0.5 + (3 - row) as f32 * 1.3, -6.0];
+                    out.push(("Test Chart".into(), test_box(pos, [1.0; 3], c)));
+                }
+            }
+        }
+        TestScene::Shadows => {
+            out.push((
+                "Test Floor".into(),
+                test_box([0.0, -0.05, 8.0], [14.0, 0.1, 10.0], [0.7, 0.7, 0.72, 1.0]),
+            ));
+            for (i, h) in [0.5f32, 1.5, 3.0, 1.0, 2.2].into_iter().enumerate() {
+                let x = i as f32 * 2.2 - 4.4;
+                out.push((
+                    "Test Pillar".into(),
+                    test_box([x, h / 2.0, 7.0], [0.6, h, 0.6], [0.9, 0.9, 0.9, 1.0]),
+                ));
+            }
+            out.push((
+                "Test Slab".into(),
+                test_box([0.0, 2.6, 10.0], [4.0, 0.2, 2.0], [0.85, 0.5, 0.3, 1.0]),
+            ));
+        }
+        TestScene::Depth => {
+            for i in 0..12 {
+                let z = -8.0 - i as f32 * 13.0;
+                let x = if i % 2 == 0 { -3.0 } else { 3.0 };
+                out.push((
+                    "Test Depth".into(),
+                    test_box([x, 2.0, z], [1.0, 4.0, 1.0], [0.95, 0.95, 0.95, 1.0]),
+                ));
+            }
+        }
+        TestScene::Stress => {
+            for i in 0..20 {
+                for j in 0..20 {
+                    // A cheap deterministic hash for varied heights.
+                    let hsh = ((i * 73 + j * 151) % 97) as f32 / 97.0;
+                    let h = 0.3 + hsh * 2.0;
+                    let pos = [i as f32 * 0.9 - 8.55, h / 2.0, j as f32 * 0.9 - 30.0];
+                    let c = hsv(0.55 + hsh * 0.15, 0.35, 0.9);
+                    out.push(("Test Stress".into(), test_box(pos, [0.6, h, 0.6], c)));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Keeps a camera attached to its entity: when an edit moves the entity's
+/// position but leaves the camera alone, the camera's eye and look-at
+/// point move by the same offset (so dragging a camera entity with the
+/// Move tool drags the view it renders).
+fn follow_camera(before: &EntityData, after: &mut EntityData) {
+    let (Some(old_t), Some(new_t)) = (before.transform, after.transform) else {
+        return;
+    };
+    if after.camera_3d != before.camera_3d {
+        return;
+    }
+    let delta = glam::Vec3::from(new_t.position) - glam::Vec3::from(old_t.position);
+    if delta == glam::Vec3::ZERO {
+        return;
+    }
+    if let Some(cam) = &mut after.camera_3d {
+        cam.position += delta;
+        cam.target += delta;
     }
 }
 
@@ -575,6 +741,7 @@ impl Document {
         };
         let mut edited = self.entities[idx].data.clone();
         f(&mut edited);
+        follow_camera(&self.entities[idx].data, &mut edited);
         if edited == self.entities[idx].data {
             return false;
         }
@@ -636,6 +803,9 @@ impl Document {
                 }
                 ComponentKind::Camera.add_to(&mut data);
             }
+            CreateKind::Environment => {
+                ComponentKind::Environment.add_to(&mut data);
+            }
             CreateKind::PhysicsCube => {
                 if let Some(t) = &mut data.transform {
                     t.position = [0.0, 4.0, 0.0];
@@ -662,6 +832,55 @@ impl Document {
         self.selected = Some(id);
         self.touch();
         id
+    }
+
+    /// Adds a graphics test arrangement (one undo step). Every entity is
+    /// named `Test …` so [`Document::clear_tests`] can remove them again.
+    /// Returns how many entities were added.
+    pub fn spawn_test(&mut self, scene: TestScene) -> usize {
+        let items = test_scene_entities(scene);
+        if items.is_empty() {
+            return 0;
+        }
+        self.push_undo();
+        let n = items.len();
+        let mut taken: std::collections::HashSet<String> =
+            self.entities.iter().map(|e| e.name().to_string()).collect();
+        let mut counters: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for (base, mut data) in items {
+            let counter = counters.entry(base.clone()).or_insert(0);
+            let name = loop {
+                *counter += 1;
+                let candidate = format!("{base} {counter}");
+                if !taken.contains(&candidate) {
+                    break candidate;
+                }
+            };
+            taken.insert(name.clone());
+            data.name = Some(name);
+            let id = self.alloc_id();
+            self.entities.push(EntityEntry { id, data });
+        }
+        self.selected = None;
+        self.touch();
+        n
+    }
+
+    /// Removes every entity whose name starts with `Test ` (one undo
+    /// step). Returns how many were removed.
+    pub fn clear_tests(&mut self) -> usize {
+        let before = self.entities.len();
+        if !self.entities.iter().any(|e| e.name().starts_with("Test ")) {
+            return 0;
+        }
+        self.push_undo();
+        self.entities.retain(|e| !e.name().starts_with("Test "));
+        if self.selected.is_some_and(|id| self.index_of(id).is_none()) {
+            self.selected = None;
+        }
+        self.touch();
+        before - self.entities.len()
     }
 
     /// Duplicates the entity with `id` (placed right after it, selected).
@@ -975,6 +1194,55 @@ impl Document {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_scenes_add_and_clear_in_single_undo_steps() {
+        let mut doc = Document::starter();
+        let before = doc.entities.len();
+        let n = doc.spawn_test(TestScene::Stress);
+        assert_eq!(n, 400);
+        assert_eq!(doc.entities.len(), before + 400);
+        let names: std::collections::HashSet<&str> =
+            doc.entities.iter().map(EntityEntry::name).collect();
+        assert_eq!(names.len(), doc.entities.len(), "names stay unique");
+        doc.spawn_test(TestScene::Shadows);
+        assert_eq!(doc.clear_tests(), 400 + 7);
+        assert_eq!(doc.entities.len(), before);
+        assert!(doc.undo());
+        assert_eq!(doc.entities.len(), before + 407);
+    }
+
+    #[test]
+    fn moving_a_camera_entity_moves_its_view() {
+        let mut doc = Document::new();
+        let id = doc.create(CreateKind::Camera);
+        let cam = doc.entities[doc.index_of(id).unwrap()]
+            .data
+            .camera_3d
+            .unwrap();
+        doc.modify(id, false, |d| {
+            if let Some(t) = &mut d.transform {
+                t.position[0] += 2.0;
+            }
+        });
+        let moved = doc.entities[doc.index_of(id).unwrap()]
+            .data
+            .camera_3d
+            .unwrap();
+        assert!((moved.position.x - cam.position.x - 2.0).abs() < 1e-5);
+        assert!((moved.target.x - cam.target.x - 2.0).abs() < 1e-5);
+        // Editing the camera itself does not drag the transform along.
+        doc.modify(id, false, |d| {
+            if let Some(c) = &mut d.camera_3d {
+                c.fov_y_degrees = 40.0;
+            }
+        });
+        let t = doc.entities[doc.index_of(id).unwrap()]
+            .data
+            .transform
+            .unwrap();
+        assert!((t.position[0] - 2.0).abs() < 1e-5);
+    }
+
     use super::*;
 
     #[test]

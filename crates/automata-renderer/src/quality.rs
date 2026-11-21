@@ -8,7 +8,7 @@
 ///
 /// The preset controls the shadow map: [`GraphicsQuality::Low`] disables
 /// shadows entirely; higher presets raise the shadow map resolution.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GraphicsQuality {
     /// No shadows — for weak GPUs and stylized flat looks.
     Low,
@@ -22,6 +22,20 @@ pub enum GraphicsQuality {
 }
 
 impl GraphicsQuality {
+    /// Every preset, lowest first.
+    pub const ALL: [Self; 4] = [Self::Low, Self::Medium, Self::High, Self::Ultra];
+
+    /// A short display name.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+            Self::Ultra => "Ultra",
+        }
+    }
+
     /// The shadow map side length in texels (`1` when shadows are off; the
     /// texture still exists so bind groups stay valid).
     #[must_use]

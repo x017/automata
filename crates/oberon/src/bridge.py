@@ -13,6 +13,7 @@ the same small API as the `automata` runtime (see the script template).
 
 import importlib.util
 import json
+import math
 import os
 import sys
 import traceback
@@ -107,6 +108,77 @@ class Transform:
         return f"Transform(position={self.position}, rotation_euler={self.rotation_euler})"
 
 
+class Camera:
+    """An entity's perspective camera (``entity.camera`` / ``ctx.camera``).
+
+    Play mode renders through the scene's first camera. Move it by setting
+    ``position`` / ``target`` or with ``look_at`` and ``follow``.
+    """
+
+    def __init__(self, entity):
+        self._e = entity
+
+    def _get(self, a, b):
+        return tuple(self._e._cam[a:b])
+
+    def _set(self, a, values):
+        cam = list(self._e._cam)
+        cam[a:a + len(values)] = values
+        self._e._cam = tuple(cam)
+        self._e._dirty.add("cam")
+
+    @property
+    def position(self):
+        """The eye position (x, y, z)."""
+        return self._get(0, 3)
+
+    @position.setter
+    def position(self, v):
+        self._set(0, _vec(v, 3))
+
+    @property
+    def target(self):
+        """The point the camera looks at (x, y, z)."""
+        return self._get(3, 6)
+
+    @target.setter
+    def target(self, v):
+        self._set(3, _vec(v, 3))
+
+    @property
+    def fov(self):
+        """Vertical field of view in degrees."""
+        return self._e._cam[6]
+
+    @fov.setter
+    def fov(self, degrees):
+        self._set(6, (min(179.0, max(1.0, float(degrees))),))
+
+    def look_at(self, point):
+        """Aims the camera at a point or an entity."""
+        if isinstance(point, Entity):
+            point = point.transform.position
+        self.target = point
+
+    def follow(self, entity, offset=(0.0, 3.0, 8.0), smooth=8.0, look_height=0.6):
+        """Moves the camera toward ``entity + offset`` and looks at it.
+
+        Call every frame from ``update``. ``smooth`` is how quickly it
+        catches up (0 = snap).
+        """
+        p = entity.transform.position
+        goal = tuple(p[i] + float(offset[i]) for i in range(3))
+        k = 1.0
+        if smooth > 0:
+            k = 1.0 - math.exp(-float(smooth) * max(_CTX.time.delta, 0.0)) if _CTX else 1.0
+        cur = self.position
+        self.position = tuple(cur[i] + (goal[i] - cur[i]) * k for i in range(3))
+        self.target = (p[0], p[1] + float(look_height), p[2])
+
+    def __repr__(self):
+        return f"Camera(position={self.position}, target={self.target}, fov={self.fov})"
+
+
 class Attributes(dict):
     """`entity.attributes`: a dict whose edits are sent back to Oberon."""
 
@@ -163,6 +235,7 @@ class Entity:
         self._s = tuple(data.get("s", (1.0, 1.0, 1.0)))
         self._v = tuple(data["v"]) if data.get("v") is not None else None
         self._grounded = bool(data.get("g", False))
+        self._cam = tuple(data["cam"]) if data.get("cam") is not None else None
         attrs = {k: tuple(v) if isinstance(v, list) else v for k, v in data.get("attrs", {}).items()}
         self.attributes = Attributes(self, attrs)
         self._dirty = set()
@@ -180,6 +253,11 @@ class Entity:
     def grounded(self):
         return self._grounded
 
+    @property
+    def camera(self):
+        """This entity's Camera, or None if it has no Camera component."""
+        return Camera(self) if self._cam is not None else None
+
     def _writes(self):
         if not self._dirty:
             return None
@@ -192,6 +270,8 @@ class Entity:
             w["s"] = list(self._s)
         if "v" in self._dirty and self._v is not None:
             w["v"] = list(self._v)
+        if "cam" in self._dirty and self._cam is not None:
+            w["cam"] = list(self._cam)
         if "attrs" in self._dirty:
             w["attrs"] = {k: list(v) if isinstance(v, tuple) else v for k, v in self.attributes.items()}
         self._dirty = set()
@@ -276,6 +356,14 @@ class Context:
         self.physics = Physics()
         self.scene = SceneView(runner)
 
+    @property
+    def camera(self):
+        """The scene camera Play mode renders through (None if the scene has none)."""
+        for e in self.scene:
+            if e._cam is not None:
+                return Camera(e)
+        return None
+
     def log(self, *parts):
         send({"op": "log", "level": "info", "msg": " ".join(str(p) for p in parts)})
 
@@ -342,12 +430,17 @@ def report(exc, path, during):
     })
 
 
+_CTX = None
+
+
 class Runner:
     def __init__(self):
+        global _CTX
         self.entities = {}
         self.scripts = {}
         self.started = set()
         self.ctx = Context(self)
+        _CTX = self.ctx
         self.last_check = 0.0
 
     def script(self, path):

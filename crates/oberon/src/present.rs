@@ -480,6 +480,33 @@ impl EditorApp {
                     .log(LogLevel::Error, format!("New folder failed: {e}")),
             },
             Intent::Quit => self.quit = true,
+            Intent::SetEnvironment(id, env) => {
+                doc.modify(id, false, |d| d.environment = Some(env));
+            }
+            Intent::SpawnTest(scene) => {
+                let n = doc.spawn_test(scene);
+                self.ui.log(
+                    LogLevel::Info,
+                    format!("Added {n} test objects ({})", scene.label()),
+                );
+            }
+            Intent::ClearTests => {
+                let n = doc.clear_tests();
+                self.ui
+                    .log(LogLevel::Info, format!("Removed {n} test objects"));
+            }
+            Intent::AlignCameraToView(id) => {
+                let view = self.ui.camera.to_camera3d();
+                doc.modify(id, false, |d| {
+                    if let Some(cam) = &mut d.camera_3d {
+                        cam.position = view.position;
+                        cam.target = view.target;
+                    }
+                    if let Some(t) = &mut d.transform {
+                        t.position = view.position.to_array();
+                    }
+                });
+            }
             _ => {}
         }
     }
@@ -1174,12 +1201,28 @@ impl EditorApp {
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.tick_scripts(dt);
+        let ms = dt * 1000.0;
+        let prev = self.ui.stats.frame_ms;
+        self.ui.stats.frame_ms = if prev <= 0.0 || ms > 250.0 {
+            ms.min(250.0)
+        } else {
+            prev + (ms - prev) * 0.08
+        };
+        if let Some(r) = &mut self.renderer {
+            if r.quality() != self.ui.prefs.graphics_quality {
+                r.set_quality(self.ui.prefs.graphics_quality);
+            }
+        }
         if let Some(play) = &mut self.play {
-            play.input = self.input.play_input(self.ui.camera.yaw);
+            // With a scene camera, movement is relative to it and scripts
+            // drive the view; otherwise the editor camera follows the player.
+            let scene_cam = play.scene_camera();
+            let yaw = scene_cam.map_or(self.ui.camera.yaw, |c| ViewCamera::from_camera3d(&c).yaw);
+            play.input = self.input.play_input(yaw);
             play.update(dt);
             // The camera follows the player (orbit/zoom stay under the
             // user's control).
-            if let Some(pos) = play.player_position() {
+            if let Some(pos) = play.player_position().filter(|_| scene_cam.is_none()) {
                 let goal = pos + glam::Vec3::Y * 0.6;
                 let current = glam::Vec3::from(self.ui.camera.target);
                 let k = 1.0 - (-dt * 10.0).exp();
@@ -1227,12 +1270,23 @@ impl EditorApp {
                     ui.frame(canvas, &session.doc, pointer, Some((frame, fw, fh)))
                 }
                 None => {
+                    // The selected camera's preview first (same world).
+                    let preview = ui.camera_preview_request(doc, lw, lh, s);
+                    match (preview, renderer.as_mut()) {
+                        (Some((camera, pw, ph)), Some(r)) => {
+                            viewport.sync(r, doc);
+                            let img = viewport.render_camera(Some(r), camera, pw, ph);
+                            ui.set_camera_preview(img);
+                        }
+                        _ => ui.set_camera_preview(None),
+                    }
                     let (frame, fw, fh) = viewport.render(renderer.as_mut(), doc, cam, vw, vh);
                     ui.frame(canvas, doc, pointer, Some((frame, fw, fh)))
                 }
             }
         };
 
+        self.ui.stats.meshes = self.viewport.mesh_count();
         // Per-frame transient input is consumed.
         self.input.pressed = false;
         self.input.right_pressed = false;
@@ -1363,7 +1417,7 @@ impl ApplicationHandler for EditorApp {
                 window.clone(),
                 (size.width.max(1), size.height.max(1)),
                 true, // vsync
-                automata_renderer::GraphicsQuality::default(),
+                self.ui.prefs.graphics_quality,
             ))
             .map_err(|e| format!("create renderer: {e}"))?;
             Ok((window, renderer))

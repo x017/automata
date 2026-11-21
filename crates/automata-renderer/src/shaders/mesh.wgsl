@@ -1,5 +1,7 @@
 // Mesh shader: Blinn-Phong lighting from a directional sun, with shadow
-// mapping (3x3 PCF over a depth texture rendered from the light's view).
+// mapping (3x3 PCF over a depth texture rendered from the light's view),
+// hemispheric sky/ground ambient, exponential distance fog, exposure, and
+// tone mapping (None / Reinhard / ACES / AgX-style).
 //
 // Bind groups:
 //   0 — camera (view-projection + world position)
@@ -27,6 +29,10 @@ struct LightUniform {
     color_ambient: vec4<f32>,  // rgb: light color, a: ambient fraction
     light_view_proj: mat4x4<f32>,
     params: vec4<f32>,         // x: shadows enabled, y: shadow texel size
+    sky_exposure: vec4<f32>,   // rgb: sky ambient, a: exposure
+    ground_tonemap: vec4<f32>, // rgb: ground ambient, a: tone mapping mode
+    fog: vec4<f32>,            // rgb: fog color, a: density (0 = off)
+    fog_params: vec4<f32>,     // x: fog start distance
 };
 @group(3) @binding(0) var<uniform> light: LightUniform;
 @group(3) @binding(1) var shadow_map: texture_depth_2d;
@@ -82,6 +88,58 @@ fn shadow_factor(world_position: vec3<f32>, n: vec3<f32>, l: vec3<f32>) -> f32 {
     return sum / 9.0;
 }
 
+// ACES filmic approximation (Krzysztof Narkowicz).
+fn tonemap_aces(x: vec3<f32>) -> vec3<f32> {
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+// A compact AgX-style curve: log2 encoding plus a polynomial sigmoid fit,
+// which desaturates bright values gracefully instead of clipping hue.
+fn tonemap_agx(x: vec3<f32>) -> vec3<f32> {
+    let inset = mat3x3<f32>(
+        vec3<f32>(0.842479, 0.0423282, 0.0423756),
+        vec3<f32>(0.0784336, 0.878468, 0.0784336),
+        vec3<f32>(0.0792237, 0.0791661, 0.879142),
+    );
+    let outset = mat3x3<f32>(
+        vec3<f32>(1.19688, -0.0528969, -0.0529716),
+        vec3<f32>(-0.0980209, 1.15190, -0.0980435),
+        vec3<f32>(-0.0990297, -0.0989612, 1.15107),
+    );
+    let min_ev = -12.47393;
+    let max_ev = 4.026069;
+    var v = inset * max(x, vec3<f32>(1e-10));
+    v = clamp(log2(v), vec3<f32>(min_ev), vec3<f32>(max_ev));
+    v = (v - min_ev) / (max_ev - min_ev);
+    let v2 = v * v;
+    let v4 = v2 * v2;
+    v = 15.5 * v4 * v2 - 40.14 * v4 * v + 31.96 * v4 - 6.868 * v2 * v
+        + 0.4298 * v2 + 0.1191 * v - 0.00232;
+    // The curve's output is display-encoded; the target applies sRGB on
+    // write, so linearize it back.
+    return pow(clamp(outset * v, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2));
+}
+
+fn tonemap(c: vec3<f32>) -> vec3<f32> {
+    let x = c * light.sky_exposure.a;
+    let mode = light.ground_tonemap.a;
+    if mode > 2.5 {
+        return tonemap_agx(x);
+    }
+    if mode > 1.5 {
+        return tonemap_aces(x);
+    }
+    if mode > 0.5 {
+        return x / (vec3<f32>(1.0) + x);
+    }
+    return x;
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
@@ -94,7 +152,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let shadow = shadow_factor(in.world_position, n, l);
 
     let base = textureSample(material_texture, material_sampler, in.uv) * material.color;
-    let lit = base.rgb * light.color_ambient.a
+    // Hemispheric ambient: sky from above, ground from below.
+    let hemi = mix(light.ground_tonemap.rgb, light.sky_exposure.rgb, n.y * 0.5 + 0.5);
+    var lit = base.rgb * hemi * light.color_ambient.a
         + (base.rgb * diffuse + vec3<f32>(specular)) * light.color_ambient.rgb * shadow;
-    return vec4<f32>(lit, base.a);
+
+    // Exponential distance fog (before tone mapping, like real scattering).
+    let density = light.fog.a;
+    if density > 0.0 {
+        let dist = max(distance(camera.view_pos.xyz, in.world_position) - light.fog_params.x, 0.0);
+        let f = 1.0 - exp(-density * dist);
+        lit = mix(lit, light.fog.rgb, clamp(f, 0.0, 1.0));
+    }
+    return vec4<f32>(tonemap(lit), base.a);
 }

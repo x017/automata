@@ -40,6 +40,10 @@ pub struct Prefs {
     pub status_hints: bool,
     /// Script editor settings.
     pub editor: crate::code::EditorSettings,
+    /// Renderer quality preset (shadow map resolution).
+    pub graphics_quality: automata_renderer::GraphicsQuality,
+    /// Show the selected camera's view as an inset in the Scene view.
+    pub camera_preview: bool,
 }
 
 impl Default for Prefs {
@@ -56,6 +60,8 @@ impl Default for Prefs {
             ui_scale: 1.0,
             status_hints: true,
             editor: crate::code::EditorSettings::default(),
+            graphics_quality: automata_renderer::GraphicsQuality::default(),
+            camera_preview: true,
         }
     }
 }
@@ -170,6 +176,7 @@ file runs under the Python runtime (`automata.run_scene`).
     ctx.time.delta                   seconds since the last frame
     ctx.physics.grounded(entity)     standing on something?
     ctx.scene["Name"]                another entity by name
+    ctx.camera.follow(entity)        the scene camera (Play renders through it)
     print(...)                       shows up in Oberon's Console
 """
 

@@ -32,6 +32,8 @@ pub enum Ty {
     Attributes,
     /// `entity.state` (a plain dict).
     Dict,
+    /// `entity.camera` / `ctx.camera`.
+    Camera,
 }
 
 /// What a string argument names.
@@ -105,6 +107,12 @@ const CONTEXT: &[Member] = &[
         "Scene",
         "The running scene's entities: ctx.scene[\"Name\"].",
         Some(Ty::Scene),
+    ),
+    prop(
+        "camera",
+        "Camera | None",
+        "The scene camera Play mode renders through (None without one).",
+        Some(Ty::Camera),
     ),
     meth(
         "log",
@@ -225,6 +233,40 @@ const ENTITY: &[Member] = &[
         None,
     ),
     prop("script", "str | None", "Path of the attached script.", None),
+    prop(
+        "camera",
+        "Camera | None",
+        "This entity's Camera component, or None.",
+        Some(Ty::Camera),
+    ),
+];
+
+const CAMERA: &[Member] = &[
+    prop(
+        "position",
+        "(x, y, z)",
+        "The eye position; assign a tuple to move the camera.",
+        None,
+    ),
+    prop(
+        "target",
+        "(x, y, z)",
+        "The point the camera looks at.",
+        None,
+    ),
+    prop("fov", "float", "Vertical field of view in degrees.", None),
+    meth(
+        "look_at",
+        "(point_or_entity) -> None",
+        "Aims the camera at a point or an entity.",
+        None,
+    ),
+    meth(
+        "follow",
+        "(entity, offset=(0, 3, 8), smooth=8.0, look_height=0.6) -> None",
+        "Eases toward entity + offset and looks at it; call every update.",
+        None,
+    ),
 ];
 
 const TRANSFORM: &[Member] = &[
@@ -408,6 +450,7 @@ impl Ty {
             Self::Transform => TRANSFORM,
             Self::Attributes => ATTRIBUTES,
             Self::Dict => DICT,
+            Self::Camera => CAMERA,
         }
     }
 
@@ -424,6 +467,7 @@ impl Ty {
             Self::Transform => "Transform",
             Self::Attributes => "Attributes",
             Self::Dict => "dict",
+            Self::Camera => "Camera",
         }
     }
 
@@ -440,6 +484,7 @@ impl Ty {
             Self::Transform => "An entity's position, rotation and scale.",
             Self::Attributes => "Custom values set in the Inspector.",
             Self::Dict => "Per-entity storage that persists between frames.",
+            Self::Camera => "A perspective camera: position, target, fov.",
         }
     }
 

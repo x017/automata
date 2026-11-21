@@ -12,7 +12,7 @@
 //! as opaque noise. The Euler round-trip drift is far below f32 visual
 //! significance.
 
-use automata_renderer::{Camera2D, Camera3D, MeshData};
+use automata_renderer::{Camera2D, Camera3D, Environment, MeshData};
 use automata_scene::{DirectionalLight, MeshVisual, MeshVisualKind, Name, SceneWorld, Transform};
 use glam::EulerRot;
 use serde::{Deserialize, Serialize};
@@ -64,6 +64,9 @@ pub struct EntityData {
     /// Directional sun light.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directional_light: Option<DirectionalLight>,
+    /// Scene look: ambient, fog, exposure, tone mapping, background.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Environment>,
     /// Primitive mesh visual.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh_visual: Option<MeshVisualData>,
@@ -271,6 +274,9 @@ impl SceneFile {
             if let Some(light) = eref.get::<&DirectionalLight>() {
                 data.directional_light = Some(*light);
             }
+            if let Some(env) = eref.get::<&Environment>() {
+                data.environment = Some(*env);
+            }
             if let Some(visual) = eref.get::<&MeshVisual>() {
                 data.mesh_visual = Some(MeshVisualData::from(&*visual));
             }
@@ -330,6 +336,9 @@ impl SceneFile {
             }
             if let Some(light) = &data.directional_light {
                 let _ = world.insert_one(entity, *light);
+            }
+            if let Some(env) = &data.environment {
+                let _ = world.insert_one(entity, *env);
             }
             if let Some(visual) = &data.mesh_visual {
                 let _ = world.insert_one(entity, MeshVisual::from(visual));
@@ -469,6 +478,29 @@ mod tests {
         ),));
         world.spawn((Name("lonely".into()),));
         scene
+    }
+
+    #[test]
+    fn environment_round_trips_and_tolerates_partial_fields() {
+        let mut world = SceneWorld::new();
+        world.spawn((automata_renderer::Environment::dusk(),));
+        let file = SceneFile::from_world(&world);
+        let text = file.to_ron().unwrap();
+        let back = SceneFile::from_ron(&text).unwrap();
+        assert_eq!(back, file);
+        assert_eq!(
+            back.entities[0].environment,
+            Some(automata_renderer::Environment::dusk())
+        );
+        // Hand-written files may set only a few fields.
+        let partial = SceneFile::from_ron(
+            "(version: 1, entities: [(environment: Some((exposure: 2.0, tonemapping: Aces)))])",
+        )
+        .unwrap();
+        let env = partial.entities[0].environment.unwrap();
+        assert!((env.exposure - 2.0).abs() < f32::EPSILON);
+        assert_eq!(env.tonemapping, automata_renderer::Tonemapping::Aces);
+        assert!(!env.fog);
     }
 
     #[test]

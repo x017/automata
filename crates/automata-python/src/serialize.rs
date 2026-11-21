@@ -25,6 +25,7 @@ pub fn staged_to_entity_data(entity: &StagedEntity) -> EntityData {
             StagedComponent::Camera3D(c) => data.camera_3d = Some(*c),
             StagedComponent::Camera2D(c) => data.camera_2d = Some(*c),
             StagedComponent::DirectionalLight(l) => data.directional_light = Some(*l),
+            StagedComponent::Environment(e) => data.environment = Some(*e),
             StagedComponent::MeshVisual(v) => data.mesh_visual = Some(MeshVisualData::from(v)),
             StagedComponent::RigidBody(b) => data.rigid_body = Some(b.clone()),
             StagedComponent::Collider3D(c) => data.collider_3d = Some(c.clone()),
@@ -54,6 +55,9 @@ pub fn entity_data_to_staged(data: &EntityData) -> StagedEntity {
     }
     if let Some(l) = &data.directional_light {
         components.push(StagedComponent::DirectionalLight(*l));
+    }
+    if let Some(e) = &data.environment {
+        components.push(StagedComponent::Environment(*e));
     }
     if let Some(v) = &data.mesh_visual {
         components.push(StagedComponent::MeshVisual(

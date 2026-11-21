@@ -26,6 +26,7 @@ pub struct DrawList {
     pub(crate) camera_2d: Option<Camera2D>,
     pub(crate) camera_3d: Option<Camera3D>,
     pub(crate) sun: Option<crate::Sun>,
+    pub(crate) environment: Option<crate::Environment>,
     pub(crate) sprites: Vec<Sprite>,
     pub(crate) meshes: Vec<MeshDraw>,
 }
@@ -63,6 +64,14 @@ impl DrawList {
     /// Without a sun, meshes are lit by a default shadowless light.
     pub fn set_sun(&mut self, sun: crate::Sun) {
         self.sun = Some(sun);
+    }
+
+    /// Sets the frame's environment (ambient, fog, exposure, tone mapping).
+    ///
+    /// Without one, [`Environment::default`](crate::Environment::default)
+    /// applies, which matches the original unfogged, untonemapped look.
+    pub fn set_environment(&mut self, environment: crate::Environment) {
+        self.environment = Some(environment);
     }
 
     /// Draws a sprite. Sprites render after meshes and ignore depth.
@@ -115,12 +124,19 @@ impl DrawList {
         self.sun
     }
 
+    /// The frame's environment, if one was set.
+    #[must_use]
+    pub fn environment(&self) -> Option<crate::Environment> {
+        self.environment
+    }
+
     /// Resets the list for the next frame, keeping allocations. Called by
     /// the engine after each presented frame.
     pub fn clear(&mut self) {
         self.camera_2d = None;
         self.camera_3d = None;
         self.sun = None;
+        self.environment = None;
         self.sprites.clear();
         self.meshes.clear();
         // The clear color intentionally persists across frames.
@@ -139,6 +155,7 @@ impl Default for DrawList {
             camera_2d: None,
             camera_3d: None,
             sun: None,
+            environment: None,
             sprites: Vec::new(),
             meshes: Vec::new(),
         }

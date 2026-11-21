@@ -174,3 +174,31 @@ def test_run_scene_propagates_script_errors(tmp_path):
     at.Scene().add(e).save(str(tmp_path / "s.ron"))
     with pytest.raises(RuntimeError, match="boom"):
         at.run_scene(str(tmp_path / "s.ron"), headless=True, max_frames=2)
+
+
+CAMERA_SCRIPT = """
+def update(entity, ctx):
+    assert entity.camera is not None
+    assert ctx.camera is not None
+    ctx.camera.follow(ctx.scene["Hero"], offset=(0, 2, 5), smooth=0)
+    ctx.camera.fov = 45
+"""
+
+
+def test_run_scene_scripts_drive_the_camera(tmp_path):
+    (tmp_path / "cam.py").write_text(CAMERA_SCRIPT)
+    cam = at.Entity("Main Camera").add(at.Camera3D(position=(0, 2, 6), target=(0, 0, 0)))
+    cam.script = "cam.py"
+    hero = at.Entity("Hero").add(at.Transform(position=(3, 1, 0)))
+    at.Scene().add(cam).add(hero).save(str(tmp_path / "level.ron"))
+    seen = []
+
+    def after(ctx):
+        c = ctx.scene["Main Camera"].camera_3d
+        seen.append((c.position, c.target, c.fov))
+
+    at.run_scene(str(tmp_path / "level.ron"), headless=True, max_frames=3, update=after)
+    position, target, fov = seen[-1]
+    assert position == pytest.approx((3.0, 3.0, 5.0))
+    assert target == pytest.approx((3.0, 1.6, 0.0))
+    assert fov == pytest.approx(45.0)
