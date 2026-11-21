@@ -46,11 +46,29 @@ fn python(root: &Path) -> (PathBuf, bool) {
     (PathBuf::from(fallback), false)
 }
 
+/// Drops Windows' verbatim prefix (`\\?\C:\…` → `C:\…`,
+/// `\\?\UNC\host\…` → `\\host\…`) that `canonicalize` adds. In verbatim
+/// form `/` is not a separator, so Python opening `game\scripts/x.py` fails.
+/// Other paths are returned unchanged.
+fn plain_path(p: PathBuf) -> PathBuf {
+    let plain = p.to_str().and_then(|s| {
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            Some(format!(r"\\{rest}"))
+        } else {
+            s.strip_prefix(r"\\?\")
+                .filter(|rest| rest.as_bytes().get(1) == Some(&b':'))
+                .map(str::to_string)
+        }
+    });
+    plain.map_or(p, PathBuf::from)
+}
+
 /// The folder the executable lives in.
 fn root() -> PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|p| std::fs::canonicalize(p).ok())
+        .map(plain_path)
         .and_then(|p| p.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."))
 }

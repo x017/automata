@@ -335,7 +335,10 @@ def run_scene(
     scripted: List[Tuple[str, str]] = []
     for entity in scene.entities():
         if entity.script and entity.name:
-            scripted.append((entity.name, os.path.join(base, entity.script)))
+            # Scenes store `/`-separated paths; join per component so they
+            # also resolve under Windows `\\?\` verbatim base paths.
+            parts = entity.script.replace("\\", "/").split("/")
+            scripted.append((entity.name, os.path.join(base, *parts)))
 
     from . import Game  # local import: automata/__init__ imports this module
 

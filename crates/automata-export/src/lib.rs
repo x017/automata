@@ -668,6 +668,24 @@ impl Skip {
     }
 }
 
+/// Drops Windows' verbatim prefix (`\\?\C:\…` → `C:\…`,
+/// `\\?\UNC\host\…` → `\\host\…`) that `canonicalize` adds. In verbatim
+/// form `/` is not a separator, so Python opening `game\scripts/x.py` fails.
+/// Other paths are returned unchanged.
+#[must_use]
+pub fn plain_path(p: PathBuf) -> PathBuf {
+    let plain = p.to_str().and_then(|s| {
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            Some(format!(r"\\{rest}"))
+        } else {
+            s.strip_prefix(r"\\?\")
+                .filter(|rest| rest.as_bytes().get(1) == Some(&b':'))
+                .map(str::to_string)
+        }
+    });
+    plain.map_or(p, PathBuf::from)
+}
+
 fn copy_tree(from: &Path, to: &Path, keep: &dyn Fn(&str) -> bool) -> Result<usize, String> {
     let mut count = 0;
     let mut stack = vec![from.to_path_buf()];
@@ -741,6 +759,16 @@ fn make_executable(_path: &Path) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verbatim_windows_paths_are_made_plain() {
+        let plain = |s: &str| plain_path(PathBuf::from(s)).to_string_lossy().into_owned();
+        assert_eq!(plain(r"\\?\C:\Games\Coin Run"), r"C:\Games\Coin Run");
+        assert_eq!(plain(r"\\?\UNC\server\share\game"), r"\\server\share\game");
+        // Device paths and ordinary paths are left alone.
+        assert_eq!(plain(r"\\?\Volume{1234}\game"), r"\\?\Volume{1234}\game");
+        assert_eq!(plain("/home/me/game"), "/home/me/game");
+    }
 
     fn project(tag: &str) -> PathBuf {
         let dir =

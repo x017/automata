@@ -90,7 +90,7 @@ fn project(args: &Args, index: usize) -> PathBuf {
 }
 
 fn absolute(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+    std::fs::canonicalize(p).map_or_else(|_| p.to_path_buf(), automata_export::plain_path)
 }
 
 fn run() -> Result<(), String> {

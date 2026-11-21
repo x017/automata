@@ -42,7 +42,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not argv:
         print("usage: python -m automata.player <game folder> [--headless] [--frames N]", file=sys.stderr)
         return 2
-    folder = os.path.abspath(argv.pop(0))
+    folder = argv.pop(0)
+    # Windows verbatim paths (\\?\C:\...) break "/"-joined relative paths.
+    if folder.startswith("\\\\?\\") and folder[5:6] == ":":
+        folder = folder[4:]
+    folder = os.path.abspath(folder)
     with open(os.path.join(folder, "game.json"), encoding="utf-8") as f:
         manifest = json.load(f)
     opts = _options(argv)
