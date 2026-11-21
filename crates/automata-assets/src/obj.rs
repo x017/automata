@@ -298,9 +298,14 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
             mesh,
             color: mtl.color,
             texture,
+            skin: None,
         });
     }
-    Ok(Loaded { parts, deps })
+    Ok(Loaded {
+        parts,
+        rig: None,
+        deps,
+    })
 }
 
 #[cfg(test)]

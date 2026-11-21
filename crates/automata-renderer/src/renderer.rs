@@ -11,7 +11,7 @@ use crate::draw::{DrawList, MeshDraw, Sprite};
 use crate::error::Result;
 use crate::light::LightUniform;
 use crate::material::{Material, MaterialInner};
-use crate::mesh::{Mesh, MeshData, MeshInner};
+use crate::mesh::{Mesh, MeshData, MeshInner, SkinVertex};
 use crate::pipeline::{self, PipelineShared, SpriteVertex};
 use crate::texture::{Texture, TextureInner};
 use crate::{GraphicsQuality, RenderContext, Sun};
@@ -55,8 +55,8 @@ pub struct Renderer {
     ctx: RenderContext,
     shared: PipelineShared,
     sprite_pipeline: wgpu::RenderPipeline,
-    mesh_pipeline: wgpu::RenderPipeline,
-    shadow_pipeline: wgpu::RenderPipeline,
+    mesh_pipeline: pipeline::PipelinePair,
+    shadow_pipeline: pipeline::PipelinePair,
     sprite_batch: SpriteBatch,
     white_texture: Texture,
     depth_texture: Option<wgpu::Texture>,
@@ -69,7 +69,7 @@ pub struct Renderer {
     /// `(mesh, sprite)` pipelines targeting [`OFFSCREEN_FORMAT`], built lazily
     /// when it differs from the surface format. Lets a windowed renderer also
     /// draw into offscreen targets on the same device (Oberon's viewport).
-    offscreen_pipelines: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
+    offscreen_pipelines: Option<(pipeline::PipelinePair, wgpu::RenderPipeline)>,
     /// Depth buffer for offscreen targets whose size differs from the
     /// surface's, cached by size.
     offscreen_depth: Option<((u32, u32), wgpu::Texture)>,
@@ -92,7 +92,7 @@ impl Renderer {
         let device = ctx.device();
         let shared = PipelineShared::new(device);
         let sprite_pipeline = pipeline::create_sprite_pipeline(device, &shared, ctx.format());
-        let mesh_pipeline = pipeline::create_mesh_pipeline(device, &shared, ctx.format());
+        let mesh_pipeline = pipeline::create_mesh_pipelines(device, &shared, ctx.format());
         let sprite_batch = SpriteBatch::new(device);
         let white_texture = Texture::from_rgba(
             device,
@@ -103,7 +103,7 @@ impl Renderer {
             wgpu::FilterMode::Linear,
         );
         let depth_texture = Some(create_depth_texture(device, size));
-        let shadow_pipeline = pipeline::create_shadow_pipeline(device, &shared);
+        let shadow_pipeline = pipeline::create_shadow_pipelines(device, &shared);
         let (shadow_texture, shadow_sampler) =
             create_shadow_resources(device, quality.shadow_map_size());
 
@@ -149,7 +149,7 @@ impl Renderer {
         let device = ctx.device();
         let shared = PipelineShared::new(device);
         let sprite_pipeline = pipeline::create_sprite_pipeline(device, &shared, ctx.format());
-        let mesh_pipeline = pipeline::create_mesh_pipeline(device, &shared, ctx.format());
+        let mesh_pipeline = pipeline::create_mesh_pipelines(device, &shared, ctx.format());
         let sprite_batch = SpriteBatch::new(device);
         let white_texture = Texture::from_rgba(
             device,
@@ -160,7 +160,7 @@ impl Renderer {
             wgpu::FilterMode::Linear,
         );
         let depth_texture = Some(create_depth_texture(device, size));
-        let shadow_pipeline = pipeline::create_shadow_pipeline(device, &shared);
+        let shadow_pipeline = pipeline::create_shadow_pipelines(device, &shared);
         let (shadow_texture, shadow_sampler) =
             create_shadow_resources(device, quality.shadow_map_size());
 
@@ -239,7 +239,41 @@ impl Renderer {
     /// Panics if the index count exceeds `u32::MAX`.
     #[must_use]
     pub fn create_mesh(&self, data: &MeshData) -> Mesh {
+        self.upload_mesh(data, None)
+    }
+
+    /// Uploads a skinned mesh: `data` in bind space plus each vertex's
+    /// joints and weights (`skin` matches `data.vertices` one to one).
+    /// Draw it with [`DrawList::skinned_mesh`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index count exceeds `u32::MAX`, or if `skin` and the
+    /// vertices differ in length.
+    #[must_use]
+    pub fn create_skinned_mesh(&self, data: &MeshData, skin: &[SkinVertex]) -> Mesh {
+        assert_eq!(skin.len(), data.vertices.len(), "one SkinVertex per vertex");
+        self.upload_mesh(data, Some(skin))
+    }
+
+    fn upload_mesh(&self, data: &MeshData, skin: Option<&[SkinVertex]>) -> Mesh {
         let device = self.ctx.device();
+        let skin_buffer = skin.map(|skin| {
+            // Out-of-range joints would read past the palette.
+            let last = u16::try_from(crate::MAX_JOINTS - 1).unwrap_or(u16::MAX);
+            let clamped: Vec<SkinVertex> = skin
+                .iter()
+                .map(|s| SkinVertex {
+                    joints: s.joints.map(|j| j.min(last)),
+                    weights: s.weights,
+                })
+                .collect();
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("mesh skin"),
+                contents: bytemuck::cast_slice(&clamped),
+                usage: wgpu::BufferUsages::VERTEX,
+            })
+        });
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mesh vertices"),
             contents: bytemuck::cast_slice(&data.vertices),
@@ -255,6 +289,7 @@ impl Renderer {
                 vertex_buffer,
                 index_buffer,
                 index_count: u32::try_from(data.indices.len()).expect("mesh index count fits u32"),
+                skin_buffer,
                 bounding_radius: data
                     .vertices
                     .iter()
@@ -393,9 +428,9 @@ impl Renderer {
     /// that need to inspect rendered output without a window.
     ///
     /// Works on windowed renderers too: the target may be any size (it gets
-    /// its own depth buffer) and is drawn with pipelines built for
-    /// [`OFFSCREEN_FORMAT`], so one device can drive both the window and an
-    /// embedded viewport.
+    /// its own depth buffer) and is drawn with pipelines built for the
+    /// offscreen format (`Rgba8UnormSrgb`), so one device can drive both the
+    /// window and an embedded viewport.
     pub fn render_offscreen(&mut self, draw: &DrawList, target: &wgpu::Texture) {
         let size = (target.width().max(1), target.height().max(1));
         self.ensure_offscreen_resources(size);
@@ -409,7 +444,7 @@ impl Renderer {
     fn ensure_offscreen_resources(&mut self, size: (u32, u32)) {
         if self.ctx.format() != OFFSCREEN_FORMAT && self.offscreen_pipelines.is_none() {
             let device = self.ctx.device();
-            let mesh = pipeline::create_mesh_pipeline(device, &self.shared, OFFSCREEN_FORMAT);
+            let mesh = pipeline::create_mesh_pipelines(device, &self.shared, OFFSCREEN_FORMAT);
             let sprite = pipeline::create_sprite_pipeline(device, &self.shared, OFFSCREEN_FORMAT);
             self.offscreen_pipelines = Some((mesh, sprite));
         }
@@ -561,6 +596,45 @@ impl Renderer {
         )
     }
 
+    /// Builds a skinned draw's model bind group: the model matrix plus the
+    /// joint palette (padded to [`crate::MAX_JOINTS`]).
+    fn skinned_model_bind_group(
+        &self,
+        model: glam::Mat4,
+        joints: &[glam::Mat4],
+    ) -> wgpu::BindGroup {
+        let device = self.ctx.device();
+        let model_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("model"),
+            contents: bytemuck::cast_slice(&model.to_cols_array()),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let mut palette = Vec::with_capacity(crate::MAX_JOINTS * 16);
+        for i in 0..crate::MAX_JOINTS {
+            let joint = joints.get(i).copied().unwrap_or(glam::Mat4::IDENTITY);
+            palette.extend_from_slice(&joint.to_cols_array());
+        }
+        let joint_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("joints"),
+            contents: bytemuck::cast_slice(&palette),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("skinned model"),
+            layout: &self.shared.skinned_model_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: model_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: joint_buffer.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
     /// Builds a single-buffer uniform bind group for `layout`.
     fn uniform_bind_group(
         &self,
@@ -665,10 +739,15 @@ impl Renderer {
             });
 
             if !draw.meshes.is_empty() {
-                pass.set_pipeline(mesh_pipeline);
-                pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
-                pass.set_bind_group(3, &prepared.light_bind, &[]);
+                let mut current: Option<bool> = None;
                 for (mesh_draw, model_bind) in draw.meshes.iter().zip(&prepared.model_bind_groups) {
+                    let skinned = mesh_draw.joints.is_some();
+                    if current != Some(skinned) {
+                        pass.set_pipeline(mesh_pipeline.get(skinned));
+                        pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
+                        pass.set_bind_group(3, &prepared.light_bind, &[]);
+                        current = Some(skinned);
+                    }
                     Self::record_mesh(&mut pass, mesh_draw, model_bind);
                 }
             }
@@ -730,12 +809,13 @@ impl Renderer {
         let model_bind_groups = draw
             .meshes
             .iter()
-            .map(|m| {
-                self.uniform_bind_group(
+            .map(|m| match &m.joints {
+                Some(joints) => self.skinned_model_bind_group(m.model, joints),
+                None => self.uniform_bind_group(
                     Some("model"),
                     bytemuck::cast_slice(&m.model.to_cols_array()),
                     &self.shared.model_layout,
-                )
+                ),
             })
             .collect();
 
@@ -832,11 +912,19 @@ impl Renderer {
             }),
             ..wgpu::RenderPassDescriptor::default()
         });
-        pass.set_pipeline(&self.shadow_pipeline);
-        pass.set_bind_group(0, &light_vp_bind, &[]);
+        let mut current: Option<bool> = None;
         for (mesh_draw, model_bind) in draw.meshes.iter().zip(model_bind_groups) {
+            let skinned = mesh_draw.joints.is_some();
+            if current != Some(skinned) {
+                pass.set_pipeline(self.shadow_pipeline.get(skinned));
+                pass.set_bind_group(0, &light_vp_bind, &[]);
+                current = Some(skinned);
+            }
             pass.set_bind_group(1, model_bind, &[]);
             pass.set_vertex_buffer(0, mesh_draw.mesh.inner.vertex_buffer.slice(..));
+            if let (true, Some(skin)) = (skinned, &mesh_draw.mesh.inner.skin_buffer) {
+                pass.set_vertex_buffer(1, skin.slice(..));
+            }
             pass.set_index_buffer(
                 mesh_draw.mesh.inner.index_buffer.slice(..),
                 wgpu::IndexFormat::Uint32,
@@ -855,10 +943,14 @@ impl Renderer {
             mesh,
             model: _,
             material,
+            joints,
         } = mesh_draw;
         pass.set_bind_group(1, model_bind, &[]);
         pass.set_bind_group(2, &material.inner.bind_group, &[]);
         pass.set_vertex_buffer(0, mesh.inner.vertex_buffer.slice(..));
+        if let (Some(_), Some(skin)) = (joints, &mesh.inner.skin_buffer) {
+            pass.set_vertex_buffer(1, skin.slice(..));
+        }
         pass.set_index_buffer(mesh.inner.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..mesh.inner.index_count, 0, 0..1);
     }
@@ -919,7 +1011,7 @@ fn light_view_proj(draw: &DrawList, sun: &Sun) -> glam::Mat4 {
     let mut max = glam::Vec3::splat(f32::MIN);
     for mesh_draw in &draw.meshes {
         let (scale, _, center) = mesh_draw.model.to_scale_rotation_translation();
-        let radius = mesh_draw.mesh.inner.bounding_radius * scale.max_element();
+        let radius = posed_radius(mesh_draw) * scale.max_element();
         min = min.min(center - glam::Vec3::splat(radius));
         max = max.max(center + glam::Vec3::splat(radius));
     }
@@ -936,6 +1028,30 @@ fn light_view_proj(draw: &DrawList, sun: &Sun) -> glam::Mat4 {
     let view = view::look_at_mat4(eye, center, up);
     let proj = directx::orthographic(-radius, radius, -radius, radius, 0.1, radius * 2.0 + 10.0);
     proj * view
+}
+
+/// A sphere around the model origin containing the draw's vertices. A
+/// skinned vertex is a weighted blend of `joint × bind vertex`, so it lies
+/// within the farthest joint's reach: its translation plus the bind radius
+/// times its largest scale.
+fn posed_radius(mesh_draw: &MeshDraw) -> f32 {
+    let bind = mesh_draw.mesh.inner.bounding_radius;
+    let Some(joints) = &mesh_draw.joints else {
+        return bind;
+    };
+    joints
+        .iter()
+        .take(crate::MAX_JOINTS)
+        .map(|j| {
+            let reach = j
+                .x_axis
+                .truncate()
+                .length()
+                .max(j.y_axis.truncate().length())
+                .max(j.z_axis.truncate().length());
+            j.w_axis.truncate().length() + bind * reach
+        })
+        .fold(0.0_f32, f32::max)
 }
 
 /// One contiguous run of sprites sharing a texture.
@@ -1147,6 +1263,46 @@ mod tests {
 
     /// Creates an offscreen renderer, or `None` when no GPU/software adapter
     /// exists (CI/sandbox without lavapipe).
+    #[test]
+    fn offscreen_skinned_mesh_follows_its_joints() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping skinned render test");
+            return;
+        };
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        // A cube bound fully to joint 1; joint 0 is unused.
+        let data = MeshData::cube(1.0);
+        let skin = vec![
+            SkinVertex {
+                joints: [1, 0, 0, 0],
+                weights: [1.0, 0.0, 0.0, 0.0],
+            };
+            data.vertices.len()
+        ];
+        let cube = renderer.create_skinned_mesh(&data, &skin);
+        assert!(cube.is_skinned());
+        let material = renderer.create_material([1.0, 1.0, 1.0, 1.0], None);
+        let camera = Camera3D::new(glam::Vec3::new(0.0, 0.0, 5.0), glam::Vec3::ZERO);
+
+        let lit = |renderer: &mut Renderer, joint: glam::Mat4| {
+            let joints: Arc<[glam::Mat4]> = vec![glam::Mat4::IDENTITY, joint].into();
+            let mut draw = DrawList::new();
+            draw.set_camera_3d(camera);
+            draw.skinned_mesh(&cube, glam::Mat4::IDENTITY, &material, &joints);
+            renderer.render_offscreen(&draw, &target);
+            let pixels = read_pixels(renderer, &target, size);
+            let c = center_pixel(&pixels, size);
+            c[0] > 20 || c[1] > 20 || c[2] > 20
+        };
+        assert!(
+            lit(&mut renderer, glam::Mat4::IDENTITY),
+            "at rest the cube covers the centre"
+        );
+        let moved = glam::Mat4::from_translation(glam::Vec3::new(3.0, 0.0, 0.0));
+        assert!(!lit(&mut renderer, moved), "the joint moved the cube away");
+    }
+
     async fn offscreen() -> Option<Renderer> {
         let renderer = Renderer::new_offscreen((64, 64)).await.ok()?;
         eprintln!(

@@ -8,6 +8,8 @@
 //! Render order within a frame: the frame is cleared to the clear color, 3D
 //! meshes are drawn (with depth testing), then 2D sprites are drawn on top.
 
+use std::sync::Arc;
+
 use glam::{Mat4, Vec2};
 
 use crate::camera::{Camera2D, Camera3D};
@@ -85,6 +87,26 @@ impl DrawList {
             mesh: mesh.clone(),
             model,
             material: material.clone(),
+            joints: None,
+        });
+    }
+
+    /// Draws a skinned mesh posed by `joints`: one matrix per joint, taking
+    /// a vertex from bind space to model space (then `model` places it in
+    /// the world). Entries past [`crate::MAX_JOINTS`] are ignored. A mesh
+    /// without skin data draws as with [`Self::mesh`].
+    pub fn skinned_mesh(
+        &mut self,
+        mesh: &Mesh,
+        model: Mat4,
+        material: &Material,
+        joints: &Arc<[Mat4]>,
+    ) {
+        self.meshes.push(MeshDraw {
+            mesh: mesh.clone(),
+            model,
+            material: material.clone(),
+            joints: mesh.is_skinned().then(|| Arc::clone(joints)),
         });
     }
 
@@ -168,6 +190,8 @@ pub(crate) struct MeshDraw {
     pub mesh: Mesh,
     pub model: Mat4,
     pub material: Material,
+    /// The joint palette, for skinned meshes.
+    pub joints: Option<Arc<[Mat4]>>,
 }
 
 /// A textured 2D quad.

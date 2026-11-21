@@ -5,7 +5,7 @@
 //
 // Bind groups:
 //   0 — camera (view-projection + world position)
-//   1 — model matrix (per draw)
+//   1 — model matrix (per draw); skinned draws add the joint palette
 //   2 — material (texture, sampler, base color)
 //   3 — light (sun uniform, shadow map, comparison sampler)
 
@@ -16,6 +16,10 @@ struct CameraUniform {
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
 
 @group(1) @binding(0) var<uniform> model: mat4x4<f32>;
+
+// Skinned draws only (`vs_skinned`): one matrix per joint, taking a vertex
+// from bind space to model space. Must match `MAX_JOINTS` in Rust.
+@group(1) @binding(1) var<uniform> joints: array<mat4x4<f32>, 128>;
 
 struct MaterialData {
     color: vec4<f32>,
@@ -59,6 +63,31 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.world_position = world.xyz;
     // Upper 3x3 of the model matrix — correct for rotation + uniform scale.
     out.normal = (model * vec4<f32>(in.normal, 0.0)).xyz;
+    out.uv = in.uv;
+    return out;
+}
+
+struct SkinInput {
+    @location(3) joints: vec4<u32>,
+    @location(4) weights: vec4<f32>,
+};
+
+// The vertex's blended joint matrix.
+fn skin_matrix(skin: SkinInput) -> mat4x4<f32> {
+    return joints[skin.joints.x] * skin.weights.x
+        + joints[skin.joints.y] * skin.weights.y
+        + joints[skin.joints.z] * skin.weights.z
+        + joints[skin.joints.w] * skin.weights.w;
+}
+
+@vertex
+fn vs_skinned(in: VertexInput, skin: SkinInput) -> VertexOutput {
+    var out: VertexOutput;
+    let posed = model * skin_matrix(skin);
+    let world = posed * vec4<f32>(in.position, 1.0);
+    out.clip_position = camera.view_proj * world;
+    out.world_position = world.xyz;
+    out.normal = (posed * vec4<f32>(in.normal, 0.0)).xyz;
     out.uv = in.uv;
     return out;
 }

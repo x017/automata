@@ -144,6 +144,7 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
         if let Some(renderer) = &self.renderer {
             automata_scene::materialize_visuals(self.world.scene_mut().world_mut(), renderer);
         }
+        automata_scene::animate(self.world.scene_mut().world_mut(), delta.as_secs_f32());
         automata_scene::record_draw_list(self.world.scene().world(), &mut self.draw);
 
         if *self.quit_requested {

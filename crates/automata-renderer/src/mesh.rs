@@ -27,6 +27,20 @@ pub struct Vertex {
     pub uv: [f32; 2],
 }
 
+/// How a skinned vertex follows its skeleton: up to four joints (indices
+/// into the draw's joint palette) and their weights, which sum to 1.
+///
+/// A skinned mesh carries one per vertex beside its [`Vertex`] data; see
+/// [`crate::Renderer::create_skinned_mesh`].
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct SkinVertex {
+    /// Joint indices, each below [`crate::MAX_JOINTS`].
+    pub joints: [u16; 4],
+    /// Joint weights.
+    pub weights: [f32; 4],
+}
+
 impl Vertex {
     /// Creates a vertex.
     #[must_use]
@@ -128,6 +142,13 @@ impl Mesh {
     pub fn index_count(&self) -> u32 {
         self.inner.index_count
     }
+
+    /// Whether the mesh has joints and weights (draw it with
+    /// [`crate::DrawList::skinned_mesh`]).
+    #[must_use]
+    pub fn is_skinned(&self) -> bool {
+        self.inner.skin_buffer.is_some()
+    }
 }
 
 /// GPU-resident mesh data.
@@ -136,6 +157,8 @@ pub(crate) struct MeshInner {
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
     pub index_count: u32,
+    /// Joints and weights per vertex ([`SkinVertex`]), for skinned meshes.
+    pub skin_buffer: Option<wgpu::Buffer>,
     /// Radius of the sphere around the origin containing all vertices;
     /// used to fit the shadow map around the scene.
     pub bounding_radius: f32,

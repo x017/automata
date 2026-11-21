@@ -8,17 +8,25 @@
 //! specular-glossiness) base color factors and textures (PNG / JPEG).
 //! Primitives sharing a material are merged into one part.
 //!
-//! Not supported: Draco / meshopt compression (an error says so),
-//! skins and animations (the bind pose is drawn), morph targets, vertex
-//! colors, and the other PBR maps.
+//! Skins (`JOINTS_0` / `WEIGHTS_0`, inverse bind matrices) and animations
+//! (translation / rotation / scale; linear, step and cubic-spline) become
+//! the model's [`Rig`]. In a rigged file, meshes that aren't skinned follow
+//! their node as a single joint, so node animation (a robot's arm) and
+//! skinning share one path.
+//!
+//! Not supported: Draco / meshopt compression (an error says so), morph
+//! targets, vertex colors, and the other PBR maps.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use automata_renderer::{MeshData, Vertex};
+use automata_renderer::{MeshData, SkinVertex, Vertex};
 use glam::{Mat3, Mat4, Quat, Vec3};
 
+use crate::anim::{
+    Channel, Clip, Interpolation, PartSkin, Property, Rig, RigNode, Trs, MAX_JOINTS,
+};
 use crate::json::Json;
 use crate::{base64_decode, percent_decode, unweld_flat, Image, Loaded, ModelPart};
 
@@ -556,6 +564,8 @@ struct PartBuilder {
     pixelated: bool,
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
+    /// Joints and weights per vertex (rigged files only).
+    skin: Vec<SkinVertex>,
 }
 
 /// What a part needs from its glTF material.
@@ -618,15 +628,41 @@ fn triangles(mode: i64, idx: &[u32]) -> Option<Vec<u32>> {
     }
 }
 
-#[allow(clippy::too_many_lines)]
-pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
-    let mut doc = Doc::new(path, bytes)?;
-    let nodes = arr(&doc.json, "nodes").to_vec();
-    let meshes = arr(&doc.json, "meshes").to_vec();
+/// A node's local transform as translation, rotation and scale.
+fn node_trs(node: &Json) -> Trs {
+    if node.get("matrix").is_some() {
+        return Trs::from_matrix(node_matrix(node));
+    }
+    let t = floats(node.get("translation"), [0.0; 3]);
+    let r = floats(node.get("rotation"), [0.0, 0.0, 0.0, 1.0]);
+    let s = floats(node.get("scale"), [1.0; 3]);
+    let q = Quat::from_xyzw(r[0], r[1], r[2], r[3]);
+    Trs {
+        translation: Vec3::from(t),
+        rotation: if q.length_squared() > 1e-12 {
+            q.normalize()
+        } else {
+            Quat::IDENTITY
+        },
+        scale: Vec3::from(s),
+    }
+}
 
+/// A node of the scene tree, in traversal order (parents first).
+struct TreeNode {
+    /// The node's index in the file.
+    index: usize,
+    /// The parent's position in the traversal.
+    parent: Option<usize>,
+    /// The rest-pose transform relative to the model.
+    world: Mat4,
+}
+
+/// Walks the default scene's node tree depth first.
+fn scene_tree(json: &Json, nodes: &[Json]) -> Result<Vec<TreeNode>, String> {
     // Root nodes: the default scene's, else every node nobody parents.
-    let scene = usize_of(doc.json.get("scene")).unwrap_or(0);
-    let roots: Vec<usize> = if let Some(s) = arr(&doc.json, "scenes").get(scene) {
+    let scene = usize_of(json.get("scene")).unwrap_or(0);
+    let roots: Vec<usize> = if let Some(s) = arr(json, "scenes").get(scene) {
         arr(s, "nodes")
             .iter()
             .filter_map(|n| usize_of(Some(n)))
@@ -638,14 +674,9 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
             .collect();
         (0..nodes.len()).filter(|i| !children.contains(i)).collect()
     };
-
-    // (mesh index, world matrix) for every mesh instance in the tree.
-    let mut instances: Vec<(usize, Mat4)> = Vec::new();
-    let mut stack: Vec<(usize, Mat4, usize)> = roots
-        .iter()
-        .rev()
-        .map(|&r| (r, Mat4::IDENTITY, 0))
-        .collect();
+    let mut tree = Vec::new();
+    let mut stack: Vec<(usize, Option<usize>, usize)> =
+        roots.iter().rev().map(|&r| (r, None, 0)).collect();
     while let Some((index, parent, depth)) = stack.pop() {
         let Some(node) = nodes.get(index) else {
             continue;
@@ -653,27 +684,225 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
         if depth > 64 {
             return Err("the node tree is too deep (or has a cycle)".into());
         }
-        let world = parent * node_matrix(node);
-        if let Some(mesh) = usize_of(node.get("mesh")) {
-            instances.push((mesh, world));
-        }
+        let parent_world = parent.map_or(Mat4::IDENTITY, |p: usize| tree_world(&tree, p));
+        let at = tree.len();
+        tree.push(TreeNode {
+            index,
+            parent,
+            world: parent_world * node_matrix(node),
+        });
         for child in arr(node, "children").iter().rev() {
             if let Some(c) = usize_of(Some(child)) {
-                stack.push((c, world, depth + 1));
+                stack.push((c, Some(at), depth + 1));
             }
         }
     }
+    Ok(tree)
+}
+
+fn tree_world(tree: &[TreeNode], at: usize) -> Mat4 {
+    tree.get(at).map_or(Mat4::IDENTITY, |n| n.world)
+}
+
+/// The palette index of `(node, inverse_bind)`, adding it when new.
+fn palette_joint(joints: &mut Vec<(usize, Mat4)>, node: usize, inverse_bind: Mat4) -> u16 {
+    let at = joints
+        .iter()
+        .position(|(n, m)| *n == node && m.abs_diff_eq(inverse_bind, 1e-6))
+        .unwrap_or_else(|| {
+            joints.push((node, inverse_bind));
+            joints.len() - 1
+        });
+    u16::try_from(at).unwrap_or(u16::MAX)
+}
+
+/// A skin's joints as palette indices.
+fn skin_palette(
+    doc: &Doc<'_>,
+    skin: &Json,
+    tree_of: &dyn Fn(usize) -> Option<usize>,
+    fallback: usize,
+    joints: &mut Vec<(usize, Mat4)>,
+) -> Result<Vec<u16>, String> {
+    let ibms = match usize_of(skin.get("inverseBindMatrices")) {
+        Some(acc) => {
+            let (m, comps) = doc.floats(acc)?;
+            if comps != 16 {
+                return Err("inverseBindMatrices must be MAT4".into());
+            }
+            m
+        }
+        None => Vec::new(),
+    };
+    Ok(arr(skin, "joints")
+        .iter()
+        .enumerate()
+        .map(|(i, j)| {
+            let node = usize_of(Some(j)).and_then(tree_of).unwrap_or(fallback);
+            let ibm = ibms
+                .get(i * 16..i * 16 + 16)
+                .map_or(Mat4::IDENTITY, Mat4::from_cols_slice);
+            palette_joint(joints, node, ibm)
+        })
+        .collect())
+}
+
+/// The file's animations, targeting nodes by traversal position.
+fn read_clips(doc: &Doc<'_>, tree_of: &dyn Fn(usize) -> Option<usize>) -> Vec<Clip> {
+    let mut clips = Vec::new();
+    for (i, anim) in arr(&doc.json, "animations").iter().enumerate() {
+        let samplers = arr(anim, "samplers");
+        let mut channels = Vec::new();
+        for ch in arr(anim, "channels") {
+            let target = ch.get("target");
+            let Some(node) = usize_of(target.and_then(|t| t.get("node"))).and_then(tree_of) else {
+                continue;
+            };
+            let property = match target.and_then(|t| t.get("path")).and_then(Json::as_str) {
+                Some("translation") => Property::Translation,
+                Some("rotation") => Property::Rotation,
+                Some("scale") => Property::Scale,
+                _ => continue, // morph target weights aren't supported
+            };
+            let Some(sampler) = usize_of(ch.get("sampler")).and_then(|s| samplers.get(s)) else {
+                continue;
+            };
+            let interpolation = match sampler.get("interpolation").and_then(Json::as_str) {
+                Some("STEP") => Interpolation::Step,
+                Some("CUBICSPLINE") => Interpolation::CubicSpline,
+                _ => Interpolation::Linear,
+            };
+            let read = |key: &str| usize_of(sampler.get(key)).and_then(|a| doc.floats(a).ok());
+            let (Some((times, 1)), Some((values, comps))) = (read("input"), read("output")) else {
+                continue;
+            };
+            let width = if property == Property::Rotation { 4 } else { 3 };
+            let per_key = if interpolation == Interpolation::CubicSpline {
+                3
+            } else {
+                1
+            };
+            if comps != width || values.len() != times.len() * width * per_key || times.is_empty() {
+                continue;
+            }
+            channels.push(Channel {
+                node,
+                property,
+                interpolation,
+                times,
+                values,
+            });
+        }
+        if channels.is_empty() {
+            continue;
+        }
+        let duration = channels
+            .iter()
+            .filter_map(|c| c.times.last().copied())
+            .fold(0.0_f32, f32::max);
+        let name = anim
+            .get("name")
+            .and_then(Json::as_str)
+            .filter(|n| !n.is_empty())
+            .map_or_else(|| format!("Animation {i}"), str::to_string);
+        clips.push(Clip {
+            name,
+            duration,
+            channels,
+        });
+    }
+    clips
+}
+
+/// Per-vertex joints and weights from `JOINTS_0` / `WEIGHTS_0`, mapped
+/// through the skin's palette; `None` when the attributes are missing.
+fn read_skin(
+    doc: &Doc<'_>,
+    attrs: Option<&Json>,
+    palette: &[u16],
+    count: usize,
+) -> Result<Option<Vec<SkinVertex>>, String> {
+    let get = |name: &str| usize_of(attrs.and_then(|a| a.get(name)));
+    let (Some(j_acc), Some(w_acc)) = (get("JOINTS_0"), get("WEIGHTS_0")) else {
+        return Ok(None);
+    };
+    let (joints, jc) = doc.floats(j_acc)?;
+    let (weights, wc) = doc.floats(w_acc)?;
+    if jc != 4 || wc != 4 || joints.len() < count * 4 || weights.len() < count * 4 {
+        return Err("JOINTS_0 and WEIGHTS_0 must be VEC4 for every vertex".into());
+    }
+    Ok(Some(
+        (0..count)
+            .map(|i| {
+                let mut skin = SkinVertex::default();
+                let mut total = 0.0;
+                for c in 0..4 {
+                    let w = weights[i * 4 + c].max(0.0);
+                    // Joint ids are small integers stored exactly as floats.
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    let local = joints[i * 4 + c] as usize;
+                    skin.joints[c] = palette.get(local).copied().unwrap_or(0);
+                    skin.weights[c] = w;
+                    total += w;
+                }
+                if total > 1e-6 {
+                    skin.weights = skin.weights.map(|w| w / total);
+                } else {
+                    skin.weights = [1.0, 0.0, 0.0, 0.0];
+                }
+                skin
+            })
+            .collect(),
+    ))
+}
+
+#[allow(clippy::too_many_lines)]
+pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
+    let mut doc = Doc::new(path, bytes)?;
+    let nodes = arr(&doc.json, "nodes").to_vec();
+    let meshes = arr(&doc.json, "meshes").to_vec();
+    let skins = arr(&doc.json, "skins").to_vec();
+    let tree = scene_tree(&doc.json, &nodes)?;
+    // A node's traversal position (its first, if it's instanced twice).
+    let tree_of = |index: usize| tree.iter().position(|n| n.index == index);
+
+    // Animated or skinned files keep a rig: the geometry stays in bind
+    // space and follows joints. Others are baked into model space.
+    let clips = read_clips(&doc, &tree_of);
+    let rigged = !clips.is_empty() || !skins.is_empty();
+    let mut joints: Vec<(usize, Mat4)> = Vec::new();
+    let mut skin_palettes: Vec<Option<Vec<u16>>> = vec![None; skins.len()];
+
+    // (mesh index, traversal position) for every mesh instance.
+    let mut instances: Vec<(usize, Option<usize>)> = tree
+        .iter()
+        .enumerate()
+        .filter_map(|(at, n)| usize_of(nodes[n.index].get("mesh")).map(|m| (m, Some(at))))
+        .collect();
     if nodes.is_empty() {
-        instances = (0..meshes.len()).map(|m| (m, Mat4::IDENTITY)).collect();
+        instances = (0..meshes.len()).map(|m| (m, None)).collect();
     }
 
     let mut parts: Vec<PartBuilder> = Vec::new();
-    for (mesh_index, world) in instances {
+    for (mesh_index, at) in instances {
         let Some(mesh) = meshes.get(mesh_index) else {
             continue;
         };
-        let normal_matrix = Mat3::from_mat4(world).inverse().transpose();
-        let flip = world.determinant() < 0.0;
+        let world = at.map_or(Mat4::IDENTITY, |at| tree_world(&tree, at));
+        // A glTF skin replaces the node's transform with its joints.
+        let skin_index = at
+            .and_then(|at| usize_of(nodes[tree[at].index].get("skin")))
+            .filter(|s| *s < skins.len() && rigged);
+        let palette = match skin_index {
+            Some(s) => {
+                if skin_palettes[s].is_none() {
+                    let p = skin_palette(&doc, &skins[s], &tree_of, at.unwrap_or(0), &mut joints)?;
+                    skin_palettes[s] = Some(p);
+                }
+                skin_palettes[s].clone()
+            }
+            None => None,
+        };
         for prim in arr(mesh, "primitives") {
             let attrs = prim.get("attributes");
             let Some(pos_acc) = usize_of(attrs.and_then(|a| a.get("POSITION"))) else {
@@ -690,6 +919,18 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
                 Some(acc) => Some(doc.floats(acc)?),
                 None => None,
             };
+            let skinned = match &palette {
+                Some(p) => read_skin(&doc, attrs, p, count)?,
+                None => None,
+            };
+            // Skinned vertices are already in bind space.
+            let place = if skinned.is_some() {
+                Mat4::IDENTITY
+            } else {
+                world
+            };
+            let normal_matrix = Mat3::from_mat4(place).inverse().transpose();
+            let flip = place.determinant() < 0.0;
 
             // Find (or start) the part for this material.
             let mat = doc.material(material);
@@ -704,6 +945,7 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
                     pixelated: mat.pixelated,
                     vertices: Vec::new(),
                     indices: Vec::new(),
+                    skin: Vec::new(),
                 });
                 parts.len() - 1
             };
@@ -730,7 +972,7 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
 
             let mut verts = Vec::with_capacity(count);
             for i in 0..count {
-                let p = world.transform_point3(Vec3::new(
+                let p = place.transform_point3(Vec3::new(
                     positions[i * pc],
                     positions[i * pc + 1],
                     positions[i * pc + 2],
@@ -754,29 +996,92 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
                 }
                 verts.push(Vertex::new(p.into(), n.into(), uv));
             }
-            let mesh = if normals.is_some() {
-                MeshData::new(verts, tris)
+            let skin = skinned.unwrap_or_else(|| {
+                // Everything that isn't skinned follows its node rigidly.
+                let rigid_joint = match at {
+                    Some(at) if rigged => palette_joint(&mut joints, at, world.inverse()),
+                    _ => 0,
+                };
+                let rigid = SkinVertex {
+                    joints: [rigid_joint, 0, 0, 0],
+                    weights: [1.0, 0.0, 0.0, 0.0],
+                };
+                vec![rigid; count]
+            });
+            let (mesh, skin) = if normals.is_some() {
+                (MeshData::new(verts, tris), skin)
             } else {
-                unweld_flat(&verts, &tris)
+                // Flat normals give every triangle its own vertices.
+                let unwelded: Vec<SkinVertex> = tris.iter().map(|&i| skin[i as usize]).collect();
+                (unweld_flat(&verts, &tris), unwelded)
             };
             let part = &mut parts[slot];
             let base = u32::try_from(part.vertices.len()).map_err(|_| "too many vertices")?;
             part.vertices.extend(mesh.vertices);
             part.indices.extend(mesh.indices.iter().map(|i| i + base));
+            if rigged {
+                part.skin.extend(skin);
+            }
         }
     }
+
+    let rig = rigged.then(|| Rig {
+        nodes: tree
+            .iter()
+            .map(|n| RigNode {
+                name: nodes[n.index]
+                    .get("name")
+                    .and_then(Json::as_str)
+                    .filter(|s| !s.is_empty())
+                    .map_or_else(|| format!("Node {}", n.index), str::to_string),
+                parent: n.parent,
+                rest: node_trs(&nodes[n.index]),
+            })
+            .collect(),
+        joints,
+        import: Mat4::IDENTITY,
+        clips,
+    });
+    // Parts draw their rest pose until something animates them; a rig with
+    // too many joints for the GPU keeps only that.
+    let rest_palette = rig.as_ref().map(Rig::rest_palette);
+    let rig = rig.filter(|r| {
+        let fits = r.joints.len() <= MAX_JOINTS;
+        if !fits {
+            tracing::warn!(
+                "{}: {} joints is more than the {MAX_JOINTS} supported; it is drawn in its rest pose",
+                path.display(),
+                r.joints.len()
+            );
+        }
+        fits
+    });
 
     Ok(Loaded {
         parts: parts
             .into_iter()
-            .map(|p| ModelPart {
-                name: p.name,
-                mesh: MeshData::new(p.vertices, p.indices),
-                color: p.color,
-                texture: p.texture,
-                pixelated: p.pixelated,
+            .map(|p| {
+                let (vertices, skin) = match &rest_palette {
+                    Some(palette) => {
+                        let skin = PartSkin {
+                            bind: p.vertices,
+                            skin: p.skin,
+                        };
+                        (skin.posed(palette), rig.is_some().then_some(skin))
+                    }
+                    None => (p.vertices, None),
+                };
+                ModelPart {
+                    name: p.name,
+                    mesh: MeshData::new(vertices, p.indices),
+                    color: p.color,
+                    texture: p.texture,
+                    pixelated: p.pixelated,
+                    skin,
+                }
             })
             .collect(),
+        rig,
         deps: doc.deps,
     })
 }
@@ -965,6 +1270,139 @@ pub(crate) mod tests {
             references(Path::new("/m/e.gltf"), json.as_bytes()),
             [PathBuf::from("/m/tex a.png")]
         );
+    }
+
+    /// A `.gltf` (buffer as a data URI) with two quads sharing a material:
+    /// a static `body` at the origin and an `arm` at x = 2 whose `wave` clip
+    /// turns it 90° about Z over one second.
+    fn waving_gltf() -> String {
+        let mut bin: Vec<u8> = Vec::new();
+        let mut push = |values: &[f32]| {
+            for v in values {
+                bin.extend(v.to_le_bytes());
+            }
+        };
+        push(&[
+            -0.5, -0.5, 0.0, 0.5, -0.5, 0.0, 0.5, 0.5, 0.0, -0.5, 0.5, 0.0,
+        ]); // 0..48
+        push(&[0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0]); // 48..96
+        push(&[0.0, 1.0]); // times, 96..104
+        let h = std::f32::consts::FRAC_1_SQRT_2;
+        push(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, h, h]); // rotations, 104..136
+        for i in [0_u16, 1, 2, 0, 2, 3] {
+            bin.extend(i.to_le_bytes()); // 136..148
+        }
+        format!(
+            r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0,1]}}],
+            "nodes":[{{"name":"body","mesh":0}},{{"name":"arm","mesh":0,"translation":[2,0,0]}}],
+            "meshes":[{{"primitives":[{{"attributes":{{"POSITION":0,"NORMAL":1}},"indices":4,"material":0}}]}}],
+            "materials":[{{"name":"Red"}}],
+            "animations":[{{"name":"wave","channels":[{{"sampler":0,"target":{{"node":1,"path":"rotation"}}}}],
+              "samplers":[{{"input":2,"output":3,"interpolation":"LINEAR"}}]}}],
+            "buffers":[{{"byteLength":{len},"uri":"data:application/octet-stream;base64,{data}"}}],
+            "bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":48}},{{"buffer":0,"byteOffset":48,"byteLength":48}},
+              {{"buffer":0,"byteOffset":96,"byteLength":8}},{{"buffer":0,"byteOffset":104,"byteLength":32}},
+              {{"buffer":0,"byteOffset":136,"byteLength":12}}],
+            "accessors":[{{"bufferView":0,"componentType":5126,"count":4,"type":"VEC3"}},
+              {{"bufferView":1,"componentType":5126,"count":4,"type":"VEC3"}},
+              {{"bufferView":2,"componentType":5126,"count":2,"type":"SCALAR"}},
+              {{"bufferView":3,"componentType":5126,"count":2,"type":"VEC4"}},
+              {{"bufferView":4,"componentType":5123,"count":6,"type":"SCALAR"}}]}}"#,
+            len = bin.len(),
+            data = encode_base64(&bin),
+        )
+    }
+
+    #[test]
+    fn node_animation_keeps_rigid_parts_on_their_nodes() {
+        let loaded = load(Path::new("/nowhere/wave.gltf"), waving_gltf().as_bytes()).unwrap();
+        let rig = loaded.rig.expect("animated files get a rig");
+        assert_eq!(rig.clip_names(), ["wave"]);
+        assert!((rig.clips[0].duration - 1.0).abs() < 1e-6);
+        assert_eq!(rig.node("arm"), Some(1));
+        assert_eq!(rig.joints.len(), 2, "one rigid joint per mesh node");
+
+        // One merged part; the rest pose matches the old baked geometry.
+        assert_eq!(loaded.parts.len(), 1);
+        let part = &loaded.parts[0];
+        let skin = part.skin.as_ref().unwrap();
+        assert_eq!(skin.bind.len(), 8);
+        assert_eq!(part.mesh.vertices[5].position, [2.5, -0.5, 0.0]);
+        assert_eq!(skin.skin[0].joints[0], 0);
+        assert_eq!(skin.skin[5].joints[0], 1);
+
+        // At the end of the clip the arm has turned about its own origin;
+        // the body hasn't moved.
+        let mut pose = rig.rest_pose();
+        rig.clips[0].sample_into(1.0, &mut pose);
+        let mut palette = Vec::new();
+        rig.palette(&pose, &mut palette);
+        let posed = skin.posed(&palette);
+        let arm = Vec3::from(posed[5].position);
+        assert!(arm.abs_diff_eq(Vec3::new(2.5, 0.5, 0.0), 1e-5), "{arm}");
+        assert!(Vec3::from(posed[1].position).abs_diff_eq(Vec3::new(0.5, -0.5, 0.0), 1e-6));
+        let normal = Vec3::from(posed[5].normal);
+        assert!(normal.abs_diff_eq(Vec3::Z, 1e-5));
+    }
+
+    #[test]
+    fn static_files_have_no_rig() {
+        let loaded = load(Path::new("quad.glb"), &quad_glb(&[[0.0; 3]], true)).unwrap();
+        assert!(loaded.rig.is_none());
+        assert!(loaded.parts.iter().all(|p| p.skin.is_none()));
+    }
+
+    #[test]
+    fn simple_skin_reads_joints_weights_and_its_clip() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/SimpleSkin.gltf");
+        let bytes = std::fs::read(&path).unwrap();
+        let loaded = load(&path, &bytes).unwrap();
+        let rig = loaded.rig.unwrap();
+        assert_eq!(rig.nodes.len(), 3);
+        assert_eq!(rig.nodes[2].parent, Some(1));
+        assert_eq!(rig.joints.len(), 2);
+        // The second joint's inverse bind undoes its rest position (0, 1, 0).
+        let (node, ibm) = rig.joints[1];
+        assert_eq!(node, 2);
+        assert!(ibm.transform_point3(Vec3::Y).abs_diff_eq(Vec3::ZERO, 1e-5));
+        let clip = &rig.clips[0];
+        assert_eq!(clip.name, "Animation 0");
+        assert!((clip.duration - 5.5).abs() < 1e-5);
+        assert_eq!(clip.channels[0].times.len(), 12);
+        assert_eq!(clip.channels[0].property, Property::Rotation);
+
+        let part = &loaded.parts[0];
+        let skin = part.skin.as_ref().unwrap();
+        // No normals in the file: flat shading unwelds to 3 per triangle.
+        assert_eq!(skin.bind.len(), 24);
+        assert_eq!(skin.skin.len(), 24);
+        for s in &skin.skin {
+            assert!((s.weights.iter().sum::<f32>() - 1.0).abs() < 1e-5);
+        }
+        // At rest the mesh is its bind pose.
+        for (rest, bind) in part.mesh.vertices.iter().zip(&skin.bind) {
+            assert!(Vec3::from(rest.position).abs_diff_eq(Vec3::from(bind.position), 1e-5));
+        }
+        // Mid-clip the top bends; the bottom row stays put.
+        let mut pose = rig.rest_pose();
+        let peak = clip.channels[0].times[3];
+        clip.sample_into(peak, &mut pose);
+        let mut palette = Vec::new();
+        rig.palette(&pose, &mut palette);
+        let posed = skin.posed(&palette);
+        let at = |p: Vec3| {
+            skin.bind
+                .iter()
+                .position(|v| Vec3::from(v.position).abs_diff_eq(p, 1e-6))
+                .unwrap()
+        };
+        let bottom = Vec3::from(posed[at(Vec3::new(-0.5, 0.0, 0.0))].position);
+        assert!(
+            bottom.abs_diff_eq(Vec3::new(-0.5, 0.0, 0.0), 1e-5),
+            "{bottom}"
+        );
+        let top = Vec3::from(posed[at(Vec3::new(0.5, 2.0, 0.0))].position);
+        assert!(top.distance(Vec3::new(0.5, 2.0, 0.0)) > 0.3, "{top}");
     }
 
     fn encode_base64(data: &[u8]) -> String {

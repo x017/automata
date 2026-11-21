@@ -3,7 +3,7 @@
 //! Pipeline creation is expressed as data on `wgpu` descriptors so the
 //! layout invariants are testable without a GPU device.
 
-use crate::mesh::Vertex;
+use crate::mesh::{SkinVertex, Vertex};
 use crate::SPRITE_VERTEX_CAPACITY;
 
 /// WGSL source of the 2D sprite shader.
@@ -39,6 +39,8 @@ pub(crate) struct PipelineShared {
     pub texture_layout: wgpu::BindGroupLayout,
     pub material_layout: wgpu::BindGroupLayout,
     pub model_layout: wgpu::BindGroupLayout,
+    /// The model matrix plus the joint palette, for skinned draws.
+    pub skinned_model_layout: wgpu::BindGroupLayout,
     pub light_layout: wgpu::BindGroupLayout,
     pub shadow_light_layout: wgpu::BindGroupLayout,
     pub sprite_shader: wgpu::ShaderModule,
@@ -47,6 +49,7 @@ pub(crate) struct PipelineShared {
 }
 
 impl PipelineShared {
+    #[allow(clippy::too_many_lines)] // one descriptor per layout
     pub(crate) fn new(device: &wgpu::Device) -> Self {
         // The camera uniform carries the view-projection (vertex stage) and
         // the world-space camera position (fragment specular), so both
@@ -105,6 +108,14 @@ impl PipelineShared {
             label: Some("model"),
             entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX)],
         });
+        let skinned_model_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("skinned model"),
+                entries: &[
+                    uniform_entry(0, wgpu::ShaderStages::VERTEX),
+                    uniform_entry(1, wgpu::ShaderStages::VERTEX),
+                ],
+            });
         // Mesh lighting: sun uniform + shadow map + comparison sampler.
         let light_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("light"),
@@ -140,6 +151,7 @@ impl PipelineShared {
             texture_layout,
             material_layout,
             model_layout,
+            skinned_model_layout,
             light_layout,
             shadow_light_layout,
             sprite_shader: shader_module(device, "sprite", SPRITE_SHADER),
@@ -218,17 +230,94 @@ pub(crate) fn create_sprite_pipeline(
     })
 }
 
-/// Creates the 3D mesh pipeline for the given surface format.
-pub(crate) fn create_mesh_pipeline(
+/// The mesh vertex buffer layout (slot 0).
+const MESH_ATTRIBUTES: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
+    0 => Float32x3,
+    1 => Float32x3,
+    2 => Float32x2
+];
+/// The skinning vertex buffer layout (slot 1, skinned pipelines only).
+const SKIN_ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![
+    3 => Uint16x4,
+    4 => Float32x4
+];
+
+/// The vertex buffers of a mesh pipeline: geometry, plus joints and weights
+/// when `skinned`.
+fn mesh_buffers(skinned: bool) -> Vec<Option<wgpu::VertexBufferLayout<'static>>> {
+    let mut buffers = vec![Some(wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &MESH_ATTRIBUTES,
+    })];
+    if skinned {
+        buffers.push(Some(wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<SkinVertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &SKIN_ATTRIBUTES,
+        }));
+    }
+    buffers
+}
+
+/// The plain and skinned variants of a pipeline.
+pub(crate) struct PipelinePair {
+    pub plain: wgpu::RenderPipeline,
+    pub skinned: wgpu::RenderPipeline,
+}
+
+impl PipelinePair {
+    /// The variant for a draw.
+    pub(crate) fn get(&self, skinned: bool) -> &wgpu::RenderPipeline {
+        if skinned {
+            &self.skinned
+        } else {
+            &self.plain
+        }
+    }
+}
+
+/// Both 3D mesh pipelines for the given surface format.
+pub(crate) fn create_mesh_pipelines(
     device: &wgpu::Device,
     shared: &PipelineShared,
     format: wgpu::TextureFormat,
+) -> PipelinePair {
+    PipelinePair {
+        plain: create_mesh_pipeline(device, shared, format, false),
+        skinned: create_mesh_pipeline(device, shared, format, true),
+    }
+}
+
+/// Both shadow pipelines.
+pub(crate) fn create_shadow_pipelines(
+    device: &wgpu::Device,
+    shared: &PipelineShared,
+) -> PipelinePair {
+    PipelinePair {
+        plain: create_shadow_pipeline(device, shared, false),
+        skinned: create_shadow_pipeline(device, shared, true),
+    }
+}
+
+/// Creates the 3D mesh pipeline for the given surface format. The skinned
+/// variant blends each vertex by its joints (`vs_skinned`).
+fn create_mesh_pipeline(
+    device: &wgpu::Device,
+    shared: &PipelineShared,
+    format: wgpu::TextureFormat,
+    skinned: bool,
 ) -> wgpu::RenderPipeline {
+    let model_layout = if skinned {
+        &shared.skinned_model_layout
+    } else {
+        &shared.model_layout
+    };
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("mesh"),
         bind_group_layouts: &[
             Some(&shared.camera_layout),
-            Some(&shared.model_layout),
+            Some(model_layout),
             Some(&shared.material_layout),
             Some(&shared.light_layout),
         ],
@@ -236,21 +325,13 @@ pub(crate) fn create_mesh_pipeline(
     });
 
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("mesh"),
+        label: Some(if skinned { "skinned mesh" } else { "mesh" }),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &shared.mesh_shader,
-            entry_point: Some("vs_main"),
+            entry_point: Some(if skinned { "vs_skinned" } else { "vs_main" }),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[Some(wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &wgpu::vertex_attr_array![
-                    0 => Float32x3,
-                    1 => Float32x3,
-                    2 => Float32x2
-                ],
-            })],
+            buffers: &mesh_buffers(skinned),
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -281,35 +362,30 @@ pub(crate) fn create_mesh_pipeline(
 ///
 /// Front faces are culled (back faces are rasterized), which pushes
 /// shadow-map depth slightly away from the light and reduces acne.
-pub(crate) fn create_shadow_pipeline(
+fn create_shadow_pipeline(
     device: &wgpu::Device,
     shared: &PipelineShared,
+    skinned: bool,
 ) -> wgpu::RenderPipeline {
+    let model_layout = if skinned {
+        &shared.skinned_model_layout
+    } else {
+        &shared.model_layout
+    };
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("shadow"),
-        bind_group_layouts: &[
-            Some(&shared.shadow_light_layout),
-            Some(&shared.model_layout),
-        ],
+        bind_group_layouts: &[Some(&shared.shadow_light_layout), Some(model_layout)],
         immediate_size: 0,
     });
 
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("shadow"),
+        label: Some(if skinned { "skinned shadow" } else { "shadow" }),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &shared.shadow_shader,
-            entry_point: Some("vs_main"),
+            entry_point: Some(if skinned { "vs_skinned" } else { "vs_main" }),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[Some(wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &wgpu::vertex_attr_array![
-                    0 => Float32x3,
-                    1 => Float32x3,
-                    2 => Float32x2
-                ],
-            })],
+            buffers: &mesh_buffers(skinned),
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -432,6 +508,37 @@ mod tests {
     #[test]
     fn mesh_vertex_layout_matches_shader_locations() {
         assert_eq!(std::mem::size_of::<Vertex>(), 32);
+        // joints (loc 3, 4xu16) + weights (loc 4, 4xf32)
+        assert_eq!(std::mem::size_of::<SkinVertex>(), 24);
+        assert_eq!(SKIN_ATTRIBUTES[1].offset, 8);
+    }
+
+    /// Full naga validation (types, entry points), not just parsing.
+    fn validate_module(source: &str) -> naga::Module {
+        let module = naga::front::wgsl::parse_str(source).unwrap();
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::empty(),
+        )
+        .validate(&module)
+        .unwrap();
+        module
+    }
+
+    #[test]
+    fn skinned_entry_points_exist_and_validate() {
+        for source in [MESH_SHADER, SHADOW_SHADER] {
+            let module = validate_module(source);
+            let names: Vec<&str> = module
+                .entry_points
+                .iter()
+                .map(|e| e.name.as_str())
+                .collect();
+            assert!(names.contains(&"vs_main") && names.contains(&"vs_skinned"));
+        }
+        // The palette size in WGSL matches the Rust limit.
+        let palette = format!("array<mat4x4<f32>, {}>", crate::MAX_JOINTS);
+        assert!(MESH_SHADER.contains(&palette) && SHADOW_SHADER.contains(&palette));
     }
 
     #[test]

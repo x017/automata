@@ -220,14 +220,20 @@ engine (wgpu sprites).
 
 ---
 
-## 4. Skeletal animation 🟢 decided (not started)
+## 4. Skeletal animation 🟡 in progress (phase 1 ✅)
 
 **Decision: everything**: clips, crossfades, Inspector preview, animation
 events, root motion, and a visual animation state machine in Oberon.
 
 ### Phases
 
-1. **Import and skinning:**
+1. **Import and skinning:** ✅
+   - Done: `automata_assets::anim` (rig, clips, sampling, palettes), glTF
+     skins and node animation (rigid parts follow their node as one
+     joint), GPU skinning (`vs_skinned` in the mesh and shadow shaders,
+     128 joints, `DrawList::skinned_mesh`), and a Rust `Animator`
+     component. Rigged models draw their rest pose in Oberon and games
+     until phase 2 plays clips.
    - Read glTF skins (joints, inverse bind matrices) and animation channels
      (translation / rotation / scale; linear, step and cubic-spline
      interpolation).
@@ -369,7 +375,7 @@ Agreed: **quick wins first.**
 2. **HUD text** (#3, phase 1) ✅.
 3. **Mesh colliders** (#5) ✅.
 4. **Performance baseline** (#6) ✅.
-5. **Skeletal animation** (#4, phases 1–4).
+5. **Skeletal animation** (#4, phases 1–4): phase 1 ✅.
 6. **Game UI**, the rest (#3, phases 2–5).
 7. **Android** (#1), then the web.
 

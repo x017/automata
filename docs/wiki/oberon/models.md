@@ -11,9 +11,20 @@ reads two formats:
 
 From each material Oberon takes the **base colour** and the **colour
 texture** (PNG or JPEG). The model draws with the engine's lighting,
-shadows and fog, like the built-in cubes. Animation, skinning and PBR maps
-(normal, metallic-roughness) aren't imported yet. The model draws in its
-bind pose.
+shadows and fog, like the built-in cubes. PBR maps (normal,
+metallic-roughness) aren't imported yet.
+
+### Animated models
+
+glTF files keep their **skeleton and animations**: skinned meshes (up to
+four bones per vertex, 128 bones per model) and parts moved by animated
+nodes, like a robot whose arms are separate meshes. The renderer poses
+them on the GPU, and shadows follow the pose.
+
+For now an animated model shows its rest pose in the scene view and in
+your game. Playing clips from scripts (`entity.animation.play("run")`) and
+previewing them in the Inspector come next. Rust games can already play
+clips with the `Animator` component.
 
 ## Add a model to the scene
 

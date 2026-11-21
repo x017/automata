@@ -13,10 +13,12 @@
 //! - [`Handle`] / [`Assets`] — generational resource handles and registries.
 //! - [`MeshRenderer`] / [`SpriteRenderer`] and [`record_draw_list`] — the
 //!   scene-to-renderer bridge.
+//! - [`Animator`] and [`animate`] — clip playback for animated models.
 //!
 //! All ECS types needed for common game code (`Entity`, queries) are
 //! re-exported; `hecs` remains available for advanced use.
 
+mod animation;
 mod events;
 mod handle;
 mod render;
@@ -24,6 +26,7 @@ mod resources;
 mod scene;
 mod transform;
 
+pub use animation::{animate, Animator};
 pub use events::Events;
 pub use handle::{Assets, Handle};
 pub use render::{

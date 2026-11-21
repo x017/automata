@@ -16,7 +16,7 @@
 
 use std::path::{Path, PathBuf};
 
-use glam::{EulerRot, Quat, Vec3};
+use glam::{EulerRot, Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
 use crate::ModelPart;
@@ -80,10 +80,11 @@ impl ImportSettings {
             && self.pivot == Pivot::File
     }
 
-    /// Bakes the settings into `parts`.
-    pub(crate) fn apply(&self, parts: &mut [ModelPart]) {
+    /// Bakes the settings into `parts`, returning the transform applied
+    /// (rigs apply it after posing).
+    pub(crate) fn apply(&self, parts: &mut [ModelPart]) -> Mat4 {
         if self.is_identity() {
-            return;
+            return Mat4::IDENTITY;
         }
         let scale = if self.scale.is_finite() && self.scale.abs() > 1e-6 {
             self.scale
@@ -104,8 +105,9 @@ impl ImportSettings {
                 }
             }
         }
+        let transform = Mat4::from_quat(rot) * Mat4::from_scale(Vec3::splat(scale));
         if self.pivot == Pivot::File {
-            return;
+            return transform;
         }
         let mut lo = Vec3::splat(f32::INFINITY);
         let mut hi = Vec3::splat(f32::NEG_INFINITY);
@@ -114,7 +116,7 @@ impl ImportSettings {
             hi = hi.max(Vec3::from(v.position));
         }
         if !lo.is_finite() {
-            return;
+            return transform;
         }
         let center = (lo + hi) * 0.5;
         let origin = match self.pivot {
@@ -125,6 +127,7 @@ impl ImportSettings {
         for v in parts.iter_mut().flat_map(|p| &mut p.mesh.vertices) {
             v.position = (Vec3::from(v.position) - origin).to_array();
         }
+        Mat4::from_translation(-origin) * transform
     }
 }
 
@@ -188,6 +191,7 @@ mod tests {
             color: [1.0; 4],
             texture: None,
             pixelated: false,
+            skin: None,
         }
     }
 
@@ -234,6 +238,33 @@ mod tests {
             .map(|v| v.position[1])
             .collect();
         assert!(ys.iter().all(|y| y.abs() <= 0.5 + 1e-5), "{ys:?}");
+    }
+
+    #[test]
+    fn rigs_apply_the_settings_after_posing() {
+        let dir = std::env::temp_dir().join(format!("import-rig-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let model = dir.join("skin.gltf");
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/SimpleSkin.gltf");
+        std::fs::copy(data, &model).unwrap();
+        let settings = ImportSettings {
+            scale: -2.0,
+            rotation: [0.0, 90.0, 0.0],
+            pivot: Pivot::BottomCenter,
+        };
+        write_settings(&model, &settings).unwrap();
+        let loaded = crate::load_file(&model).unwrap();
+        let rig = loaded.rig.as_ref().unwrap();
+        // Skinning the bind pose with the rest palette lands exactly on the
+        // baked (scaled, turned, re-pivoted) rest mesh.
+        let part = &loaded.parts[0];
+        let posed = part.skin.as_ref().unwrap().posed(&rig.rest_palette());
+        for (a, b) in posed.iter().zip(&part.mesh.vertices) {
+            assert!(Vec3::from(a.position).abs_diff_eq(Vec3::from(b.position), 1e-4));
+            assert!(Vec3::from(a.normal).abs_diff_eq(Vec3::from(b.normal), 1e-4));
+        }
+        assert!(loaded.min.y.abs() < 1e-5, "bottom-centre pivot");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -30,7 +30,7 @@ pub use environment::{Environment, Tonemapping};
 pub use error::{Error, Result};
 pub use light::Sun;
 pub use material::Material;
-pub use mesh::{Mesh, MeshData, Vertex};
+pub use mesh::{Mesh, MeshData, SkinVertex, Vertex};
 pub use quality::GraphicsQuality;
 pub use renderer::Renderer;
 pub use text::{TextAlign, TextAtlas, TextStyle};
@@ -41,3 +41,7 @@ pub use wgpu::Texture as RenderTarget;
 
 /// Maximum number of sprite vertices in one batch (quads × 4).
 pub(crate) const SPRITE_VERTEX_CAPACITY: usize = 16_384;
+
+/// The most joints a skinned draw can use (the size of the shaders' joint
+/// palette).
+pub const MAX_JOINTS: usize = 128;

@@ -254,6 +254,7 @@ mod tests {
                 color,
                 texture: None,
                 pixelated: false,
+                skin: None,
             }],
         )
     }

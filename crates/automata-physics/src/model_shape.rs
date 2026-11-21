@@ -119,6 +119,7 @@ mod tests {
                 color: [1.0; 4],
                 texture: None,
                 pixelated: false,
+                skin: None,
             }],
         )
     }

@@ -3,7 +3,9 @@
 //! [`load`] reads a model file (glTF 2.0 `.glb` / `.gltf`, or Wavefront
 //! `.obj` with its `.mtl`) into a [`Model`]: one [`ModelPart`] per material,
 //! with node transforms baked in so the whole file draws as one object.
-//! Each part keeps its base color and color texture.
+//! Each part keeps its base color and color texture. Animated or skinned
+//! glTF files also get a [`Rig`]: their parts keep bind-space vertices with
+//! joint weights, and their clips pose the joints (see [`anim`]).
 //!
 //! Loaded models are cached by path and shared (`Arc`), so a hundred trees
 //! read the file once and upload it to the GPU once. The cache notices when
@@ -14,6 +16,7 @@
 //! Relative paths resolve against the asset root ([`set_root`], normally the
 //! scene file's folder), then the working directory.
 
+pub mod anim;
 mod gltf;
 pub mod import;
 pub mod json;
@@ -26,6 +29,8 @@ use std::time::SystemTime;
 
 use automata_renderer::{Mesh, MeshData, Renderer, Texture};
 use glam::Vec3;
+
+pub use anim::{Clip, PartSkin, Pose, Rig};
 
 /// File extensions [`load`] understands (lowercase, without the dot).
 pub const MODEL_EXTENSIONS: [&str; 3] = ["glb", "gltf", "obj"];
@@ -131,6 +136,9 @@ pub struct ModelPart {
     /// Whether the texture is sampled without smoothing when magnified (the
     /// file asked for nearest filtering: palette atlases, pixel art).
     pub pixelated: bool,
+    /// How the part follows the model's [`Rig`]: bind-space vertices plus
+    /// joints and weights. `mesh` then holds the rest pose.
+    pub skin: Option<PartSkin>,
 }
 
 /// A part's GPU resources (see [`Model::gpu`]).
@@ -140,6 +148,9 @@ pub struct GpuPart {
     pub mesh: Mesh,
     /// The uploaded color texture, if the part has one.
     pub texture: Option<Texture>,
+    /// The bind-space geometry with joints and weights, for parts that
+    /// follow the model's rig (drawn with a joint palette).
+    pub skinned: Option<Mesh>,
 }
 
 /// A loaded model: its parts plus model-space bounds.
@@ -153,6 +164,9 @@ pub struct Model {
     pub min: Vec3,
     /// Bounding box maximum corner (model space).
     pub max: Vec3,
+    /// The node hierarchy, joints and animations of an animated or skinned
+    /// file.
+    pub rig: Option<Arc<Rig>>,
     gpu: OnceLock<Vec<GpuPart>>,
 }
 
@@ -181,8 +195,25 @@ impl Model {
             parts,
             min,
             max,
+            rig: None,
             gpu: OnceLock::new(),
         }
+    }
+
+    /// Attaches a rig (see [`Model::rig`]).
+    #[must_use]
+    pub fn with_rig(mut self, rig: Option<Rig>) -> Self {
+        self.rig = rig.map(Arc::new);
+        self
+    }
+
+    /// The names of the model's animations, in file order.
+    #[must_use]
+    pub fn clip_names(&self) -> Vec<&str> {
+        self.rig
+            .as_ref()
+            .map(|r| r.clip_names())
+            .unwrap_or_default()
     }
 
     /// The bounding box centre (model space).
@@ -258,9 +289,14 @@ impl Model {
                         uploaded.push((key, t.clone()));
                         t
                     });
+                    let skinned = part.skin.as_ref().map(|skin| {
+                        let bind = MeshData::new(skin.bind.clone(), part.mesh.indices.clone());
+                        renderer.create_skinned_mesh(&bind, &skin.skin)
+                    });
                     GpuPart {
                         mesh: renderer.create_mesh(&part.mesh),
                         texture,
+                        skinned,
                     }
                 })
                 .collect()
@@ -272,6 +308,7 @@ impl Model {
 /// (buffers, textures, `.mtl`), which the cache watches for changes.
 pub(crate) struct Loaded {
     pub parts: Vec<ModelPart>,
+    pub rig: Option<Rig>,
     pub deps: Vec<PathBuf>,
 }
 
@@ -309,8 +346,12 @@ fn load_uncached(path: &Path) -> Result<(Model, Vec<PathBuf>), ModelError> {
         message,
     })?;
     let mut parts = loaded.parts;
-    import::read_settings(path).apply(&mut parts);
-    let model = Model::new(path.to_path_buf(), parts);
+    let mut rig = loaded.rig;
+    let import = import::read_settings(path).apply(&mut parts);
+    if let Some(rig) = &mut rig {
+        rig.import = import;
+    }
+    let model = Model::new(path.to_path_buf(), parts).with_rig(rig);
     if model.parts.is_empty() {
         return Err(ModelError::Invalid {
             path: shown,

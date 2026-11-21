@@ -31,6 +31,10 @@ pub struct MeshRenderer {
     /// More meshes drawn with the same transform, each with its own
     /// material.
     pub parts: Vec<(Mesh, Material)>,
+    /// The joint palette posing skinned meshes (see
+    /// [`automata_renderer::DrawList::skinned_mesh`]); set every frame by
+    /// [`crate::animate`]. Skinned meshes need one to draw correctly.
+    pub joints: Option<Arc<[glam::Mat4]>>,
 }
 
 impl MeshRenderer {
@@ -41,6 +45,7 @@ impl MeshRenderer {
             mesh,
             material,
             parts: Vec::new(),
+            joints: None,
         }
     }
 
@@ -176,9 +181,13 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
 
     for (renderer, global) in &mut world.query::<(&MeshRenderer, &GlobalTransform)>() {
         let model = global.matrix();
-        draw.mesh(&renderer.mesh, model, &renderer.material);
-        for (mesh, material) in &renderer.parts {
-            draw.mesh(mesh, model, material);
+        let parts = std::iter::once((&renderer.mesh, &renderer.material))
+            .chain(renderer.parts.iter().map(|(m, mat)| (m, mat)));
+        for (mesh, material) in parts {
+            match &renderer.joints {
+                Some(joints) => draw.skinned_mesh(mesh, model, material, joints),
+                None => draw.mesh(mesh, model, material),
+            }
         }
     }
 
@@ -364,8 +373,14 @@ pub fn materialize_visuals(
                 .zip(&model.parts)
                 .map(|(gpu, part)| {
                     let color = std::array::from_fn(|i| part.color[i] * tint[i]);
+                    // Rigged parts draw skinned, posed by the joints below.
+                    let mesh = if model.rig.is_some() {
+                        gpu.skinned.as_ref().unwrap_or(&gpu.mesh)
+                    } else {
+                        &gpu.mesh
+                    };
                     (
-                        gpu.mesh.clone(),
+                        mesh.clone(),
                         renderer.create_material(color, gpu.texture.clone()),
                     )
                 });
@@ -374,6 +389,8 @@ pub fn materialize_visuals(
             };
             let mut component = MeshRenderer::new(mesh, material);
             component.parts.extend(parts);
+            // The rest pose until an Animator poses it.
+            component.joints = model.rig.as_ref().map(|rig| rig.rest_palette().into());
             component
         } else {
             let mesh = renderer.create_mesh(&visual.data);
