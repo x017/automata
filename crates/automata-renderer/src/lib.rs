@@ -20,6 +20,7 @@ mod mesh;
 mod pipeline;
 mod quality;
 mod renderer;
+pub mod text;
 mod texture;
 
 pub use camera::{Camera2D, Camera3D};
@@ -32,6 +33,7 @@ pub use material::Material;
 pub use mesh::{Mesh, MeshData, Vertex};
 pub use quality::GraphicsQuality;
 pub use renderer::Renderer;
+pub use text::{TextAlign, TextAtlas, TextStyle};
 pub use texture::Texture;
 
 pub use wgpu::Color;

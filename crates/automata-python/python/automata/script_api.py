@@ -633,6 +633,34 @@ class Hud:
         self._items.append({"k": "rect", "x": float(x), "y": float(y), "w": float(width),
                             "h": float(height), "c": list(_vec(color, 4))})
 
+    def text(self, text, x, y, size=24.0, color=(1.0, 1.0, 1.0, 1.0), align="left",
+             shadow=None, outline=None):
+        """Draws ``text`` with the built-in font this frame.
+
+        ``size`` is the line height in pixels. ``align`` says where ``x``
+        sits on each line: ``"left"`` (its left edge), ``"center"`` or
+        ``"right"``. Lines (split on ``\\n``) are centred vertically on
+        ``y``. ``shadow`` and ``outline`` take a colour, or True for
+        translucent / solid black.
+        """
+        a = str(align).lower()
+        if a == "centre":
+            a = "center"
+        if a not in ("left", "center", "right"):
+            raise ValueError(f'align must be "left", "center" or "right", not {align!r}')
+        size = float(size)
+        if not (size > 0 and math.isfinite(size)):
+            raise ValueError("text size must be a positive number")
+        item = {"k": "text", "text": str(text), "x": float(x), "y": float(y), "size": size,
+                "c": list(_vec(color, 4)), "align": a}
+        for key, value, default in (("shadow", shadow, (0.0, 0.0, 0.0, 0.6)),
+                                    ("outline", outline, (0.0, 0.0, 0.0, 1.0))):
+            if value is True:
+                value = default
+            if value is not None and value is not False:
+                item[key] = list(_vec(value, 4))
+        self._items.append(item)
+
 
 class SceneView:
     """``ctx.scene``: entities by name, by id, or all of them."""

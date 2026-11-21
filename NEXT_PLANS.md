@@ -156,7 +156,7 @@ implemented `entity` / `ctx` separately. They also **behaved differently**:
 - Entities spawned at runtime with a script now run it under `run_scene`
   too (handles are keyed by id, not name).
 
-## 3. Game UI system 🟢 decided (not started)
+## 3. Game UI system 🟢 decided (phase 1 ✅ done)
 
 **Decision: a full game-UI system**: text, widgets, custom fonts, layout and
 focus, and a UI editor in Oberon. It's large, so it ships in phases; the
@@ -174,6 +174,19 @@ engine (wgpu sprites).
    optional shadow/outline. Works in Oberon Play, `run_scene` and exports.
    The engine draws from a glyph atlas texture; Oberon draws through its
    canvas. The FPS gets its "100%" health label.
+
+   ✅ **Done.** `automata_renderer::text` holds the built-in font (Geist
+   Medium, moved out of Oberon's assets), the line layout, and a
+   `TextAtlas`: glyphs are rasterized once into a 1024² texture and drawn
+   as sprites. Oberon's Play HUD already went through the engine renderer,
+   so it uses the same atlas instead of its tiny-skia canvas, and text is
+   identical in Play, `run_scene` and exports. `ctx.hud.text` lives in the
+   shared script API, so both runners validate the same way. `shadow` and
+   `outline` take a colour or `True`. Multi-line text works. Under
+   `run_scene`, `ctx.screen.measure_text` gives text's size. Oberon has no
+   Python-side font metrics, so measuring there waits for phase 4
+   (layout). The FPS shows its health percentage and an "ARENA CLEAR"
+   banner.
 2. **Widgets** (immediate mode, drawn from scripts each frame):
    `if ctx.ui.button("Play", x, y, w, h): …`, labels, progress bars,
    panels, images, toggles, sliders. Hover/pressed states. Clicks on UI are

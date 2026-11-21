@@ -1262,6 +1262,46 @@ mod tests {
         );
     }
 
+    #[test]
+    fn offscreen_hud_text_draws_glyphs_from_the_atlas() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping HUD text render test");
+            return;
+        };
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let mut atlas = crate::text::TextAtlas::new();
+        atlas.prepare(&renderer, [("H", 48.0)]);
+        let style = crate::text::TextStyle {
+            size: 48.0,
+            color: [1.0, 0.0, 0.0, 1.0],
+            align: crate::text::TextAlign::Center,
+            ..crate::text::TextStyle::default()
+        };
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        for sprite in atlas.sprites("H", 32.0, 32.0, &style) {
+            draw.sprite(sprite);
+        }
+        renderer.render_offscreen(&draw, &target);
+        let pixels = read_pixels(&renderer, &target, size);
+        let red = |x: usize, y: usize| pixels[(y * 64 + x) * 4];
+        // An "H" centred on the target: red down both stems, black in the
+        // gaps above and below the bar, and black in the corners.
+        let row: Vec<u8> = (0..64).map(|x| red(x, 24)).collect();
+        let lit: Vec<usize> = (0..64).filter(|&x| row[x] > 128).collect();
+        assert!(lit.len() >= 4, "two stems on row 24: {row:?}");
+        let (first, last) = (lit[0], lit[lit.len() - 1]);
+        assert!(
+            first < 30 && last > 34,
+            "stems either side of centre: {row:?}"
+        );
+        assert!(row[32] < 64, "the gap between the stems: {row:?}");
+        assert!(red(2, 2) < 16 && red(61, 61) < 16, "corners stay black");
+        let bar: Vec<u8> = (0..64).map(|y| red(32, y)).collect();
+        assert!(bar.iter().any(|&v| v > 128), "the crossbar: {bar:?}");
+    }
+
     /// Renders the shadow test scene with the given sun, returning each
     /// pixel's brightness (R + G + B).
     fn shadow_scene_brightness(renderer: &mut Renderer, sun: crate::Sun) -> Vec<u32> {

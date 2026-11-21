@@ -181,7 +181,12 @@ frame. Positions are screen pixels, and shapes are placed by their centre:</p>
         hud.image(<span class="tok-s">&quot;sprites/hit.png&quot;</span>, cx, cy, size=(<span class="tok-n">64</span>, <span class="tok-n">64</span>), color=(<span class="tok-n">1.0</span>, <span class="tok-n">1.0</span>, <span class="tok-n">1.0</span>, <span class="tok-n">0.9</span>))
         s[<span class="tok-s">&quot;marker&quot;</span>] -= dt</code></pre></div>
 <p>The rest of <code>draw_hud</code> adds a health bar at the bottom left, a red flash
-when you're hit, and a pip for each drone still flying at the top right.</p>
+when you're hit, and a pip for each drone still flying at the top right.
+Text uses the built-in font. <code>size</code> is the line height in pixels,
+<code>shadow=True</code> adds a soft drop shadow, and <code>align</code> says where <code>x</code> sits:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>    hud.text(<span class="tok-s">f&quot;{health:.0f}%&quot;</span>, left + width + <span class="tok-n">20</span>, bottom, size=<span class="tok-n">26</span>, shadow=<span class="tok-b">True</span>)</code></pre></div>
+<p>Once the last drone falls, an outlined "ARENA CLEAR" fades out at the top
+of the screen, drawn with <code>align=&quot;center&quot;</code>.</p>
 <h2 id="4-the-drones">4. The drones<a class="anchor" href="#4-the-drones" aria-label="Link to this section">#</a></h2>
 <p>Drag four <code>enemy-flying.glb</code> drones into the air around the level and name
 them <strong>Enemy 1</strong> to <strong>Enemy 4</strong>. Give each one:</p>

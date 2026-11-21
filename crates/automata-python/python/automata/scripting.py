@@ -208,6 +208,12 @@ class _EngineBackend(api.Backend):
             if item["k"] == "img":
                 size = (item["w"], item["h"]) if "w" in item else None
                 ctx.screen.image(item["path"], item["x"], item["y"], size, color, item["rot"])
+            elif item["k"] == "text":
+                shadow, outline = item.get("shadow"), item.get("outline")
+                ctx.screen.text(
+                    item["text"], item["x"], item["y"], item["size"], color, item["align"],
+                    tuple(shadow) if shadow else None, tuple(outline) if outline else None,
+                )
             else:
                 ctx.screen.rect(item["x"], item["y"], item["w"], item["h"], color)
         if out.lock is not None:

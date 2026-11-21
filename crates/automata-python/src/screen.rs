@@ -1,6 +1,6 @@
 //! `ctx.screen`: the window's size, a simple HUD layer, and cursor lock.
 //!
-//! HUD calls (`image`, `rect`) are recorded during the update callback and
+//! HUD calls (`image`, `rect`, `text`) are recorded during the update callback and
 //! drawn on top of the 3D scene that frame, in screen pixels with the
 //! origin at the top-left (`+y` down). Shapes are positioned by their
 //! centre. Draw them every frame you want them visible, like any immediate
@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use automata_renderer::{Renderer, Sprite, Texture};
+use automata_renderer::{Renderer, Sprite, TextAlign, TextAtlas, TextStyle, Texture};
 use glam::Vec2;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -40,6 +40,16 @@ pub enum HudItem {
         size: (f32, f32),
         /// Fill colour.
         color: [f32; 4],
+    },
+    /// A string in the built-in font, anchored at `anchor` (see
+    /// [`automata_renderer::text::layout`]).
+    Text {
+        /// The string (`\n` starts a new line).
+        text: String,
+        /// Anchor in pixels.
+        anchor: (f32, f32),
+        /// Size, colour, alignment and effects.
+        style: TextStyle,
     },
 }
 
@@ -163,21 +173,70 @@ impl PyScreen {
         Ok(())
     }
 
+    /// Draws `text` this frame with the built-in font. `size` is the line
+    /// height in pixels. `align` says where `x` sits on each line:
+    /// `"left"` (its left edge), `"center"` or `"right"`. Lines (split on
+    /// `\n`) are centred vertically on `y`. `shadow` and `outline` are
+    /// colours, or `None` for no effect.
+    #[pyo3(signature = (text, x, y, size=24.0, color=(1.0, 1.0, 1.0, 1.0), align="left", shadow=None, outline=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn text(
+        &self,
+        text: &str,
+        x: f32,
+        y: f32,
+        size: f32,
+        color: (f32, f32, f32, f32),
+        align: &str,
+        shadow: Option<(f32, f32, f32, f32)>,
+        outline: Option<(f32, f32, f32, f32)>,
+    ) -> PyResult<()> {
+        let align = TextAlign::parse(align).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "align must be \"left\", \"center\" or \"right\", not {align:?}"
+            ))
+        })?;
+        if !size.is_finite() || size <= 0.0 {
+            return Err(PyValueError::new_err("text size must be a positive number"));
+        }
+        self.queue.borrow_mut().items.push(HudItem::Text {
+            text: text.to_string(),
+            anchor: (x, y),
+            style: TextStyle {
+                size,
+                color: color4(color),
+                align,
+                shadow: shadow.map(color4),
+                outline: outline.map(color4),
+            },
+        });
+        Ok(())
+    }
+
+    /// The `(width, height)` in pixels that `text(text, ..., size)` covers.
+    #[pyo3(signature = (text, size=24.0))]
+    #[allow(clippy::unused_self)] // a method so scripts find it on ctx.screen
+    fn measure_text(&self, text: &str, size: f32) -> (f32, f32) {
+        automata_renderer::text::measure(text, size)
+    }
+
     fn __repr__(&self) -> String {
         format!("Screen(size={:?})", self.size)
     }
 }
 
-/// Image files decoded into textures, by path.
+/// Image files decoded into textures, by path, and the text atlas.
 #[derive(Default)]
 pub struct HudTextures {
     loaded: HashMap<PathBuf, Option<Texture>>,
+    text: Option<TextAtlas>,
 }
 
 impl std::fmt::Debug for HudTextures {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HudTextures")
             .field("loaded", &self.loaded.len())
+            .field("text", &self.text)
             .finish()
     }
 }
@@ -200,37 +259,67 @@ impl HudTextures {
 
     /// Turns recorded HUD items into sprites.
     pub fn sprites(&mut self, renderer: &Renderer, items: &[HudItem]) -> Vec<Sprite> {
-        items
+        let mut texts = items
             .iter()
             .filter_map(|item| match item {
-                HudItem::Image {
-                    path,
-                    center,
-                    size,
-                    color,
-                    rotation,
-                } => {
-                    let texture = self.get(renderer, path)?;
-                    let mut sprite = Sprite::new(texture)
-                        .position(Vec2::new(center.0, center.1))
-                        .color(*color)
-                        .rotation(*rotation);
-                    if let Some((w, h)) = size {
-                        sprite = sprite.size(Vec2::new(*w, *h));
-                    }
-                    Some(sprite)
-                }
-                HudItem::Rect {
-                    center,
-                    size,
-                    color,
-                } => Some(
-                    Sprite::new(renderer.white_texture())
-                        .position(Vec2::new(center.0, center.1))
-                        .size(Vec2::new(size.0, size.1))
-                        .color(*color),
-                ),
+                HudItem::Text { text, style, .. } => Some((text.as_str(), style.size)),
+                _ => None,
             })
-            .collect()
+            .peekable();
+        if texts.peek().is_some() {
+            self.text
+                .get_or_insert_with(TextAtlas::new)
+                .prepare(renderer, texts);
+        }
+        let mut out = Vec::new();
+        for item in items {
+            match item {
+                HudItem::Text {
+                    text,
+                    anchor,
+                    style,
+                } => {
+                    if let Some(atlas) = &self.text {
+                        out.extend(atlas.sprites(text, anchor.0, anchor.1, style));
+                    }
+                }
+                other => out.extend(self.shape_sprite(renderer, other)),
+            }
+        }
+        out
+    }
+
+    /// The sprite for an image or rectangle.
+    fn shape_sprite(&mut self, renderer: &Renderer, item: &HudItem) -> Option<Sprite> {
+        Some(item).and_then(|item| match item {
+            HudItem::Image {
+                path,
+                center,
+                size,
+                color,
+                rotation,
+            } => {
+                let texture = self.get(renderer, path)?;
+                let mut sprite = Sprite::new(texture)
+                    .position(Vec2::new(center.0, center.1))
+                    .color(*color)
+                    .rotation(*rotation);
+                if let Some((w, h)) = size {
+                    sprite = sprite.size(Vec2::new(*w, *h));
+                }
+                Some(sprite)
+            }
+            HudItem::Rect {
+                center,
+                size,
+                color,
+            } => Some(
+                Sprite::new(renderer.white_texture())
+                    .position(Vec2::new(center.0, center.1))
+                    .size(Vec2::new(size.0, size.1))
+                    .color(*color),
+            ),
+            HudItem::Text { .. } => None,
+        })
     }
 }

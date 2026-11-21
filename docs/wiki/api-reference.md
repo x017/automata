@@ -341,9 +341,9 @@ returns the number of frames run.
 | `scene` | Script entities: `["Name"]`, `find`, `by_id`, `in`, iteration |
 | `input` | Keys with the aliases `"shift"`, `"ctrl"`, `"alt"` (either side) and `"left"`/`"right"`/`"up"`/`"down"`; `axis(neg, pos)`; mouse buttons, `mouse_delta`, `lock_mouse` |
 | `physics` | `grounded`, `raycast`; the rest of the engine's physics, which also accepts script entities |
-| `audio`, `hud` | One-shot sounds; HUD images and rectangles |
+| `audio`, `hud` | One-shot sounds; HUD images, rectangles and text (`hud.text(text, x, y, size=24, color, align, shadow, outline)`) |
 | `camera` | The first `Camera3D` in the scene as a `ScriptCamera` |
-| `events`, `resources`, `raw`, `quit()` | Engine extras (`run_scene` only) |
+| `events`, `resources`, `screen`, `raw`, `quit()` | Engine extras (`run_scene` only). `screen.measure_text(text, size)` gives text's pixel size |
 | `log(...)`, `warn(...)` | |
 
 Reads see every write made earlier in the frame; writes apply after all

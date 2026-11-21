@@ -223,6 +223,15 @@ frame. Positions are screen pixels, and shapes are placed by their centre:
 
 The rest of `draw_hud` adds a health bar at the bottom left, a red flash
 when you're hit, and a pip for each drone still flying at the top right.
+Text uses the built-in font. `size` is the line height in pixels,
+`shadow=True` adds a soft drop shadow, and `align` says where `x` sits:
+
+```python
+    hud.text(f"{health:.0f}%", left + width + 20, bottom, size=26, shadow=True)
+```
+
+Once the last drone falls, an outlined "ARENA CLEAR" fades out at the top
+of the screen, drawn with `align="center"`.
 
 ## 4. The drones
 

@@ -252,13 +252,17 @@ class FakeHud:
     center = (640.0, 360.0)
 
     def __init__(self):
-        self.images, self.rects = [], []
+        self.images, self.rects, self.texts = [], [], []
 
     def image(self, path, x, y, size=None, color=(1, 1, 1, 1), rotation=0.0):
         self.images.append((path, x, y))
 
     def rect(self, x, y, w, h, color=(1, 1, 1, 1)):
         self.rects.append((x, y, w, h, color))
+
+    def text(self, text, x, y, size=24.0, color=(1, 1, 1, 1), align="left", shadow=None,
+             outline=None):
+        self.texts.append((text, x, y, align))
 
 
 class FakeTime:
@@ -380,6 +384,7 @@ def test_the_hud_shows_health_and_drones_left():
     pips = [r for r in ctx.hud.rects if r[2] == 14]
     assert len(pips) == 1, "one drone left"
     assert any(r[2] == 1280 for r in ctx.hud.rects), "a damage flash covers the screen"
+    assert [t[0] for t in ctx.hud.texts] == ["40%"], "the health label"
 
 
 def test_clearing_every_drone_is_announced_once():
@@ -389,6 +394,8 @@ def test_clearing_every_drone_is_announced_once():
     player_script.update(player, ctx)
     player_script.update(player, ctx)
     assert len(ctx.logs) == 1 and "drones down" in ctx.logs[0]
+    banners = [t for t in ctx.hud.texts if t[0] == "ARENA CLEAR"]
+    assert banners and banners[0][3] == "center", "a banner announces it too"
 
 
 def test_a_hurt_drone_cries_out_and_a_dead_one_explodes():

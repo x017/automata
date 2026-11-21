@@ -63,6 +63,11 @@ def update(entity, ctx):
         entity.attributes["miss"] = miss is None
         ctx.hud.image("crosshair.png", *ctx.hud.center, size=(32, 32))
         ctx.hud.rect(100, 20, 180, 12, (1, 0, 0, 1))
+        ctx.hud.text("100%", 40, 40, size=26, shadow=True)
+        ctx.hud.text("CLEAR\\nnext", *ctx.hud.center, align="center", outline=(0, 0, 0, 1))
+        w, h = ctx.screen.measure_text("100%", 26)
+        entity.attributes["text_w"] = w
+        entity.attributes["text_h"] = h
         entity.attributes["hud"] = "%dx%d" % ctx.hud.size
         if entity.audio.source is not None:
             entity.attributes["clip"] = entity.audio.source.clip
@@ -111,6 +116,7 @@ def test_scripts_play_sounds_raycast_and_draw_the_hud(tmp_path, capfd):
     assert seen["hit_distance"] == pytest.approx(5.0, abs=1e-3)
     assert seen["miss"] is True
     assert seen["hud"] == "1280x720"
+    assert 30 < seen["text_w"] < 80 and abs(seen["text_h"] - 26) < 0.01
     assert seen["clip"] == "hum.wav"
     err = capfd.readouterr().err
     assert "missing.wav" in err

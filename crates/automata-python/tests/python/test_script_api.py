@@ -83,3 +83,20 @@ def test_engine_extras_explain_themselves(tmp_path):
     host = api.ScriptHost(backend, on_error="report")
     host.frame([{"id": 1, "name": "E", "script": str(script)}])
     assert "ctx.quit isn't available here" in backend.errors[0]["msg"]
+
+
+def test_hud_text_items_and_validation():
+    hud = api.Hud()
+    hud.text("100%", 10, 20, size=26, shadow=True)
+    hud.text("Hi", 5, 5, align="Centre", outline=(1, 0, 0, 1), shadow=False)
+    first, second = hud._items
+    assert first == {"k": "text", "text": "100%", "x": 10.0, "y": 20.0, "size": 26.0,
+                     "c": [1.0, 1.0, 1.0, 1.0], "align": "left", "shadow": [0.0, 0.0, 0.0, 0.6]}
+    assert second["align"] == "center" and second["outline"] == [1.0, 0.0, 0.0, 1.0]
+    assert "shadow" not in second
+    for bad in ({"align": "middle"}, {"size": 0}, {"size": float("nan")}):
+        try:
+            hud.text("x", 0, 0, **bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"accepted {bad}")

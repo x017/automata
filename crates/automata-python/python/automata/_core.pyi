@@ -549,6 +549,18 @@ class Screen:
         height: float,
         color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
     ) -> None: ...
+    def text(
+        self,
+        text: str,
+        x: float,
+        y: float,
+        size: float = 24.0,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        align: str = "left",
+        shadow: Optional[tuple[float, float, float, float]] = None,
+        outline: Optional[tuple[float, float, float, float]] = None,
+    ) -> None: ...
+    def measure_text(self, text: str, size: float = 24.0) -> tuple[float, float]: ...
 
 class Physics:
     """3D physics queries for the current frame (ctx.physics)."""

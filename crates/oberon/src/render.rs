@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use automata_renderer::{DrawList, RenderTarget, Renderer, Sprite, Texture};
+use automata_renderer::{DrawList, RenderTarget, Renderer, Sprite, TextAtlas, TextStyle, Texture};
 use automata_scene::{Scene, SceneWorld};
 use glam::Vec2;
 
@@ -44,6 +44,8 @@ pub struct ViewportRenderer {
     preview_frame: Vec<u8>,
     /// HUD images scripts drew, loaded once per file (`None`: unreadable).
     hud_textures: HashMap<PathBuf, Option<Texture>>,
+    /// Glyphs for HUD text (the engine's atlas, so text matches the game).
+    hud_text: Option<TextAtlas>,
 }
 
 impl Default for ViewportRenderer {
@@ -65,43 +67,83 @@ impl ViewportRenderer {
             preview_target: None,
             preview_frame: Vec::new(),
             hud_textures: HashMap::new(),
+            hud_text: None,
         }
     }
 
     /// Turns a script HUD into sprites (screen pixels, top-left origin).
     /// Image paths are relative to `root`, the scene folder.
     fn hud_sprites(&mut self, renderer: &Renderer, root: &Path, items: &[HudItem]) -> Vec<Sprite> {
-        items
+        let mut texts = items
             .iter()
-            .filter_map(|item| {
-                let texture = match &item.kind {
-                    HudKind::Rect => renderer.white_texture(),
-                    HudKind::Image(rel) => {
-                        let path = if Path::new(rel).is_absolute() {
-                            PathBuf::from(rel)
-                        } else {
-                            rel.split('/')
-                                .fold(root.to_path_buf(), |p, part| p.join(part))
-                        };
-                        self.hud_textures
-                            .entry(path)
-                            .or_insert_with_key(|path| {
-                                let bytes = std::fs::read(path).ok()?;
-                                renderer.create_texture_from_bytes(&bytes).ok()
-                            })
-                            .clone()?
-                    }
-                };
-                let mut sprite = Sprite::new(texture)
-                    .position(Vec2::new(item.x, item.y))
-                    .color(item.color)
-                    .rotation(item.rotation);
-                if let Some([w, h]) = item.size {
-                    sprite = sprite.size(Vec2::new(w, h));
-                }
-                Some(sprite)
+            .filter_map(|item| match &item.kind {
+                HudKind::Text { text, size, .. } => Some((text.as_str(), *size)),
+                _ => None,
             })
-            .collect()
+            .peekable();
+        if texts.peek().is_some() {
+            self.hud_text
+                .get_or_insert_with(TextAtlas::new)
+                .prepare(renderer, texts);
+        }
+        let mut out = Vec::new();
+        for item in items {
+            if let HudKind::Text {
+                text,
+                size,
+                align,
+                shadow,
+                outline,
+            } = &item.kind
+            {
+                if let Some(atlas) = &self.hud_text {
+                    let style = TextStyle {
+                        size: *size,
+                        color: item.color,
+                        align: *align,
+                        shadow: *shadow,
+                        outline: *outline,
+                    };
+                    out.extend(atlas.sprites(text, item.x, item.y, &style));
+                }
+            } else {
+                out.extend(self.hud_shape(renderer, root, item));
+            }
+        }
+        out
+    }
+
+    /// The sprite for a HUD image or rectangle.
+    fn hud_shape(&mut self, renderer: &Renderer, root: &Path, item: &HudItem) -> Option<Sprite> {
+        Some(item).and_then(|item| {
+            let texture = match &item.kind {
+                HudKind::Rect => renderer.white_texture(),
+                HudKind::Text { .. } => return None,
+                HudKind::Image(rel) => {
+                    let path = if Path::new(rel).is_absolute() {
+                        PathBuf::from(rel)
+                    } else {
+                        rel.split('/')
+                            .fold(root.to_path_buf(), |p, part| p.join(part))
+                    };
+                    self.hud_textures
+                        .entry(path)
+                        .or_insert_with_key(|path| {
+                            let bytes = std::fs::read(path).ok()?;
+                            renderer.create_texture_from_bytes(&bytes).ok()
+                        })
+                        .clone()?
+                }
+            };
+            let mut sprite = Sprite::new(texture)
+                .position(Vec2::new(item.x, item.y))
+                .color(item.color)
+                .rotation(item.rotation);
+            if let Some([w, h]) = item.size {
+                sprite = sprite.size(Vec2::new(w, h));
+            }
+            Some(sprite)
+        })
     }
 
     /// Forgets loaded HUD images (a file changed, or Play stopped).

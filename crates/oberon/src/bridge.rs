@@ -161,6 +161,19 @@ pub enum HudKind {
     Image(String),
     /// A filled rectangle.
     Rect,
+    /// A string in the built-in font, anchored at the item's `x`, `y`.
+    Text {
+        /// The string (`\n` starts a new line).
+        text: String,
+        /// Line height in pixels.
+        size: f32,
+        /// Where `x` sits on each line.
+        align: automata_renderer::TextAlign,
+        /// Drop-shadow colour.
+        shadow: Option<[f32; 4]>,
+        /// Outline colour.
+        outline: Option<[f32; 4]>,
+    },
 }
 
 /// One thing `ctx.hud` drew this frame (pixels, top-left origin, placed by
@@ -688,6 +701,17 @@ fn parse_hud(v: &Json) -> Option<HudItem> {
     let kind = match v.get("k")?.as_str()? {
         "img" => HudKind::Image(v.get("path")?.as_str()?.to_string()),
         "rect" => HudKind::Rect,
+        "text" => HudKind::Text {
+            text: v.get("text")?.as_str()?.to_string(),
+            size: field("size").unwrap_or(24.0),
+            align: v
+                .get("align")
+                .and_then(Json::as_str)
+                .and_then(automata_renderer::TextAlign::parse)
+                .unwrap_or_default(),
+            shadow: v.get("shadow").and_then(Json::as_floats::<4>),
+            outline: v.get("outline").and_then(Json::as_floats::<4>),
+        },
         _ => return None,
     };
     Some(HudItem {
@@ -848,6 +872,37 @@ mod tests {
         assert_eq!(attrs["tint"], AttributeValue::Color([1.0, 0.0, 0.0, 1.0]));
         assert!(parse_msg("not json").is_none());
         assert!(parse_msg(r#"{"op":"???"}"#).is_none());
+    }
+
+    #[test]
+    fn hud_text_crosses_the_bridge() {
+        let msg = parse_msg(
+            r#"{"op":"frame","frame":1,"writes":[],"hud":[{"k":"text","text":"100%","x":10,"y":20,"size":26,"c":[1,1,1,1],"align":"center","shadow":[0,0,0,0.6]},{"k":"text","text":"x","x":0,"y":0,"size":12,"c":[1,0,0,1],"align":"sideways"}]}"#,
+        );
+        let Some(BridgeMsg::Frame(FrameReply { hud, .. })) = msg else {
+            panic!("frame expected: {msg:?}");
+        };
+        assert_eq!(
+            hud[0].kind,
+            HudKind::Text {
+                text: "100%".into(),
+                size: 26.0,
+                align: automata_renderer::TextAlign::Center,
+                shadow: Some([0.0, 0.0, 0.0, 0.6]),
+                outline: None,
+            }
+        );
+        assert_eq!((hud[0].x, hud[0].y), (10.0, 20.0));
+        assert!(
+            matches!(
+                hud[1].kind,
+                HudKind::Text {
+                    align: automata_renderer::TextAlign::Left,
+                    ..
+                }
+            ),
+            "unknown alignments fall back to left"
+        );
     }
 
     #[test]

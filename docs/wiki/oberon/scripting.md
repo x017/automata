@@ -97,6 +97,7 @@ for `entity` and `ctx`.
 | `ctx.audio.play("sounds/hit.ogg", volume=1, pitch=1, position=None)` | Play a sound once. With a `position` (a point or an entity) it fades with distance |
 | `ctx.hud.image("sprites/crosshair.png", x, y, size=None, color=(1,1,1,1))` | Draw an image this frame, centred on `(x, y)` in screen pixels |
 | `ctx.hud.rect(x, y, width, height, color)` | Draw a filled rectangle this frame, centred on `(x, y)` |
+| `ctx.hud.text("100%", x, y, size=24, color=(1,1,1,1), align="left", shadow=None, outline=None)` | Draw text this frame with the built-in font (see below) |
 | `ctx.hud.size`, `ctx.hud.center` | The game view's size in pixels, and its centre |
 | `ctx.scene["Name"]` | Another entity by name (raises `KeyError` if missing) |
 | `ctx.scene.find("Name")` | The same, but returns `None` if missing |
@@ -109,6 +110,24 @@ for `entity` and `ctx`.
 HUD shapes last one frame, so draw them in `update` every frame you want
 them shown. Image paths are relative to the scene folder. Each call draws on
 top of the previous one.
+
+**Text** uses the built-in font (Geist Medium):
+- `size` is the line height in pixels.
+- `align` says where `x` sits on each line: `"left"` (its left edge),
+  `"center"` or `"right"`.
+- `y` is the vertical centre, and `\n` starts a new line.
+- `shadow` and `outline` take a colour, or `True` for a translucent black
+  shadow or a solid black outline.
+
+```python
+ctx.hud.text(f"{health}%", 290, ctx.hud.size[1] - 48, size=26, shadow=True)
+ctx.hud.text("ARENA CLEAR", *ctx.hud.center, size=56, align="center", outline=True)
+```
+
+Text looks the same in Play and in the exported game, because both draw it
+with the engine's own glyph atlas. Under `run_scene`,
+`ctx.screen.measure_text(text, size)` returns the `(width, height)` text
+will cover.
 
 **Key names** are lowercase: `"a"`–`"z"`, `"0"`–`"9"`, `"space"`,
 `"enter"`, `"escape"`, `"tab"`, `"backspace"`, the arrows `"arrow_left"`,

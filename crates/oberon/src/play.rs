@@ -1135,10 +1135,22 @@ mod tests {
             .iter()
             .filter_map(|h| match &h.kind {
                 HudKind::Image(p) => Some(p.as_str()),
-                HudKind::Rect => None,
+                _ => None,
             })
             .collect();
         assert!(images.contains(&"sprites/crosshair.png"), "{images:?}");
+        let labels: Vec<&str> = play
+            .hud
+            .iter()
+            .filter_map(|h| match &h.kind {
+                HudKind::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            labels.iter().any(|t| t.ends_with('%')),
+            "the health label: {labels:?}"
+        );
         let pips = play
             .hud
             .iter()

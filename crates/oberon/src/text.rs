@@ -18,7 +18,7 @@ const MONO_BYTES: &[u8] = include_bytes!("../assets/FiraCode-Regular.ttf");
 /// The interface font: Geist Regular (SIL OFL, `assets/Geist-LICENSE.txt`).
 const UI_BYTES: &[u8] = include_bytes!("../assets/Geist-Regular.ttf");
 /// Headings and emphasis: Geist Medium.
-const UI_MEDIUM_BYTES: &[u8] = include_bytes!("../assets/Geist-Medium.ttf");
+const UI_MEDIUM_BYTES: &[u8] = automata_renderer::text::BUILTIN_FONT;
 
 /// A type face.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -18,6 +18,7 @@ image.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+ab_glyph.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]

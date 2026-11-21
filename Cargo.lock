@@ -260,6 +260,7 @@ dependencies = [
 name = "automata-renderer"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "bytemuck",
  "glam 0.33.12",
  "image",

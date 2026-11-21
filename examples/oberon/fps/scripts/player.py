@@ -116,6 +116,7 @@ def start(entity, ctx):
     s["flash"] = 0.0
     s["walking"] = False
     s["won"] = False
+    s["banner"] = 0.0
     if entity.attributes.get("health") is None:
         entity.attributes["health"] = 100
     s["health"] = entity.attributes.get("health")
@@ -305,6 +306,7 @@ def draw_hud(entity, ctx):
     if fill > 0:
         color = (0.95, 0.95, 0.92, 1.0) if health > 30 else (1.0, 0.3, 0.2, 1.0)
         hud.rect(left + fill / 2, bottom, fill, 18, color)
+    hud.text(f"{health:.0f}%", left + width + 20, bottom, size=26, shadow=True)
 
     # One pip per drone still flying, top right.
     drones = sum(1 for e in ctx.scene if (e.name or "").startswith("Enemy"))
@@ -312,4 +314,10 @@ def draw_hud(entity, ctx):
         hud.rect(w - 48 - i * 22, 48, 14, 14, (0.95, 0.95, 0.92, 0.9))
     if drones == 0 and not s["won"]:
         s["won"] = True
+        s["banner"] = 4.0
         ctx.log("All drones down. Nice shooting!")
+    if s["banner"] > 0.0:
+        fade = min(1.0, s["banner"])
+        hud.text("ARENA CLEAR", cx, cy - 120, size=56, color=(0.95, 0.95, 0.92, fade),
+                 align="center", outline=(0.0, 0.0, 0.0, 0.8 * fade))
+        s["banner"] -= dt
