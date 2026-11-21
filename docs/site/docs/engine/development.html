@@ -89,15 +89,22 @@ python3 -m http.server -d docs 8000     # preview at http://localhost:8000/site/
 <p>New pages must be added to <code>NAV</code> in the script to get a sidebar entry. The
 page styles and scripts live in <code>scripts/site/</code> and are copied into
 <code>docs/site/docs/_static/</code>.</p>
-<p>The art direction is editorial type (Geist with Instrument Serif for display,
-both OFL and vendored in <code>docs/site/fonts/</code>) with one-bit dithered art.
-<code>docs/site/dither.js</code> holds the shared art: the live ray-marched hero scene,
-the dither-to-colour "develop" effect on screenshots, and the swatch, moon,
-and wordmark drawings. The static stills in <code>docs/site/img/</code> (hero fallback
-and section banners) are exported from the same shader with
-<code>scripts/site/export-art.html</code>; its header lists the parameters for each.
-Everything honours <code>prefers-reduced-motion</code>, and the pages work without
-JavaScript or WebGL.</p>
+<p><strong>Landing page</strong> (<code>docs/site/index.html</code> + <code>docs/site/landing.js</code>). It is
+set in Bricolage Grotesque, with JetBrains Mono for code. Both are OFL and
+vendored in <code>docs/site/fonts/</code>. <code>landing.js</code> is a tiny hidden-line 3D
+renderer on a 2D canvas, styled after Oberon's scene view. It draws the hero
+scene and the <code>coin.py</code> playground, whose yellow numbers are draggable
+sliders running the same logic as the tutorial script. It also drives the
+Oberon tour, which highlights regions of the screenshots in
+<code>docs/assets/oberon/</code>. If you regenerate those screenshots with a different
+layout, update the <code>data-rect</code> values (in 1600×950 pixels) in <code>index.html</code>.</p>
+<p><strong>Docs pages</strong> use editorial type (Geist with Instrument Serif for display)
+and one-bit dithered art. <code>docs/site/dither.js</code> provides the dither-to-colour
+"develop" effect on screenshots. The section banners in <code>docs/site/img/</code>
+are exported from the same shader with <code>scripts/site/export-art.html</code>; its
+header lists the parameters for each.</p>
+<p>Everything honours <code>prefers-reduced-motion</code>, and the pages work without
+JavaScript (the canvases simply stay empty).</p>
 <h2 id="coding-conventions">Coding conventions<a class="anchor" href="#coding-conventions" aria-label="Link to this section">#</a></h2>
 <ul><li><strong>Edition 2021</strong>, MSRV 1.86 (bumped deliberately, not casually).</li><li><strong>No <code>unsafe</code></strong> in engine crates — enforced workspace-wide.</li><li><strong>Document every public item.</strong> <code>missing_docs</code> is a workspace lint and CI
 denies warnings. Document why, not just what.</li><li><strong>Errors</strong>: libraries define a crate-local <code>Error</code> enum with <code>thiserror</code>

@@ -93,15 +93,24 @@ New pages must be added to `NAV` in the script to get a sidebar entry. The
 page styles and scripts live in `scripts/site/` and are copied into
 `docs/site/docs/_static/`.
 
-The art direction is editorial type (Geist with Instrument Serif for display,
-both OFL and vendored in `docs/site/fonts/`) with one-bit dithered art.
-`docs/site/dither.js` holds the shared art: the live ray-marched hero scene,
-the dither-to-colour "develop" effect on screenshots, and the swatch, moon,
-and wordmark drawings. The static stills in `docs/site/img/` (hero fallback
-and section banners) are exported from the same shader with
-`scripts/site/export-art.html`; its header lists the parameters for each.
+**Landing page** (`docs/site/index.html` + `docs/site/landing.js`). It is
+set in Bricolage Grotesque, with JetBrains Mono for code. Both are OFL and
+vendored in `docs/site/fonts/`. `landing.js` is a tiny hidden-line 3D
+renderer on a 2D canvas, styled after Oberon's scene view. It draws the hero
+scene and the `coin.py` playground, whose yellow numbers are draggable
+sliders running the same logic as the tutorial script. It also drives the
+Oberon tour, which highlights regions of the screenshots in
+`docs/assets/oberon/`. If you regenerate those screenshots with a different
+layout, update the `data-rect` values (in 1600×950 pixels) in `index.html`.
+
+**Docs pages** use editorial type (Geist with Instrument Serif for display)
+and one-bit dithered art. `docs/site/dither.js` provides the dither-to-colour
+"develop" effect on screenshots. The section banners in `docs/site/img/`
+are exported from the same shader with `scripts/site/export-art.html`; its
+header lists the parameters for each.
+
 Everything honours `prefers-reduced-motion`, and the pages work without
-JavaScript or WebGL.
+JavaScript (the canvases simply stay empty).
 
 ## Coding conventions
 
