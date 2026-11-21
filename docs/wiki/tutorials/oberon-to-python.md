@@ -56,14 +56,15 @@ the file.
 |---|---|---|
 | Scripts | Separate Python process, hot reload | In-process, no reload |
 | A script error | Pauses that script and logs it | Raises and stops the game, so you see it immediately |
-| `ctx.input.axis`, key aliases | ✓ | ✓ |
-| `entity.camera`, `ctx.camera` | ✓ | ✓ |
+| Everything in [Scripting](../oberon/scripting.md): `entity`, input, `raycast`, audio, HUD, cameras | ✓ | ✓ |
+| When writes apply | After all scripts have run | The same |
 | `ctx.events`, `ctx.resources`, `ctx.quit()` | — | ✓ |
-| Full physics (raycasts, impulses): `ctx.physics.*` | `grounded` only | ✓ |
+| The rest of the engine's physics (impulses, queued casts) | — | ✓ |
 | Spawning: `ctx.raw.scene.spawn(prefab)` | — | ✓ |
-| `transform.translate` / `rotate` | ✓ | Assign `position` / `rotation_euler` instead |
 
-Stick to the common column and a script runs identically in both.
+Both columns run the same code for `entity` and `ctx`, and a shared test
+suite holds them to the same results. Stick to the common rows and a
+script runs identically in both.
 
 ## 4. Test it headlessly
 

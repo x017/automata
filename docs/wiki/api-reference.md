@@ -325,21 +325,30 @@ returns the number of frames run.
 
 | `entity` | |
 |---|---|
-| `name`, `id`, `state` (dict), `grounded` | |
-| `transform` | `position`, `rotation_euler` (radians), `scale`. Read, or assign |
+| `name`, `id`, `state` (dict), `grounded`, `script` | |
+| `transform` | `position`, `rotation_euler` (radians), `scale`; `translate(d)`, `rotate(d)`. Read, or assign |
 | `character_velocity` | Set to move a character |
 | `attributes` | Dict-like, saved in the scene |
 | `camera` | `ScriptCamera` or `None` |
-| `camera_3d` | Raw `Camera3D` get/set |
-| `despawn()` | |
+| `audio` | `play()`, `stop()`, `playing`, `source` |
+| `camera_3d` | The camera as a `Camera3D` (get/set) |
+| `view` | The engine's `EntityView` for this frame |
+| `despawn()` | At the end of the frame |
 
 | `ctx` | |
 |---|---|
-| `time`, `scene`, `events`, `resources`, `raw` | Engine objects (`ctx.scene` finds script handles by name) |
-| `input` | Engine input plus `axis(neg, pos)` and the aliases `"shift"`, `"ctrl"`, `"alt"` (either side), `"left"`/`"right"`/`"up"`/`"down"` |
-| `physics` | Engine physics; also accepts script handles |
+| `time` | `delta`, `elapsed`, `frame` (from 1) |
+| `scene` | Script entities: `["Name"]`, `find`, `by_id`, `in`, iteration |
+| `input` | Keys with the aliases `"shift"`, `"ctrl"`, `"alt"` (either side) and `"left"`/`"right"`/`"up"`/`"down"`; `axis(neg, pos)`; mouse buttons, `mouse_delta`, `lock_mouse` |
+| `physics` | `grounded`, `raycast`; the rest of the engine's physics, which also accepts script entities |
+| `audio`, `hud` | One-shot sounds; HUD images and rectangles |
 | `camera` | The first `Camera3D` in the scene as a `ScriptCamera` |
-| `log(...)`, `warn(...)`, `quit()` | |
+| `events`, `resources`, `raw`, `quit()` | Engine extras (`run_scene` only) |
+| `log(...)`, `warn(...)` | |
+
+Reads see every write made earlier in the frame; writes apply after all
+scripts have run. That's the same model as Oberon's Play mode, from the same
+module (`automata.script_api`).
 
 **`ScriptCamera`**: `position`, `target`, `fov` (read/assign),
 `look_at(point_or_entity)`, and

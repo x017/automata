@@ -5,7 +5,7 @@ we intend to tackle them. Each section records **what was decided**,
 **why**, and **what's still open**, so work can resume without
 re-discussing settled points.
 
-Status: 🟢 decided · 🟡 under discussion · ⚪ not discussed yet
+Status: ✅ done · 🟢 decided · 🟡 under discussion · ⚪ not discussed yet
 
 ---
 
@@ -86,14 +86,19 @@ discussion before starting.
 
 ---
 
-## 2. One scripting API instead of two 🟢 decided (not started)
+## 2. One scripting API instead of two ✅ done
 
-Today Oberon's bridge (`crates/oberon/src/bridge.py`, ~860 lines, standard
+**Done.** `automata/script_api.py` is the one implementation. Oberon's
+`bridge.py` and `scripting.py` are now only its drivers, and
+`tests/script_conformance/` runs through both runners in CI. Details are in
+*Outcome* below.
+
+Before, Oberon's bridge (`crates/oberon/src/bridge.py`, ~860 lines, standard
 library only) and `run_scene` (`automata/scripting.py`, ~570 lines) each
-implement `entity` / `ctx` separately. They also **behave differently**:
-- Oberon applies script writes after all scripts run; `run_scene` applies
+implemented `entity` / `ctx` separately. They also **behaved differently**:
+- Oberon applied script writes after all scripts ran; `run_scene` applied
   them immediately.
-- Some helpers (`transform.translate`, `input.axis`) exist on one side only.
+- Some helpers (`transform.translate`, `input.axis`) existed on one side only.
 
 ### Decisions
 
@@ -101,7 +106,7 @@ implement `entity` / `ctx` separately. They also **behave differently**:
 |---|---|
 | Approach | **One shared API layer + a shared test suite.** `entity` / `ctx` are written once, in a standard-library-only Python module, on top of a small backend interface. |
 | Backends | **Bridge backend** (Oberon's JSON frames) and **engine backend** (the Rust extension under `run_scene`). Both are thin: read/write transform and attributes, ray cast, sounds, HUD, input, despawn. |
-| When writes become visible | **Deferred (Oberon's model) everywhere.** Scripts read the start of the frame plus their own writes; all writes apply after every script has run. Results don't depend on script order. |
+| When writes become visible | **Deferred (Oberon's model) everywhere.** Scripts read the start of the frame plus every write made earlier in it (one shared handle per entity); all writes reach the simulation after every script has run. |
 | Play without the Automata package | **Keep zero-setup.** Oberon embeds the shared module, so Play works with any `python3`. No install step, and no version mismatch between Oberon and an installed package. |
 
 ### Plan
@@ -120,6 +125,36 @@ implement `entity` / `ctx` separately. They also **behave differently**:
    the end-to-end check.
 6. Make the formerly "Oberon only" helpers available everywhere and remove
    those notes from the docs.
+
+### Outcome
+
+- **`crates/automata-python/python/automata/script_api.py`** (standard
+  library only): `entity`, `ctx`, script loading, hot reload and error
+  reports, built on a `Backend` interface. `ScriptHost.frame(records)` returns
+  a `FrameOutput` (writes, sounds, HUD, cursor lock) for the driver to apply.
+- **Oberon:** `bridge.rs` `include_str!`s the module and writes it as
+  `.oberon/_automata_script_api.py` next to `bridge.py`. `bridge.py` (~300
+  lines) keeps the JSON protocol, the Console redirect and the ray casts
+  against collider shapes. Play still needs only a plain `python3`.
+- **Engine:** `scripting.py` turns `EntityView`s into records and applies
+  the output through the engine's buffered writes. `EntityView.attributes`
+  gained a setter (a whole-map replacement). Engine-only members (`ctx.events`,
+  `ctx.resources`, `ctx.quit()`, `ctx.raw`, the rest of `ctx.physics`) come
+  through `Backend.extra`. In Oberon they raise an error that says they need
+  `run_scene`.
+- **Conformance:** seven scenarios (write timing, transforms and
+  read-your-writes, attribute types, cameras, ray casts, scene lookups and
+  despawn, input and ctx basics). They run in `oberon`'s
+  `script_conformance_scenarios_match_expectations` (real Play loop and
+  bridge) and in `tests/python/test_script_conformance.py` (real engine).
+  Hot reload and error reports are unit-tested in `test_script_api.py`.
+  Sounds and HUD stay covered by the end-to-end FPS tests.
+- **Side effect:** `run_scene` no longer looks entities up by name once per
+  scripted entity, which was O(n²). With 1000 scripted entities a headless
+  frame went from 268 ms to 14 ms. The bridge went from 13.2 to 15.0 ms
+  (JSON both ways included). Item #6 will measure properly.
+- Entities spawned at runtime with a script now run it under `run_scene`
+  too (handles are keyed by id, not name).
 
 ## 3. Game UI system 🟢 decided (not started)
 

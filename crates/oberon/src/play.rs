@@ -554,6 +554,140 @@ mod tests {
     use super::*;
     use crate::doc::CreateKind;
 
+    /// Differences between an `expect.json` value and an observed one
+    /// (numbers within 1e-3; booleans must be booleans).
+    fn json_mismatches(
+        expected: &crate::json::Json,
+        actual: &crate::json::Json,
+        path: &str,
+    ) -> Vec<String> {
+        use crate::json::Json;
+        let differ = || {
+            vec![format!(
+                "{path}: expected {}, got {}",
+                expected.dump(),
+                actual.dump()
+            )]
+        };
+        match (expected, actual) {
+            (Json::Bool(a), Json::Bool(b)) if a == b => Vec::new(),
+            (Json::Int(_) | Json::Float(_), Json::Int(_) | Json::Float(_)) => {
+                let (a, b) = (expected.as_f64().unwrap(), actual.as_f64().unwrap());
+                if (a - b).abs() <= 1e-3 {
+                    Vec::new()
+                } else {
+                    differ()
+                }
+            }
+            (Json::Str(a), Json::Str(b)) if a == b => Vec::new(),
+            (Json::Arr(a), Json::Arr(b)) if a.len() == b.len() => a
+                .iter()
+                .zip(b)
+                .enumerate()
+                .flat_map(|(i, (e, g))| json_mismatches(e, g, &format!("{path}[{i}]")))
+                .collect(),
+            _ => differ(),
+        }
+    }
+
+    /// Runs one `tests/script_conformance/` folder through Oberon's Play
+    /// loop and the real bridge; returns what didn't match `expect.json`.
+    fn run_conformance(python: &str, dir: &std::path::Path) -> Vec<String> {
+        use crate::bridge::{attr_json, BridgeMsg, ScriptBridge};
+        use crate::json::Json;
+        let name = dir.file_name().unwrap().to_string_lossy().to_string();
+        let expect =
+            Json::parse(&std::fs::read_to_string(dir.join("expect.json")).unwrap()).unwrap();
+        let frames = u64::try_from(expect.get("frames").and_then(Json::as_i64).unwrap()).unwrap();
+        let doc = Document::load(&dir.join("scene.ron")).unwrap();
+        let mut play = PlaySession::start(&doc);
+        let runtime =
+            std::env::temp_dir().join(format!("oberon_conformance_{name}_{}", std::process::id()));
+        let mut bridge = ScriptBridge::start(python, &runtime, dir).unwrap();
+        let mut problems = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            for msg in bridge.poll() {
+                match msg {
+                    BridgeMsg::Frame(w) => play.apply_frame(&w),
+                    BridgeMsg::Error { msg, traceback, .. } => {
+                        problems.push(format!("{name}: script error {msg}\n{traceback}"));
+                    }
+                    _ => {}
+                }
+            }
+            if bridge.answered >= frames || std::time::Instant::now() > deadline {
+                break;
+            }
+            let mut input = play.frame_input();
+            input.screen = [1280, 720];
+            let states = play.script_states(|rel| doc.resolve(rel));
+            if bridge.send_frame_with(TIMESTEP, play.elapsed, &[], &states, &input) {
+                play.update(TIMESTEP);
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        let answered = bridge.answered;
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&runtime);
+        if answered < frames {
+            problems.push(format!("{name}: only {answered} of {frames} frames ran"));
+            return problems;
+        }
+        let states = play.script_states(|rel| doc.resolve(rel));
+        for (entity, want) in expect.get("entities").and_then(Json::as_obj).unwrap() {
+            let got = states.iter().find(|s| &s.name == entity);
+            let (want, got) = match (want, got) {
+                (Json::Null, None) => continue,
+                (Json::Null, Some(_)) => {
+                    problems.push(format!("{name}: {entity}: expected gone, still there"));
+                    continue;
+                }
+                (_, None) => {
+                    problems.push(format!("{name}: {entity}: missing"));
+                    continue;
+                }
+                (want, Some(got)) => (want, got),
+            };
+            for (key, value) in want.get("attributes").and_then(Json::as_obj).unwrap_or(&[]) {
+                let path = format!("{name}: {entity}.attributes[{key:?}]");
+                match got.attributes.get(key) {
+                    Some(v) => problems.extend(json_mismatches(value, &attr_json(v), &path)),
+                    None => problems.push(format!("{path}: missing")),
+                }
+            }
+            for key in want
+                .get("attributes_absent")
+                .and_then(Json::as_arr)
+                .unwrap_or(&[])
+            {
+                let key = key.as_str().unwrap();
+                if got.attributes.contains_key(key) {
+                    problems.push(format!(
+                        "{name}: {entity}.attributes[{key:?}]: expected absent"
+                    ));
+                }
+            }
+            let fields = [
+                ("position", Some(Json::floats(&got.position))),
+                ("rotation", Some(Json::floats(&got.rotation))),
+                ("scale", Some(Json::floats(&got.scale))),
+                ("camera", got.camera.map(|c| Json::floats(&c))),
+            ];
+            for (key, actual) in fields {
+                if let Some(value) = want.get(key) {
+                    let path = format!("{name}: {entity}.{key}");
+                    match actual {
+                        Some(actual) => problems.extend(json_mismatches(value, &actual, &path)),
+                        None => problems.push(format!("{path}: missing")),
+                    }
+                }
+            }
+        }
+        problems
+    }
+
     #[test]
     fn a_physics_cube_falls_onto_the_ground_and_the_document_is_untouched() {
         let mut doc = Document::starter();
@@ -685,6 +819,38 @@ mod tests {
             doc.entities[idx].data.attributes["hp"],
             automata_core::AttributeValue::Int(3)
         );
+    }
+
+    /// The script conformance suite (`tests/script_conformance/`): every
+    /// scenario runs through Oberon's Play loop and JSON bridge and must
+    /// end as its `expect.json` says. The engine's runner is held to the
+    /// same files by `crates/automata-python/tests/test_script_conformance.py`
+    /// (skipped without python3).
+    #[test]
+    fn script_conformance_scenarios_match_expectations() {
+        let python = crate::bridge::default_python();
+        if std::process::Command::new(python)
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/script_conformance");
+        let mut dirs: Vec<_> = std::fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.join("expect.json").is_file())
+            .collect();
+        dirs.sort();
+        assert!(dirs.len() >= 7, "{dirs:?}");
+        let problems: Vec<String> = dirs
+            .iter()
+            .flat_map(|d| run_conformance(python, d))
+            .collect();
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
 
     /// The finished tutorial project plays in Oberon: every script loads and

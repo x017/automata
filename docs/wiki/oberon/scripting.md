@@ -46,10 +46,19 @@ Every frame, Oberon sends the scene state to the Python runner. The runner
 calls every script, and the scripts' changes come back and apply before the
 frame renders. Two rules follow from this:
 
-1. **Reads see the start of the frame**, plus your own writes made earlier
-   in the same frame.
-2. **Writes apply after all scripts have run.** If two scripts write the
+1. **Reads see the start of the frame**, plus every write made earlier in
+   the same frame, by any script. All scripts share one handle per entity.
+2. **Writes reach the simulation after all scripts have run.** Physics,
+   rendering and sound see the frame's final values. If two scripts set the
    same value, the last one wins.
+
+So when four drones each run
+`ctx.scene["Player"].attributes["health"] -= 5` in one frame, the player
+loses 20 health, not 5. A despawn also lands at the end of the frame:
+other scripts can still find the entity until then.
+
+`run_scene` follows the same rules, because both runners use the same code
+for `entity` and `ctx`.
 
 ## `entity`
 
@@ -59,7 +68,7 @@ frame renders. Two rules follow from this:
 | `entity.transform.position` | `(x, y, z)`. Read it, or assign a tuple |
 | `entity.transform.rotation_euler` | `(x, y, z)` in **radians** (the Inspector shows degrees) |
 | `entity.transform.scale` | `(x, y, z)` |
-| `entity.transform.translate(d)` / `.rotate(d)` | Add a delta (Oberon only) |
+| `entity.transform.translate(d)` / `.rotate(d)` | Add a delta to the position / rotation |
 | `entity.character_velocity` | Set it to move a Character Controller |
 | `entity.grounded` | True when a character is standing on something |
 | `entity.attributes["key"]` | Custom values from the Inspector; read and write like a dict |
@@ -78,7 +87,7 @@ frame renders. Two rules follow from this:
 | `ctx.input.pressed("w")` | Key held down |
 | `ctx.input.just_pressed("space")` | Pressed this frame |
 | `ctx.input.just_released("e")` | Released this frame |
-| `ctx.input.axis("a", "d")` | −1, 0, or 1 from two keys (Oberon only) |
+| `ctx.input.axis("a", "d")` | −1, 0, or 1 from two keys |
 | `ctx.input.mouse_delta` | `(dx, dy)` mouse movement in pixels since last frame; +y is down |
 | `ctx.input.mouse_pressed("left")` | Mouse button held (`"left"`, `"right"`, `"middle"`); also `mouse_just_pressed` and `mouse_just_released` |
 | `ctx.input.lock_mouse(True)` | Hide and capture the cursor for mouse look. `False` frees it, and Stop always frees it |
@@ -91,6 +100,8 @@ frame renders. Two rules follow from this:
 | `ctx.hud.size`, `ctx.hud.center` | The game view's size in pixels, and its centre |
 | `ctx.scene["Name"]` | Another entity by name (raises `KeyError` if missing) |
 | `ctx.scene.find("Name")` | The same, but returns `None` if missing |
+| `ctx.scene.by_id(id)` | An entity by id (as in `hit.entity.id`), or `None` |
+| `"Name" in ctx.scene` | Whether an entity has that name |
 | `for e in ctx.scene:` | Every entity |
 | `ctx.camera` | The camera Play renders through, or `None` |
 | `ctx.log(...)`, `ctx.warn(...)` | Write to the Console. `print()` works too |
@@ -154,11 +165,17 @@ at.run_scene("level.ron")                          # windowed
 at.run_scene("level.ron", headless=True, max_frames=600)   # CI test
 ```
 
+Everything on this page works in both places: one module
+(`automata/script_api.py`) implements `entity` and `ctx` for Oberon and for
+`run_scene`. A shared test suite (`tests/script_conformance/`) runs the same
+scenes through both runners in CI.
+
 Under `run_scene`, `ctx` also exposes the full engine:
 - `ctx.events`
 - `ctx.resources`
-- the complete `ctx.physics` (raycasts, impulses)
+- the complete `ctx.physics` (impulses, queued casts, and more)
 - `ctx.quit()`
+- `ctx.raw`, the engine's own frame context
 
-To keep a script portable, use only the members above that aren't marked
-"Oberon only". See [From Oberon to Python](../tutorials/oberon-to-python.md).
+In Oberon these raise an error that names the member and says it needs
+`run_scene`. See [From Oberon to Python](../tutorials/oberon-to-python.md).

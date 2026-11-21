@@ -1,0 +1,12 @@
+{
+  "frames": 3,
+  "entities": {
+    "Cam": {
+      "attributes": {
+        "fov_now": 179.0, "pos": [0, 3, 8], "target": [4, 0, 0], "fov": 179.0,
+        "target_has_camera": false
+      },
+      "camera": [0, 3, 8, 4, 0, 0, 179]
+    }
+  }
+}

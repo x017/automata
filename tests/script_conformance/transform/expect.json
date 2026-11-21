@@ -1,0 +1,11 @@
+{
+  "frames": 5,
+  "entities": {
+    "Mover": {
+      "attributes": {"starts": 1, "updates": 5, "first_frame": 1, "x_after_translate": 1.0},
+      "position": [3, 5, 0],
+      "rotation": [0, 1.5, 0],
+      "scale": [2, 2, 2]
+    }
+  }
+}

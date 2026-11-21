@@ -746,6 +746,15 @@ impl EntityView {
         PyAttributes::live(self.id, self.attributes.clone(), Rc::clone(&self.writes))
     }
 
+    /// Queues a whole new attribute map (a dict), applied after the
+    /// callback returns.
+    #[setter]
+    fn set_attributes(&self, values: &Bound<'_, PyAny>) -> PyResult<()> {
+        let map = map_from_py(values)?;
+        self.writes.borrow_mut().attributes.insert(self.id, map);
+        Ok(())
+    }
+
     /// Path of the behaviour script attached in Oberon, or `None`.
     #[getter]
     fn script(&self) -> Option<String> {

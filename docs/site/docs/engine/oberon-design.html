@@ -272,7 +272,12 @@ representable).</li></ul>
 the Inspector) never run inside the editor process. On Play, Oberon starts
 the configured interpreter (<code>prefs.ron</code> → <code>python</code>, default <code>python3</code>) on
 <code>bridge.py</code>, a pure-stdlib runner compiled into the editor and written to
-<code>&lt;project&gt;/.oberon/</code>. The two sides exchange JSON lines:</p>
+<code>&lt;project&gt;/.oberon/</code> together with <code>_automata_script_api.py</code>. That second
+file is <code>automata/script_api.py</code>, the one implementation of <code>entity</code>/<code>ctx</code>,
+which <code>run_scene</code> also uses. <code>bridge.py</code> is only the driver: the protocol,
+the Console redirect and ray casts against the sent collider shapes.
+<code>tests/script_conformance/</code> runs the same scenes through both runners. The
+two sides exchange JSON lines:</p>
 <div class="table"><table><thead><tr><th>Direction</th><th>Message</th><th>Contents</th></tr></thead><tbody><tr><td>→ runner</td><td><code>frame</code></td><td>dt, time, held keys, every entity's transform / character velocity / grounded / attributes / script</td></tr><tr><td>→ runner</td><td><code>stop</code></td><td>call <code>stop</code> hooks and exit</td></tr><tr><td>← runner</td><td><code>ready</code></td><td>Python version</td></tr><tr><td>← runner</td><td><code>log</code></td><td><code>print</code> output (Console)</td></tr><tr><td>← runner</td><td><code>error</code></td><td>summary, script file + line, user-frame traceback</td></tr><tr><td>← runner</td><td><code>reloaded</code></td><td>a script file changed and was re-imported</td></tr><tr><td>← runner</td><td><code>frame</code></td><td>per-entity writes: transform, velocity, attributes</td></tr></tbody></table></div>
 <p>Frames are pipelined, not awaited: the next frame is sent only after the
 previous reply, so a slow script lowers the script tick rate instead of

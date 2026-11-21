@@ -3,7 +3,9 @@
 //! Oberon never embeds a Python interpreter. When a scene with scripts
 //! enters Play mode, it starts the project's `python3` on a small runner
 //! (`bridge.py`, compiled into the editor and written to
-//! `<project>/.oberon/bridge.py`) and exchanges one JSON object per line:
+//! `<project>/.oberon/bridge.py` next to `_automata_script_api.py`, the
+//! script API shared with `automata.run_scene`) and exchanges one JSON
+//! object per line:
 //!
 //! * Oberon → runner: `frame` (time, held keys, every entity's transform,
 //!   character velocity, grounded flag, attributes and script path), and
@@ -29,6 +31,14 @@ use crate::json::Json;
 
 /// The runner script (pure standard-library Python).
 pub const RUNNER: &str = include_str!("bridge.py");
+
+/// The behaviour-script API (`entity`, `ctx`, loading, errors), the same
+/// module the engine's `run_scene` uses. The runner imports it from its own
+/// folder, so Play needs no installed packages.
+pub const SCRIPT_API: &str = include_str!("../../automata-python/python/automata/script_api.py");
+
+/// The file name [`SCRIPT_API`] is written under, next to the runner.
+pub const SCRIPT_API_FILE: &str = "_automata_script_api.py";
 
 /// The default interpreter when the preferences don't name one.
 #[must_use]
@@ -273,8 +283,13 @@ impl ScriptBridge {
     pub fn start(python: &str, runtime_dir: &Path, cwd: &Path) -> std::io::Result<Self> {
         std::fs::create_dir_all(runtime_dir)?;
         let runner = runtime_dir.join("bridge.py");
-        if std::fs::read_to_string(&runner).ok().as_deref() != Some(RUNNER) {
-            std::fs::write(&runner, RUNNER)?;
+        for (path, text) in [
+            (runner.clone(), RUNNER),
+            (runtime_dir.join(SCRIPT_API_FILE), SCRIPT_API),
+        ] {
+            if std::fs::read_to_string(&path).ok().as_deref() != Some(text) {
+                std::fs::write(&path, text)?;
+            }
         }
         let mut child = Command::new(python)
             .arg("-u")
@@ -964,7 +979,9 @@ mod tests {
         assert_eq!(err.0, broken);
         assert_eq!(err.1, 2);
         assert!(
-            err.2.contains("ZeroDivisionError") && !err.2.contains("bridge.py"),
+            err.2.contains("ZeroDivisionError")
+                && !err.2.contains("bridge.py")
+                && !err.2.contains(SCRIPT_API_FILE),
             "{}",
             err.2
         );

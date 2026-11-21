@@ -1,0 +1,13 @@
+{
+  "frames": 4,
+  "entities": {
+    "Doomed": null,
+    "Watcher": {
+      "attributes": {
+        "found_during_frame": true, "contains_self": true, "missing": true,
+        "key_error": true, "same_handle": true, "by_id_self": true,
+        "gone_later": true, "state_kept": 3
+      }
+    }
+  }
+}

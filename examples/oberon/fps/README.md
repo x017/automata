@@ -47,5 +47,5 @@ automata-export build examples/oberon/fps --target all
 | `build_level.py` | Rebuilds `level.ron` from Python. Run it after changing the layout in code. |
 | `tests/` | Headless tests: `pytest examples/oberon/fps/tests`. |
 
-The walkthrough is in the wiki: [Tutorial: a first-person shooter](../../../docs/wiki/tutorial-fps.md).
+The walkthrough is in the wiki: [Tutorial: a first-person shooter](../../../docs/wiki/tutorials/fps.md).
 Asset licences are in [CREDITS.md](CREDITS.md).

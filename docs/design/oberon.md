@@ -354,7 +354,12 @@ Behaviour scripts (`start/update/stop(entity, ctx)` modules attached in
 the Inspector) never run inside the editor process. On Play, Oberon starts
 the configured interpreter (`prefs.ron` → `python`, default `python3`) on
 `bridge.py`, a pure-stdlib runner compiled into the editor and written to
-`<project>/.oberon/`. The two sides exchange JSON lines:
+`<project>/.oberon/` together with `_automata_script_api.py`. That second
+file is `automata/script_api.py`, the one implementation of `entity`/`ctx`,
+which `run_scene` also uses. `bridge.py` is only the driver: the protocol,
+the Console redirect and ray casts against the sent collider shapes.
+`tests/script_conformance/` runs the same scenes through both runners. The
+two sides exchange JSON lines:
 
 | Direction | Message | Contents |
 |---|---|---|
