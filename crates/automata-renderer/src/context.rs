@@ -231,6 +231,30 @@ impl RenderContext {
         self.queue.present(texture);
     }
 
+    /// Switches between [`wgpu::PresentMode::AutoVsync`] and
+    /// [`wgpu::PresentMode::AutoNoVsync`]; applied at the next acquire (no
+    /// surface texture may be outstanding while reconfiguring).
+    pub(crate) fn set_vsync(&mut self, vsync: bool) {
+        if let Some(config) = &mut self.config {
+            let mode = if vsync {
+                wgpu::PresentMode::AutoVsync
+            } else {
+                wgpu::PresentMode::AutoNoVsync
+            };
+            if config.present_mode != mode {
+                config.present_mode = mode;
+                self.needs_reconfigure = true;
+            }
+        }
+    }
+
+    /// Whether presenting waits for the display (always true offscreen).
+    pub(crate) fn vsync(&self) -> bool {
+        self.config
+            .as_ref()
+            .is_none_or(|c| c.present_mode != wgpu::PresentMode::AutoNoVsync)
+    }
+
     /// Reconfigures the surface (helper for acquire/resize paths).
     fn reconfigure(&mut self) {
         if let (Some(surface), Some(config)) = (&self.surface, &self.config) {

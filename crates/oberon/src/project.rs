@@ -46,6 +46,10 @@ pub struct Prefs {
     pub graphics_quality: automata_renderer::GraphicsQuality,
     /// Show the selected camera's view as an inset in the Scene view.
     pub camera_preview: bool,
+    /// Wait for the display when presenting (frame rate = refresh rate).
+    pub vsync: bool,
+    /// Frame rate cap; 0 = none (V-Sync, when on, still paces frames).
+    pub fps_limit: u32,
 }
 
 impl Default for Prefs {
@@ -65,6 +69,8 @@ impl Default for Prefs {
             editor: crate::code::EditorSettings::default(),
             graphics_quality: automata_renderer::GraphicsQuality::default(),
             camera_preview: true,
+            vsync: true,
+            fps_limit: 0,
         }
     }
 }

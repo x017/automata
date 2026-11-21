@@ -40,6 +40,15 @@ pub struct FrameStats {
 /// Named environment looks offered as one-click presets.
 type Preset = (&'static str, fn() -> Environment);
 
+/// The FPS Limit choices: label and cap (0 = none).
+const FPS_LIMITS: [(&str, u32); 5] = [
+    ("Off", 0),
+    ("30", 30),
+    ("60", 60),
+    ("120", 120),
+    ("144", 144),
+];
+
 const PRESETS: [Preset; 4] = [
     ("Neutral", Environment::default),
     ("Daylight", Environment::daylight),
@@ -141,7 +150,7 @@ impl Ui {
         }
     }
 
-    /// Quality preset and live statistics.
+    /// Quality preset, frame pacing and live statistics.
     fn renderer_group(&mut self, canvas: &mut Canvas, x: f32, y: f32, w: f32) -> f32 {
         let mut y = self.gfx_heading(canvas, x, y, w, "Renderer");
         // Quality: a segmented control (one option is always active).
@@ -174,6 +183,57 @@ impl Ui {
                 };
                 if self.button(canvas, b, q.label(), style) && !active {
                     self.prefs.graphics_quality = q;
+                    self.prefs_dirty = true;
+                }
+            }
+        }
+        y += layout::ROW_STEP;
+        // V-Sync and the FPS limit (editor preferences).
+        let r = Rect::new(x, y, w, layout::FIELD_H);
+        if self.row_visible(r) {
+            self.row_label(canvas, x, y, "V-Sync");
+            let b = Rect::new(x + layout::LABEL_W, y + 1.0, 18.0, 18.0);
+            if self.checkbox(canvas, b, self.prefs.vsync) {
+                self.prefs.vsync = !self.prefs.vsync;
+                self.prefs_dirty = true;
+            }
+            canvas.text(
+                b.x + 26.0,
+                y + 4.0,
+                layout::SMALL_SIZE,
+                "Match the display's refresh rate",
+                color::text_dim(),
+            );
+        }
+        y += layout::ROW_STEP;
+        let r = Rect::new(x, y, w, layout::FIELD_H);
+        if self.row_visible(r) {
+            self.row_label(canvas, x, y, "FPS Limit");
+            let area = w - layout::LABEL_W;
+            let seg = area / FPS_LIMITS.len() as f32;
+            canvas.fill_rounded(
+                x + layout::LABEL_W,
+                y,
+                area,
+                layout::FIELD_H,
+                layout::RADIUS,
+                color::field(),
+            );
+            for (i, (label, limit)) in FPS_LIMITS.iter().enumerate() {
+                let b = Rect::new(
+                    x + layout::LABEL_W + seg * i as f32 + 1.0,
+                    y + 1.0,
+                    seg - 2.0,
+                    layout::FIELD_H - 2.0,
+                );
+                let active = self.prefs.fps_limit == *limit;
+                let style = if active {
+                    ButtonStyle::Active
+                } else {
+                    ButtonStyle::Ghost
+                };
+                if self.button(canvas, b, label, style) && !active {
+                    self.prefs.fps_limit = *limit;
                     self.prefs_dirty = true;
                 }
             }

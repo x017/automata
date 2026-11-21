@@ -190,6 +190,18 @@ impl Renderer {
         })
     }
 
+    /// Turns V-Sync on or off at runtime (takes effect next frame). With it
+    /// on, presenting paces the caller to the display's refresh rate.
+    pub fn set_vsync(&mut self, vsync: bool) {
+        self.ctx.set_vsync(vsync);
+    }
+
+    /// Whether V-Sync is on.
+    #[must_use]
+    pub fn vsync(&self) -> bool {
+        self.ctx.vsync()
+    }
+
     /// Switches the quality preset at runtime (recreates the shadow map).
     pub fn set_quality(&mut self, quality: GraphicsQuality) {
         let size = quality.shadow_map_size();

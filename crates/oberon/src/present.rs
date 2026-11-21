@@ -1792,6 +1792,9 @@ impl EditorApp {
             if r.quality() != self.ui.prefs.graphics_quality {
                 r.set_quality(self.ui.prefs.graphics_quality);
             }
+            if r.vsync() != self.ui.prefs.vsync {
+                r.set_vsync(self.ui.prefs.vsync);
+            }
         }
         if let Some(play) = &mut self.play {
             // With a scene camera, movement is relative to it and scripts
@@ -2035,7 +2038,7 @@ impl ApplicationHandler for EditorApp {
             let renderer = pollster::block_on(Renderer::new(
                 window.clone(),
                 (size.width.max(1), size.height.max(1)),
-                true, // vsync
+                self.ui.prefs.vsync,
                 self.ui.prefs.graphics_quality,
             ))
             .map_err(|e| format!("create renderer: {e}"))?;
@@ -2201,16 +2204,32 @@ impl ApplicationHandler for EditorApp {
             event_loop.exit();
             return;
         }
-        // Redraw at a steady ~60 FPS so play mode, hover and drags stay live
-        // without spinning the CPU between frames.
-        let deadline = self.last_frame + Duration::from_millis(16);
-        if Instant::now() >= deadline {
-            self.request_redraw();
-            event_loop.set_control_flow(ControlFlow::Wait);
-        } else {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        // Redraw continuously so play mode, hover and drags stay live. V-Sync
+        // (when on) paces frames to the display; the optional FPS limit
+        // and the background throttle space them out further.
+        let background = self.window.as_ref().is_some_and(|w| {
+            w.is_minimized() == Some(true) || (!w.has_focus() && self.play.is_none())
+        });
+        match frame_interval(self.ui.prefs.fps_limit, background) {
+            Some(interval) if Instant::now() < self.last_frame + interval => {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(self.last_frame + interval));
+            }
+            _ => {
+                self.request_redraw();
+                event_loop.set_control_flow(ControlFlow::Wait);
+            }
         }
     }
+}
+
+/// The minimum time between frames: `fps_limit` (0 = none), or 10 FPS
+/// while the editor sits in the background (unfocused and not playing, or
+/// minimized) so it doesn't spend a core or the GPU on an unseen window.
+fn frame_interval(fps_limit: u32, background: bool) -> Option<Duration> {
+    if background {
+        return Some(Duration::from_millis(100));
+    }
+    (fps_limit > 0).then(|| Duration::from_secs_f64(1.0 / f64::from(fps_limit)))
 }
 
 /// Maps a key to the script editor's key model (letters, digits and
@@ -2294,4 +2313,20 @@ fn code_char(code: KeyCode) -> Option<char> {
         (KeyCode::Quote, '\''),
     ];
     letters.iter().find(|(k, _)| *k == code).map(|(_, c)| *c)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_pacing_is_uncapped_unless_limited_or_in_the_background() {
+        assert_eq!(frame_interval(0, false), None);
+        assert_eq!(
+            frame_interval(120, false),
+            Some(Duration::from_secs_f64(1.0 / 120.0))
+        );
+        assert_eq!(frame_interval(0, true), Some(Duration::from_millis(100)));
+        assert_eq!(frame_interval(240, true), Some(Duration::from_millis(100)));
+    }
 }
