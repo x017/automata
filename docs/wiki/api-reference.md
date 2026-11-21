@@ -104,6 +104,24 @@ The scene's sun; the first entity carrying one lights the frame. Getters:
 `direction`, `color`, `ambient`, `shadows`. Without one, a neutral
 shadowless default is used.
 
+### Environment
+
+```python
+at.Environment(sky_color=(1, 1, 1), ground_color=(1, 1, 1),
+               background=(0.012, 0.012, 0.012), exposure=1.0,
+               tonemapping="none", fog=False, fog_color=(0.5, 0.55, 0.6),
+               fog_density=0.02, fog_start=0.0)
+at.Environment.preset("neutral" | "daylight" | "dusk" | "night")
+```
+
+The scene look. The first entity carrying one wins. It sets hemisphere
+ambient (sky above, ground below, scaled by the sun's `ambient`), the
+background clear colour (overriding `Game.clear_color`), exposure, tone
+mapping (`"none"`, `"reinhard"`, `"aces"`, `"agx"`), and exponential
+distance fog. All arguments are readable as properties. Unknown tone
+mapping or preset names raise `ValueError`. It's saved in scene files.
+Guide: [Rendering & Lights](guides/rendering-and-lights.md#environment).
+
 ### Physics components
 
 ```text
@@ -278,3 +296,38 @@ All are `str` enums — members work anywhere the plain string does.
 | `at.GamepadButton` | `SOUTH`, `EAST`, `NORTH`, `WEST`, triggers, thumbs, d-pad, `START`, `SELECT`… | 19 |
 | `at.GamepadAxis` | `LEFT_STICK_X/Y`, `RIGHT_STICK_X/Y`, `LEFT_Z`, `RIGHT_Z`, `DPAD_X/Y` | 8 |
 | `at.GraphicsQuality` | `LOW` (no shadows), `MEDIUM` (1024), `HIGH` (2048), `ULTRA` (4096) | 4 |
+
+## Behaviour scripts (`automata.run_scene`)
+
+```python
+at.run_scene(path, *, max_frames=None, update=None, **game_options) -> int
+```
+
+Plays an Oberon scene file with its behaviour scripts:
+`start(entity, ctx)`, `update(entity, ctx)`, `stop(entity, ctx)`. It
+returns the number of frames run.
+
+| `entity` | |
+|---|---|
+| `name`, `id`, `state` (dict), `grounded` | |
+| `transform` | `position`, `rotation_euler` (radians), `scale`. Read, or assign |
+| `character_velocity` | Set to move a character |
+| `attributes` | Dict-like, saved in the scene |
+| `camera` | `ScriptCamera` or `None` |
+| `camera_3d` | Raw `Camera3D` get/set |
+| `despawn()` | |
+
+| `ctx` | |
+|---|---|
+| `time`, `scene`, `events`, `resources`, `raw` | Engine objects (`ctx.scene` finds script handles by name) |
+| `input` | Engine input plus `axis(neg, pos)` and the aliases `"shift"`, `"ctrl"`, `"alt"` (either side), `"left"`/`"right"`/`"up"`/`"down"` |
+| `physics` | Engine physics; also accepts script handles |
+| `camera` | The first `Camera3D` in the scene as a `ScriptCamera` |
+| `log(...)`, `warn(...)`, `quit()` | |
+
+**`ScriptCamera`**: `position`, `target`, `fov` (read/assign),
+`look_at(point_or_entity)`, and
+`follow(entity, offset=(0, 3, 8), smooth=8.0, look_height=0.6)`. Several
+writes in one frame accumulate. The same API exists in Oberon's Play mode.
+See [Oberon: Cameras](oberon/cameras.md).
+

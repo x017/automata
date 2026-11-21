@@ -758,6 +758,24 @@ impl Document {
         true
     }
 
+    /// Creates a camera entity looking through `view` (one undo step), so a
+    /// new camera starts out framing what the user is looking at.
+    pub fn create_camera_at(&mut self, view: automata_renderer::Camera3D) -> u64 {
+        let id = self.create(CreateKind::Camera);
+        if let Some(i) = self.index_of(id) {
+            let data = &mut self.entities[i].data;
+            if let Some(cam) = &mut data.camera_3d {
+                cam.position = view.position;
+                cam.target = view.target;
+            }
+            if let Some(t) = &mut data.transform {
+                t.position = view.position.to_array();
+            }
+            self.touch();
+        }
+        id
+    }
+
     /// Ends a continuous edit gesture: the next gesture edit records a fresh
     /// undo snapshot.
     pub fn end_gesture(&mut self) {
@@ -1209,6 +1227,22 @@ mod tests {
         assert_eq!(doc.entities.len(), before);
         assert!(doc.undo());
         assert_eq!(doc.entities.len(), before + 407);
+    }
+
+    #[test]
+    fn new_cameras_frame_the_current_view_in_one_undo_step() {
+        let mut doc = Document::new();
+        let view = automata_renderer::Camera3D::new(
+            glam::Vec3::new(4.0, 5.0, 6.0),
+            glam::Vec3::new(1.0, 0.0, 0.0),
+        );
+        let id = doc.create_camera_at(view);
+        let data = &doc.entities[doc.index_of(id).unwrap()].data;
+        assert_eq!(data.camera_3d.unwrap().position, view.position);
+        assert_eq!(data.camera_3d.unwrap().target, view.target);
+        assert_eq!(data.transform.unwrap().position, [4.0, 5.0, 6.0]);
+        assert!(doc.undo());
+        assert!(doc.entities.is_empty());
     }
 
     #[test]

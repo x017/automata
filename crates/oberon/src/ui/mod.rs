@@ -3148,10 +3148,13 @@ fn draw_markers(canvas: &mut Canvas, doc: &Document, proj: &Projector, rect: Rec
         {
             continue;
         }
-        let Some(t) = e.data.transform else {
-            continue;
+        // A camera's marker sits at its eye, which is where its frustum starts.
+        let at = match (e.data.camera_3d, e.data.transform) {
+            (Some(cam), _) => cam.position,
+            (None, Some(t)) => Vec3::from(t.position),
+            (None, None) => continue,
         };
-        let Some((x, y)) = proj.project(Vec3::from(t.position)) else {
+        let Some((x, y)) = proj.project(at) else {
             continue;
         };
         if !rect.contains(x, y) {

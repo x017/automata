@@ -202,3 +202,25 @@ def test_run_scene_scripts_drive_the_camera(tmp_path):
     assert position == pytest.approx((3.0, 3.0, 5.0))
     assert target == pytest.approx((3.0, 1.6, 0.0))
     assert fov == pytest.approx(45.0)
+
+
+def test_coin_run_example_plays_headless(tmp_path):
+    """The tutorial project (examples/oberon/coin_run) runs end to end."""
+    import importlib.util
+    import pathlib
+    import shutil
+
+    src = pathlib.Path(__file__).resolve().parents[4] / "examples" / "oberon" / "coin_run"
+    shutil.copytree(src / "scripts", tmp_path / "scripts")
+    spec = importlib.util.spec_from_file_location("coin_run_build", src / "build_level.py")
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    build.COINS[0] = (0, 1.0, 0)  # a coin right where the player starts
+    build.build().save(str(tmp_path / "level.ron"))
+    scores = []
+
+    def after(ctx):
+        scores.append(ctx.scene["Rules"].attributes.get("score"))
+
+    at.run_scene(str(tmp_path / "level.ron"), headless=True, max_frames=20, update=after)
+    assert scores[-1] == 1

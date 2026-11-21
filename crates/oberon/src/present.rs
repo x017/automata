@@ -31,7 +31,7 @@ use automata_renderer::Renderer;
 use crate::bridge::{self, BridgeMsg, ScriptBridge};
 use crate::canvas::Canvas;
 use crate::code;
-use crate::doc::Document;
+use crate::doc::{CreateKind, Document};
 use crate::fields;
 use crate::lsp::{self, LspAction, LspClient};
 use crate::play::{PlayInput, PlaySession};
@@ -258,7 +258,11 @@ impl EditorApp {
                 }
             }
             Intent::Create(kind) => {
-                let id = doc.create(kind);
+                let id = if kind == CreateKind::Camera {
+                    doc.create_camera_at(self.ui.camera.to_camera3d())
+                } else {
+                    doc.create(kind)
+                };
                 let name = doc.index_of(id).map(|i| doc.entities[i].name().to_string());
                 self.ui.log(
                     LogLevel::Info,

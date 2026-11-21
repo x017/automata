@@ -1,7 +1,7 @@
 # Guide: Rendering & Lights
 
-How things get on screen: primitives, cameras, the sun, and quality
-presets.
+How things get on screen: primitives, cameras, the sun, the
+environment (ambient, fog, tone mapping), and quality presets.
 
 ## Drawing primitives
 
@@ -72,6 +72,60 @@ scene.add(
   frustum around your scene every frame, so any level size works. Shadowed
   regions keep the ambient term.
 
+## Environment
+
+The `Environment` component sets the look of the whole frame:
+- hemisphere ambient light (sky above, ground below)
+- the background colour
+- exposure and tone mapping
+- distance fog
+
+The first entity that carries one wins.
+
+```python
+scene.add(at.Entity("look").add(at.Environment.preset("dusk")))
+```
+
+or spelled out:
+
+```python
+scene.add(
+    at.Entity("look").add(
+        at.Environment(
+            sky_color=(0.75, 0.85, 1.0),     # ambient from above
+            ground_color=(0.45, 0.4, 0.35),  # ambient from below (bounce)
+            background=(0.55, 0.68, 0.85),   # replaces Game.clear_color
+            exposure=1.1,
+            tonemapping="aces",              # "none" | "reinhard" | "aces" | "agx"
+            fog=True,
+            fog_color=(0.55, 0.68, 0.85),    # match the background
+            fog_density=0.012,               # per metre; 0.05 is thick
+            fog_start=10.0,                  # metres of clear air first
+        )
+    )
+)
+```
+
+| Preset | Look |
+|---|---|
+| `"neutral"` | The default: white ambient, no fog, no tone mapping |
+| `"daylight"` | Blue sky, warm bounce, light haze, ACES |
+| `"dusk"` | Violet sky, dark red ground, dense warm fog, AgX |
+| `"night"` | Cold dark ambient, black fog close to the camera, ACES |
+
+How it combines with the sun:
+
+- Ambient is `DirectionalLight.ambient × mix(ground, sky)`, picked by how
+  much a surface faces up. Keep the sky and ground colours near 1.0 in
+  brightness and control strength with `ambient`.
+- **Fog** fades lit colour toward `fog_color` as
+  `1 − exp(−density × (distance − start))`.
+- **Tone mapping** runs last. ACES and AgX roll off highlights smoothly,
+  so you can use brighter suns and colours without clipping. Raise
+  `exposure` a little to compensate for their darker mid-tones.
+- An Environment is staged data like any other component. It's saved in
+  scene files and edited in [Oberon's Graphics tab](../oberon/graphics.md).
+
 ## Sky and quality
 
 ```python
@@ -93,6 +147,9 @@ same setting as the renderer grows.
 
 ## Mood recipes
 
+Without an Environment, these recipes use the plain look. Add a preset on
+top to get fog and tone mapping too.
+
 | Look | clear_color | sun color | ambient |
 |---|---|---|---|
 | Noon | `(0.55, 0.78, 0.95, 1)` | `(1.0, 1.0, 1.0)` | 0.35 |
@@ -104,4 +161,6 @@ same setting as the renderer grows.
 
 - [The Game Loop](game-loop.md) — when frames render
 - [Scenes & Entities](scenes-and-entities.md) — transforms and the scale trick
+- [Cameras](cameras.md) — follow, orbit, rails, shake, zoom
 - [Cookbook](../cookbook.md#cameras) — orbit cams, screen shake
+- [Oberon: Graphics](../oberon/graphics.md) — tune all of this visually

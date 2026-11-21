@@ -23,7 +23,11 @@ fn main() {
         .unwrap_or_else(|| "/tmp/oberon.png".to_string());
     let (w, h) = (1600u32, 950u32);
     let mut canvas = Canvas::new(w, h);
-    let mut doc = Document::starter();
+    // `OBERON_SCENE=level.ron` screenshots a scene file instead of the starter.
+    let mut doc = std::env::var("OBERON_SCENE")
+        .ok()
+        .and_then(|p| Document::load(std::path::Path::new(&p)).ok())
+        .unwrap_or_else(Document::starter);
     // Pre-select the cube so the inspector shows content.
     if let Some(cube) = doc.entities.iter().find(|e| e.name() == "Cube") {
         doc.select(Some(cube.id));
@@ -103,8 +107,13 @@ fn main() {
             }
         }
         "graphics" | "camera" => {
-            let cam = doc.create(oberon::doc::CreateKind::Camera);
-            if let Some(i) = doc.index_of(cam) {
+            let existing = doc
+                .entities
+                .iter()
+                .find(|e| e.data.camera_3d.is_some())
+                .map(|e| e.id);
+            let cam = existing.unwrap_or_else(|| doc.create(oberon::doc::CreateKind::Camera));
+            if let (None, Some(i)) = (existing, doc.index_of(cam)) {
                 let d = &mut doc.entities[i].data;
                 d.name = Some("Main Camera".into());
                 d.camera_3d = Some(automata_renderer::Camera3D::new(
@@ -115,8 +124,11 @@ fn main() {
                     t.position = [6.0, 4.0, 8.0];
                 }
             }
+            doc.select(Some(cam));
             if scene == "graphics" {
-                doc.create(oberon::doc::CreateKind::Environment);
+                if !doc.entities.iter().any(|e| e.data.environment.is_some()) {
+                    doc.create(oberon::doc::CreateKind::Environment);
+                }
                 ui.right_tab = oberon::ui::RightTab::Graphics;
                 ui.stats = oberon::ui::FrameStats {
                     frame_ms: 4.2,

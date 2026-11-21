@@ -28,6 +28,32 @@ wgpu rendering, scene/events core, Python bindings, and physics + input.
 - CI enforces fmt, Clippy (`-D warnings`), tests, docs, and the Python
   test suite on every push
 
+## Oberon, the editor
+
+![Oberon](docs/assets/oberon/camera.png)
+
+```console
+cargo run -p oberon --release [level.ron]
+```
+
+You build scenes visually and attach Python behaviour scripts, then press
+Play. Oberon also has these:
+- a **Graphics** tab for tuning the sun, environment, tone mapping, and
+  fog, with one-click test scenes
+- **scene cameras** with frustums and a live preview
+- a built-in code editor with completion and LSP
+
+Start with the [tutorials](docs/wiki/tutorials/README.md) or the
+[Oberon manual](docs/wiki/oberon/README.md). The landing page is in
+[`docs/site/index.html`](docs/site/index.html).
+
+## Documentation
+
+- [Wiki home](docs/wiki/README.md): guides for the Python API and Oberon
+- [Tutorials](docs/wiki/tutorials/README.md): first scene, coin collector,
+  third-person camera, camera rails, lighting & mood, shipping
+- [API reference](docs/wiki/api-reference.md)
+
 ## Building
 
 ```console

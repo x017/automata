@@ -233,12 +233,53 @@ class _Scene:
         return getattr(self._s, name)
 
 
+_KEY_ALIASES = {
+    "shift": ("shift_left", "shift_right"),
+    "ctrl": ("ctrl_left", "ctrl_right"),
+    "alt": ("alt_left", "alt_right"),
+    "left": ("arrow_left",),
+    "right": ("arrow_right",),
+    "up": ("arrow_up",),
+    "down": ("arrow_down",),
+}
+
+
+def _keys(key: Any) -> Tuple[Any, ...]:
+    if isinstance(key, str):
+        return _KEY_ALIASES.get(key.lower(), (key.lower(),))
+    return (key,)
+
+
+class _Input:
+    """`ctx.input` for scripts: Oberon's key aliases (``"shift"`` means
+    either Shift key, ``"left"`` the left arrow) plus ``axis``."""
+
+    def __init__(self, raw: Any) -> None:
+        self._raw = raw
+
+    def pressed(self, key: Any) -> bool:
+        return any(self._raw.pressed(k) for k in _keys(key))
+
+    def just_pressed(self, key: Any) -> bool:
+        return any(self._raw.just_pressed(k) for k in _keys(key))
+
+    def just_released(self, key: Any) -> bool:
+        return any(self._raw.just_released(k) for k in _keys(key))
+
+    def axis(self, negative: Any, positive: Any) -> float:
+        """-1, 0, or 1 from two keys."""
+        return float(self.pressed(positive)) - float(self.pressed(negative))
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._raw, name)
+
+
 class ScriptContext:
     """The `ctx` a behaviour script receives."""
 
     def __init__(self, ctx: Any, handles: Dict[str, ScriptEntity]) -> None:
         self.raw = ctx
-        self.input = ctx.input
+        self.input = _Input(ctx.input)
         self.time = ctx.time
         self.events = ctx.events
         self.resources = ctx.resources

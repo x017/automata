@@ -3,11 +3,15 @@
 Welcome to the AUTOMATA documentation wiki — the complete guide to making
 2D and 3D games with a Rust engine core and Python gameplay code.
 
-AUTOMATA is **code-first**: games are ordinary Python programs. There is no
-editor to learn and no project file format — you write a `Game`, stage
-`Entity` objects into a `Scene`, and react to input every frame. (A visual
-editor — **Oberon** — is planned as a separate desktop app; the engine
-itself stays code-first.)
+You can make games two ways, and both use the same engine and file
+format:
+
+- **Code-first:** a game is an ordinary Python program. You write a
+  `Game`, stage `Entity` objects into a `Scene`, and react to input every
+  frame.
+- **Oberon, the editor:** build scenes visually, attach Python behaviour
+  scripts, press Play, and tune graphics live. See
+  [Oberon](oberon/README.md).
 
 ```python
 import automata as at
@@ -39,6 +43,27 @@ Hello().run()
 
 ## Where to go
 
+**New here?** Follow the [tutorials](tutorials/README.md). The Oberon track
+takes you from an empty scene to a tested, shippable game in about two
+hours.
+
+### Oberon (the editor)
+
+| I want to… | Read |
+|---|---|
+| Install and open the editor | [Oberon](oberon/README.md) |
+| Learn every panel and how to navigate | [The interface](oberon/interface.md) |
+| Write behaviour scripts | [Scripting](oberon/scripting.md) |
+| Place and drive cameras | [Cameras](oberon/cameras.md) |
+| Tune lighting, fog, and tone mapping, and test graphics | [Graphics](oberon/graphics.md) |
+| Use the built-in code editor and language servers | [The code editor](oberon/code-editor.md) |
+| Reuse objects and add custom data | [Prefabs & attributes](oberon/prefabs-and-attributes.md) |
+| Look up a shortcut | [Keyboard shortcuts](oberon/shortcuts.md) |
+
+### Python
+
+
+
 | I want to… | Read |
 |---|---|
 | Install the engine and open my first window | [Getting Started](getting-started.md) |
@@ -47,7 +72,8 @@ Hello().run()
 | Solve a specific problem (double jump, pause, spawn waves…) | [Cookbook](cookbook.md) |
 | Understand the update loop and the frame model | [Guide: The Game Loop](guides/game-loop.md) |
 | Build levels out of entities and components | [Guide: Scenes & Entities](guides/scenes-and-entities.md) |
-| Draw things, light them, and move the camera | [Guide: Rendering & Lights](guides/rendering-and-lights.md) |
+| Draw things, light them, fog and tone mapping | [Guide: Rendering & Lights](guides/rendering-and-lights.md) |
+| Follow, orbit, rail, and shake cameras | [Guide: Cameras](guides/cameras.md) |
 | Handle keyboard, mouse, and gamepads | [Guide: Input](guides/input.md) |
 | Add gravity, collisions, and character movement | [Guide: Physics](guides/physics.md) |
 | Pass messages and store game state | [Guide: Events & Resources](guides/events-and-resources.md) |

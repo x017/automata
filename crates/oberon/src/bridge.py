@@ -291,24 +291,32 @@ class Input:
         self._down = set(keys)
 
     def pressed(self, key):
-        return _key(key) in self._down
+        return any(k in self._down for k in _keys(key))
 
     def just_pressed(self, key):
-        k = _key(key)
-        return k in self._down and k not in self._prev
+        return any(k in self._down and k not in self._prev for k in _keys(key))
 
     def just_released(self, key):
-        k = _key(key)
-        return k in self._prev and k not in self._down
+        return any(k in self._prev and k not in self._down for k in _keys(key))
 
     def axis(self, negative, positive):
         return float(self.pressed(positive)) - float(self.pressed(negative))
 
 
-def _key(key):
+_ALIASES = {
+    "shift": ("shift_left", "shift_right"),
+    "ctrl": ("ctrl_left", "ctrl_right"),
+    "alt": ("alt_left", "alt_right"),
+    "left": ("arrow_left",),
+    "right": ("arrow_right",),
+    "up": ("arrow_up",),
+    "down": ("arrow_down",),
+}
+
+
+def _keys(key):
     k = str(getattr(key, "value", key)).lower()
-    return {"shift": "shift_left", "ctrl": "ctrl_left", "alt": "alt_left", "left": "arrow_left",
-            "right": "arrow_right", "up": "arrow_up", "down": "arrow_down"}.get(k, k)
+    return _ALIASES.get(k, (k,))
 
 
 class Time:

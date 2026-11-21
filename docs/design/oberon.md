@@ -285,6 +285,39 @@ Editor camera: a viewport-only fly/orbit camera (middle-drag orbit,
 scroll zoom, F-focus on selection). It overrides the render camera in edit
 mode; the game's own `Camera3D` entity takes over in play mode.
 
+### 5.1 As shipped (native Rust UI)
+
+The panels above were the nexa-era plan. The shipped editor draws its own
+UI (tiny-skia), and the right dock has two tabs:
+
+- **Inspector**: components, attributes, Add Component.
+- **Graphics**: a test bench for the frame look. It has:
+  - **Renderer**: quality preset (an editor preference) and live
+    ms / fps / mesh / shadow-map stats.
+  - **Sun**: edits the first Directional Light via azimuth/elevation.
+  - **Environment**: presets, hemisphere ambient, background, exposure,
+    tone mapping, fog.
+  - **Camera**: FOV, Look Through, Align to View, preview toggle.
+  - **Test Scenes**: color chart, shadows, fog depth, 400-cube stress.
+    Entities are named `Test …`, and adding or removing them is one undo
+    step.
+
+  Each group names the entity it edits and has a Select shortcut. Nothing
+  is hidden editor state.
+
+**Scene cameras.**
+- Every `Camera3D` draws a frustum in the viewport.
+- The selected camera gets a live preview inset (an offscreen render
+  through the scene camera, bottom-right, 16:9).
+- New cameras spawn at the current editor view.
+- Moving a camera entity moves its eye and target together.
+- **Play renders through the first scene camera.** Player input becomes
+  relative to it, and scripts drive it with `entity.camera` /
+  `ctx.camera` (`follow`, `look_at`). Without a camera, Play falls back
+  to the editor view following the player.
+
+User docs: `docs/wiki/oberon/`.
+
 ## 6. Play mode semantics (Unity's rules)
 
 - **Edit mode:** simulation paused. Edits write through the buffered path
