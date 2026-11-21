@@ -12,7 +12,7 @@ use crate::theme::{color, layout};
 use crate::view::GizmoMode;
 
 /// Height of the menu bar.
-pub const MENUBAR_H: f32 = 26.0;
+pub const MENUBAR_H: f32 = 40.0;
 
 /// The menu bar's top-level menus.
 pub const BAR: [&str; 6] = ["File", "Edit", "GameObject", "Component", "Window", "Help"];
@@ -574,13 +574,11 @@ impl Ui {
         canvas.fill_rect(0.0, 0.0, w, MENUBAR_H, color::background());
         canvas.fill_rect(0.0, MENUBAR_H - 1.0, w, 1.0, color::border());
         let cy = MENUBAR_H / 2.0;
-        draw_logo(canvas, 17.0, cy, 15.0, color::accent());
-        canvas.text(36.0, cy - 7.5, 13.0, "OBERON", color::text());
-        let mut x = 98.0;
+        let mut x = 8.0;
         let open_bar = self.menu.as_ref().and_then(|m| m.bar);
         for (i, title) in BAR.iter().enumerate() {
             let tw = canvas.measure_text(layout::FONT_SIZE, title) + 18.0;
-            let r = Rect::new(x, 2.0, tw, MENUBAR_H - 4.0);
+            let r = Rect::new(x, 7.0, tw, MENUBAR_H - 14.0);
             let over = r.contains(self.raw.x, self.raw.y);
             let open = open_bar == Some(i);
             if open || over {
@@ -618,7 +616,7 @@ impl Ui {
             }
             x += tw + 2.0;
         }
-        // Right side: the scene's file name and unsaved marker.
+        // The scene's file name and unsaved marker, after the menus.
         let name = doc.path.as_ref().map_or_else(
             || "Untitled scene".to_string(),
             |p| {
@@ -628,20 +626,19 @@ impl Ui {
                 )
             },
         );
-        let label = if doc.dirty() {
-            format!("{name} •")
-        } else {
-            name
-        };
-        let tw = canvas.measure_text(layout::SMALL_SIZE, &label);
-        if w - tw - 16.0 > x + 20.0 {
-            canvas.text(
-                w - tw - 12.0,
-                cy - 7.0,
-                layout::SMALL_SIZE,
-                &label,
-                color::text_dim(),
-            );
+        canvas.fill_rect(x + 10.0, cy - 7.0, 1.0, 14.0, color::border());
+        let nx = x + 22.0;
+        let max_w = (w * 0.5 - 90.0 - nx).max(0.0);
+        let nw = canvas.text_clipped(
+            nx,
+            cy - 8.0,
+            layout::FONT_SIZE,
+            &name,
+            color::text_dim(),
+            max_w,
+        );
+        if doc.dirty() && max_w > 0.0 {
+            canvas.fill_circle(nx + nw + 8.0, cy, 3.0, color::text_dim());
         }
     }
 
@@ -720,48 +717,4 @@ impl Ui {
         }
         clicked
     }
-}
-
-/// The AUTOMATA mark: a sharp "A" crossed by an orbital ring, with a
-/// four-point star. `h` is the letter height, centred on `(cx, cy)`.
-pub(super) fn draw_logo(canvas: &mut Canvas, cx: f32, cy: f32, h: f32, c: tiny_skia::Color) {
-    let half = h / 2.0;
-    let leg = h * 0.40;
-    let w = (h * 0.15).max(1.6);
-    canvas.polyline(
-        &[
-            (cx - leg, cy + half),
-            (cx, cy - half + w * 0.4),
-            (cx + leg, cy + half),
-        ],
-        c,
-        w,
-    );
-    // The orbit: a tilted ellipse arc sweeping in front of the letter.
-    let (rx, ry, tilt) = (h * 0.78, h * 0.2, -0.36_f32);
-    let (st, ct) = tilt.sin_cos();
-    let pts: Vec<(f32, f32)> = (0..=28)
-        .map(|i| {
-            let a = 0.35 + i as f32 / 28.0 * 4.4;
-            let (x, y) = (rx * a.cos(), ry * a.sin());
-            (cx + x * ct - y * st, cy + h * 0.1 + x * st + y * ct)
-        })
-        .collect();
-    canvas.polyline(&pts, c, (h * 0.07).max(1.0));
-    // The star.
-    let (sx, sy, r) = (cx + h * 0.72, cy - h * 0.34, h * 0.16);
-    let k = r * 0.28;
-    canvas.fill_polygon(
-        &[
-            (sx, sy - r),
-            (sx + k, sy - k),
-            (sx + r, sy),
-            (sx + k, sy + k),
-            (sx, sy + r),
-            (sx - k, sy + k),
-            (sx - r, sy),
-            (sx - k, sy - k),
-        ],
-        c,
-    );
 }

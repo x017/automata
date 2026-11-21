@@ -439,19 +439,17 @@ impl Ui {
         let hex_r = Rect::new(prev.x + prev.w + 8.0, y + 2.0, 92.0, layout::FIELD_H);
         let editing_hex = self.is_editing(p.id, EditTarget::Hex(p.target));
         canvas.fill_rounded(hex_r.x, hex_r.y, hex_r.w, hex_r.h, 3.0, color::field());
-        canvas.stroke_rounded(
-            hex_r.x,
-            hex_r.y,
-            hex_r.w,
-            hex_r.h,
-            3.0,
-            if editing_hex {
-                color::accent()
-            } else {
-                color::border()
-            },
-            1.0,
-        );
+        if editing_hex {
+            canvas.stroke_rounded(
+                hex_r.x,
+                hex_r.y,
+                hex_r.w,
+                hex_r.h,
+                3.0,
+                color::accent(),
+                1.0,
+            );
+        }
         if editing_hex {
             self.draw_edit_text(canvas, hex_r, hex_r.x + 5.0);
         } else {

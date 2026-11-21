@@ -218,16 +218,17 @@ impl Ui {
         errors: bool,
     ) -> (bool, bool) {
         let hot = self.hot(r);
-        let bg = if active {
-            color::viewport_bg()
-        } else if hot {
-            color::hover()
-        } else {
-            color::surface()
-        };
-        canvas.fill_rect(r.x, r.y, r.w, r.h, bg);
         if active {
-            canvas.fill_rect(r.x, r.y, r.w, 2.0, color::accent());
+            canvas.fill_rect(r.x + 6.0, r.y + r.h - 2.0, r.w - 12.0, 2.0, color::accent());
+        } else if hot {
+            canvas.fill_rounded(
+                r.x + 2.0,
+                r.y + 2.0,
+                r.w - 4.0,
+                r.h - 6.0,
+                layout::RADIUS,
+                color::hover(),
+            );
         }
         let fg = if errors {
             color::danger()
@@ -312,6 +313,7 @@ impl Ui {
         {
             self.code.page_lines = ((area.h / lh) as usize).saturating_sub(1).max(1);
         }
+        let ui_face = canvas.set_face(crate::canvas::Face::Mono);
         let cell = canvas.cell_width(font);
         let line_count = self.code.tabs[idx].buf.line_count();
         let digits = line_count.to_string().len().max(3);
@@ -614,9 +616,12 @@ impl Ui {
             canvas.fill_rounded(track.x + 2.0, ty, 4.0, th, 2.0, rgba(160, 158, 152, 60));
         }
 
+        canvas.set_face(ui_face);
         self.code_status(canvas, status, idx);
+        canvas.set_face(crate::canvas::Face::Mono);
         self.completion_popup(canvas, area, geom, idx);
         self.code_tooltips(canvas, area, geom, idx);
+        canvas.set_face(ui_face);
     }
 
     fn code_mouse(&mut self, area: Rect, gutter_w: f32, geom: TextGeom, idx: usize) {
@@ -798,19 +803,9 @@ impl Ui {
         focused: bool,
     ) -> bool {
         canvas.fill_rounded(r.x, r.y, r.w, r.h, 3.0, color::field());
-        canvas.stroke_rounded(
-            r.x,
-            r.y,
-            r.w,
-            r.h,
-            3.0,
-            if focused {
-                color::accent()
-            } else {
-                color::border()
-            },
-            1.0,
-        );
+        if focused {
+            canvas.stroke_rounded(r.x, r.y, r.w, r.h, 3.0, color::accent(), 1.0);
+        }
         let clip = canvas.set_clip(Some((r.x + 2.0, r.y, r.w - 4.0, r.h)));
         if text.is_empty() {
             canvas.text(

@@ -15,6 +15,7 @@ use tiny_skia::{
     Color, FillRule, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform,
 };
 
+pub use crate::text::Face;
 use crate::text::TextRenderer;
 
 /// A 2D canvas Oberon draws the editor into each frame.
@@ -28,6 +29,8 @@ pub struct Canvas {
     blit_scratch: Vec<u8>,
     /// Physical clip rectangle `x0, y0, x1, y1` for text and rectangles.
     clip: Option<[i32; 4]>,
+    /// The face `text` / `measure_text` use.
+    face: Face,
 }
 
 impl Canvas {
@@ -40,7 +43,37 @@ impl Canvas {
             scale: 1.0,
             blit_scratch: Vec::new(),
             clip: None,
+            face: Face::Ui,
         }
+    }
+
+    /// Sets the face for following text calls; returns the previous one.
+    pub fn set_face(&mut self, face: Face) -> Face {
+        std::mem::replace(&mut self.face, face)
+    }
+
+    /// Draws text in `face` (restoring the current face afterwards).
+    pub fn text_in(
+        &mut self,
+        face: Face,
+        x: f32,
+        y: f32,
+        size: f32,
+        text: &str,
+        color: Color,
+    ) -> f32 {
+        let prev = self.set_face(face);
+        let w = self.text(x, y, size, text, color);
+        self.face = prev;
+        w
+    }
+
+    /// Measures text in `face`.
+    pub fn measure_in(&mut self, face: Face, size: f32, text: &str) -> f32 {
+        let prev = self.set_face(face);
+        let w = self.measure_text(size, text);
+        self.face = prev;
+        w
     }
 
     /// The canvas size in physical pixels.
@@ -261,6 +294,7 @@ impl Canvas {
         let s = self.scale;
         self.text.draw(
             &mut self.pixmap,
+            self.face,
             x * s,
             y * s,
             size * s,
@@ -300,7 +334,7 @@ impl Canvas {
     /// Measures text width at `size` (logical pixels) without drawing.
     pub fn measure_text(&mut self, size: f32, text: &str) -> f32 {
         let s = self.scale;
-        self.text.measure(size * s, text) / s
+        self.text.measure(self.face, size * s, text) / s
     }
 
     /// Blits an RGBA8 image (row-major, straight alpha) with its top-left

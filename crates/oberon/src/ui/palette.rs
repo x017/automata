@@ -369,7 +369,6 @@ impl Ui {
             let hot = row.contains(raw.x, raw.y);
             if k == p.selected {
                 canvas.fill_rounded(row.x, row.y, row.w, row.h, 6.0, color::select());
-                canvas.fill_rounded(row.x, row.y + 7.0, 3.0, row.h - 14.0, 1.5, color::accent());
             } else if hot {
                 canvas.fill_rounded(row.x, row.y, row.w, row.h, 6.0, color::hover());
             }

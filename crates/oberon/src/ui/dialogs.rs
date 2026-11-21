@@ -527,12 +527,7 @@ impl Ui {
                 } else if hot {
                     canvas.fill_rect(row.x, row.y, row.w, row.h, color::hover());
                 }
-                let (icon, c) = if e.dir {
-                    ("▸", color::warn())
-                } else {
-                    ("•", color::accent_soft())
-                };
-                canvas.text(row.x + 8.0, row.y + 4.0, layout::FONT_SIZE, icon, c);
+                super::draw_small_file_icon(canvas, row.x + 14.0, row.y + row.h / 2.0, e.dir);
                 canvas.text(
                     row.x + 26.0,
                     row.y + 4.0,

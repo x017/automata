@@ -392,11 +392,11 @@ impl Ui {
         let add = Rect::new(x + layout::LABEL_W, y, w - layout::LABEL_W, 22.0);
         if self.row_visible(add) {
             let style = if editing {
-                ButtonStyle::Accent
+                ButtonStyle::Ghost
             } else {
                 ButtonStyle::Disabled
             };
-            if self.button(canvas, add, "+ Attribute", style) {
+            if self.button(canvas, add, "+ Add attribute", style) {
                 let items = TYPES
                     .iter()
                     .enumerate()
@@ -453,23 +453,12 @@ impl Ui {
                 color::field()
             },
         );
-        canvas.stroke_rounded(
-            r.x,
-            r.y,
-            r.w,
-            r.h,
-            3.0,
-            if editing_now {
-                color::accent()
-            } else {
-                color::border()
-            },
-            1.0,
-        );
+        if editing_now {
+            canvas.stroke_rounded(r.x, r.y, r.w, r.h, 3.0, color::accent(), 1.0);
+        }
         let mut tx = r.x + 5.0;
         if let Some(t) = tag {
-            canvas.fill_rounded(r.x + 1.0, r.y + 2.0, 3.0, r.h - 4.0, 1.5, t);
-            tx += 3.0;
+            tx = super::draw_axis_tag(canvas, r, t);
         }
         if editing_now {
             self.draw_edit_text(canvas, r, tx);

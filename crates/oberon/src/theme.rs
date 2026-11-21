@@ -39,7 +39,7 @@ pub mod color {
     c!(axis_z, 92, 144, 230);
     c!(danger, 236, 98, 98);
     c!(axis_y, 120, 204, 112);
-    c!(field, 8, 8, 8);
+    c!(field, 20, 20, 20);
     c!(warn, 232, 186, 92);
     c!(success, 128, 208, 150);
     c!(gizmo_hot, 255, 220, 96);
@@ -59,7 +59,7 @@ pub mod color {
 /// Layout metrics, in logical pixels (scaled by the window's DPI factor).
 pub mod layout {
     /// Height of the top toolbar.
-    pub const TOOLBAR_H: f32 = 44.0;
+    pub const TOOLBAR_H: f32 = 0.0;
     /// Width of the hierarchy panel.
     pub const HIERARCHY_W: f32 = 250.0;
     /// Width of the inspector panel.

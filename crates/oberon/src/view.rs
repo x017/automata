@@ -318,6 +318,9 @@ pub enum GizmoMode {
 }
 
 impl GizmoMode {
+    /// Every mode, in toolbar order.
+    pub const ALL: [Self; 3] = [Self::Move, Self::Rotate, Self::Scale];
+
     /// The display label.
     #[must_use]
     pub fn label(self) -> &'static str {

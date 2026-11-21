@@ -100,9 +100,15 @@ impl Ui {
     /// Draws the Settings dialog body inside `r`.
     pub(super) fn draw_settings(&mut self, canvas: &mut Canvas, r: Rect, page: SettingsPage) {
         // Header.
-        super::menus::draw_logo(canvas, r.x + 28.0, r.y + 27.0, 16.0, color::accent());
-        canvas.text(r.x + 50.0, r.y + 18.0, 16.0, "Settings", color::text());
-        let saved = "Changes apply instantly and are saved automatically";
+        canvas.text_in(
+            crate::canvas::Face::Medium,
+            r.x + 24.0,
+            r.y + 17.0,
+            16.0,
+            "Settings",
+            color::text(),
+        );
+        let saved = "Changes save automatically";
         let sw = canvas.measure_text(layout::SMALL_SIZE, saved);
         canvas.text(
             r.x + r.w - sw - 56.0,
@@ -115,7 +121,7 @@ impl Ui {
             canvas,
             Rect::new(r.x + r.w - 42.0, r.y + 14.0, 26.0, 26.0),
             "",
-            ButtonStyle::Normal,
+            ButtonStyle::Ghost,
         ) {
             self.dialog = None;
             return;
@@ -157,7 +163,6 @@ impl Ui {
             let hot = self.hot(row);
             if active {
                 canvas.fill_rounded(row.x, row.y, row.w, row.h, layout::RADIUS, color::select());
-                canvas.fill_rounded(row.x, row.y + 8.0, 3.0, row.h - 16.0, 1.5, color::accent());
             } else if hot {
                 canvas.fill_rounded(row.x, row.y, row.w, row.h, layout::RADIUS, color::hover());
             }
