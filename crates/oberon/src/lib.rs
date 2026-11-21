@@ -42,6 +42,7 @@ pub mod canvas;
 pub mod code;
 pub mod doc;
 pub mod fields;
+pub mod files;
 pub mod json;
 pub mod lsp;
 pub mod models;

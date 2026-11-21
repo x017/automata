@@ -70,6 +70,25 @@ fn main() {
         }
         "menu" => ui.open_bar_menu(0, &doc),
         "dialog" => ui.open_dialog_kind(oberon::ui::DialogKind::SaveSceneAs, &doc),
+        "browser" | "browser-filter" => {
+            if scene == "browser-filter" {
+                ui.open_dialog_kind(oberon::ui::DialogKind::OpenScript, &doc);
+                ui.type_text("c");
+            } else {
+                ui.open_dialog_kind(oberon::ui::DialogKind::OpenScene, &doc);
+            }
+        }
+        "files-menu" => {
+            let root = ui.project_root.clone();
+            if let Some(script) = std::fs::read_dir(root.join("scripts"))
+                .ok()
+                .and_then(|d| d.flatten().map(|e| e.path()).find(|p| p.is_file()))
+            {
+                ui.reveal_in_files(&script);
+                ui.begin_file_rename(&script);
+                ui.type_text("hero");
+            }
+        }
         "project" | "files" => {
             // Reveal a script so the Files tree shows a couple of open folders.
             let root = ui.project_root.clone();

@@ -6,7 +6,12 @@
 //! models are added to the scene. Drag a model onto the scene view to place
 //! it there, or onto the Inspector to use it on the selected entity.
 //! Right-click offers the same plus creation of scripts and folders in that
-//! folder. The open scene and the active script are highlighted.
+//! folder, and Rename / Duplicate / Delete / Copy Path / Show in File
+//! Manager. After a click the panel takes the keyboard: arrows move, Enter
+//! opens, F2 renames in place, Delete asks and moves to the Trash, Ctrl+D
+//! duplicates. Drag a file onto a folder to move it there (scene references
+//! follow), or a script onto the Inspector to attach it. The open scene and
+//! the active script are highlighted.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -48,7 +53,49 @@ pub struct ProjectState {
     /// Cached listings: folder → (items, when read).
     listings: HashMap<PathBuf, (Vec<Item>, Instant)>,
     scroll: f32,
-    selected: Option<PathBuf>,
+    pub(super) selected: Option<PathBuf>,
+    /// The panel was clicked last, so it takes F2 / Delete / arrow keys.
+    focused: bool,
+    /// The file or folder being renamed in place.
+    renaming: Option<PathBuf>,
+    /// The folder a file dragged over the panel would move into.
+    drop_dir: Option<PathBuf>,
+}
+
+/// A key for the focused Files panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilesKey {
+    /// Select the row above.
+    Up,
+    /// Select the row below.
+    Down,
+    /// Collapse the folder, or select its parent.
+    Left,
+    /// Expand the folder.
+    Right,
+    /// Open the file / toggle the folder.
+    Open,
+    /// Rename in place.
+    Rename,
+    /// Delete (asks first).
+    Delete,
+    /// Copy next to itself.
+    Duplicate,
+    /// Copy the path to the clipboard.
+    CopyPath,
+}
+
+/// A Files panel command on the selected file (context menu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileCommand {
+    /// Rename in place.
+    Rename,
+    /// Delete (asks first).
+    Delete,
+    /// Copy the absolute path.
+    CopyPath,
+    /// Copy the path relative to the project.
+    CopyRelativePath,
 }
 
 /// A file dragged out of the Files panel.
@@ -246,6 +293,26 @@ impl Ui {
 
         let top = rect.y + layout::TITLEBAR_H;
         let list = Rect::new(rect.x, top, rect.w, (rect.h - layout::TITLEBAR_H).max(0.0));
+        self.last_files_h = rect.h;
+        // Focus follows clicks: inside takes the keyboard, outside gives it
+        // back.
+        if self.p.pressed || self.p.right_pressed {
+            self.project.focused = self.hot(rect);
+        }
+        let dragging = self
+            .file_drag
+            .as_ref()
+            .filter(|d| d.active)
+            .map(|d| d.path.clone());
+        self.project.drop_dir = None;
+        let renaming = self.project.renaming.clone().filter(|_| {
+            self.edit
+                .as_ref()
+                .is_some_and(|e| e.target == super::EditTarget::FileRename)
+        });
+        if renaming.is_none() {
+            self.project.renaming = None;
+        }
         let rows = self.project.rows(&root);
         let content_h = rows.len() as f32 * ROW_H + 8.0;
         if self.hot(list) && self.p.scroll != 0.0 {
@@ -298,6 +365,55 @@ impl Ui {
             }
             draw_tree_icon(canvas, kind, x + 21.0, r.y + r.h / 2.0);
             let tx = x + 32.0;
+            // A file dragged over a row moves into that folder (a file row:
+            // its folder).
+            if let Some(dragged) = dragging.as_ref().filter(|_| hot) {
+                let into = if item.dir {
+                    item.path.clone()
+                } else {
+                    item.path
+                        .parent()
+                        .map_or_else(|| root.clone(), Path::to_path_buf)
+                };
+                if dragged.parent() != Some(into.as_path()) && dragged != &into {
+                    canvas.stroke_rounded(r.x, r.y, r.w, r.h, 3.0, color::accent(), 1.5);
+                    self.project.drop_dir = Some(into);
+                }
+            }
+            if renaming.as_ref() == Some(&item.path) {
+                let field = Rect::new(tx - 4.0, r.y + 1.0, (r.x + r.w - tx).max(40.0), r.h - 2.0);
+                canvas.fill_rounded(
+                    field.x,
+                    field.y,
+                    field.w,
+                    field.h,
+                    3.0,
+                    color::viewport_bg(),
+                );
+                canvas.stroke_rounded(
+                    field.x,
+                    field.y,
+                    field.w,
+                    field.h,
+                    3.0,
+                    color::accent(),
+                    1.0,
+                );
+                self.draw_edit_text(canvas, field, tx);
+                let (_, ext) = crate::files::split_name(&item.path);
+                let typed = self.edit.as_ref().map_or("", |e| e.buffer.as_str());
+                if !ext.is_empty() && Path::new(typed).extension().is_none() {
+                    let tw = canvas.measure_text(layout::FONT_SIZE, typed);
+                    canvas.text(
+                        tx + tw + 3.0,
+                        r.y + (r.h - layout::FONT_SIZE) / 2.0 - 1.0,
+                        layout::FONT_SIZE,
+                        &ext,
+                        color::text_faint(),
+                    );
+                }
+                continue;
+            }
             canvas.text_clipped(
                 tx,
                 r.y + (r.h - layout::FONT_SIZE) / 2.0 - 1.0,
@@ -318,10 +434,7 @@ impl Ui {
                 if self.p.pressed {
                     clicked_row = true;
                     self.project.selected = Some(item.path.clone());
-                    if matches!(kind, AssetKind::Model | AssetKind::Audio)
-                        && editing
-                        && !self.p.double_click
-                    {
+                    if !item.dir && editing && !self.p.double_click {
                         self.file_drag = Some(FileDrag {
                             path: item.path.clone(),
                             origin: (self.p.x, self.p.y),
@@ -339,7 +452,8 @@ impl Ui {
                 if self.p.right_pressed {
                     clicked_row = true;
                     self.project.selected = Some(item.path.clone());
-                    let menu = self.file_menu(doc, item, kind, editing);
+                    let mut menu = self.file_menu(doc, item, kind, editing);
+                    menu.extend(self.file_ops_items(item, editing));
                     self.open_menu(self.p.x, self.p.y, menu);
                 }
             }
@@ -352,6 +466,26 @@ impl Ui {
                 "No files yet. Right-click to add a script.",
                 color::text_dim(),
             );
+        }
+        // Dropping on empty space moves to the project folder.
+        if let Some(dragged) = dragging.as_ref() {
+            if self.project.drop_dir.is_none()
+                && self.hot(list)
+                && dragged.parent() != Some(root.as_path())
+                && y < list.y + list.h
+                && self.p.y > y
+            {
+                canvas.stroke_rounded(
+                    list.x + 2.0,
+                    list.y + 2.0,
+                    list.w - 5.0,
+                    list.h - 4.0,
+                    4.0,
+                    color::accent(),
+                    1.5,
+                );
+                self.project.drop_dir = Some(root.clone());
+            }
         }
         if !clicked_row && self.hot(list) {
             if self.p.pressed {
@@ -510,6 +644,210 @@ impl Ui {
         }
         menu.extend(self.project_create_items());
         menu
+    }
+
+    /// Rename / Duplicate / Delete / Copy Path / Show in File Manager for a
+    /// tree row (acting on the selection, which the right-click set).
+    fn file_ops_items(&self, item: &Item, editing: bool) -> Vec<MenuItem> {
+        let file = |label: &str, shortcut: &'static str, cmd: FileCommand, on: bool| {
+            MenuItem::new(label, shortcut, Action::Ui(UiAction::File(cmd)), on)
+        };
+        vec![
+            MenuItem::separator(),
+            file("Rename…", "F2", FileCommand::Rename, editing),
+            MenuItem::new(
+                "Duplicate",
+                "Ctrl+D",
+                Action::Intent(Intent::DuplicateFile(item.path.clone())),
+                true,
+            ),
+            file(
+                crate::files::delete_label(),
+                "Del",
+                FileCommand::Delete,
+                true,
+            ),
+            MenuItem::separator(),
+            file("Copy Path", "Ctrl+Shift+C", FileCommand::CopyPath, true),
+            file(
+                "Copy Relative Path",
+                "",
+                FileCommand::CopyRelativePath,
+                true,
+            ),
+            MenuItem::new(
+                "Show in File Manager",
+                "",
+                Action::Intent(Intent::RevealFile(item.path.clone())),
+                true,
+            ),
+        ]
+    }
+
+    /// The folder a file dragged over the Files panel would move into.
+    pub(super) fn project_drop_dir(&self) -> Option<PathBuf> {
+        self.project.drop_dir.clone()
+    }
+
+    /// Whether the Files panel has the keyboard.
+    #[must_use]
+    pub fn files_focused(&self) -> bool {
+        self.project.focused
+            && self.panels.show_files
+            && self.edit.is_none()
+            && self.dialog.is_none()
+            && self.menu.is_none()
+            && !self.code.has_focus()
+    }
+
+    /// Runs a context-menu command on the selected file.
+    pub(super) fn file_command(&mut self, cmd: FileCommand) {
+        let Some(path) = self.project.selected.clone() else {
+            return;
+        };
+        match cmd {
+            FileCommand::Rename => self.begin_file_rename(&path),
+            FileCommand::Delete => self.ask_delete(path),
+            FileCommand::CopyPath => self.code.clipboard.set(&path.display().to_string()),
+            FileCommand::CopyRelativePath => {
+                let rel = path.strip_prefix(&self.project_root).unwrap_or(&path);
+                let text = rel
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                self.code.clipboard.set(&text);
+            }
+        }
+    }
+
+    /// Starts renaming `path` in place: the name without its extension is
+    /// selected, so typing replaces it and the extension stays.
+    pub fn begin_file_rename(&mut self, path: &Path) {
+        if path == self.project_root {
+            return;
+        }
+        let (stem, _) = crate::files::split_name(path);
+        self.project.renaming = Some(path.to_path_buf());
+        self.project.selected = Some(path.to_path_buf());
+        self.edit = Some(super::TextEdit {
+            id: 0,
+            target: super::EditTarget::FileRename,
+            buffer: stem,
+            rect: Rect::default(),
+            fresh: true,
+            attr: None,
+        });
+    }
+
+    /// Commits an in-place rename typed as `text`. A name without an
+    /// extension keeps the file's own.
+    pub(super) fn commit_file_rename(&mut self, text: &str) -> Option<Intent> {
+        let from = self.project.renaming.take()?;
+        let name = text.trim();
+        if let Err(e) = crate::files::check_name(name) {
+            self.log(super::LogLevel::Warn, format!("Rename: {e}"));
+            return None;
+        }
+        let (stem, ext) = crate::files::split_name(&from);
+        let new_name = if !ext.is_empty() && Path::new(name).extension().is_none() {
+            format!("{name}{ext}")
+        } else {
+            name.to_string()
+        };
+        if new_name == format!("{stem}{ext}") {
+            return None;
+        }
+        let to = from.with_file_name(new_name);
+        Some(Intent::MoveFile { from, to })
+    }
+
+    /// Handles a key while the Files panel has focus.
+    pub fn files_key(&mut self, key: FilesKey, editing: bool) -> Option<Intent> {
+        let root = self.project_root.clone();
+        let rows = self.project.rows(&root);
+        let pos = self
+            .project
+            .selected
+            .as_ref()
+            .and_then(|s| rows.iter().position(|r| &r.item.path == s));
+        let current = pos.map(|i| rows[i].item.clone());
+        match key {
+            FilesKey::Up | FilesKey::Down => {
+                if rows.is_empty() {
+                    return None;
+                }
+                let next = match (key, pos) {
+                    (FilesKey::Down, Some(i)) => (i + 1).min(rows.len() - 1),
+                    (FilesKey::Up, Some(i)) => i.saturating_sub(1),
+                    (FilesKey::Down, None) => 0,
+                    _ => rows.len() - 1,
+                };
+                self.project.selected = Some(rows[next].item.path.clone());
+                self.reveal_row(next);
+                None
+            }
+            FilesKey::Left => {
+                let item = current?;
+                if item.dir && self.project.expanded.remove(&item.path) {
+                    return None;
+                }
+                let parent = item.path.parent()?.to_path_buf();
+                if parent.starts_with(&root) && parent != root {
+                    self.project.expanded.remove(&parent);
+                    if let Some(i) = rows.iter().position(|r| r.item.path == parent) {
+                        self.reveal_row(i);
+                    }
+                    self.project.selected = Some(parent);
+                }
+                None
+            }
+            FilesKey::Right => {
+                let item = current?;
+                if item.dir {
+                    self.project.expanded.insert(item.path);
+                }
+                None
+            }
+            FilesKey::Open => {
+                let item = current?;
+                if item.dir {
+                    if !self.project.expanded.remove(&item.path) {
+                        self.project.expanded.insert(item.path);
+                    }
+                    return None;
+                }
+                open_intent(&item.path, false)
+            }
+            FilesKey::Rename => {
+                if editing {
+                    self.begin_file_rename(&current?.path);
+                }
+                None
+            }
+            FilesKey::Delete => {
+                self.ask_delete(current?.path);
+                None
+            }
+            FilesKey::Duplicate => Some(Intent::DuplicateFile(current?.path)),
+            FilesKey::CopyPath => {
+                self.code
+                    .clipboard
+                    .set(&current?.path.display().to_string());
+                None
+            }
+        }
+    }
+
+    /// Scrolls the tree so row `i` is visible.
+    fn reveal_row(&mut self, i: usize) {
+        let top = i as f32 * ROW_H;
+        let view = (self.last_files_h - layout::TITLEBAR_H - 8.0).max(ROW_H);
+        if top < self.project.scroll {
+            self.project.scroll = top;
+        } else if top + ROW_H > self.project.scroll + view {
+            self.project.scroll = top + ROW_H - view;
+        }
     }
 
     /// "New Script…" and "New Folder" in [`Ui::project_dir`].
@@ -896,5 +1234,129 @@ mod tests {
             "{}",
             ui.panels.files_h
         );
+    }
+
+    #[test]
+    fn the_focused_panel_renames_duplicates_and_deletes_by_keyboard() {
+        let root = project("keys");
+        let mut c = Canvas::new(1600, 950);
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        ui.project_root.clone_from(&root);
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        // A click in the panel gives it the keyboard; arrows walk rows.
+        let (x, y) = row_center(1);
+        press(&mut ui, &mut c, &doc, x, y, false);
+        assert!(ui.files_focused());
+        assert_eq!(ui.project.selected, Some(root.join("level.ron")));
+        ui.files_key(FilesKey::Up, true);
+        assert_eq!(ui.project.selected, Some(root.join("scripts")));
+        ui.files_key(FilesKey::Right, true);
+        ui.files_key(FilesKey::Down, true);
+        ui.files_key(FilesKey::Down, true);
+        assert_eq!(ui.project.selected, Some(root.join("scripts/coin.py")));
+        assert!(matches!(
+            ui.files_key(FilesKey::Open, true),
+            Some(Intent::OpenScript(p)) if p.ends_with("coin.py")
+        ));
+
+        // F2 renames in place: the stem is selected, the extension kept.
+        ui.files_key(FilesKey::Rename, true);
+        assert_eq!(ui.edit.as_ref().map(|e| e.buffer.as_str()), Some("coin"));
+        assert!(!ui.files_focused(), "the rename field has the keyboard");
+        ui.type_text("gem");
+        let intent = ui.edit_key(crate::ui::EditKey::Enter);
+        assert_eq!(
+            intent,
+            Some(Intent::MoveFile {
+                from: root.join("scripts/coin.py"),
+                to: root.join("scripts/gem.py"),
+            })
+        );
+
+        assert_eq!(
+            ui.files_key(FilesKey::Duplicate, true),
+            Some(Intent::DuplicateFile(root.join("scripts/coin.py")))
+        );
+        // Delete asks first; Enter confirms.
+        assert_eq!(ui.files_key(FilesKey::Delete, true), None);
+        assert!(ui.dialog_open());
+        ui.dialog_enter();
+        let out = ui.frame(&mut c, &doc, Pointer::default(), None);
+        assert!(
+            out.contains(&Intent::DeleteFile(root.join("scripts/coin.py"))),
+            "{out:?}"
+        );
+
+        // A click elsewhere gives the keyboard back.
+        press(&mut ui, &mut c, &doc, 800.0, 400.0, false);
+        assert!(!ui.files_focused());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_context_menu_offers_file_operations() {
+        let root = project("menu");
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        ui.project_root.clone_from(&root);
+        let item = Item {
+            name: "level.ron".into(),
+            path: root.join("level.ron"),
+            dir: false,
+        };
+        let labels: Vec<String> = ui
+            .file_ops_items(&item, true)
+            .into_iter()
+            .map(|m| m.label)
+            .collect();
+        for want in ["Rename…", "Duplicate", "Copy Path", "Show in File Manager"] {
+            assert!(labels.iter().any(|l| l == want), "{labels:?}");
+        }
+        assert!(labels.iter().any(|l| l == crate::files::delete_label()));
+        let _ = doc;
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn dragging_a_file_onto_a_folder_moves_it() {
+        let root = project("drag");
+        let mut c = Canvas::new(1600, 950);
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        ui.project_root.clone_from(&root);
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        // Drag level.ron (row 1) onto scripts/ (row 0).
+        let (x, y) = row_center(1);
+        let down = |x: f32, y: f32, pressed: bool| Pointer {
+            x,
+            y,
+            down: true,
+            pressed,
+            ..Pointer::default()
+        };
+        ui.frame(&mut c, &doc, down(x, y, true), None);
+        let (tx, ty) = row_center(0);
+        ui.frame(&mut c, &doc, down(tx, ty - 2.0, false), None);
+        ui.frame(&mut c, &doc, down(tx, ty, false), None);
+        assert_eq!(ui.project_drop_dir(), Some(root.join("scripts")));
+        let out = ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x: tx,
+                y: ty,
+                ..Pointer::default()
+            },
+            None,
+        );
+        assert!(
+            out.contains(&Intent::MoveFile {
+                from: root.join("level.ron"),
+                to: root.join("scripts/level.ron"),
+            }),
+            "{out:?}"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -522,7 +522,7 @@ impl Ui {
     // ----- build ---------------------------------------------------------
 
     /// The Build page's settings, loaded from the project on first use.
-    fn build_settings(&mut self) -> &mut crate::build::BuildConfig {
+    pub(super) fn build_settings(&mut self) -> &mut crate::build::BuildConfig {
         let root = self.project_root.clone();
         if self.build_cfg.as_ref().is_none_or(|(r, _)| *r != root) {
             let cfg = crate::build::config_for(&root, None);
@@ -597,14 +597,28 @@ impl Ui {
         for (l1, w1, v1, p1, l2, w2, v2, p2) in pairs {
             canvas.text(body.x, *y, layout::FONT_SIZE, l1, color::text());
             canvas.text(right, *y, layout::FONT_SIZE, l2, color::text());
-            self.setting_field(
-                canvas,
-                Rect::new(body.x, *y + 20.0, half, 26.0),
-                w1,
-                &v1,
-                p1,
-            );
-            self.setting_field(canvas, Rect::new(right, *y + 20.0, half, 26.0), w2, &v2, p2);
+            for (x, which, value, placeholder) in [(body.x, w1, &v1, p1), (right, w2, &v2, p2)] {
+                let browse = match which {
+                    SettingText::BuildScene => Some(super::DialogKind::BuildScene),
+                    SettingText::BuildOutput => Some(super::DialogKind::BuildOutput),
+                    _ => None,
+                };
+                let field_w = if browse.is_some() { half - 36.0 } else { half };
+                self.setting_field(
+                    canvas,
+                    Rect::new(x, *y + 20.0, field_w, 26.0),
+                    which,
+                    value,
+                    placeholder,
+                );
+                if let Some(kind) = browse {
+                    self.browse_button(
+                        canvas,
+                        Rect::new(x + half - 32.0, *y + 20.0, 32.0, 26.0),
+                        kind,
+                    );
+                }
+            }
             *y += 60.0;
         }
 
@@ -899,8 +913,25 @@ impl Ui {
             color::text_dim(),
             body.w,
         );
+        if which == SettingText::Python {
+            let field = Rect::new(body.x, y + 36.0, body.w - 36.0, 26.0);
+            self.setting_field(canvas, field, which, value, placeholder);
+            let b = Rect::new(body.x + body.w - 32.0, y + 36.0, 32.0, 26.0);
+            self.browse_button(canvas, b, super::DialogKind::PythonInterpreter);
+            return;
+        }
         let field = Rect::new(body.x, y + 36.0, body.w, 26.0);
         self.setting_field(canvas, field, which, value, placeholder);
+    }
+
+    /// A "…" button next to a path field: opens the file browser (which
+    /// comes back to Settings).
+    fn browse_button(&mut self, canvas: &mut Canvas, r: Rect, kind: super::DialogKind) {
+        self.tip(r, "Browse…");
+        if self.button(canvas, r, "…", ButtonStyle::Normal) {
+            self.edit = None;
+            self.open_file_dialog(kind, None);
+        }
     }
 
     /// A text field; click to edit, Enter (or clicking away) applies.

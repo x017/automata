@@ -41,6 +41,31 @@ means ⌘.
 | F2 | Rename |
 | Esc | Deselect |
 
+## File browser
+
+| Keys | Action |
+|---|---|
+| Type | Filter the list |
+| ↑ / ↓, PgUp / PgDn, Home / End | Move the highlight |
+| Enter | Open the folder / choose the file |
+| Tab | Complete the name |
+| Backspace (empty name) or Alt+↑ | Up one folder |
+| Alt+← / Alt+→ | Back / Forward |
+| F5 | Refresh |
+| Esc | Close |
+
+## Files panel (click it first)
+
+| Keys | Action |
+|---|---|
+| ↑ / ↓ | Select the previous / next file |
+| → / ← | Expand / collapse |
+| Enter | Open |
+| F2 | Rename |
+| Ctrl+D | Duplicate |
+| Del | Move to Trash |
+| Ctrl+Shift+C | Copy path |
+
 ## Play mode (default player)
 
 | Keys | Action |

@@ -680,6 +680,37 @@ impl EditorApp {
                     .ui
                     .log(LogLevel::Error, format!("New folder failed: {e}")),
             },
+            Intent::MoveFile { from, to } => self.move_file(&from, &to),
+            Intent::DuplicateFile(path) => match crate::files::duplicate(&path) {
+                Ok(copy) => {
+                    self.ui.files_changed(Some(&copy));
+                    self.ui.log(
+                        LogLevel::Info,
+                        format!("Created {}", crate::files::display_name(&copy)),
+                    );
+                }
+                Err(e) => self.ui.log(LogLevel::Error, e),
+            },
+            Intent::DeleteFile(path) => match crate::files::delete(&path) {
+                Ok(()) => {
+                    self.ui.files_changed(None);
+                    let how = if crate::files::deletes_to_trash() {
+                        "Moved to the Trash"
+                    } else {
+                        "Deleted"
+                    };
+                    self.ui.log(
+                        LogLevel::Info,
+                        format!("{how}: {}", crate::files::display_name(&path)),
+                    );
+                }
+                Err(e) => self.ui.log(LogLevel::Error, e),
+            },
+            Intent::RevealFile(path) => {
+                if let Err(e) = crate::files::reveal(&path) {
+                    self.ui.log(LogLevel::Error, e);
+                }
+            }
             Intent::Quit => self.quit = true,
             Intent::SetEnvironment(id, env) => {
                 doc.modify(id, false, |d| d.environment = Some(env));
@@ -820,6 +851,49 @@ impl EditorApp {
         } else {
             self.add_model(path, at);
         }
+    }
+
+    /// Renames or moves a file or folder, then points the scene, the open
+    /// script tabs and the scene's own path at the new place.
+    fn move_file(&mut self, from: &std::path::Path, to: &std::path::Path) {
+        if let Err(e) = crate::files::rename(from, to) {
+            self.ui.log(LogLevel::Error, e);
+            return;
+        }
+        self.ui.code.retarget(from, to);
+        // Moving the scene (or a folder holding it) carries its relative
+        // references along; anything else is re-pointed.
+        let scene_moved = self.doc.path.clone().and_then(|scene| {
+            scene
+                .strip_prefix(from)
+                .ok()
+                .map(std::path::Path::to_path_buf)
+        });
+        let refs = match scene_moved {
+            Some(rest) => {
+                self.doc.path = Some(if rest.as_os_str().is_empty() {
+                    to.to_path_buf()
+                } else {
+                    to.join(rest)
+                });
+                0
+            }
+            None => self.doc.retarget_paths(from, to),
+        };
+        self.ui.files_changed(Some(to));
+        let what = if refs > 0 {
+            format!(" ({refs} object(s) in the scene updated; save to keep)")
+        } else {
+            String::new()
+        };
+        self.ui.log(
+            LogLevel::Info,
+            format!(
+                "Renamed {} → {}{what}",
+                crate::files::display_name(from),
+                crate::files::display_name(to)
+            ),
+        );
     }
 
     /// Brings a sound into the project (copying it into `sounds/` when it
@@ -1498,10 +1572,34 @@ impl EditorApp {
             }
             return;
         }
+        // The file browser moves its selection with the arrow keys (its
+        // name field keeps the typing).
+        if self.ui.file_dialog_open() {
+            use crate::ui::file_browser::NavKey;
+            let alt = self.input.modifiers.alt_key();
+            let nav = match code {
+                KeyCode::ArrowLeft if alt => Some(NavKey::Back),
+                KeyCode::ArrowRight if alt => Some(NavKey::Forward),
+                KeyCode::ArrowUp if alt => Some(NavKey::Parent),
+                KeyCode::ArrowUp => Some(NavKey::Up),
+                KeyCode::ArrowDown => Some(NavKey::Down),
+                KeyCode::PageUp => Some(NavKey::PageUp),
+                KeyCode::PageDown => Some(NavKey::PageDown),
+                KeyCode::Home => Some(NavKey::First),
+                KeyCode::End => Some(NavKey::Last),
+                KeyCode::F5 => Some(NavKey::Refresh),
+                _ => None,
+            };
+            if let Some(nav) = nav {
+                if self.ui.file_dialog_key(nav) {
+                    return;
+                }
+            }
+        }
         // A modal dialog without a focused field only listens for Enter.
         if self.ui.dialog_open() && !self.ui.is_editing_text() {
             if matches!(code, KeyCode::Enter | KeyCode::NumpadEnter) {
-                self.ui.close_dialog();
+                self.ui.dialog_enter();
             }
             return;
         }
@@ -1567,6 +1665,30 @@ impl EditorApp {
                 if self.ui.code_tab_key(key, mods) {
                     return;
                 }
+            }
+        }
+
+        // The Files panel, after a click in it, takes F2 / Delete / arrows.
+        if self.ui.files_focused() {
+            use crate::ui::project_panel::FilesKey;
+            let key = match code {
+                KeyCode::ArrowUp => Some(FilesKey::Up),
+                KeyCode::ArrowDown => Some(FilesKey::Down),
+                KeyCode::ArrowLeft => Some(FilesKey::Left),
+                KeyCode::ArrowRight => Some(FilesKey::Right),
+                KeyCode::Enter | KeyCode::NumpadEnter => Some(FilesKey::Open),
+                KeyCode::F2 => Some(FilesKey::Rename),
+                KeyCode::Delete => Some(FilesKey::Delete),
+                KeyCode::KeyD if ctrl => Some(FilesKey::Duplicate),
+                KeyCode::KeyC if ctrl && shift => Some(FilesKey::CopyPath),
+                _ => None,
+            };
+            if let Some(key) = key {
+                let editing = self.ui.play == PlayState::Editing;
+                if let Some(intent) = self.ui.files_key(key, editing) {
+                    self.apply(intent);
+                }
+                return;
             }
         }
 
@@ -2083,7 +2205,9 @@ impl ApplicationHandler for EditorApp {
             WindowEvent::HoveredFileCancelled => self.ui.os_file_hover = false,
             WindowEvent::DroppedFile(path) => {
                 self.ui.os_file_hover = false;
-                self.dropped_file(&path);
+                if !self.ui.file_dialog_drop(&path) {
+                    self.dropped_file(&path);
+                }
             }
             WindowEvent::Focused(focused) => {
                 // Buttons and keys released outside the window never report;

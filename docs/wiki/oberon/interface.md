@@ -60,6 +60,47 @@ share the space, or hide either one from the **Window** menu.
   **New Folder**. New files go in the selected folder, and the tree opens
   to show them.
 - **+** in the title bar does the same as right-clicking empty space.
+- **Drag a file onto a folder** to move it there (onto empty space to move
+  it to the project root). Scenes that use the file, such as an attached
+  script, a model or a sound, are updated to the new path in one undo step.
+- Right-click a file or folder for **Rename…**, **Duplicate**, **Copy
+  Path**, **Copy Relative Path**, **Show in File Manager**, and **Move to
+  Trash**. Deleting always asks first and goes to the system trash where
+  there is one, so it can be restored.
+
+Click in the panel to give it the keyboard:
+
+| Keys | Action |
+|---|---|
+| ↑ / ↓ | Select the previous / next file |
+| → / ← | Expand / collapse a folder (← on a file goes to its folder) |
+| Enter | Open the file (scene, script, prefab) or toggle a folder |
+| F2 | Rename in place (the extension is kept) |
+| Ctrl+D | Duplicate |
+| Del | Move to Trash (asks first) |
+| Ctrl+Shift+C | Copy the file's path |
+
+## File browser
+
+Open, Save As, New Script, Import Model, and the **…** buttons in Settings
+all use the same browser, so you rarely need to type a path:
+
+- **Places** on the left: the project, its Scripts/Models/Scenes folders,
+  folders you used recently, and your home folder.
+- **Breadcrumbs** across the top: click any part of the path to go back to
+  it. **← → ↑** go back, forward and up (Alt+← / Alt+→ / Alt+↑).
+- **Click** a file to select it, **double-click** to open it. One click on
+  a folder opens it. Click a column header to sort by name, size or date.
+- **Type to filter**: the name field narrows the list as you type, and
+  Enter takes the highlighted match, so `pla` + Enter opens `player.py`.
+  **Tab** completes the name.
+- **Keyboard**: ↑/↓, PgUp/PgDn, Home/End move the highlight; Enter opens a
+  folder or chooses a file; Backspace in an empty field goes up a folder;
+  F5 refreshes; Esc closes.
+- **+ New Folder** makes a folder right there and asks for its name.
+- Saving over an existing file asks first. Dropping a file from your
+  desktop onto the browser jumps to it.
+- Each kind of dialog remembers the folder you used last.
 
 Hidden files and `__pycache__`, `target`, and `node_modules` folders are
 left out.

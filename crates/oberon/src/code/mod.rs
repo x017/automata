@@ -661,6 +661,23 @@ impl CodeEditor {
         false
     }
 
+    /// Follows a file or folder moved on disk: tabs showing `from` (or a
+    /// file inside it) now show the new path. Returns how many moved.
+    pub fn retarget(&mut self, from: &Path, to: &Path) -> usize {
+        let mut moved = 0;
+        for tab in &mut self.tabs {
+            if let Ok(rest) = tab.path.strip_prefix(from) {
+                tab.path = if rest.as_os_str().is_empty() {
+                    to.to_path_buf()
+                } else {
+                    to.join(rest)
+                };
+                moved += 1;
+            }
+        }
+        moved
+    }
+
     /// Closes every unmodified tab for which `close` holds. Modified tabs
     /// stay open (they would need a save prompt each). Returns how many
     /// modified tabs were kept.

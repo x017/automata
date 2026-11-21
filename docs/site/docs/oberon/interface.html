@@ -71,7 +71,26 @@ looking. See <a href="models.html">Models</a>.</li><li>The open scene and the sc
 with a dot.</li><li>Right-click a file for Open, Edit Script, <strong>Attach to</strong> the selected
 entity, or Instantiate. Right-click anywhere for <strong>New Script…</strong> and
 <strong>New Folder</strong>. New files go in the selected folder, and the tree opens
-to show them.</li><li><strong>+</strong> in the title bar does the same as right-clicking empty space.</li></ul>
+to show them.</li><li><strong>+</strong> in the title bar does the same as right-clicking empty space.</li><li><strong>Drag a file onto a folder</strong> to move it there (onto empty space to move
+it to the project root). Scenes that use the file, such as an attached
+script, a model or a sound, are updated to the new path in one undo step.</li><li>Right-click a file or folder for <strong>Rename…</strong>, <strong>Duplicate</strong>, <strong>Copy
+Path</strong>, <strong>Copy Relative Path</strong>, <strong>Show in File Manager</strong>, and <strong>Move to
+Trash</strong>. Deleting always asks first and goes to the system trash where
+there is one, so it can be restored.</li></ul>
+<p>Click in the panel to give it the keyboard:</p>
+<div class="table"><table><thead><tr><th>Keys</th><th>Action</th></tr></thead><tbody><tr><td>↑ / ↓</td><td>Select the previous / next file</td></tr><tr><td>→ / ←</td><td>Expand / collapse a folder (← on a file goes to its folder)</td></tr><tr><td>Enter</td><td>Open the file (scene, script, prefab) or toggle a folder</td></tr><tr><td>F2</td><td>Rename in place (the extension is kept)</td></tr><tr><td>Ctrl+D</td><td>Duplicate</td></tr><tr><td>Del</td><td>Move to Trash (asks first)</td></tr><tr><td>Ctrl+Shift+C</td><td>Copy the file's path</td></tr></tbody></table></div>
+<h2 id="file-browser">File browser<a class="anchor" href="#file-browser" aria-label="Link to this section">#</a></h2>
+<p>Open, Save As, New Script, Import Model, and the <strong>…</strong> buttons in Settings
+all use the same browser, so you rarely need to type a path:</p>
+<ul><li><strong>Places</strong> on the left: the project, its Scripts/Models/Scenes folders,
+folders you used recently, and your home folder.</li><li><strong>Breadcrumbs</strong> across the top: click any part of the path to go back to
+it. <strong>← → ↑</strong> go back, forward and up (Alt+← / Alt+→ / Alt+↑).</li><li><strong>Click</strong> a file to select it, <strong>double-click</strong> to open it. One click on
+a folder opens it. Click a column header to sort by name, size or date.</li><li><strong>Type to filter</strong>: the name field narrows the list as you type, and
+Enter takes the highlighted match, so <code>pla</code> + Enter opens <code>player.py</code>.
+<strong>Tab</strong> completes the name.</li><li><strong>Keyboard</strong>: ↑/↓, PgUp/PgDn, Home/End move the highlight; Enter opens a
+folder or chooses a file; Backspace in an empty field goes up a folder;
+F5 refreshes; Esc closes.</li><li><strong>+ New Folder</strong> makes a folder right there and asks for its name.</li><li>Saving over an existing file asks first. Dropping a file from your
+desktop onto the browser jumps to it.</li><li>Each kind of dialog remembers the folder you used last.</li></ul>
 <p>Hidden files and <code>__pycache__</code>, <code>target</code>, and <code>node_modules</code> folders are
 left out.</p>
 <h2 id="scene-view">Scene view<a class="anchor" href="#scene-view" aria-label="Link to this section">#</a></h2>
@@ -128,7 +147,7 @@ off in <strong>Settings → Appearance</strong>.</p>
     <footer class="pager"><a class="prev" href="index.html"><small>Previous</small>Introduction</a><a class="next" href="scripting.html"><small>Next</small>Scripting</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/interface.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#top-bar">Top bar</a></li><li class="l2"><a href="#hierarchy">Hierarchy</a></li><li class="l2"><a href="#files">Files</a></li><li class="l2"><a href="#scene-view">Scene view</a></li><li class="l2"><a href="#inspector">Inspector</a></li><li class="l2"><a href="#graphics">Graphics</a></li><li class="l2"><a href="#console">Console</a></li><li class="l2"><a href="#assets">Assets</a></li><li class="l2"><a href="#play-mode">Play mode</a></li><li class="l2"><a href="#status-bar">Status bar</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#top-bar">Top bar</a></li><li class="l2"><a href="#hierarchy">Hierarchy</a></li><li class="l2"><a href="#files">Files</a></li><li class="l2"><a href="#file-browser">File browser</a></li><li class="l2"><a href="#scene-view">Scene view</a></li><li class="l2"><a href="#inspector">Inspector</a></li><li class="l2"><a href="#graphics">Graphics</a></li><li class="l2"><a href="#console">Console</a></li><li class="l2"><a href="#assets">Assets</a></li><li class="l2"><a href="#play-mode">Play mode</a></li><li class="l2"><a href="#status-bar">Status bar</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

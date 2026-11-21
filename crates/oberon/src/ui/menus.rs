@@ -61,6 +61,12 @@ pub enum DialogKind {
     /// Import a sound file (from anywhere) into the scene, or onto an
     /// entity's Audio Source.
     ImportSound(Option<u64>),
+    /// Settings ▸ Build: pick the start scene.
+    BuildScene,
+    /// Settings ▸ Build: pick the output folder.
+    BuildOutput,
+    /// Settings ▸ Python: pick the interpreter.
+    PythonInterpreter,
     /// Keyboard shortcut reference.
     Shortcuts,
     /// About Oberon.
@@ -110,6 +116,8 @@ pub enum UiAction {
     /// Pick a sound from the project: for a new entity (`None`) or for an
     /// entity's Audio Source.
     PickSound(Option<u64>),
+    /// A Files panel command on the selected file.
+    File(super::project_panel::FileCommand),
 }
 
 /// Commands from a script tab's context menu (VS Code's set).
@@ -697,6 +705,7 @@ impl Ui {
             UiAction::PickModel(target) => self.open_model_picker(target),
             UiAction::PickSound(target) => self.open_sound_picker(target),
             UiAction::Tab(cmd) => self.tab_command(cmd),
+            UiAction::File(cmd) => self.file_command(cmd),
         }
     }
 

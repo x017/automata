@@ -30,6 +30,7 @@ pub mod assets_panel;
 pub mod attributes;
 mod code_view;
 pub mod dialogs;
+pub mod file_browser;
 pub mod graphics;
 pub mod menus;
 pub mod palette;
@@ -447,6 +448,20 @@ pub enum Intent {
     },
     /// Create a folder.
     NewFolder(PathBuf),
+    /// Rename or move a file or folder on disk; scene references to it
+    /// follow.
+    MoveFile {
+        /// The current path.
+        from: PathBuf,
+        /// The new path.
+        to: PathBuf,
+    },
+    /// Copy a file or folder next to itself (`name copy.ext`).
+    DuplicateFile(PathBuf),
+    /// Delete a file or folder (to the Trash where the desktop has one).
+    DeleteFile(PathBuf),
+    /// Show a file in the system file manager.
+    RevealFile(PathBuf),
     /// Quit the editor (asks to save unsaved changes first).
     Quit,
     /// Restart the language server (its settings changed).
@@ -486,6 +501,9 @@ impl Intent {
                 | Self::OpenScriptAt { .. }
                 | Self::NewScript(_)
                 | Self::NewFolder(_)
+                | Self::DuplicateFile(_)
+                | Self::DeleteFile(_)
+                | Self::RevealFile(_)
                 | Self::Play
                 | Self::Pause
                 | Self::Stop
@@ -586,6 +604,8 @@ enum EditTarget {
     Import(u8),
     /// The Assets browser's filter.
     AssetQuery,
+    /// A Files panel row being renamed in place.
+    FileRename,
 }
 
 #[derive(Debug, Clone)]
@@ -718,6 +738,10 @@ pub struct Ui {
     /// The selected camera's view, rendered by the app: RGBA, size.
     camera_preview: Option<(Vec<u8>, u32, u32)>,
     recent_colors: Vec<[f32; 4]>,
+    /// The Files panel's height last frame (keyboard scrolling).
+    last_files_h: f32,
+    /// Where each kind of file dialog was last used (this session).
+    dialog_dirs: std::collections::HashMap<&'static str, PathBuf>,
     entity_clipboard: Vec<EntityData>,
     component_clipboard: Option<(ComponentKind, EntityData)>,
     /// The menu bar consumed this frame's click.
@@ -826,6 +850,8 @@ impl Ui {
             stats: FrameStats::default(),
             camera_preview: None,
             recent_colors: Vec::new(),
+            dialog_dirs: std::collections::HashMap::new(),
+            last_files_h: 0.0,
             entity_clipboard: Vec::new(),
             component_clipboard: None,
             bar_click_consumed: false,
@@ -965,7 +991,16 @@ impl Ui {
     /// when the field is committed.
     pub fn edit_key(&mut self, key: EditKey) -> Option<Intent> {
         let edit = self.edit.as_mut()?;
+        let dialog_field = edit.target == EditTarget::DialogName;
         match key {
+            EditKey::Backspace if dialog_field && edit.buffer.is_empty() => {
+                self.file_dialog_key(file_browser::NavKey::Parent);
+                None
+            }
+            EditKey::Tab if dialog_field => {
+                self.file_dialog_complete();
+                None
+            }
             EditKey::Backspace => {
                 if edit.fresh {
                     edit.buffer.clear();
@@ -982,12 +1017,11 @@ impl Ui {
             }
             EditKey::Enter | EditKey::Tab => self.commit_edit(),
             EditKey::Escape => {
-                if self
-                    .edit
-                    .as_ref()
-                    .is_some_and(|e| e.target == EditTarget::DialogName)
-                {
-                    self.close_dialog();
+                if dialog_field {
+                    if !self.file_dialog_escape() {
+                        self.close_dialog();
+                    }
+                    return None;
                 }
                 self.edit = None;
                 None
@@ -1064,6 +1098,7 @@ impl Ui {
                 })
             }
             EditTarget::DialogName => self.submit_dialog(&edit.buffer),
+            EditTarget::FileRename => self.commit_file_rename(&edit.buffer),
             EditTarget::Setting(which) => self.commit_setting(which, &edit.buffer),
             EditTarget::AssetQuery => {
                 self.assets.query = edit.buffer.trim().to_string();
@@ -1345,9 +1380,11 @@ impl Ui {
     }
 
     /// Drives a file dragged out of the Files panel (or over the window from
-    /// the OS): highlights where it would land, and on release adds the
-    /// model to the scene or puts it on the selected entity.
+    /// the OS): highlights where it would land, and on release moves it
+    /// into a folder, adds a model / sound / prefab to the scene, puts a
+    /// model or sound on the selected entity, or attaches a script.
     fn update_file_drag(&mut self, canvas: &mut Canvas, doc: &Document, lay: &Layout) {
+        use project_panel::AssetKind;
         let (x, y) = (self.raw.x, self.raw.y);
         if self.os_file_hover {
             if self.code.active.is_none() {
@@ -1362,32 +1399,54 @@ impl Ui {
             drag.active = true;
         }
         let drag = drag.clone();
-        let target = self.file_drop_target(doc, lay, x, y);
+        let kind = project_panel::asset_kind(&drag.path, false);
+        let folder = self.project_drop_dir();
+        let target = match (self.file_drop_target(doc, lay, x, y), kind) {
+            _ if folder.is_some() => FileDrop::Nothing,
+            (
+                t @ (FileDrop::Scene(_) | FileDrop::Entity(..)),
+                AssetKind::Model | AssetKind::Audio,
+            )
+            | (t @ FileDrop::Entity(..), AssetKind::Script)
+            | (t @ FileDrop::Scene(_), AssetKind::Prefab) => t,
+            _ => FileDrop::Nothing,
+        };
+        let editing = self.play == PlayState::Editing;
         if !self.raw.down {
             self.file_drag = None;
-            if drag.active && self.play == PlayState::Editing {
-                let sound = automata_core::audio_source::is_audio_path(&drag.path);
-                match target {
-                    FileDrop::Scene(_) if sound => self.out.push(Intent::AddSound {
-                        path: drag.path,
-                        at: Some((x, y)),
-                    }),
-                    FileDrop::Scene(_) => self.out.push(Intent::AddModel {
-                        path: drag.path,
-                        at: Some((x, y)),
-                    }),
-                    FileDrop::Entity(id, _) if sound => {
-                        self.out.push(Intent::SetAudioClip {
-                            id,
-                            path: drag.path,
-                        });
-                    }
-                    FileDrop::Entity(id, _) => self.out.push(Intent::SetModel {
-                        id,
-                        path: drag.path,
-                    }),
-                    FileDrop::Nothing => {}
+            if !drag.active || !editing {
+                return;
+            }
+            if let Some(dir) = folder {
+                let to = dir.join(drag.path.file_name().unwrap_or_default());
+                self.out.push(Intent::MoveFile {
+                    from: drag.path,
+                    to,
+                });
+                return;
+            }
+            let path = drag.path;
+            let intent = match (target, kind) {
+                (FileDrop::Scene(_), AssetKind::Audio) => Some(Intent::AddSound {
+                    path,
+                    at: Some((x, y)),
+                }),
+                (FileDrop::Scene(_), AssetKind::Prefab) => Some(Intent::InstantiatePrefab(path)),
+                (FileDrop::Scene(_), _) => Some(Intent::AddModel {
+                    path,
+                    at: Some((x, y)),
+                }),
+                (FileDrop::Entity(id, _), AssetKind::Audio) => {
+                    Some(Intent::SetAudioClip { id, path })
                 }
+                (FileDrop::Entity(id, _), AssetKind::Script) => {
+                    Some(Intent::AttachScript { id, path })
+                }
+                (FileDrop::Entity(id, _), _) => Some(Intent::SetModel { id, path }),
+                (FileDrop::Nothing, _) => None,
+            };
+            if let Some(intent) = intent {
+                self.out.push(intent);
             }
             return;
         }
@@ -1399,33 +1458,45 @@ impl Ui {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let sound = automata_core::audio_source::is_audio_path(&drag.path);
-        match target {
-            FileDrop::Scene(r) if sound => draw_drop_zone(canvas, r, "Add a sound here"),
-            FileDrop::Scene(r) => draw_drop_zone(canvas, r, "Add to scene"),
-            FileDrop::Entity(id, r) => {
-                let who = doc.index_of(id).map_or("", |i| doc.entities[i].name());
-                let what = if sound {
-                    format!("Play from {who}")
-                } else {
-                    format!("Use on {who}")
+        let mut label = name.clone();
+        match &target {
+            FileDrop::Scene(r) => {
+                let what = match kind {
+                    AssetKind::Audio => "Add a sound here",
+                    AssetKind::Prefab => "Instantiate the prefab",
+                    _ => "Add to scene",
                 };
-                draw_drop_zone(canvas, r, &what);
+                draw_drop_zone(canvas, *r, what);
             }
-            FileDrop::Nothing => self.cursor = CursorHint::Grabbing,
+            FileDrop::Entity(id, r) => {
+                let who = doc.index_of(*id).map_or("", |i| doc.entities[i].name());
+                let what = match kind {
+                    AssetKind::Audio => format!("Play from {who}"),
+                    AssetKind::Script => format!("Attach to {who}"),
+                    _ => format!("Use on {who}"),
+                };
+                draw_drop_zone(canvas, *r, &what);
+            }
+            FileDrop::Nothing => {
+                if let Some(dir) = &folder {
+                    label = format!("Move {name} to {}", crate::files::display_name(dir));
+                } else {
+                    self.cursor = CursorHint::Grabbing;
+                }
+            }
         }
         // The file follows the pointer.
-        let tw = canvas.measure_text(layout::SMALL_SIZE, &name) + 34.0;
+        let tw = canvas.measure_text(layout::SMALL_SIZE, &label) + 34.0;
         let (gx, gy) = (x + 14.0, y + 10.0);
         canvas.fill_rounded(gx + 1.0, gy + 3.0, tw, 24.0, 5.0, color::shadow());
         canvas.fill_rounded(gx, gy, tw, 24.0, 5.0, color::raised());
         canvas.stroke_rounded(gx, gy, tw, 24.0, 5.0, color::border(), 1.0);
-        project_panel::draw_model_icon(canvas, gx + 14.0, gy + 12.0, color::accent_soft());
+        project_panel::draw_tree_icon(canvas, kind, gx + 14.0, gy + 12.0);
         canvas.text(
             gx + 26.0,
             gy + 5.0,
             layout::SMALL_SIZE,
-            &name,
+            &label,
             color::text(),
         );
     }

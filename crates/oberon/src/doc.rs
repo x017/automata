@@ -1306,6 +1306,64 @@ impl Document {
         }
     }
 
+    /// After a file or folder moved on disk from `from` to `to`, points
+    /// every script, model and sound reference at the new place (files
+    /// inside a moved folder included). One undo step; returns how many
+    /// entities changed.
+    pub fn retarget_paths(&mut self, from: &Path, to: &Path) -> usize {
+        let old = self.relative(from);
+        let new = self.relative(to);
+        let moved = |path: &str| -> Option<String> {
+            let rel = path.replace('\\', "/");
+            if rel == old {
+                Some(new.clone())
+            } else {
+                rel.strip_prefix(&format!("{old}/"))
+                    .map(|rest| format!("{new}/{rest}"))
+            }
+        };
+        let mut changes = Vec::new();
+        for (i, e) in self.entities.iter().enumerate() {
+            let mut data = e.data.clone();
+            let mut changed = false;
+            if let Some(script) = &mut data.script {
+                if let Some(p) = moved(&script.path) {
+                    script.path = p;
+                    changed = true;
+                }
+            }
+            if let Some(MeshVisualData {
+                primitive: PrimitiveData::Model { path },
+                ..
+            }) = &mut data.mesh_visual
+            {
+                if let Some(p) = moved(path) {
+                    *path = p;
+                    changed = true;
+                }
+            }
+            if let Some(audio) = &mut data.audio_source {
+                if let Some(p) = moved(&audio.clip) {
+                    audio.clip = p;
+                    changed = true;
+                }
+            }
+            if changed {
+                changes.push((i, data));
+            }
+        }
+        if changes.is_empty() {
+            return 0;
+        }
+        self.push_undo();
+        let n = changes.len();
+        for (i, data) in changes {
+            self.entities[i].data = data;
+        }
+        self.touch();
+        n
+    }
+
     /// Resets a component to its defaults. Returns true if changed.
     pub fn reset_component(&mut self, id: u64, kind: ComponentKind) -> bool {
         self.modify(id, false, |d| {
@@ -1429,6 +1487,42 @@ impl Document {
 
 #[cfg(test)]
 pub(crate) mod tests {
+
+    #[test]
+    fn moved_files_keep_their_references() {
+        let root = std::env::temp_dir().join(format!("oberon-retarget-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("scripts")).unwrap();
+        std::fs::write(root.join("scripts/coin.py"), "").unwrap();
+        let mut doc = Document::new();
+        doc.path = Some(root.join("level.ron"));
+        let id = doc.create(CreateKind::Cube);
+        doc.modify(id, false, |d| {
+            d.script = Some(automata_core::Script {
+                path: "scripts/coin.py".into(),
+            });
+        });
+        // The folder is renamed on disk, then the scene follows.
+        std::fs::rename(root.join("scripts"), root.join("code")).unwrap();
+        assert_eq!(
+            doc.retarget_paths(&root.join("scripts"), &root.join("code")),
+            1
+        );
+        let i = doc.index_of(id).unwrap();
+        assert_eq!(
+            doc.entities[i].data.script.as_ref().unwrap().path,
+            "code/coin.py"
+        );
+        // One undo step brings the old reference back.
+        doc.undo();
+        let i = doc.index_of(id).unwrap();
+        assert_eq!(
+            doc.entities[i].data.script.as_ref().unwrap().path,
+            "scripts/coin.py"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// A closed ramp (a wedge rising along +X, `y = x` over a 1 m
     /// footprint: half its bounding box), written to a temp file. Returns
     /// its absolute path.

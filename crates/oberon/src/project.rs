@@ -22,6 +22,8 @@ pub const RECENT_LIMIT: usize = 12;
 pub struct Prefs {
     /// Recently opened scenes, most recent first.
     pub recent: Vec<PathBuf>,
+    /// Folders recently used in the file browser, most recent first.
+    pub recent_dirs: Vec<PathBuf>,
     /// Hierarchy width.
     pub hierarchy_w: f32,
     /// Inspector width.
@@ -57,6 +59,7 @@ impl Default for Prefs {
         let panels = PanelSizes::default();
         Self {
             recent: Vec::new(),
+            recent_dirs: Vec::new(),
             hierarchy_w: panels.hierarchy_w,
             inspector_w: panels.inspector_w,
             bottom_h: panels.bottom_h,
