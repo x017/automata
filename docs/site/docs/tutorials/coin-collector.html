@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorial: Coin collector · AUTOMATA docs</title>
+<meta name="description" content="Goal: turn your first scene into a game. Coins spin and bob, the player collects them, a score counts up, and you win when they&#x27;re all gone.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="first-scene.html">Your first scene</a></li><li><a href="coin-collector.html" aria-current="page">Coin collector</a></li><li><a href="third-person-camera.html">Third-person camera</a></li><li><a href="camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Tutorial: Coin collector</h1>
+<p><strong>Goal:</strong> turn your first scene into a game. Coins spin and bob, the player
+collects them, a score counts up, and you win when they're all gone.</p>
+<p><strong>You'll learn:</strong></p>
+<ul><li>behaviour scripts (<code>start</code> / <code>update</code>)</li><li>attributes</li><li>reading other entities</li><li>the Console</li><li>hot reload</li></ul>
+<p><strong>Start from:</strong> the scene from <a href="first-scene.html">Your first scene</a>. Open
+it with Ctrl+O. Or build the finished version with
+<code>python examples/oberon/coin_run/build_level.py</code> and follow along.</p>
+<h2 id="1-a-coin">1. A coin<a class="anchor" href="#1-a-coin" aria-label="Link to this section">#</a></h2>
+<ol><li><strong>+ → Cube</strong>, renamed <code>Coin 1</code>.</li><li>Scale it to <code>0.5, 0.5, 0.12</code>: a flat disc-ish block.</li><li>Colour it gold: <code>#FFC733</code>.</li><li>Set its Y position to <code>1</code> so it floats at chest height.</li></ol>
+<h2 id="2-the-coin-script">2. The coin script<a class="anchor" href="#2-the-coin-script" aria-label="Link to this section">#</a></h2>
+<p>With the coin selected, choose <strong>Add Component → Script…</strong> and type
+<code>scripts/coin.py</code>. Oberon creates the file from a template and opens it in
+the code editor. Replace the contents with:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-s">&quot;&quot;&quot;coin: spins, bobs, and is collected when the player touches it.&quot;&quot;&quot;</span>
+
+<span class="tok-k">import</span> math
+
+PICKUP_RADIUS = <span class="tok-n">1.1</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;home&quot;</span>] = entity.transform.position
+    entity.attributes[<span class="tok-s">&quot;collected&quot;</span>] = <span class="tok-b">False</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    <span class="tok-k">if</span> entity.attributes.get(<span class="tok-s">&quot;collected&quot;</span>):
+        <span class="tok-k">return</span>
+    hx, hy, hz = entity.state[<span class="tok-s">&quot;home&quot;</span>]
+    t = ctx.time.elapsed
+    entity.transform.position = (hx, hy + <span class="tok-n">0.15</span> * math.sin(t * <span class="tok-n">3.0</span> + hx), hz)
+    entity.transform.rotation_euler = (<span class="tok-n">0.0</span>, t * <span class="tok-n">2.5</span>, <span class="tok-n">0.0</span>)
+
+    px, py, pz = ctx.scene[<span class="tok-s">&quot;Player&quot;</span>].transform.position
+    <span class="tok-k">if</span> math.dist((px, py, pz), (hx, hy, hz)) &lt; PICKUP_RADIUS:
+        entity.attributes[<span class="tok-s">&quot;collected&quot;</span>] = <span class="tok-b">True</span>
+        entity.transform.position = (hx, -<span class="tok-n">100.0</span>, hz)  <span class="tok-c"># out of sight</span>
+        <span class="tok-b">print</span>(<span class="tok-s">f&quot;+{entity.attributes.get(&#x27;value&#x27;, 1)}&quot;</span>)</code></pre></div>
+<p>Save it (Ctrl+S), press Esc to return to the scene, and press <strong>Play</strong>.
+The coin spins and bobs. Walk into it, and it disappears with <code>+1</code> in the
+Console.</p>
+<p>What's going on:</p>
+<ul><li><code>start</code> runs once. We remember the coin's starting position in
+<code>entity.state</code>, a private dict that lasts for the whole Play session.</li><li><code>update</code> runs every frame. <code>ctx.time.elapsed</code> drives the motion, so it
+runs at the same speed at any frame rate.</li><li><code>ctx.scene[&quot;Player&quot;]</code> finds another entity by name.</li><li><code>entity.attributes[&quot;collected&quot;]</code> is a value <strong>other scripts can read</strong>.
+That's how the score will know.</li></ul>
+<h2 id="3-hot-reload">3. Hot reload<a class="anchor" href="#3-hot-reload" aria-label="Link to this section">#</a></h2>
+<p>Keep Play running. In the code editor, change <code>t * 2.5</code> to <code>t * 8.0</code> and
+save. Within half a second the Console says <code>Reloaded coin.py</code>, and the
+coin spins faster. You don't need to restart.</p>
+<p>Now break it on purpose: type <code>entity.transfrom</code> and save. The Console
+shows the error with a <strong>coin.py:17</strong> link. That coin pauses; the rest of
+the game keeps running. Fix the typo and save, and it resumes.</p>
+<h2 id="4-many-coins-different-values">4. Many coins, different values<a class="anchor" href="#4-many-coins-different-values" aria-label="Link to this section">#</a></h2>
+<p>Stop. Select the coin and press <strong>Ctrl+D</strong> five times. The copies share
+<code>scripts/coin.py</code>; each one gets its own <code>entity</code> and <code>state</code>. Spread them
+out, and put one somewhere hard to reach, such as on top of a pillar.</p>
+<p>Give that hard-to-reach coin a bigger reward:</p>
+<ol><li>In the Inspector, choose <strong>Attributes → + Add attribute</strong>.</li><li>Name: <code>value</code>, type <strong>Int</strong>, value <code>5</code>.</li></ol>
+<p>The script already reads <code>entity.attributes.get(&#x27;value&#x27;, 1)</code>, so coins
+without the attribute are worth 1.</p>
+<h2 id="5-keeping-score">5. Keeping score<a class="anchor" href="#5-keeping-score" aria-label="Link to this section">#</a></h2>
+<p>Score belongs to the game, not to any coin. Choose <strong>+ → Empty</strong> and name
+it <code>Rules</code>. Attach a new script, <code>scripts/rules.py</code>:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-s">&quot;&quot;&quot;rules: keeps score and announces the win.&quot;&quot;&quot;</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">coins</span>(ctx):
+    <span class="tok-k">return</span> [e <span class="tok-k">for</span> e <span class="tok-k">in</span> ctx.scene <span class="tok-k">if</span> e.name.startswith(<span class="tok-s">&quot;Coin&quot;</span>)]
+
+
+<span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;score&quot;</span>] = <span class="tok-n">0</span>
+    <span class="tok-b">print</span>(<span class="tok-s">f&quot;Collect {len(coins(ctx))} coins!&quot;</span>)
+
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    all_coins = coins(ctx)
+    score = <span class="tok-b">sum</span>(c.attributes.get(<span class="tok-s">&quot;value&quot;</span>, <span class="tok-n">1</span>) <span class="tok-k">for</span> c <span class="tok-k">in</span> all_coins <span class="tok-k">if</span> c.attributes.get(<span class="tok-s">&quot;collected&quot;</span>))
+    <span class="tok-k">if</span> score != entity.state[<span class="tok-s">&quot;score&quot;</span>]:
+        entity.state[<span class="tok-s">&quot;score&quot;</span>] = score
+        entity.attributes[<span class="tok-s">&quot;score&quot;</span>] = score
+        <span class="tok-b">print</span>(<span class="tok-s">f&quot;Score: {score}&quot;</span>)
+        <span class="tok-k">if</span> all_coins <span class="tok-k">and</span> <span class="tok-b">all</span>(c.attributes.get(<span class="tok-s">&quot;collected&quot;</span>) <span class="tok-k">for</span> c <span class="tok-k">in</span> all_coins):
+            <span class="tok-b">print</span>(<span class="tok-s">&quot;You found every coin!&quot;</span>)</code></pre></div>
+<p>Play and collect everything. The Console counts up and celebrates at the
+end.</p>
+<aside class="note"><p><strong>Why doesn't each coin add to the score itself?</strong> Every script reads
+the start-of-frame state, and writes apply after all scripts run. If two
+coins were collected in the same frame, each would read <code>score = 3</code> and
+write <code>4</code>. Having <strong>one writer per value</strong> avoids that. Coins report
+their own state, and the rules script adds it up.</p></aside>
+<h2 id="6-your-own-player-script-optional">6. Your own player script (optional)<a class="anchor" href="#6-your-own-player-script-optional" aria-label="Link to this section">#</a></h2>
+<p>The built-in Player controller is fine in Oberon. A script makes the game
+behave the same outside the editor too (see
+<a href="oberon-to-python.html">From Oberon to Python</a>). Attach <code>scripts/player.py</code>
+to the Player. Use the version in
+<a href="https://github.com/x017/automata/blob/main/examples/oberon/coin_run/scripts/player.py" rel="noopener"><code>examples/oberon/coin_run/scripts/player.py</code></a>:
+it walks relative to the camera, sprints, jumps, and has gravity. A
+character with a script skips the built-in controller.</p>
+<p>The heart of it:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>vy = entity.state[<span class="tok-s">&quot;vy&quot;</span>]
+<span class="tok-k">if</span> ctx.physics.grounded(entity):
+    vy = JUMP <span class="tok-k">if</span> keys.just_pressed(<span class="tok-s">&quot;space&quot;</span>) <span class="tok-k">else</span> -<span class="tok-n">2.0</span>
+<span class="tok-k">else</span>:
+    vy -= GRAVITY * ctx.time.delta
+entity.state[<span class="tok-s">&quot;vy&quot;</span>] = vy
+entity.character_velocity = (vx, vy, vz)</code></pre></div>
+<h2 id="what-you-learned">What you learned<a class="anchor" href="#what-you-learned" aria-label="Link to this section">#</a></h2>
+<ul><li>A behaviour script has <code>start(entity, ctx)</code> and <code>update(entity, ctx)</code>.</li><li><code>entity.state</code> is private memory; <code>entity.attributes</code> is shared, shown
+in the Inspector, and saved.</li><li>Find other entities with <code>ctx.scene[&quot;Name&quot;]</code> or by iterating
+<code>ctx.scene</code>.</li><li>Save to hot-reload; errors pause only the script that failed.</li><li>Have one writer per value.</li></ul>
+<p><strong>Next:</strong> <a href="third-person-camera.html">Third-person camera</a>. Make the camera
+chase the player.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="first-scene.html"><small>Previous</small>Your first scene</a><a class="next" href="third-person-camera.html"><small>Next</small>Third-person camera</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/tutorials/coin-collector.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#1-a-coin">1. A coin</a></li><li class="l2"><a href="#2-the-coin-script">2. The coin script</a></li><li class="l2"><a href="#3-hot-reload">3. Hot reload</a></li><li class="l2"><a href="#4-many-coins-different-values">4. Many coins, different values</a></li><li class="l2"><a href="#5-keeping-score">5. Keeping score</a></li><li class="l2"><a href="#6-your-own-player-script-optional">6. Your own player script (optional)</a></li><li class="l2"><a href="#what-you-learned">What you learned</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

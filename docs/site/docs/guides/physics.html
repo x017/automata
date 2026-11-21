@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide: Physics · AUTOMATA docs</title>
+<meta name="description" content="Rapier-powered rigid bodies in 3D and 2D, a character controller, and raycasts — stepped at a fixed 60 Hz so gameplay is identical at any frame rate.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="game-loop.html">The game loop</a></li><li><a href="scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="input.html">Input</a></li><li><a href="physics.html" aria-current="page">Physics</a></li><li><a href="events-and-resources.html">Events &amp; resources</a></li><li><a href="oop-style.html">OOP style</a></li><li><a href="scene-files.html">Scene files</a></li><li><a href="project-structure.html">Project structure</a></li><li><a href="testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Guide: Physics</h1>
+<p>Rapier-powered rigid bodies in 3D and 2D, a character controller, and
+raycasts — stepped at a fixed 60 Hz so gameplay is identical at any frame
+rate.</p>
+<h2 id="bodies">Bodies<a class="anchor" href="#bodies" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.RigidBody.dynamic()              <span class="tok-c"># gravity, forces, collisions — crates, balls</span>
+at.RigidBody.fixed()                <span class="tok-c"># never moves — floors, walls, platforms</span>
+at.RigidBody.kinematic_velocity()   <span class="tok-c"># you set velocity; physics resolves collisions</span>
+at.RigidBody.kinematic_position()   <span class="tok-c"># you set position; it pushes dynamic bodies</span></code></pre></div>
+<p>Fine-tuning: `at.RigidBody(body_type="dynamic", gravity_scale=1.0,
+linear_damping=0.0, angular_damping=0.0, enabled=True)`.</p>
+<h2 id="colliders">Colliders<a class="anchor" href="#colliders" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Collider3D.cuboid(x, y, z)   <span class="tok-c"># FULL sizes — match Transform.scale exactly</span>
+at.Collider3D.ball(radius)
+at.Collider3D.capsule(half_height, radius)
+
+at.Collider2D.cuboid(x, y)
+at.Collider2D.ball(radius)
+at.Collider2D.capsule(half_height, radius)</code></pre></div>
+<p>Chainable material modifiers: <code>.friction(0.8)</code>, <code>.restitution(0.3)</code>
+(bounciness), <code>.density(2.0)</code>, <code>.sensor(True)</code> (detect overlap without
+blocking movement — pickups, triggers).</p>
+<aside class="note"><p><strong>Collider sizes are full sizes.</strong> <code>Transform(scale=(40, 1, 40))</code> pairs
+with <code>Collider3D.cuboid(40, 1, 40)</code>. Get this wrong and things float or
+sink by exactly half.</p></aside>
+<aside class="note"><p><strong>2D and 3D are separate worlds.</strong> A <code>Collider2D</code> never touches a
+<code>Collider3D</code>. Pick one per game; per entity, use the matching family.</p></aside>
+<h2 id="the-per-frame-toolbox">The per-frame toolbox<a class="anchor" href="#the-per-frame-toolbox" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.physics.grounded(player)                       <span class="tok-c"># standing on something?</span>
+ctx.physics.velocity(entity)                       <span class="tok-c"># current (vx, vy, vz)</span>
+ctx.physics.set_velocity(entity, (<span class="tok-n">0</span>, <span class="tok-n">5</span>, <span class="tok-n">0</span>))
+ctx.physics.apply_impulse(entity, (<span class="tok-n">0</span>, <span class="tok-n">300</span>, <span class="tok-n">0</span>))     <span class="tok-c"># one-shot kick</span>
+ctx.physics.apply_force(entity, (<span class="tok-n">10</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>))        <span class="tok-c"># continuous push</span>
+ctx.physics.gravity() / ctx.physics.set_gravity((<span class="tok-n">0</span>, -<span class="tok-n">9.81</span>, <span class="tok-n">0</span>))
+ctx.physics.body_count()
+
+key = ctx.physics.cast_ray(origin, direction, max_distance=<span class="tok-n">100.0</span>, exclude=player)
+hit = ctx.physics.ray_result(key)   <span class="tok-c"># (entity_id, point, normal, distance) or None</span></code></pre></div>
+<p><code>ctx.physics2d</code> mirrors the essentials for the 2D world (<code>apply_impulse</code>,
+<code>grounded</code>, <code>body_count</code>).</p>
+<h2 id="the-character-controller">The character controller<a class="anchor" href="#the-character-controller" aria-label="Link to this section">#</a></h2>
+<p>The platformer recipe — tight movement that still collides and climbs
+slopes:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>player = (
+    at.Entity(<span class="tok-s">&quot;player&quot;</span>)
+    .add(at.Transform(position=(<span class="tok-n">0</span>, <span class="tok-n">1.4</span>, <span class="tok-n">0</span>)))
+    .add(at.MeshRenderer.cube(size=<span class="tok-n">0.9</span>, color=ORANGE))
+    .add(at.RigidBody.kinematic_velocity())       <span class="tok-c"># 1. we own the velocity</span>
+    .add(at.Collider3D.capsule(<span class="tok-n">0.5</span>, <span class="tok-n">0.4</span>))         <span class="tok-c"># 2. capsule slides over edges</span>
+    .add(at.CharacterController(snap_to_ground=<span class="tok-n">0.5</span>))  <span class="tok-c"># 3. kinematic solver</span>
+    .add(at.CharacterVelocity())                  <span class="tok-c"># 4. per-frame drive input</span>
+)</code></pre></div>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    player = ctx.scene[<span class="tok-s">&quot;player&quot;</span>]
+    dx = <span class="tok-b">self</span>.controls.axis(<span class="tok-s">&quot;move_x&quot;</span>, ctx.input)
+    <span class="tok-k">if</span> ctx.physics.grounded(player):
+        <span class="tok-b">self</span>.vy = -<span class="tok-n">1.0</span>                             <span class="tok-c"># stay snapped to ground</span>
+        <span class="tok-k">if</span> <span class="tok-b">self</span>.controls.just_pressed(<span class="tok-s">&quot;jump&quot;</span>, ctx.input):
+            <span class="tok-b">self</span>.vy = JUMP_SPEED
+    <span class="tok-k">else</span>:
+        <span class="tok-b">self</span>.vy -= GRAVITY * ctx.time.delta
+    player.character_velocity = (dx * WALK_SPEED, <span class="tok-b">self</span>.vy, <span class="tok-n">0.0</span>)</code></pre></div>
+<p><code>CharacterController</code> options (keyword-only): <code>snap_to_ground</code>,
+<code>autostep</code>, <code>max_slope_climb_angle</code>, <code>min_slope_slide_angle</code>,
+<code>offset</code>, <code>slide</code>, and <code>mode=&quot;normal&quot;</code> (or <code>&quot;autostep&quot;</code>-friendly setups).</p>
+<h2 id="common-pitfalls">Common pitfalls<a class="anchor" href="#common-pitfalls" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Player falls through the floor:</strong> collider sizes don't match the
+visual scale (use full sizes), or the floor lacks <code>RigidBody.fixed()</code>.</li><li><strong>Kinematic character never moves:</strong> you set <code>Transform.position</code> instead
+of <code>character_velocity</code> — the solver only sees the velocity component.</li><li><strong>Dynamic body jitters against a wall:</strong> that's restitution/friction;
+try <code>friction(0.2)</code> on the wall or clamp velocity yourself.</li></ul>
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="scenes-and-entities.html">Scenes &amp; Entities</a> — component basics</li><li><a href="../cookbook.html#movement">Cookbook</a> — coyote time, jump buffering</li><li><a href="../api-reference.html#physics-ctxphysics">API Reference</a></li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="input.html"><small>Previous</small>Input</a><a class="next" href="events-and-resources.html"><small>Next</small>Events &amp; resources</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/physics.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#bodies">Bodies</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#the-per-frame-toolbox">The per-frame toolbox</a></li><li class="l2"><a href="#the-character-controller">The character controller</a></li><li class="l2"><a href="#common-pitfalls">Common pitfalls</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

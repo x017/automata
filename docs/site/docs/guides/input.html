@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide: Input · AUTOMATA docs</title>
+<meta name="description" content="Keyboard, mouse, and gamepads — polled raw for toys, bound to named actions for games.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="game-loop.html">The game loop</a></li><li><a href="scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="input.html" aria-current="page">Input</a></li><li><a href="physics.html">Physics</a></li><li><a href="events-and-resources.html">Events &amp; resources</a></li><li><a href="oop-style.html">OOP style</a></li><li><a href="scene-files.html">Scene files</a></li><li><a href="project-structure.html">Project structure</a></li><li><a href="testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Guide: Input</h1>
+<p>Keyboard, mouse, and gamepads — polled raw for toys, bound to named actions
+for games.</p>
+<h2 id="the-snapshot">The snapshot<a class="anchor" href="#the-snapshot" aria-label="Link to this section">#</a></h2>
+<p><code>ctx.input</code> is the device state at the start of the frame:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.input.pressed(at.Key.SPACE)          <span class="tok-c"># held right now</span>
+ctx.input.just_pressed(at.Key.SPACE)     <span class="tok-c"># went down this frame</span>
+ctx.input.just_released(at.Key.SPACE)    <span class="tok-c"># went up this frame</span>
+
+ctx.input.mouse_pressed(at.MouseButton.LEFT)
+ctx.input.mouse_just_pressed(at.MouseButton.LEFT)
+ctx.input.cursor                          <span class="tok-c"># (x, y) pixels or None</span>
+ctx.input.scroll                          <span class="tok-c"># (dx, dy) this frame</span>
+ctx.input.modifiers.shift                 <span class="tok-c"># shift/ctrl/alt/super_key</span></code></pre></div>
+<p>Key names are <strong>typed enums</strong> — <code>at.Key.SPACE</code>, <code>at.Key.ARROW_LEFT</code>,
+<code>at.Key.F1</code> — that your IDE autocompletes. Every enum member is a plain
+<code>str</code>, so <code>&quot;space&quot;</code> works identically; prefer enums for typo safety.</p>
+<aside class="note"><p>Headless mode receives no OS input events — everything reads as
+unpressed. Drive headless tests through physics and logic instead (see
+<a href="testing.html">Testing</a>).</p></aside>
+<h2 id="action-maps-the-layer-youll-actually-use">Action maps: the layer you'll actually use<a class="anchor" href="#action-maps-the-layer-youll-actually-use" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>controls = at.ActionMap()
+controls.bind(<span class="tok-s">&quot;jump&quot;</span>, at.Binding.key(at.Key.SPACE))
+controls.bind(<span class="tok-s">&quot;jump&quot;</span>, at.Binding.gamepad_button(at.GamepadButton.SOUTH))
+controls.bind_axis(<span class="tok-s">&quot;move_x&quot;</span>, at.AxisBinding.key_pair(at.Key.A, at.Key.D))
+controls.bind_axis(<span class="tok-s">&quot;move_x&quot;</span>, at.AxisBinding.key_pair(at.Key.ARROW_LEFT, at.Key.ARROW_RIGHT))
+controls.bind_axis(<span class="tok-s">&quot;move_x&quot;</span>, at.AxisBinding.gamepad_axis(at.GamepadAxis.LEFT_STICK_X))
+
+<span class="tok-c"># inside update:</span>
+<span class="tok-k">if</span> controls.just_pressed(<span class="tok-s">&quot;jump&quot;</span>, ctx.input): ...
+dx = controls.axis(<span class="tok-s">&quot;move_x&quot;</span>, ctx.input)            <span class="tok-c"># -1.0 ..= 1.0</span>
+mx, my = controls.axis_pair(<span class="tok-s">&quot;move_x&quot;</span>, <span class="tok-s">&quot;move_y&quot;</span>, ctx.input)</code></pre></div>
+<p>Rules that matter:</p>
+<ol><li><strong>Bindings stack.</strong> Three <code>bind_axis(&quot;move_x&quot;, ...)</code> calls mean A/D,
+arrows, and the stick all work at once; values sum, clamped to −1..1.
+(This was once a replace-not-stack bug — if your game only jumps but
+never walks, update your checkout.)</li><li><strong>Query against <code>ctx.input</code></strong> — the map itself is stateless, so it works
+with the frame snapshot.</li><li><strong>Remapping is game code</strong> — <code>rebind(action, [bindings])</code>,
+<code>unbind(action)</code>, <code>unbind_axis(name)</code> work at runtime; a settings screen
+is ordinary game code.</li></ol>
+<h3 id="binding-kinds">Binding kinds<a class="anchor" href="#binding-kinds" aria-label="Link to this section">#</a></h3>
+<div class="table"><table><thead><tr><th>Constructor</th><th>Triggers on</th></tr></thead><tbody><tr><td><code>Binding.key(key)</code></td><td>keyboard key</td></tr><tr><td><code>Binding.mouse(button)</code></td><td>mouse button</td></tr><tr><td><code>Binding.gamepad_button(button)</code></td><td>any connected pad's button</td></tr><tr><td><code>Binding.gamepad_axis_positive(axis)</code> / <code>..._negative(axis)</code></td><td>analog axis past ±0.5 (triggers-as-buttons)</td></tr><tr><td><code>AxisBinding.key_pair(neg, pos)</code></td><td>two keys → −1/0/+1</td></tr><tr><td><code>AxisBinding.button_pair(neg, pos)</code></td><td>two bindings → −1/0/+1</td></tr><tr><td><code>AxisBinding.gamepad_axis(axis, scale=1.0)</code></td><td>analog value × scale (<code>-1.0</code> inverts)</td></tr></tbody></table></div>
+<h2 id="gamepads">Gamepads<a class="anchor" href="#gamepads" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>pads = ctx.input.gamepads
+<span class="tok-k">if</span> pads.any_connected():
+    pad = pads.primary()
+    pad.pressed(at.GamepadButton.SOUTH)
+    lx, ly = pad.left_stick()
+<span class="tok-k">for</span> event <span class="tok-k">in</span> pads.events:   <span class="tok-c"># connections, disconnections, button/axis edges</span>
+    ...</code></pre></div>
+<p>Buttons: <code>SOUTH/EAST/NORTH/WEST</code> (A/B/Y/X or Cross/Circle/Triangle/Square),
+triggers, <code>LEFT_THUMB</code>/<code>RIGHT_THUMB</code> (stick clicks), d-pad. Axes:
+<code>LEFT_STICK_X/Y</code>, <code>RIGHT_STICK_X/Y</code>, and more — all in <code>GamepadButton</code> /
+<code>GamepadAxis</code>.</p>
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="game-loop.html">The Game Loop</a> — where the snapshot comes from</li><li><a href="../cookbook.html#input">Cookbook</a> — double-tap dash, input buffering</li><li><a href="../api-reference.html#input">API Reference</a></li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="cameras.html"><small>Previous</small>Cameras</a><a class="next" href="physics.html"><small>Next</small>Physics</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/input.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#the-snapshot">The snapshot</a></li><li class="l2"><a href="#action-maps-the-layer-youll-actually-use">Action maps: the layer you'll actually use</a></li><li class="l3"><a href="#binding-kinds">Binding kinds</a></li><li class="l2"><a href="#gamepads">Gamepads</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

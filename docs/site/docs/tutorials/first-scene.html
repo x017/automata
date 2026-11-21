@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorial: Your first scene · AUTOMATA docs</title>
+<meta name="description" content="Goal: build a small level in Oberon, light it, place a camera, play it, and save it. No code yet.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="first-scene.html" aria-current="page">Your first scene</a></li><li><a href="coin-collector.html">Coin collector</a></li><li><a href="third-person-camera.html">Third-person camera</a></li><li><a href="camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Tutorial: Your first scene</h1>
+<p><strong>Goal:</strong> build a small level in Oberon, light it, place a camera, play
+it, and save it. No code yet.</p>
+<p><strong>You need:</strong> Oberon running (<code>cargo run -p oberon --release</code>). See
+<a href="../oberon/index.html#run-it">Oberon</a>.</p>
+<h2 id="1-start-clean">1. Start clean<a class="anchor" href="#1-start-clean" aria-label="Link to this section">#</a></h2>
+<p>Oberon opens with a starter scene: a sun, a ground, a cube, a player, and
+three crates. Choose <strong>File → New Scene</strong> (Ctrl+N) to get an empty one
+instead. The Hierarchy on the left is now empty.</p>
+<h2 id="2-a-floor">2. A floor<a class="anchor" href="#2-a-floor" aria-label="Link to this section">#</a></h2>
+<ol><li>Click <strong>+</strong> at the top of the Hierarchy and choose <strong>Cube</strong>.</li><li>In the Inspector, set <strong>Transform → Scale</strong> to <code>20, 0.2, 20</code> and
+<strong>Position</strong> Y to <code>-0.1</code>. Click a field and type, or drag the X / Y /
+Z label left and right to scrub.</li><li>Click the name field at the top of the Inspector and rename the cube
+<code>Ground</code>. F2 also works.</li><li>Make it solid: choose <strong>Add Component → Rigidbody</strong> and set <strong>Body
+Type</strong> to <strong>Static</strong>. Then choose <strong>Add Component → Collider</strong>; the
+collider sizes itself to the mesh.</li></ol>
+<p>(<strong>+ → Plane</strong> makes a flat visual-only quad. That's good for decoration,
+but use a cube when things need to stand on it.)</p>
+<h2 id="3-some-objects">3. Some objects<a class="anchor" href="#3-some-objects" aria-label="Link to this section">#</a></h2>
+<ol><li><strong>+ → Cube</strong>. Press <strong>W</strong> for the Move gizmo and drag the red arrow to
+move the cube along X.</li><li>Press <strong>Ctrl+D</strong> a few times to duplicate it, and spread the copies
+around.</li><li>Select one cube and click the <strong>Color</strong> swatch under <strong>Mesh Renderer</strong>.
+Pick a colour, or type a hex value such as <code>#E8613A</code>.</li><li>Press <strong>R</strong> for Scale and stretch one cube into a tall pillar.</li></ol>
+<p>Made a mistake? <strong>Ctrl+Z</strong> undoes it. Every edit is one step, including a
+whole gizmo drag.</p>
+<h2 id="4-light">4. Light<a class="anchor" href="#4-light" aria-label="Link to this section">#</a></h2>
+<p>Choose <strong>+ → Directional Light</strong>. A sun icon appears in the view, and the
+objects get light and shadows.</p>
+<p>Open the <strong>Graphics</strong> tab (right dock, beside Inspector). Under <strong>Sun</strong>:</p>
+<ul><li>drag <strong>Elevation</strong> down to about <code>25</code> for long evening shadows</li><li>drag <strong>Azimuth</strong> around until the shadows fall where you like them</li></ul>
+<h2 id="5-a-player">5. A player<a class="anchor" href="#5-a-player" aria-label="Link to this section">#</a></h2>
+<p>Choose <strong>+ → Player</strong>. You get an orange capsule-sized box with a
+<strong>Character Controller</strong>. In Play mode it walks with WASD, jumps with
+Space, and sprints with Shift. No script is needed for that.</p>
+<p>Move it up a little so it isn't stuck inside the floor. A Y position of
+<code>0.9</code> stands it on the ground.</p>
+<h2 id="6-a-camera">6. A camera<a class="anchor" href="#6-a-camera" aria-label="Link to this section">#</a></h2>
+<p>Orbit the view (drag empty space) and zoom (wheel) until you have a nice
+shot from behind and above the player. Then choose <strong>+ → Camera</strong>.</p>
+<p>The new camera is placed exactly where you're looking from:</p>
+<ul><li>a <strong>frustum</strong> pyramid shows what it sees</li><li>a <strong>preview</strong> in the bottom-right corner shows its live view</li></ul>
+<p>Orbit away and the frustum stays put. Click <strong>Look Through</strong> in the
+Inspector to jump back into the camera's view. Adjust the shot, then
+click <strong>Align to View</strong> to move the camera there.</p>
+<h2 id="7-play">7. Play<a class="anchor" href="#7-play" aria-label="Link to this section">#</a></h2>
+<p>Press <strong>▶</strong> (Ctrl+P).</p>
+<ul><li>The view switches to your camera.</li><li>WASD moves the player relative to the camera, and Space jumps.</li><li>Press <strong>■</strong> to stop. Everything returns to exactly where it was.</li></ul>
+<p>The camera doesn't follow the player yet; you'll script that in
+<a href="third-person-camera.html">Third-person camera</a>. If you delete the camera,
+Play falls back to the editor view following the player.</p>
+<h2 id="8-save">8. Save<a class="anchor" href="#8-save" aria-label="Link to this section">#</a></h2>
+<p><strong>Ctrl+S</strong> asks for a file name. Save as <code>my_game/level.ron</code> (make a new
+folder for it). The title bar shows the name, and the unsaved-changes dot
+disappears.</p>
+<p>The file is plain text you can read. Open it from <strong>Project</strong>, or in any
+editor:</p>
+<div class="codeblock" data-lang="ron"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>(
+    version: <span class="tok-n">1</span>,
+    entities: [
+        (
+            name: <span class="tok-k">Some</span>(<span class="tok-s">&quot;Ground&quot;</span>),
+            transform: <span class="tok-k">Some</span>((position: (<span class="tok-n">0.0</span>, <span class="tok-n">0.0</span>, <span class="tok-n">0.0</span>), scale: (<span class="tok-n">20.0</span>, <span class="tok-n">1.0</span>, <span class="tok-n">20.0</span>), ...)),
+            ...</code></pre></div>
+<h2 id="what-you-learned">What you learned<a class="anchor" href="#what-you-learned" aria-label="Link to this section">#</a></h2>
+<ul><li>Hierarchy <strong>+</strong> creates objects; the Inspector edits them.</li><li>W / E / R gizmos, Ctrl+D duplicate, Ctrl+Z undo.</li><li>The sun's direction lives in Graphics → Sun.</li><li>A Camera decides what Play shows, and Look Through / Align to View
+frame it.</li><li>Scenes are <code>.ron</code> text files.</li></ul>
+<p><strong>Next:</strong> <a href="coin-collector.html">Coin collector</a>. Make it a game with Python.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="index.html"><small>Previous</small>All tutorials</a><a class="next" href="coin-collector.html"><small>Next</small>Coin collector</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/tutorials/first-scene.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#1-start-clean">1. Start clean</a></li><li class="l2"><a href="#2-a-floor">2. A floor</a></li><li class="l2"><a href="#3-some-objects">3. Some objects</a></li><li class="l2"><a href="#4-light">4. Light</a></li><li class="l2"><a href="#5-a-player">5. A player</a></li><li class="l2"><a href="#6-a-camera">6. A camera</a></li><li class="l2"><a href="#7-play">7. Play</a></li><li class="l2"><a href="#8-save">8. Save</a></li><li class="l2"><a href="#what-you-learned">What you learned</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

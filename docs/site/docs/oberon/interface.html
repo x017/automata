@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The interface · AUTOMATA docs</title>
+<meta name="description" content="All panel borders can be dragged. Window → Reset Layout restores the default sizes.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="index.html">Introduction</a></li><li><a href="interface.html" aria-current="page">The interface</a></li><li><a href="scripting.html">Scripting</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="graphics.html">Graphics</a></li><li><a href="code-editor.html">The code editor</a></li><li><a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>The interface</h1>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>┌ File Edit GameObject Component Window Help ─── ▶ ❚❚ ■ ───── Search ⚙ ┐
+│ Hierarchy    │ Scene  script.py               │ Inspector  Graphics  │
+│              │                                │                      │
+│  Sun         │      (3D viewport / editor)    │  name, components,   │
+│  Ground      │                                │  attributes          │
+│  Player      │                                │                      │
+│  Main Camera ├────────────────────────────────┤                      │
+│              │ Console  Project               │                      │
+└ status bar ──────────────────────────────────────────── shortcut hints ┘</code></pre></div>
+<p>All panel borders can be dragged. <strong>Window → Reset Layout</strong> restores the
+default sizes.</p>
+<h2 id="top-bar">Top bar<a class="anchor" href="#top-bar" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Menus</strong>: File (scenes, scripts, prefabs), Edit (undo, clipboard,
+tools), GameObject (create), Component (add to the selection), Window,
+Help.</li><li><strong>Play / Pause / Stop</strong> sit in the centre. The scene name next to the
+menus shows a dot when you have unsaved changes.</li><li><strong>Search</strong> (Ctrl+Shift+P) opens the command palette. Type part of any
+command, entity, or script name and press Enter.</li><li><strong>⚙</strong> (Ctrl+,) opens Settings.</li></ul>
+<h2 id="hierarchy">Hierarchy<a class="anchor" href="#hierarchy" aria-label="Link to this section">#</a></h2>
+<p>Lists every entity in the scene. Each icon shows the entity's main
+component: cube, sun, camera, horizon (Environment), or empty.</p>
+<ul><li>Click to select. Double-click (or press F) to frame the entity in the
+view.</li><li><strong>+</strong> opens the Create menu: Empty, Cube, Plane, Directional Light,
+Camera, Environment, Physics Cube, Player.</li><li>Right-click an entity for Rename, Duplicate, Copy/Paste, Delete, Frame,
+Save as Prefab, and Attach/Edit Script.</li></ul>
+<h2 id="scene-view">Scene view<a class="anchor" href="#scene-view" aria-label="Link to this section">#</a></h2>
+<p>This is the 3D viewport, rendered by the engine's own wgpu renderer.</p>
+<div class="table"><table><thead><tr><th>To</th><th>Do</th></tr></thead><tbody><tr><td>Select</td><td>Click an object</td></tr><tr><td>Orbit</td><td>Drag empty space, right-drag, or Alt+drag</td></tr><tr><td>Pan</td><td>Middle-drag</td></tr><tr><td>Zoom</td><td>Mouse wheel</td></tr><tr><td>Frame selection</td><td>F, or double-click in the hierarchy</td></tr><tr><td>Context menu</td><td>Right-click without dragging</td></tr></tbody></table></div>
+<p><strong>Gizmos.</strong> The floating toolbar (top-left) switches between <strong>Move</strong> (W),
+<strong>Rotate</strong> (E), and <strong>Scale</strong> (R). Drag a coloured axis handle to edit
+along that axis. Arrow keys nudge the selection across the ground relative to the view, PgUp/PgDn move it up and down, and holding Shift makes the steps finer. The axis
+widget (top-right) shows the view orientation.</p>
+<p><strong>Overlays.</strong></p>
+<ul><li>Lights draw as a small sun icon.</li><li>Cameras draw their view <strong>frustum</strong>: a pyramid showing exactly what the
+camera sees, with a notch marking "up".</li><li>When a camera is selected, a <strong>live preview</strong> of its view appears in
+the bottom-right corner. See <a href="cameras.html">Cameras</a>.</li></ul>
+<h2 id="inspector">Inspector<a class="anchor" href="#inspector" aria-label="Link to this section">#</a></h2>
+<p>Shows the selected entity.</p>
+<ul><li><strong>Name</strong> at the top.</li><li><strong>Components</strong>: Transform, Mesh Renderer, Directional Light, Camera,
+Environment, Rigidbody, Collider, Character Controller, Script. Each
+section folds open and closed. The <strong>⋮</strong> menu has Reset, Copy/Paste
+Component, and Remove.</li><li><strong>Fields</strong>: drag the label to scrub a number, or click the field and
+type. Colour swatches open a colour picker with hex input.</li><li><strong>Attributes</strong>: custom values your scripts read. See
+<a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a>.</li><li><strong>Add Component</strong> lists every component the entity doesn't have yet.</li></ul>
+<p>Every edit is one undo step. Scrubbing a value counts as one step, not
+one per frame.</p>
+<h2 id="graphics">Graphics<a class="anchor" href="#graphics" aria-label="Link to this section">#</a></h2>
+<p>The second tab in the right dock. It's a single place to test and tune how
+the scene looks:</p>
+<ul><li>renderer quality and live frame time</li><li>the sun angle</li><li>environment presets, tone mapping, and fog</li><li>the scene camera</li><li>one-click test scenes</li></ul>
+<p>Full guide: <a href="graphics.html">Graphics</a>.</p>
+<p><img src="../../../assets/oberon/graphics.png" alt="The Graphics tab" loading="lazy" decoding="async"></p>
+<h2 id="console-and-project">Console and Project<a class="anchor" href="#console-and-project" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Console</strong> collects <code>print()</code> output from your scripts, Oberon
+messages, and Python errors with clickable file and line links. The
+Info / Warnings / Errors chips filter the list.</li><li><strong>Project</strong> shows the files next to your scene. Double-click a <code>.py</code>
+file to open it in the code editor, or a <code>.ron</code> file to open it as a
+scene.</li></ul>
+<h2 id="play-mode">Play mode<a class="anchor" href="#play-mode" aria-label="Link to this section">#</a></h2>
+<p>Press <strong>▶</strong> (Ctrl+P). Oberon copies the scene and starts simulating:</p>
+<ul><li><strong>Physics.</strong> Rigidbodies fall and collide. The <strong>Player</strong> (Character
+Controller) walks with WASD or arrows, jumps with Space, and sprints
+with Shift.</li><li><strong>Scripts</strong> get <code>start</code> once, then <code>update</code> every frame.</li><li><strong>Camera.</strong> If the scene has a Camera, Play renders through it, and
+player input is relative to that camera's direction. Without one, the
+editor view follows the player.</li><li><strong>❚❚</strong> pauses. <strong>■</strong> (Ctrl+P again) stops and restores the scene
+exactly as it was before Play.</li></ul>
+<p>Edits are locked during Play, so you can't lose work to a scene that gets
+thrown away on Stop.</p>
+<h2 id="status-bar">Status bar<a class="anchor" href="#status-bar" aria-label="Link to this section">#</a></h2>
+<p>The left side shows the entity count and the current selection. The right
+side shows shortcut hints for whatever has focus. You can turn the hints
+off in <strong>Settings → Appearance</strong>.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="index.html"><small>Previous</small>Introduction</a><a class="next" href="scripting.html"><small>Next</small>Scripting</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/interface.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#top-bar">Top bar</a></li><li class="l2"><a href="#hierarchy">Hierarchy</a></li><li class="l2"><a href="#scene-view">Scene view</a></li><li class="l2"><a href="#inspector">Inspector</a></li><li class="l2"><a href="#graphics">Graphics</a></li><li class="l2"><a href="#console-and-project">Console and Project</a></li><li class="l2"><a href="#play-mode">Play mode</a></li><li class="l2"><a href="#status-bar">Status bar</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

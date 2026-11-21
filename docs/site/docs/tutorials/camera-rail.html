@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorial: Camera rail &amp; intro shot · AUTOMATA docs</title>
+<meta name="description" content="Goal: when Play starts, the camera flies over the level for a few seconds, showing off the coins, and then hands control to the third-person follow camera smoothly.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="first-scene.html">Your first scene</a></li><li><a href="coin-collector.html">Coin collector</a></li><li><a href="third-person-camera.html">Third-person camera</a></li><li><a href="camera-rail.html" aria-current="page">Camera rail &amp; intro shot</a></li><li><a href="lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Tutorial: Camera rail &amp; intro shot</h1>
+<p><strong>Goal:</strong> when Play starts, the camera flies over the level for a few
+seconds, showing off the coins, and then hands control to the
+third-person follow camera smoothly.</p>
+<p><strong>You'll learn:</strong></p>
+<ul><li>keyframes</li><li>easing curves</li><li>using empty entities as editable shot markers</li><li>blending between two camera behaviours</li></ul>
+<h2 id="1-mark-the-shots-in-the-editor">1. Mark the shots in the editor<a class="anchor" href="#1-mark-the-shots-in-the-editor" aria-label="Link to this section">#</a></h2>
+<p>Hard-coding positions means you can't see them. Use entities instead:</p>
+<ol><li><strong>+ → Empty</strong>, renamed <code>Shot 1</code>. An Empty only needs a position, so
+move it to where the camera should be for the opening shot.</li><li>Add an attribute <code>look</code> of type <strong>Vec3</strong>, set to the point the shot
+should look at.</li><li>Repeat for <code>Shot 2</code> and <code>Shot 3</code>.</li></ol>
+<aside class="note"><p>Quick way to place a marker: frame the shot, then press <strong>+ → Camera</strong>.
+It lands at your eye position. Copy its <strong>Eye</strong> into the Empty's
+position and its <strong>Look At</strong> into <code>look</code>. Then delete the temporary
+camera.</p></aside>
+<h2 id="2-the-rail-script">2. The rail script<a class="anchor" href="#2-the-rail-script" aria-label="Link to this section">#</a></h2>
+<p>Replace <code>scripts/follow_camera.py</code>, or make a new script on the camera:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> math
+
+SHOT_TIME = <span class="tok-n">2.5</span>   <span class="tok-c"># seconds per segment</span>
+BLEND = <span class="tok-n">1.0</span>       <span class="tok-c"># seconds to blend into the follow camera</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">smoothstep</span>(t):
+    t = <span class="tok-b">min</span>(<span class="tok-n">1.0</span>, <span class="tok-b">max</span>(<span class="tok-n">0.0</span>, t))
+    <span class="tok-k">return</span> t * t * (<span class="tok-n">3.0</span> - <span class="tok-n">2.0</span> * t)
+
+
+<span class="tok-k">def</span> <span class="tok-f">lerp</span>(a, b, t):
+    <span class="tok-k">return</span> <span class="tok-b">tuple</span>(x + (y - x) * t <span class="tok-k">for</span> x, y <span class="tok-k">in</span> <span class="tok-b">zip</span>(a, b))
+
+
+<span class="tok-k">def</span> <span class="tok-f">shots</span>(ctx):
+    found = <span class="tok-b">sorted</span>((e <span class="tok-k">for</span> e <span class="tok-k">in</span> ctx.scene <span class="tok-k">if</span> e.name.startswith(<span class="tok-s">&quot;Shot &quot;</span>)), key=<span class="tok-k">lambda</span> e: e.name)
+    <span class="tok-k">return</span> [(e.transform.position, e.attributes[<span class="tok-s">&quot;look&quot;</span>]) <span class="tok-k">for</span> e <span class="tok-k">in</span> found]
+
+
+<span class="tok-k">def</span> <span class="tok-f">rail</span>(keys, time):
+    <span class="tok-s">&quot;&quot;&quot;Position and target `time` seconds into the flyover, or None when done.&quot;&quot;&quot;</span>
+    segment = <span class="tok-b">int</span>(time // SHOT_TIME)
+    <span class="tok-k">if</span> segment &gt;= <span class="tok-b">len</span>(keys) - <span class="tok-n">1</span>:
+        <span class="tok-k">return</span> <span class="tok-b">None</span>
+    k = smoothstep((time - segment * SHOT_TIME) / SHOT_TIME)
+    (p0, a0), (p1, a1) = keys[segment], keys[segment + <span class="tok-n">1</span>]
+    <span class="tok-k">return</span> lerp(p0, p1, k), lerp(a0, a1, k)
+
+
+<span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;keys&quot;</span>] = shots(ctx)
+    entity.state[<span class="tok-s">&quot;yaw&quot;</span>] = <span class="tok-n">0.0</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    cam = entity.camera
+    keys = entity.state[<span class="tok-s">&quot;keys&quot;</span>]
+    t = ctx.time.elapsed
+    on_rail = rail(keys, t) <span class="tok-k">if</span> <span class="tok-b">len</span>(keys) &gt;= <span class="tok-n">2</span> <span class="tok-k">else</span> <span class="tok-b">None</span>
+
+    <span class="tok-k">if</span> on_rail <span class="tok-k">is</span> <span class="tok-k">not</span> <span class="tok-b">None</span>:
+        cam.position, cam.target = on_rail
+        <span class="tok-k">return</span>
+
+    <span class="tok-c"># After the flyover: follow, easing in over BLEND seconds.</span>
+    done_at = (<span class="tok-b">len</span>(keys) - <span class="tok-n">1</span>) * SHOT_TIME <span class="tok-k">if</span> <span class="tok-b">len</span>(keys) &gt;= <span class="tok-n">2</span> <span class="tok-k">else</span> <span class="tok-n">0.0</span>
+    blend = smoothstep((t - done_at) / BLEND)
+    yaw = entity.state[<span class="tok-s">&quot;yaw&quot;</span>]
+    offset = (<span class="tok-n">8.0</span> * math.sin(yaw), <span class="tok-n">3.5</span>, <span class="tok-n">8.0</span> * math.cos(yaw))
+    cam.follow(ctx.scene[<span class="tok-s">&quot;Player&quot;</span>], offset=offset, smooth=<span class="tok-n">1.0</span> + <span class="tok-n">7.0</span> * blend)</code></pre></div>
+<p>Play. The camera glides through the shots and then settles in behind the
+player.</p>
+<h2 id="how-it-works">How it works<a class="anchor" href="#how-it-works" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Keyframes are data in the scene.</strong> Moving a Shot entity in the editor
+changes the flyover without touching code. Designers can tweak it.</li><li><strong><code>smoothstep</code></strong> eases each segment in and out. Linear interpolation
+would jerk at every keyframe; smoothstep has zero speed at both ends.</li><li><strong>The hand-off</strong> reuses <code>follow</code>, but ramps its <code>smooth</code> from 1 (lazy)
+to 8 (normal) over <code>BLEND</code> seconds. The camera drifts from the last
+shot to its follow position instead of cutting.</li><li>Everything keys off <code>ctx.time.elapsed</code>, so the shot takes the same time
+on any machine.</li></ul>
+<h2 id="variations">Variations<a class="anchor" href="#variations" aria-label="Link to this section">#</a></h2>
+<p><strong>Skippable intro:</strong> jump straight to the hand-off when the player presses
+a key.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;space&quot;</span>):
+    entity.state[<span class="tok-s">&quot;keys&quot;</span>] = []</code></pre></div>
+<p><strong>Catmull-Rom curves:</strong> with four or more shots, a spline passes through
+every key without stopping at each one. Replace <code>lerp</code> and <code>smoothstep</code>
+with:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">catmull</span>(p0, p1, p2, p3, t):
+    t2, t3 = t * t, t * t * t
+    <span class="tok-k">return</span> <span class="tok-b">tuple</span>(
+        <span class="tok-n">0.5</span> * (<span class="tok-n">2</span> * b + (-a + c) * t + (<span class="tok-n">2</span> * a - <span class="tok-n">5</span> * b + <span class="tok-n">4</span> * c - d) * t2 + (-a + <span class="tok-n">3</span> * b - <span class="tok-n">3</span> * c + d) * t3)
+        <span class="tok-k">for</span> a, b, c, d <span class="tok-k">in</span> <span class="tok-b">zip</span>(p0, p1, p2, p3)
+    )</code></pre></div>
+<p><strong>Dolly zoom (the "Vertigo" shot):</strong> move the camera back while narrowing
+the field of view, keeping the subject the same size:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>width = <span class="tok-n">4.0</span>                              <span class="tok-c"># metres of subject to keep in frame</span>
+cam.fov = math.degrees(<span class="tok-n">2</span> * math.atan(width / (<span class="tok-n">2</span> * distance)))</code></pre></div>
+<p><strong>Next:</strong> <a href="lighting-and-mood.html">Lighting &amp; mood</a>.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="third-person-camera.html"><small>Previous</small>Third-person camera</a><a class="next" href="lighting-and-mood.html"><small>Next</small>Lighting &amp; mood</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/tutorials/camera-rail.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#1-mark-the-shots-in-the-editor">1. Mark the shots in the editor</a></li><li class="l2"><a href="#2-the-rail-script">2. The rail script</a></li><li class="l2"><a href="#how-it-works">How it works</a></li><li class="l2"><a href="#variations">Variations</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

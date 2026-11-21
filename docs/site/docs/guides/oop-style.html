@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide: OOP Style · AUTOMATA docs</title>
+<meta name="description" content="Three coding styles, one engine. Pick per project — they mix freely.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="game-loop.html">The game loop</a></li><li><a href="scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="input.html">Input</a></li><li><a href="physics.html">Physics</a></li><li><a href="events-and-resources.html">Events &amp; resources</a></li><li><a href="oop-style.html" aria-current="page">OOP style</a></li><li><a href="scene-files.html">Scene files</a></li><li><a href="project-structure.html">Project structure</a></li><li><a href="testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Guide: OOP Style</h1>
+<p>Three coding styles, one engine. Pick per project — they mix freely.</p>
+<div class="table"><table><thead><tr><th>Style</th><th>Looks like</th><th>Best for</th></tr></thead><tbody><tr><td><strong>OOP</strong></td><td><code>class Platformer(at.Game)</code></td><td>Real games, anything you'll maintain</td></tr><tr><td><strong>Decorator</strong></td><td><code>@game.update</code> on an instance</td><td>Small toys, sketches</td></tr><tr><td><strong>Procedural</strong></td><td><code>game.run(tick)</code></td><td>Throwaway experiments, tests</td></tr></tbody></table></div>
+<p>This guide is the OOP style in full.</p>
+<h2 id="the-game-subclass">The Game subclass<a class="anchor" href="#the-game-subclass" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">Platformer</span>(at.Game):
+    <span class="tok-c"># Engine options as declarative class attributes:</span>
+    title = <span class="tok-s">&quot;platformer&quot;</span>
+    resolution = (<span class="tok-n">1280</span>, <span class="tok-n">720</span>)
+    headless = <span class="tok-b">False</span>
+    resizable = <span class="tok-b">True</span>
+    vsync = <span class="tok-b">True</span>
+    log_filter = <span class="tok-b">None</span>            <span class="tok-c"># e.g. &quot;debug&quot; or &quot;automata_core=trace&quot;</span>
+    target_fps = <span class="tok-n">60</span>              <span class="tok-c"># None disables frame pacing</span>
+    clear_color = (<span class="tok-n">0.55</span>, <span class="tok-n">0.78</span>, <span class="tok-n">0.95</span>, <span class="tok-n">1.0</span>)
+    graphics = at.GraphicsQuality.HIGH
+
+    <span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>): ...                 <span class="tok-c"># once, before frame 1</span>
+    <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx): ...           <span class="tok-c"># every frame</span>
+    <span class="tok-k">def</span> <span class="tok-f">on_coin_pickup</span>(<span class="tok-b">self</span>, payload): ...  <span class="tok-c"># once per &quot;coin_pickup&quot; event</span>
+
+Platformer().run()</code></pre></div>
+<ul><li>Every option defaults to <code>None</code> = "engine default"; keyword arguments to
+the constructor <strong>win over</strong> class attributes: <code>Platformer(headless=True)</code>.</li><li>Direct construction with an unknown option raises <code>TypeError</code>; subclass
+constructors may take their own parameters freely.</li><li>Hooks: <code>on_start</code> runs once; <code>on_update(ctx)</code> runs every frame; any
+method named <code>on_&lt;event&gt;</code> auto-registers as a handler for <code>&lt;event&gt;</code>.</li></ul>
+<h2 id="entity-and-scene-subclasses">Entity and Scene subclasses<a class="anchor" href="#entity-and-scene-subclasses" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">Player</span>(at.Entity):
+    <span class="tok-k">def</span> <span class="tok-f">__init__</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">super</span>().__init__(<span class="tok-s">&quot;player&quot;</span>)
+        <span class="tok-b">self</span>.add(at.Transform(position=(-<span class="tok-n">4</span>, <span class="tok-n">1.4</span>, <span class="tok-n">0</span>)))
+        <span class="tok-b">self</span>.add(at.MeshRenderer.cube(size=<span class="tok-n">0.9</span>, color=ORANGE))
+
+
+<span class="tok-k">class</span> <span class="tok-f">Level</span>(at.Scene):
+    <span class="tok-k">def</span> <span class="tok-f">__init__</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">super</span>().__init__()
+        <span class="tok-b">self</span>.add(Camera())
+        <span class="tok-b">self</span>.add(Player())</code></pre></div>
+<p>This is the Django habit applied to games: entity classes are your
+<strong>models</strong> (reusable, importable archetypes), scene classes compose them
+into levels, and the game class is the <strong>view</strong> wiring input to behavior.</p>
+<p><strong>The constructor rule:</strong> an <code>Entity</code>'s first positional argument is its
+name. Subclass constructors take keyword parameters
+(<code>Coin(f&quot;coin_{i}&quot;, x=x, y=y)</code> — never <code>Coin(f&quot;coin_{i}&quot;, x, y)</code>).</p>
+<h2 id="mixing-styles">Mixing styles<a class="anchor" href="#mixing-styles" aria-label="Link to this section">#</a></h2>
+<p>Everything is the same object underneath:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>game = Platformer(headless=<span class="tok-b">True</span>)
+
+<span class="tok-d">@game.update</span>                       <span class="tok-c"># decorator overrides on_update</span>
+<span class="tok-k">def</span> <span class="tok-f">tick</span>(ctx): ...
+
+game.run(tick)                     <span class="tok-c"># or procedural: explicit wins</span>
+game.run(max_frames=<span class="tok-n">300</span>)           <span class="tok-c"># kwargs still fine</span></code></pre></div>
+<p>Callback resolution order: <code>run(update=...)</code> → <code>@game.update</code> →
+<code>on_update</code> override. If none exists, <code>run</code> raises <code>TypeError</code>.</p>
+<h2 id="ide-support">IDE support<a class="anchor" href="#ide-support" aria-label="Link to this section">#</a></h2>
+<p>The wrapper layer is fully typed — annotate your hooks and your editor
+autocompletes the whole frame context:</p>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>def on_update(self, ctx: at.FrameContext) -&gt; None:
+    ctx.scene.      # find, names, spawn, despawn, entity_count
+    ctx.input.      # pressed, just_pressed, cursor, gamepads
+    ctx.physics.    # grounded, apply_impulse, cast_ray
+    ctx.events.     # send, read
+    ctx.resources.  # get, set, remove
+    ctx.time.       # delta, elapsed, frame</code></pre></div>
+<p>Components accepted by <code>add()</code> are the <code>at.Component</code> union — type
+checkers flag unsupported objects before you run.</p>
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="project-structure.html">Project Structure</a> — one file becomes a package</li><li><a href="events-and-resources.html">Events &amp; Resources</a> — the <code>on_&lt;event&gt;</code> contract</li><li><a href="../api-reference.html">API Reference</a></li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="events-and-resources.html"><small>Previous</small>Events &amp; resources</a><a class="next" href="scene-files.html"><small>Next</small>Scene files</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/oop-style.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#the-game-subclass">The Game subclass</a></li><li class="l2"><a href="#entity-and-scene-subclasses">Entity and Scene subclasses</a></li><li class="l2"><a href="#mixing-styles">Mixing styles</a></li><li class="l2"><a href="#ide-support">IDE support</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

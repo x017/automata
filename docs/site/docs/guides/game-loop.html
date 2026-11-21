@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide: The Game Loop · AUTOMATA docs</title>
+<meta name="description" content="The loop is the engine&#x27;s heartbeat. This guide is the mental model the rest of the wiki assumes.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="game-loop.html" aria-current="page">The game loop</a></li><li><a href="scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="input.html">Input</a></li><li><a href="physics.html">Physics</a></li><li><a href="events-and-resources.html">Events &amp; resources</a></li><li><a href="oop-style.html">OOP style</a></li><li><a href="scene-files.html">Scene files</a></li><li><a href="project-structure.html">Project structure</a></li><li><a href="testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Guide: The Game Loop</h1>
+<p>The loop is the engine's heartbeat. This guide is the mental model the rest
+of the wiki assumes.</p>
+<h2 id="the-loop">The loop<a class="anchor" href="#the-loop" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>game = at.Game(title=<span class="tok-s">&quot;demo&quot;</span>, target_fps=<span class="tok-n">60</span>)
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(ctx):
+    ...  <span class="tok-c"># your code, once per frame</span>
+
+frames = game.run(update)</code></pre></div>
+<p>Every frame, in order:</p>
+<ol><li><strong>Time advances</strong> — <code>ctx.time.delta</code> (seconds since last frame),
+<code>elapsed</code>, <code>frame</code> (1-based counter) are refreshed.</li><li><strong>Events age</strong> — an event sent this frame becomes readable next frame,
+then expires.</li><li><strong>Physics steps</strong> — a fixed 60 Hz timestep, as many steps as fit the
+elapsed frame time. Frame rate never changes simulation speed.</li><li><strong>Your <code>update(ctx)</code> runs</strong> — input snapshot, scene snapshot, buffered
+writes.</li><li><strong>Your buffered writes apply</strong> — transforms, velocities, camera changes,
+spawns, despawns all land at once.</li><li><strong>The frame renders</strong> (windowed mode) — the scene is recorded into a
+draw list and presented.</li></ol>
+<h2 id="the-frame-contract">The frame contract<a class="anchor" href="#the-frame-contract" aria-label="Link to this section">#</a></h2>
+<p>Two rules prevent an entire category of engine bugs:</p>
+<ol><li><strong>Reads observe start-of-frame state.</strong> <code>ctx.scene</code>, <code>ctx.input</code>,
+<code>ctx.physics</code> are snapshots taken as the frame began. If physics moves
+the player mid-frame and you write a camera from <code>player.transform</code>, you
+see <em>this</em> frame's settled position — consistent, never half-updated.
+(Reading an entity you just wrote to returns your pending write.)</li><li><strong>Writes apply after your callback returns.</strong> `view.transform.position =
+...<code>,</code>view.despawn()<code>,</code>ctx.scene.spawn(...)` are commands in a queue,
+not live mutation. They become visible from the next frame onward.</li></ol>
+<p>Consequences:</p>
+<ul><li>Read-your-writes: after writing an entity's transform, reads <em>of that
+entity</em> return your pending value; every other entity still reads
+start-of-frame state.</li><li>Safe despawns: despawning an entity that later lines in the same callback
+still reference is harmless — the despawn lands after.</li><li>Events are next-frame mail: a sent event is never visible to the sending
+frame — readers and handlers see it on the following frame, then it's
+gone.</li></ul>
+<h2 id="ending-the-loop">Ending the loop<a class="anchor" href="#ending-the-loop" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>How</th><th>When</th></tr></thead><tbody><tr><td>Window closed</td><td>windowed mode, automatic</td></tr><tr><td><code>ctx.quit()</code></td><td>anywhere in your callback</td></tr><tr><td><code>game.quit()</code></td><td>from outside the callback</td></tr><tr><td><code>max_frames=N</code> reached</td><td>tests, CI, fixed-length demos</td></tr></tbody></table></div>
+<p><code>run</code> returns the total frame count. A <code>Game</code> instance runs <strong>once</strong>;
+create a new one to run again.</p>
+<h2 id="frame-pacing">Frame pacing<a class="anchor" href="#frame-pacing" aria-label="Link to this section">#</a></h2>
+<ul><li><code>target_fps=60</code> (default) sleeps between frames to hold 60 fps.</li><li><code>target_fps=None</code> runs flat out — for headless tools and benchmarks.</li><li><code>vsync=True</code> (default) additionally syncs presentation to the display.</li><li>Windowed games still render every frame even when idle; there is no
+event-driven redraw mode yet.</li></ul>
+<h2 id="headless-mode">Headless mode<a class="anchor" href="#headless-mode" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>game = at.Game(headless=<span class="tok-b">True</span>)
+game.run(update, max_frames=<span class="tok-n">300</span>)</code></pre></div>
+<p>The identical loop without window, GPU, or OS input events. Physics,
+events, resources, and your logic all run; <code>MeshRenderer</code> components are
+inert (no GPU exists to materialize them). See <a href="testing.html">Testing</a>.</p>
+<h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Link to this section">#</a></h2>
+<ul><li>Engine failures (lost GPU device, window errors) raise <code>automata.Error</code>.</li><li>Exceptions raised inside your callback stop the loop and <strong>propagate
+unchanged</strong> out of <code>run</code> — wrap in try/except if you want cleanup.</li></ul>
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="scenes-and-entities.html">Scenes &amp; Entities</a> — what the loop updates</li><li><a href="rendering-and-lights.html">Rendering &amp; Lights</a> — what the loop draws</li><li><a href="testing.html">Testing</a> — headless patterns</li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="../oberon/shortcuts.html"><small>Previous</small>Keyboard shortcuts</a><a class="next" href="scenes-and-entities.html"><small>Next</small>Scenes &amp; entities</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/game-loop.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#the-loop">The loop</a></li><li class="l2"><a href="#the-frame-contract">The frame contract</a></li><li class="l2"><a href="#ending-the-loop">Ending the loop</a></li><li class="l2"><a href="#frame-pacing">Frame pacing</a></li><li class="l2"><a href="#headless-mode">Headless mode</a></li><li class="l2"><a href="#errors">Errors</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

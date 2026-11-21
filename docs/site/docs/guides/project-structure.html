@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide: Project Structure · AUTOMATA docs</title>
+<meta name="description" content="One file is right until it isn&#x27;t. When the platformer passes ~300 lines, split it the Django way: each concern in one obvious home.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="game-loop.html">The game loop</a></li><li><a href="scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="input.html">Input</a></li><li><a href="physics.html">Physics</a></li><li><a href="events-and-resources.html">Events &amp; resources</a></li><li><a href="oop-style.html">OOP style</a></li><li><a href="scene-files.html">Scene files</a></li><li><a href="project-structure.html" aria-current="page">Project structure</a></li><li><a href="testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Guide: Project Structure</h1>
+<p>One file is right until it isn't. When the platformer passes ~300 lines,
+split it the Django way: each concern in one obvious home.</p>
+<h2 id="the-layout">The layout<a class="anchor" href="#the-layout" aria-label="Link to this section">#</a></h2>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>mygame/
+├── main.py        # the Game subclass + __main__ entry
+├── entities.py    # Entity subclasses: Player, Coin, Platform, Crate...
+├── scenes.py      # Scene subclasses: LevelOne, LevelTwo, Menu
+├── systems.py     # update helpers: movement, camera, pickups
+└── tests/
+    └── test_game.py</code></pre></div>
+<h2 id="what-goes-where">What goes where<a class="anchor" href="#what-goes-where" aria-label="Link to this section">#</a></h2>
+<p><strong>entities.py</strong> — archetypes, nothing else:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+ORANGE = (<span class="tok-n">0.95</span>, <span class="tok-n">0.45</span>, <span class="tok-n">0.15</span>, <span class="tok-n">1.0</span>)
+
+
+<span class="tok-k">class</span> <span class="tok-f">Player</span>(at.Entity):
+    <span class="tok-k">def</span> <span class="tok-f">__init__</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">super</span>().__init__(<span class="tok-s">&quot;player&quot;</span>)
+        <span class="tok-b">self</span>.add(at.Transform(position=(-<span class="tok-n">4</span>, <span class="tok-n">1.4</span>, <span class="tok-n">0</span>)))
+        <span class="tok-b">self</span>.add(at.MeshRenderer.cube(size=<span class="tok-n">0.9</span>, color=ORANGE))
+        <span class="tok-b">self</span>.add(at.RigidBody.kinematic_velocity())
+        <span class="tok-b">self</span>.add(at.Collider3D.capsule(<span class="tok-n">0.5</span>, <span class="tok-n">0.4</span>))
+        <span class="tok-b">self</span>.add(at.CharacterController(snap_to_ground=<span class="tok-n">0.5</span>))
+        <span class="tok-b">self</span>.add(at.CharacterVelocity())</code></pre></div>
+<p><strong>scenes.py</strong> — composition:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">LevelOne</span>(at.Scene):
+    <span class="tok-k">def</span> <span class="tok-f">__init__</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">super</span>().__init__()
+        <span class="tok-b">self</span>.add(Camera())
+        <span class="tok-b">self</span>.add(Sun())
+        <span class="tok-b">self</span>.add(Ground())
+        <span class="tok-b">self</span>.add(Player())
+        <span class="tok-k">for</span> x, y <span class="tok-k">in</span> PLATFORMS:
+            <span class="tok-b">self</span>.add(Platform(x=x, y=y))</code></pre></div>
+<p><strong>systems.py</strong> — pure functions taking <code>(game, ctx)</code>:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">follow_camera</span>(game, ctx):
+    px, py, _ = ctx.scene[<span class="tok-s">&quot;player&quot;</span>].transform.position
+    ...
+    ctx.scene[<span class="tok-s">&quot;camera&quot;</span>].camera_3d = at.Camera3D(...)</code></pre></div>
+<p><strong>main.py</strong> — wiring and policy:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">MyGame</span>(at.Game):
+    title = <span class="tok-s">&quot;my game&quot;</span>
+    graphics = at.GraphicsQuality.HIGH
+
+    <span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">self</span>.load_scene(LevelOne())
+
+    <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+        movement(<span class="tok-b">self</span>, ctx)
+        follow_camera(<span class="tok-b">self</span>, ctx)</code></pre></div>
+<h2 id="the-rules-of-thumb">The rules of thumb<a class="anchor" href="#the-rules-of-thumb" aria-label="Link to this section">#</a></h2>
+<ol><li><strong>Entities are data</strong> — no update logic in entity classes; behavior
+lives in systems or the Game hooks.</li><li><strong>Scenes compose, never compute</strong> — level layout is a list of <code>add</code>
+calls, not procedural generation (put generators in <code>scenes.py</code> as
+separate functions if you need them).</li><li><strong>Game state on the Game or in resources</strong> — <code>self.score</code> for
+game-local state, <code>ctx.resources</code> for things tests and tools poke at.</li><li><strong>Constants at module top</strong> — speeds, colors, gravity. Your future self
+tunes games by editing exactly one block.</li></ol>
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="oop-style.html">OOP Style</a></li><li><a href="testing.html">Testing</a></li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="scene-files.html"><small>Previous</small>Scene files</a><a class="next" href="testing.html"><small>Next</small>Testing</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/project-structure.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#the-layout">The layout</a></li><li class="l2"><a href="#what-goes-where">What goes where</a></li><li class="l2"><a href="#the-rules-of-thumb">The rules of thumb</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

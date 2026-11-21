@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture · AUTOMATA docs</title>
+<meta name="description" content="This document describes the engine&#x27;s architecture as it is actually implemented. The target design is specified in build.md section 3; this file tracks what exists and why.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="architecture.html" aria-current="page">Architecture</a></li><li><a href="development.html">Development</a></li><li><a href="api.html">API design</a></li><li><a href="oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Architecture</h1>
+<p>This document describes the engine's architecture as it is actually
+implemented. The target design is specified in <code>build.md</code> section 3; this
+file tracks what exists and why.</p>
+<h2 id="layers">Layers<a class="anchor" href="#layers" aria-label="Link to this section">#</a></h2>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>┌─────────────────────────────────────┐
+│ Python gameplay code (Phase 5)      │
+├─────────────────────────────────────┤
+│ automata-python (PyO3 bindings)     │
+├─────────────────────────────────────┤
+│ renderer · scene · input · physics  │
+│ audio · assets (Phases 2–7)         │
+├─────────────────────────────────────┤
+│ automata-core (this phase)          │
+└─────────────────────────────────────┘</code></pre></div>
+<p>Each layer may only depend on layers below it. Python never sees Rust
+ownership or lifetime details; the binding layer translates between the two
+worlds.</p>
+<h2 id="crates">Crates<a class="anchor" href="#crates" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Crate</th><th>Status</th><th>Responsibility</th></tr></thead><tbody><tr><td><code>automata-core</code></td><td>✅ Phase 1–2</td><td>Application lifecycle, main loop, timekeeping, logging, error types, windowed/headless runtime</td></tr><tr><td><code>automata-input</code></td><td>✅ Phase 2</td><td>Input event collection, keyboard/mouse state</td></tr><tr><td><code>automata-renderer</code></td><td>✅ Phase 2 (context)</td><td>wgpu device, surface, frame presentation; drawing in Phase 3</td></tr><tr><td><code>automata-scene</code></td><td>✅ Phase 4</td><td>Scenes, entities, ECS, transforms</td></tr><tr><td><code>automata-physics</code></td><td>Phase 6</td><td>Rapier 2D/3D integration</td></tr><tr><td><code>automata-audio</code></td><td>Phase 7</td><td>Kira-based audio</td></tr><tr><td><code>automata-assets</code></td><td>Phase 7</td><td>Resource loading, caching, handles</td></tr><tr><td><code>automata-python</code></td><td>✅ Phase 5</td><td>PyO3 bindings and Python API</td></tr></tbody></table></div>
+<p>New crates are introduced only when a subsystem boundary becomes meaningful —
+not ahead of time.</p>
+<h2 id="application-lifecycle-phase-12">Application lifecycle (Phase 1–2)<a class="anchor" href="#application-lifecycle-phase-12" aria-label="Link to this section">#</a></h2>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>Created ──run()──▶ Running ──quit requested / window closed──▶ Shutdown</code></pre></div>
+<ul><li><strong>Created</strong> — <code>Application::new(EngineConfig)</code> initializes engine-wide
+services (logging) and returns. No window or GPU device exists yet.</li><li><strong>Running</strong> — <code>Application::run(update)</code> invokes <code>update</code> once per frame
+with an <code>AppContext</code> (timing, input, quit control). Two drivers implement
+the same contract:
+<ul><li><code>WindowMode::Windowed</code> — the winit event loop drives frames
+(<code>resumed</code> creates the window + GPU context; <code>about_to_wait</code> runs the
+frame and paces itself via <code>ControlFlow::WaitUntil</code>; <code>RedrawRequested</code>
+presents). OS input events feed <code>InputState</code> between frames.</li><li><code>WindowMode::Headless</code> — a sleep-paced loop without window, GPU, or
+input. Used by tests, CI, and tooling.</li></ul></li><li><strong>Shutdown</strong> — reached after a quit request or window close completes the
+current frame. An application cannot run twice; <code>run</code> returns
+<code>Error::InvalidState</code>.</li></ul>
+<p>Fatal errors inside event-loop callbacks (which cannot return <code>Result</code>) are
+captured by the driver and reported by <code>run</code> after the loop exits.</p>
+<h2 id="rendering-phase-2-scope">Rendering (Phase 2 scope)<a class="anchor" href="#rendering-phase-2-scope" aria-label="Link to this section">#</a></h2>
+<p><code>automata-renderer::RenderContext</code> owns the wgpu surface, device, and queue.
+It is deliberately minimal — device/surface management, resizing, and
+presenting a clear color. Key wgpu 30 API notes (verified against vendored
+sources):</p>
+<ul><li><code>Instance::new(InstanceDescriptor::new_without_display_handle())</code></li><li><code>request_adapter</code>/<code>request_device</code> return <code>Result</code>s</li><li><code>DeviceDescriptor</code> requires explicit <code>experimental_features</code> and <code>trace</code></li><li><code>Surface::get_current_texture()</code> returns the <code>CurrentSurfaceTexture</code> enum
+(Success/Suboptimal/Timeout/Occluded/Outdated/Lost/Validation), not a
+<code>Result</code> — transient variants are handled internally</li><li>Presentation is <code>Queue::present(surface_texture)</code></li><li><code>RenderPassColorAttachment</code> requires a <code>depth_slice</code> field</li></ul>
+<p>Phase 3 adds shaders, buffers, textures, materials, and cameras here.</p>
+<h2 id="python-bridge-phase-5">Python bridge (Phase 5)<a class="anchor" href="#python-bridge-phase-5" aria-label="Link to this section">#</a></h2>
+<p><code>automata-python</code> wraps the engine in the <code>automata</code> Python package (PyO3,
+maturin-built). The design keeps the FFI boundary free of live borrows:</p>
+<ul><li><code>Game</code> owns the <code>Application</code>. <code>run(update)</code> borrows it for the whole
+loop; each frame the driver builds a <code>FrameContext</code> from <strong>owned
+snapshots</strong> (time, input, scene) plus <strong>shared write buffers</strong> (scene
+commands, outgoing events, quit flag).</li><li>The Python callback sees start-of-frame state; its writes are applied
+immediately after it returns and become visible the next frame. A context
+object that escapes its callback holds stale owned data — no dangling
+references are possible, and no <code>unsafe</code> is required.</li><li>Rust errors surface as <code>automata.Error</code>; exceptions raised by the Python
+callback stop the loop and propagate unchanged to the caller of <code>run</code>.</li><li>The crate sets <code>unsafe_code = &quot;deny&quot;</code> instead of the workspace-wide
+<code>forbid</code>: PyO3 macro expansions contain <code>unsafe impl</code> blocks that a
+<code>forbid</code> cannot tolerate. Hand-written binding code contains no unsafe.</li></ul>
+<h2 id="cross-cutting-conventions">Cross-cutting conventions<a class="anchor" href="#cross-cutting-conventions" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Errors</strong> — each crate defines an <code>Error</code> enum with <code>thiserror</code> and a
+<code>Result&lt;T&gt;</code> alias. No panics for recoverable conditions.</li><li><strong>Logging</strong> — <code>tracing</code> everywhere; the subscriber is installed once by
+<code>Application::new</code>, honoring <code>RUST_LOG</code>.</li><li><strong>Unsafe</strong> — forbidden in engine crates (<code>unsafe_code = &quot;forbid&quot;</code>).</li><li><strong>Docs</strong> — every public item carries documentation; CI enforces it.</li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="../cookbook.html"><small>Previous</small>Cookbook</a><a class="next" href="development.html"><small>Next</small>Development</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/architecture.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#layers">Layers</a></li><li class="l2"><a href="#crates">Crates</a></li><li class="l2"><a href="#application-lifecycle-phase-12">Application lifecycle (Phase 1–2)</a></li><li class="l2"><a href="#rendering-phase-2-scope">Rendering (Phase 2 scope)</a></li><li class="l2"><a href="#python-bridge-phase-5">Python bridge (Phase 5)</a></li><li class="l2"><a href="#cross-cutting-conventions">Cross-cutting conventions</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

@@ -84,9 +84,11 @@ frame renders. Two rules follow from this:
 | `ctx.log(...)`, `ctx.warn(...)` | Write to the Console. `print()` works too |
 
 **Key names** are lowercase: `"a"`–`"z"`, `"0"`–`"9"`, `"space"`,
-`"enter"`, `"escape"`, `"tab"`, `"backspace"`, `"arrow_left"` (or
-`"left"`) and the other arrows, and `"shift"` / `"ctrl"` / `"alt"`. The
-last three mean the left-hand key; use `"shift_right"` for the right one.
+`"enter"`, `"escape"`, `"tab"`, `"backspace"`, the arrows `"arrow_left"`,
+`"arrow_right"`, `"arrow_up"` and `"arrow_down"` (or just `"left"`,
+`"right"`, `"up"`, `"down"`), and `"shift"` / `"ctrl"` / `"alt"`. The last
+three match either side of the keyboard; use `"shift_left"` or
+`"shift_right"` (and likewise for ctrl and alt) to require one side.
 
 ## Hot reload
 

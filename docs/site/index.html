@@ -80,7 +80,7 @@
   .nav ul { display: flex; gap: 28px; list-style: none; margin: 0 0 0 auto; padding: 0; font-size: 15px; }
   .nav ul a { color: var(--dim); text-decoration: none; transition: color 150ms var(--ease); }
   .nav ul a:hover { color: var(--text); }
-  @media (max-width: 640px) { .nav ul li:not(:last-child) { display: none; } }
+  @media (max-width: 640px) { .nav ul li:not(.keep) { display: none; } }
 
   /* ---------- buttons ---------- */
   .actions { display: flex; flex-wrap: wrap; gap: 12px; }
@@ -221,9 +221,9 @@
   <div class="wrap">
     <a class="wordmark" href="#top" aria-label="AUTOMATA home">AUTOMATA</a>
     <ul>
-      <li><a href="https://github.com/x017/automata/blob/main/docs/wiki/tutorials/README.md">Tutorials</a></li>
-      <li><a href="https://github.com/x017/automata/blob/main/docs/wiki/oberon/README.md">Oberon</a></li>
-      <li><a href="https://github.com/x017/automata/blob/main/docs/wiki/README.md">Docs</a></li>
+      <li><a href="docs/tutorials/index.html">Tutorials</a></li>
+      <li><a href="docs/oberon/index.html">Oberon</a></li>
+      <li class="keep"><a href="docs/index.html">Docs</a></li>
       <li><a href="https://github.com/x017/automata">GitHub</a></li>
     </ul>
   </div>
@@ -238,7 +238,7 @@
       them, frame the shot, and press Play, all without leaving one window.
     </p>
     <div class="actions">
-      <a class="btn btn-primary" href="https://github.com/x017/automata/blob/main/docs/wiki/tutorials/first-scene.md">
+      <a class="btn btn-primary" href="docs/tutorials/first-scene.html">
         Make your first scene
         <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </a>
@@ -267,7 +267,7 @@
           runs the scene and its scripts in the real engine, with no editor
           installed.
         </p>
-        <a class="more" href="https://github.com/x017/automata/blob/main/docs/wiki/oberon/scripting.md">How scripting works</a>
+        <a class="more" href="docs/oberon/scripting.html">How scripting works</a>
       </div>
       <div class="code reveal" role="figure" aria-label="A coin behaviour script">
         <header>scripts/coin.py</header>
@@ -307,7 +307,7 @@
           <div><dt>Scripts</dt><dd><code>ctx.camera.follow(player)</code>, <code>look_at</code>, <code>fov</code>: a third-person camera in one line.</dd></div>
           <div><dt>Undo</dt><dd>Every edit is one step, including a whole gizmo drag.</dd></div>
         </dl>
-        <a class="more" href="https://github.com/x017/automata/blob/main/docs/wiki/oberon/cameras.md">Camera guide</a>
+        <a class="more" href="docs/oberon/cameras.html">Camera guide</a>
       </div>
       <figure class="shot reveal" style="margin:0">
         <img src="../assets/oberon/editor.png" width="1600" height="950" loading="lazy"
@@ -333,7 +333,7 @@
           <div class="preset" style="background:#522e33;color:#f6dfe0">Dusk<small>AgX, warm fog</small></div>
           <div class="preset" style="background:#0f1424;color:#c9d3f0">Night<small>ACES, black fog</small></div>
         </div>
-        <a class="more" href="https://github.com/x017/automata/blob/main/docs/wiki/oberon/graphics.md">Graphics guide</a>
+        <a class="more" href="docs/oberon/graphics.html">Graphics guide</a>
       </div>
       <figure class="shot reveal" style="margin:0">
         <img src="../assets/oberon/graphics.png" width="1600" height="950" loading="lazy"
@@ -351,7 +351,7 @@
           cameras, without a window or a GPU, as fast as the CPU allows. Your
           level becomes a pytest suite that runs in CI on every push.
         </p>
-        <a class="more" href="https://github.com/x017/automata/blob/main/docs/wiki/tutorials/oberon-to-python.md">From Oberon to Python</a>
+        <a class="more" href="docs/tutorials/oberon-to-python.html">From Oberon to Python</a>
       </div>
       <div class="code reveal" role="figure" aria-label="A headless gameplay test">
         <header>tests/test_level.py</header>
@@ -391,7 +391,7 @@
         <dl>
           <div><dt>Physics</dt><dd>Rapier 2D and 3D, character controllers</dd></div>
           <div><dt>Audio</dt><dd>Kira</dd></div>
-          <div><dt>Scripting</dt><dd>Python 3.11+ via PyO3</dd></div>
+          <div><dt>Scripting</dt><dd>Python 3.10+ via PyO3</dd></div>
           <div><dt>Editor</dt><dd>Oberon: native Rust, code editor with LSP</dd></div>
         </dl>
       </div>
@@ -406,8 +406,8 @@
         <button class="copybtn" type="button" data-copy="cmd">Copy</button>
       </div>
       <div class="actions" style="margin-top:28px">
-        <a class="btn btn-primary" href="https://github.com/x017/automata/blob/main/docs/wiki/tutorials/README.md">Start the tutorials</a>
-        <a class="btn btn-ghost" href="https://github.com/x017/automata/blob/main/docs/wiki/zero-to-hero.md">Prefer pure Python? Zero to Hero</a>
+        <a class="btn btn-primary" href="docs/tutorials/index.html">Start the tutorials</a>
+        <a class="btn btn-ghost" href="docs/zero-to-hero.html">Prefer pure Python? Zero to Hero</a>
       </div>
     </div>
   </section>
@@ -417,8 +417,8 @@
   <div class="wrap">
     <span>AUTOMATA · MIT or Apache-2.0</span>
     <nav aria-label="Footer">
-      <a href="https://github.com/x017/automata/blob/main/docs/wiki/README.md">Docs</a>
-      <a href="https://github.com/x017/automata/blob/main/docs/wiki/api-reference.md">API</a>
+      <a href="docs/index.html">Docs</a>
+      <a href="docs/api-reference.html">API</a>
       <a href="https://github.com/x017/automata">GitHub</a>
     </nav>
   </div>

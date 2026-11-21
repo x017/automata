@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graphics · AUTOMATA docs</title>
+<meta name="description" content="The Graphics tab sits next to the Inspector in the right dock. It collects everything that decides how the frame looks, plus tools for testing it. Every edit is undoable and saved with the scene,…">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="index.html">Introduction</a></li><li><a href="interface.html">The interface</a></li><li><a href="scripting.html">Scripting</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="graphics.html" aria-current="page">Graphics</a></li><li><a href="code-editor.html">The code editor</a></li><li><a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Graphics</h1>
+<p>The <strong>Graphics</strong> tab sits next to the Inspector in the right dock. It
+collects everything that decides how the frame looks, plus tools for
+testing it. Every edit is undoable and saved with the scene, except
+<strong>Quality</strong> and <strong>Preview</strong>, which are editor preferences.</p>
+<p><img src="../../../assets/oberon/graphics.png" alt="The Graphics tab beside a scene" loading="lazy" decoding="async"></p>
+<p>The panel edits real scene entities. Each group shows which entity it
+edits, for example <em>On entity "Sun"</em>, with a <strong>Select</strong> button that jumps
+to that entity in the Inspector. Nothing in the panel is hidden state: a
+scene tuned here looks the same in Play and under <code>at.run_scene</code>.</p>
+<h2 id="renderer">Renderer<a class="anchor" href="#renderer" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Quality</strong>: Low / Medium / High / Ultra. This sets the shadow map
+resolution, or turns shadows off on Low. It applies immediately.</li><li><strong>Stats</strong> update live: frame time in ms, fps, meshes drawn, and shadow
+map size. Use them with the <em>400 cubes</em> test scene to see what your
+scene costs.</li></ul>
+<div class="table"><table><thead><tr><th>Quality</th><th>Shadows</th><th>Shadow map</th></tr></thead><tbody><tr><td>Low</td><td>off</td><td>—</td></tr><tr><td>Medium</td><td>on</td><td>1024 px</td></tr><tr><td>High (default)</td><td>on</td><td>2048 px</td></tr><tr><td>Ultra</td><td>on</td><td>4096 px</td></tr></tbody></table></div>
+<h2 id="sun">Sun<a class="anchor" href="#sun" aria-label="Link to this section">#</a></h2>
+<p>This group edits the scene's first <strong>Directional Light</strong>. If there isn't
+one, <strong>Add Directional Light</strong> creates it.</p>
+<div class="table"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td>Azimuth</td><td>Compass direction the light comes <strong>from</strong>, in degrees. 0 = from +Z (behind the default view), 90 = from +X</td></tr><tr><td>Elevation</td><td>Height of the sun above the horizon. 90 = straight down (noon), 5–15 = long sunset shadows</td></tr><tr><td>Color</td><td>Sunlight tint</td></tr><tr><td>Ambient</td><td>How bright the shadowed sides are (0 = black shadows, 1 = no shading)</td></tr><tr><td>Cast Shadows</td><td>Shadow mapping for this light</td></tr></tbody></table></div>
+<p>Azimuth and elevation are a friendlier way to set the light's direction
+vector. The Inspector's Directional Light section shows the same two
+fields.</p>
+<h2 id="environment">Environment<a class="anchor" href="#environment" aria-label="Link to this section">#</a></h2>
+<p>The <strong>Environment</strong> component sets the look of the whole scene: ambient
+colour, background, exposure, tone mapping, and fog. The first entity
+that has one wins. A scene without one uses the neutral default look: white
+ambient, a near-black background, no fog, and no tone mapping. Click
+<strong>Customize Environment</strong> to create an Environment entity and start
+tuning.</p>
+<p><strong>Presets</strong> give you a starting point:</p>
+<div class="table"><table><thead><tr><th>Preset</th><th>Look</th><th>Tone mapping</th></tr></thead><tbody><tr><td>Neutral</td><td>Plain lighting, no fog: the default</td><td>None</td></tr><tr><td>Daylight</td><td>Blue sky ambient, warm ground bounce, light haze</td><td>ACES</td></tr><tr><td>Dusk</td><td>Violet sky, dark red ground, dense warm fog</td><td>AgX</td></tr><tr><td>Night</td><td>Cold dark ambient, black fog close to the camera</td><td>ACES</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td>Sky / Ground</td><td>Ambient light from above and from below. Surfaces facing up take the sky colour; surfaces facing down take the ground colour; the rest blend between them. This hemisphere ambient makes flat-coloured scenes look grounded</td></tr><tr><td>Background</td><td>The colour behind everything</td></tr><tr><td>Tone Mapping</td><td>How bright values are squeezed into the screen's range. <strong>None</strong>: values above 1 clip. <strong>Reinhard</strong>: soft and flat. <strong>ACES</strong>: filmic contrast and saturation. <strong>AgX</strong>: filmic, keeps bright colours from turning neon</td></tr><tr><td>Exposure</td><td>Brightness multiplier applied before tone mapping. Raise it with ACES or AgX, which darken mid-tones</td></tr><tr><td>Fog</td><td>Exponential distance fog</td></tr><tr><td>Fog Color</td><td>Usually the same as Background, so distant objects melt into the sky</td></tr><tr><td>Fog Density</td><td>How quickly fog thickens per metre. 0.01 is light haze, 0.05 is thick</td></tr><tr><td>Fog Start</td><td>Distance from the camera with no fog at all</td></tr></tbody></table></div>
+<aside class="note"><p>Fog is applied before tone mapping and the background after it. With
+ACES or AgX on, the far fog can look slightly different from the
+background. If the horizon shows a seam, nudge Fog Color.</p></aside>
+<h2 id="camera">Camera<a class="anchor" href="#camera" aria-label="Link to this section">#</a></h2>
+<p>This group edits the scene's first camera, the one Play renders through.
+If there isn't one, <strong>Add Camera</strong> creates one framed on your current
+view.</p>
+<ul><li><strong>Field of View</strong></li><li><strong>Look Through</strong> / <strong>Align to View</strong></li><li><strong>Preview</strong>: show the live inset when a camera is selected</li></ul>
+<p>Full guide: <a href="cameras.html">Cameras</a>.</p>
+<h2 id="test-scenes">Test Scenes<a class="anchor" href="#test-scenes" aria-label="Link to this section">#</a></h2>
+<p>These buttons drop known content into the scene so you can judge a look
+or a setting fairly. Every object they add is named <code>Test …</code>, and each
+button press is one undo step. <strong>Remove N test objects</strong> deletes them all
+at once, also as one undo step.</p>
+<div class="table"><table><thead><tr><th>Scene</th><th>Use it to</th></tr></thead><tbody><tr><td>Color chart</td><td>A sweep of hues and brightness. Switch tone mapping and watch how saturated colours and highlights behave</td></tr><tr><td>Shadows</td><td>A floor, pillars, and a floating slab. Check shadow shape, contact, and acne while you move the sun</td></tr><tr><td>Fog depth</td><td>Pillars marching out to 150 m. Tune fog density and start until the far ones fade the way you want</td></tr><tr><td>400 cubes</td><td>A 20×20 field. Watch the frame time stat at each quality level</td></tr></tbody></table></div>
+<p>Test objects are ordinary entities. Remember to remove them before you
+save, unless you want to keep them.</p>
+<h2 id="a-tuning-workflow">A tuning workflow<a class="anchor" href="#a-tuning-workflow" aria-label="Link to this section">#</a></h2>
+<ol><li>Add <strong>Shadows</strong> and <strong>Color chart</strong>.</li><li>Pick the preset closest to your mood.</li><li>Set <strong>Elevation</strong>: low for drama, high for clarity. Then rotate
+<strong>Azimuth</strong> until the shadows fall where they read best.</li><li>Adjust <strong>Sky / Ground</strong> until the shadowed sides look right, then
+<strong>Ambient</strong> for overall contrast.</li><li>Pick <strong>Tone Mapping</strong>, then fix overall brightness with <strong>Exposure</strong>.</li><li>Turn on <strong>Fog</strong>. Match Fog Color to Background and set <strong>Fog Start</strong>
+just past the play area.</li><li>Click <strong>Remove test objects</strong> and save.</li></ol>
+<p>The same look in plain Python is in
+<a href="../guides/rendering-and-lights.html#environment">Guide: Rendering &amp; Lights</a>.
+The <a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood tutorial</a> walks
+through three complete looks.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="cameras.html"><small>Previous</small>Cameras</a><a class="next" href="code-editor.html"><small>Next</small>The code editor</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/graphics.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#renderer">Renderer</a></li><li class="l2"><a href="#sun">Sun</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#camera">Camera</a></li><li class="l2"><a href="#test-scenes">Test Scenes</a></li><li class="l2"><a href="#a-tuning-workflow">A tuning workflow</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

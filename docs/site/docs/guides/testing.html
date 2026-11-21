@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide: Testing · AUTOMATA docs</title>
+<meta name="description" content="Your game is a Python program; test it like one. Headless mode runs the real engine — physics, events, resources, your logic — with no window and no GPU.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="game-loop.html">The game loop</a></li><li><a href="scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="input.html">Input</a></li><li><a href="physics.html">Physics</a></li><li><a href="events-and-resources.html">Events &amp; resources</a></li><li><a href="oop-style.html">OOP style</a></li><li><a href="scene-files.html">Scene files</a></li><li><a href="project-structure.html">Project structure</a></li><li><a href="testing.html" aria-current="page">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Guide: Testing</h1>
+<p>Your game is a Python program; test it like one. Headless mode runs the
+real engine — physics, events, resources, your logic — with no window and
+no GPU.</p>
+<h2 id="the-pattern">The pattern<a class="anchor" href="#the-pattern" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+
+<span class="tok-k">def</span> <span class="tok-f">test_scene_loads</span>():
+    game = at.Game(headless=<span class="tok-b">True</span>)
+    game.load_scene(at.Scene().add(at.Entity(<span class="tok-s">&quot;box&quot;</span>).add(at.Transform())))
+    seen = {}
+
+    <span class="tok-k">def</span> <span class="tok-f">update</span>(ctx):
+        seen[<span class="tok-s">&quot;names&quot;</span>] = ctx.scene.names()
+        ctx.quit()
+
+    game.run(update)
+    <span class="tok-k">assert</span> seen[<span class="tok-s">&quot;names&quot;</span>] == [<span class="tok-s">&quot;player-spawn&quot;</span>]</code></pre></div>
+<p>Headless rules:</p>
+<ul><li><code>headless=True</code> + <code>max_frames=N</code> bounds every run.</li><li><code>MeshRenderer</code> is inert (no GPU) — stage visuals anyway; they're ignored.</li><li><strong>No OS input events arrive.</strong> Test outcomes and logic, not key plumbing:
+instead of "pressing space makes the player jump," test "when grounded
+and <code>jump</code> is triggered, <code>vy</code> becomes positive" — or drive physics
+directly (<code>ctx.physics.apply_impulse</code>) and assert the landing.</li></ul>
+<h2 id="probing-a-game-subclass">Probing a Game subclass<a class="anchor" href="#probing-a-game-subclass" aria-label="Link to this section">#</a></h2>
+<p>Wrap the real update hook rather than replacing it:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">from</span> mygame <span class="tok-k">import</span> Platformer
+
+
+<span class="tok-k">def</span> <span class="tok-f">test_player_settles_on_ground</span>():
+    <span class="tok-k">class</span> <span class="tok-f">Probe</span>(Platformer):
+        headless = <span class="tok-b">True</span>
+
+        <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+            <span class="tok-b">super</span>().on_update(ctx)
+            <span class="tok-k">if</span> ctx.time.frame == <span class="tok-n">120</span>:
+                <span class="tok-b">self</span>.player_y = ctx.scene[<span class="tok-s">&quot;player&quot;</span>].transform.position[<span class="tok-n">1</span>]
+                ctx.quit()
+
+    game = Probe()
+    game.run()
+    <span class="tok-k">assert</span> game.player_y == pytest.approx(<span class="tok-n">1.0</span>, <span class="tok-b">abs</span>=<span class="tok-n">0.05</span>)</code></pre></div>
+<p>An explicit <code>run(update=fn)</code> also wins over <code>on_update</code>; call
+<code>Platformer.on_update(game, ctx)</code> inside it to keep the real logic.</p>
+<h2 id="what-to-test">What to test<a class="anchor" href="#what-to-test" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Layer</th><th>Example assertion</th></tr></thead><tbody><tr><td>Scene staging</td><td>names present, <code>entity_count</code> right</td></tr><tr><td>Physics</td><td>ball rests at expected height after N frames</td></tr><tr><td>Game logic</td><td>collecting a coin despawns it and bumps score</td></tr><tr><td>Events</td><td>sending <code>hit</code> triggers your handler</td></tr><tr><td>Action maps</td><td>bindings stack; <code>axis_names()</code> correct</td></tr><tr><td>API misuse</td><td>bad colors raise <code>ValueError</code>, unknown keys raise <code>KeyError</code></td></tr></tbody></table></div>
+<h2 id="ci">CI<a class="anchor" href="#ci" aria-label="Link to this section">#</a></h2>
+<p>The repo's own CI runs the Python suite headless on every push — your
+game's tests work the same way:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>python -m pytest tests/ -q</code></pre></div>
+<p>GPU rendering is covered separately by the engine's offscreen tests (they
+run under lavapipe in CI); your game tests never need a GPU.</p>
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="game-loop.html#headless-mode">The Game Loop</a></li><li>The engine's own suite: <code>crates/automata-python/tests/python/test_automata.py</code></li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="project-structure.html"><small>Previous</small>Project structure</a><a class="next" href="../api-reference.html"><small>Next</small>API reference</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/testing.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#the-pattern">The pattern</a></li><li class="l2"><a href="#probing-a-game-subclass">Probing a Game subclass</a></li><li class="l2"><a href="#what-to-test">What to test</a></li><li class="l2"><a href="#ci">CI</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

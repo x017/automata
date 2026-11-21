@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AUTOMATA Wiki · AUTOMATA docs</title>
+<meta name="description" content="Welcome to the AUTOMATA documentation wiki — the complete guide to making 2D and 3D games with a Rust engine core and Python gameplay code.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="_static/docs.css">
+<script>window.DOCS_ROOT = "";</script>
+<script defer src="_static/search-index.js"></script>
+<script defer src="_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../index.html">AUTOMATA</a>
+  <a class="section" href="index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="index.html" aria-current="page">Overview</a></li><li><a href="getting-started.html">Getting started</a></li><li><a href="tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="tutorials/first-scene.html">Your first scene</a></li><li><a href="tutorials/coin-collector.html">Coin collector</a></li><li><a href="tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="oberon/index.html">Introduction</a></li><li><a href="oberon/interface.html">The interface</a></li><li><a href="oberon/scripting.html">Scripting</a></li><li><a href="oberon/cameras.html">Cameras</a></li><li><a href="oberon/graphics.html">Graphics</a></li><li><a href="oberon/code-editor.html">The code editor</a></li><li><a href="oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="guides/game-loop.html">The game loop</a></li><li><a href="guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="guides/cameras.html">Cameras</a></li><li><a href="guides/input.html">Input</a></li><li><a href="guides/physics.html">Physics</a></li><li><a href="guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="guides/oop-style.html">OOP style</a></li><li><a href="guides/scene-files.html">Scene files</a></li><li><a href="guides/project-structure.html">Project structure</a></li><li><a href="guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="api-reference.html">API reference</a></li><li><a href="cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="engine/architecture.html">Architecture</a></li><li><a href="engine/development.html">Development</a></li><li><a href="engine/api.html">API design</a></li><li><a href="engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>AUTOMATA Wiki</h1>
+<p>Welcome to the AUTOMATA documentation wiki — the complete guide to making
+2D and 3D games with a Rust engine core and Python gameplay code.</p>
+<p>You can make games two ways, and both use the same engine and file
+format:</p>
+<ul><li><strong>Code-first:</strong> a game is an ordinary Python program. You write a
+<code>Game</code>, stage <code>Entity</code> objects into a <code>Scene</code>, and react to input every
+frame.</li><li><strong>Oberon, the editor:</strong> build scenes visually, attach Python behaviour
+scripts, press Play, and tune graphics live. See
+<a href="oberon/index.html">Oberon</a>.</li></ul>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+
+<span class="tok-k">class</span> <span class="tok-f">Hello</span>(at.Game):
+    title = <span class="tok-s">&quot;hello automata&quot;</span>
+    clear_color = (<span class="tok-n">0.55</span>, <span class="tok-n">0.78</span>, <span class="tok-n">0.95</span>, <span class="tok-n">1.0</span>)  <span class="tok-c"># sky blue</span>
+
+    <span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">self</span>.load_scene(
+            at.Scene()
+            .add(at.Entity(<span class="tok-s">&quot;camera&quot;</span>).add(at.Camera3D(position=(<span class="tok-n">0</span>, <span class="tok-n">2</span>, <span class="tok-n">6</span>), target=(<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>))))
+            .add(
+                at.Entity(<span class="tok-s">&quot;cube&quot;</span>)
+                .add(at.Transform(position=(<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>)))
+                .add(at.MeshRenderer.cube(size=<span class="tok-n">1.0</span>, color=(<span class="tok-n">0.95</span>, <span class="tok-n">0.45</span>, <span class="tok-n">0.15</span>, <span class="tok-n">1.0</span>)))
+            )
+        )
+
+    <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+        ctx.scene[<span class="tok-s">&quot;cube&quot;</span>].transform.rotation_euler = (<span class="tok-n">0.0</span>, ctx.time.elapsed, <span class="tok-n">0.0</span>)
+        <span class="tok-k">if</span> ctx.input.just_pressed(at.Key.ESCAPE):
+            ctx.quit()
+
+
+Hello().run()</code></pre></div>
+<h2 id="where-to-go">Where to go<a class="anchor" href="#where-to-go" aria-label="Link to this section">#</a></h2>
+<p><strong>New here?</strong> Follow the <a href="tutorials/index.html">tutorials</a>. The Oberon track
+takes you from an empty scene to a tested, shippable game in about two
+hours.</p>
+<h3 id="oberon-the-editor">Oberon (the editor)<a class="anchor" href="#oberon-the-editor" aria-label="Link to this section">#</a></h3>
+<div class="table"><table><thead><tr><th>I want to…</th><th>Read</th></tr></thead><tbody><tr><td>Install and open the editor</td><td><a href="oberon/index.html">Oberon</a></td></tr><tr><td>Learn every panel and how to navigate</td><td><a href="oberon/interface.html">The interface</a></td></tr><tr><td>Write behaviour scripts</td><td><a href="oberon/scripting.html">Scripting</a></td></tr><tr><td>Place and drive cameras</td><td><a href="oberon/cameras.html">Cameras</a></td></tr><tr><td>Tune lighting, fog, and tone mapping, and test graphics</td><td><a href="oberon/graphics.html">Graphics</a></td></tr><tr><td>Use the built-in code editor and language servers</td><td><a href="oberon/code-editor.html">The code editor</a></td></tr><tr><td>Reuse objects and add custom data</td><td><a href="oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></td></tr><tr><td>Look up a shortcut</td><td><a href="oberon/shortcuts.html">Keyboard shortcuts</a></td></tr></tbody></table></div>
+<h3 id="python">Python<a class="anchor" href="#python" aria-label="Link to this section">#</a></h3>
+<div class="table"><table><thead><tr><th>I want to…</th><th>Read</th></tr></thead><tbody><tr><td>Install the engine and open my first window</td><td><a href="getting-started.html">Getting Started</a></td></tr><tr><td>Learn <strong>everything</strong>, step by step, building a real game</td><td><a href="zero-to-hero.html">Zero to Hero</a></td></tr><tr><td>Look up an exact class, method, or parameter</td><td><a href="api-reference.html">API Reference</a></td></tr><tr><td>Solve a specific problem (double jump, pause, spawn waves…)</td><td><a href="cookbook.html">Cookbook</a></td></tr><tr><td>Understand the update loop and the frame model</td><td><a href="guides/game-loop.html">Guide: The Game Loop</a></td></tr><tr><td>Build levels out of entities and components</td><td><a href="guides/scenes-and-entities.html">Guide: Scenes &amp; Entities</a></td></tr><tr><td>Draw things, light them, fog and tone mapping</td><td><a href="guides/rendering-and-lights.html">Guide: Rendering &amp; Lights</a></td></tr><tr><td>Follow, orbit, rail, and shake cameras</td><td><a href="guides/cameras.html">Guide: Cameras</a></td></tr><tr><td>Handle keyboard, mouse, and gamepads</td><td><a href="guides/input.html">Guide: Input</a></td></tr><tr><td>Add gravity, collisions, and character movement</td><td><a href="guides/physics.html">Guide: Physics</a></td></tr><tr><td>Pass messages and store game state</td><td><a href="guides/events-and-resources.html">Guide: Events &amp; Resources</a></td></tr><tr><td>Structure a big game with classes</td><td><a href="guides/oop-style.html">Guide: OOP Style</a></td></tr><tr><td>Test my game headlessly in CI</td><td><a href="guides/testing.html">Guide: Testing</a></td></tr><tr><td>Organize a project past one file</td><td><a href="guides/project-structure.html">Guide: Project Structure</a></td></tr><tr><td>Save and load scenes as files</td><td><a href="guides/scene-files.html">Guide: Scene Files</a></td></tr></tbody></table></div>
+<h2 id="the-two-rules-of-the-frame-model">The two rules of the frame model<a class="anchor" href="#the-two-rules-of-the-frame-model" aria-label="Link to this section">#</a></h2>
+<p>Everything else in this wiki follows from these two rules:</p>
+<ol><li><strong>Reads see the start of the frame.</strong> Inside <code>on_update</code>, <code>ctx</code> is a
+snapshot of the world as the frame began. (One exception: after you
+write a transform, reads <em>of that entity</em> return your pending write.)</li><li><strong>Writes apply after your callback.</strong> Setting a transform, despawning a
+coin, or sending an event is buffered and becomes visible next frame.</li></ol>
+<p>That's it. No locks, no partial states, no data races with the engine.</p>
+<h2 id="conventions">Conventions<a class="anchor" href="#conventions" aria-label="Link to this section">#</a></h2>
+<ul><li>Angles are <strong>radians</strong> in <code>Transform.rotation_euler</code>, <strong>degrees</strong> in
+<code>Camera3D(fov=...)</code>.</li><li>Colors are <code>(r, g, b, a)</code> float tuples in the <code>0.0..=1.0</code> range.</li><li>Input names are <strong>typed enums</strong> — <code>at.Key.SPACE</code>, <code>at.GamepadButton.SOUTH</code>
+— but plain strings (<code>&quot;space&quot;</code>) work everywhere too.</li><li>Headless mode (<code>headless=True</code>) runs the full engine without a window or
+GPU: the same loop, the same physics, no rendering. It's how you test.</li></ul>
+    </article>
+    <footer class="pager"><span></span><a class="next" href="getting-started.html"><small>Next</small>Getting started</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/README.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#where-to-go">Where to go</a></li><li class="l3"><a href="#oberon-the-editor">Oberon (the editor)</a></li><li class="l3"><a href="#python">Python</a></li><li class="l2"><a href="#the-two-rules-of-the-frame-model">The two rules of the frame model</a></li><li class="l2"><a href="#conventions">Conventions</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

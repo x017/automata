@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cameras · AUTOMATA docs</title>
+<meta name="description" content="A new camera is placed where you&#x27;re currently looking from, aimed at the same point, so it starts with a sensible view.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="index.html">Introduction</a></li><li><a href="interface.html">The interface</a></li><li><a href="scripting.html">Scripting</a></li><li><a href="cameras.html" aria-current="page">Cameras</a></li><li><a href="graphics.html">Graphics</a></li><li><a href="code-editor.html">The code editor</a></li><li><a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Cameras</h1>
+<p>AUTOMATA has two kinds of view:</p>
+<ul><li><strong>The editor view</strong> is the free orbit camera you navigate with in
+Oberon. It isn't part of the scene and is never saved.</li><li><strong>Scene cameras</strong> are entities with a <strong>Camera</strong> component. They're
+saved in the scene file. Play mode and the shipped game render through
+the first one.</li></ul>
+<p><img src="../../../assets/oberon/camera.png" alt="A selected camera with its frustum and live preview" loading="lazy" decoding="async"></p>
+<h2 id="add-a-camera">Add a camera<a class="anchor" href="#add-a-camera" aria-label="Link to this section">#</a></h2>
+<p><strong>+ → Camera</strong> in the Hierarchy, or <strong>GameObject → Camera</strong>. You can also
+use <strong>Graphics → Camera → Add Camera</strong>. You can add a Camera component to
+any entity too: <strong>Add Component → Camera</strong>.</p>
+<p>A new camera is placed where you're currently looking from, aimed at the
+same point, so it starts with a sensible view.</p>
+<h2 id="camera-fields">Camera fields<a class="anchor" href="#camera-fields" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td>Field of View</td><td>Vertical angle in degrees. Around 60 is natural; 30 is a telephoto zoom; 90+ is a wide action view</td></tr><tr><td>Near Clip / Far Clip</td><td>Nothing closer than Near or farther than Far is drawn. Keep Near as large as you can (0.1–0.5) to avoid depth flicker</td></tr><tr><td>Eye</td><td>Where the camera is</td></tr><tr><td>Look At</td><td>The point it aims at</td></tr></tbody></table></div>
+<p>The camera aims at a <em>point</em> rather than storing a rotation, because that
+matches how games usually move cameras: follow something, look at
+something.</p>
+<p><strong>Moving the entity moves the camera.</strong> When you drag a camera with the
+Move gizmo, or change its Transform position, Eye and Look At move with it.
+That keeps the aim. Editing Eye or Look At directly doesn't drag the
+Transform along.</p>
+<h2 id="see-what-the-camera-sees">See what the camera sees<a class="anchor" href="#see-what-the-camera-sees" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Frustum.</strong> Every camera draws its view pyramid in the scene view. The
+selected one is brighter, and a small notch marks the top edge.</li><li><strong>Preview.</strong> While a camera is selected, a live render of its view
+appears in the bottom-right corner of the scene view. You can turn it
+off with <strong>Graphics → Camera → Preview</strong>. It hides automatically when
+the view is too small.</li><li><strong>Look Through</strong> jumps the editor view to the camera's position, aim,
+and field of view. It's the quickest way to frame a shot exactly.</li><li><strong>Align to View</strong> does the reverse: it moves the camera to where the
+editor view is now. A good workflow is to navigate until the shot looks
+right, then click Align to View. It's one undo step.</li></ul>
+<p>Look Through and Align to View are in the Inspector's Camera section and
+in <strong>Graphics → Camera</strong>.</p>
+<h2 id="cameras-in-play-mode">Cameras in Play mode<a class="anchor" href="#cameras-in-play-mode" aria-label="Link to this section">#</a></h2>
+<p>When the scene has a camera, <strong>Play renders through the first one</strong> in the
+hierarchy. The editor's own view is ignored until you Stop. The built-in
+player's WASD movement is relative to the camera's facing.</p>
+<p>With no camera, Play uses the editor view and follows the player. That's
+handy for quick tests, but a shipped game should always have a camera.</p>
+<h2 id="driving-a-camera-from-a-script">Driving a camera from a script<a class="anchor" href="#driving-a-camera-from-a-script" aria-label="Link to this section">#</a></h2>
+<p>Attach a script to the camera entity, or to anything else, and use
+<code>entity.camera</code> or <code>ctx.camera</code>:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    cam = ctx.camera                     <span class="tok-c"># the camera Play renders through</span>
+    cam.follow(ctx.scene[<span class="tok-s">&quot;Player&quot;</span>])      <span class="tok-c"># smooth third-person follow</span></code></pre></div>
+<div class="table"><table><thead><tr><th>Member</th><th>Meaning</th></tr></thead><tbody><tr><td><code>cam.position</code></td><td>Eye <code>(x, y, z)</code>. Read it or assign it</td></tr><tr><td><code>cam.target</code></td><td>Look-at point <code>(x, y, z)</code></td></tr><tr><td><code>cam.fov</code></td><td>Vertical field of view in degrees (clamped to 1–179)</td></tr><tr><td><code>cam.look_at(point_or_entity)</code></td><td>Aim at a point or at an entity's position</td></tr><tr><td><code>cam.follow(entity, offset=(0, 3, 8), smooth=8.0, look_height=0.6)</code></td><td>Ease toward <code>entity + offset</code> and look at the entity. Call it every frame. <code>smooth=0</code> snaps</td></tr></tbody></table></div>
+<p>The same API works in Oberon's Play mode and under <code>at.run_scene</code>.</p>
+<h3 id="recipes">Recipes<a class="anchor" href="#recipes" aria-label="Link to this section">#</a></h3>
+<p><strong>Fixed security camera that tracks the player</strong></p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    entity.camera.look_at(ctx.scene[<span class="tok-s">&quot;Player&quot;</span>])</code></pre></div>
+<p><strong>Side-scroller</strong>: lock the camera's Z distance and follow only X and Y.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    x, y, _ = ctx.scene[<span class="tok-s">&quot;Player&quot;</span>].transform.position
+    cam = entity.camera
+    cx, cy, cz = cam.position
+    k = <span class="tok-b">min</span>(<span class="tok-n">1.0</span>, <span class="tok-n">6.0</span> * ctx.time.delta)
+    cam.position = (cx + (x - cx) * k, cy + (y + <span class="tok-n">1.5</span> - cy) * k, <span class="tok-n">12.0</span>)
+    cam.target = (cam.position[<span class="tok-n">0</span>], cam.position[<span class="tok-n">1</span>] - <span class="tok-n">1.0</span>, <span class="tok-n">0.0</span>)</code></pre></div>
+<p><strong>Orbit with Q / E</strong></p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> math
+
+<span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;yaw&quot;</span>] = <span class="tok-n">0.0</span>
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    yaw = entity.state[<span class="tok-s">&quot;yaw&quot;</span>]
+    yaw += (ctx.input.pressed(<span class="tok-s">&quot;e&quot;</span>) - ctx.input.pressed(<span class="tok-s">&quot;q&quot;</span>)) * <span class="tok-n">2.0</span> * ctx.time.delta
+    entity.state[<span class="tok-s">&quot;yaw&quot;</span>] = yaw
+    px, py, pz = ctx.scene[<span class="tok-s">&quot;Player&quot;</span>].transform.position
+    entity.camera.position = (px + <span class="tok-n">8</span> * math.sin(yaw), py + <span class="tok-n">3.5</span>, pz + <span class="tok-n">8</span> * math.cos(yaw))
+    entity.camera.look_at((px, py + <span class="tok-n">0.6</span>, pz))</code></pre></div>
+<p><strong>Zoom while a key is held</strong> (Z)</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    goal = <span class="tok-n">35.0</span> <span class="tok-k">if</span> ctx.input.pressed(<span class="tok-s">&quot;z&quot;</span>) <span class="tok-k">else</span> <span class="tok-n">60.0</span>
+    entity.camera.fov += (goal - entity.camera.fov) * <span class="tok-b">min</span>(<span class="tok-n">1.0</span>, <span class="tok-n">10</span> * ctx.time.delta)</code></pre></div>
+<p>More: the <a href="../tutorials/third-person-camera.html">third-person camera tutorial</a>
+and the <a href="../tutorials/camera-rail.html">camera rail / cutscene tutorial</a>.</p>
+<h2 id="cameras-in-plain-python">Cameras in plain Python<a class="anchor" href="#cameras-in-plain-python" aria-label="Link to this section">#</a></h2>
+<p>In code-first games (no Oberon), cameras are ordinary components. See
+<a href="../guides/cameras.html">Guide: Cameras</a>.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="scripting.html"><small>Previous</small>Scripting</a><a class="next" href="graphics.html"><small>Next</small>Graphics</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/cameras.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#add-a-camera">Add a camera</a></li><li class="l2"><a href="#camera-fields">Camera fields</a></li><li class="l2"><a href="#see-what-the-camera-sees">See what the camera sees</a></li><li class="l2"><a href="#cameras-in-play-mode">Cameras in Play mode</a></li><li class="l2"><a href="#driving-a-camera-from-a-script">Driving a camera from a script</a></li><li class="l3"><a href="#recipes">Recipes</a></li><li class="l2"><a href="#cameras-in-plain-python">Cameras in plain Python</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide: Rendering &amp; Lights · AUTOMATA docs</title>
+<meta name="description" content="How things get on screen: primitives, cameras, the sun, the environment (ambient, fog, tone mapping), and quality presets.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="game-loop.html">The game loop</a></li><li><a href="scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="rendering-and-lights.html" aria-current="page">Rendering &amp; lights</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="input.html">Input</a></li><li><a href="physics.html">Physics</a></li><li><a href="events-and-resources.html">Events &amp; resources</a></li><li><a href="oop-style.html">OOP style</a></li><li><a href="scene-files.html">Scene files</a></li><li><a href="project-structure.html">Project structure</a></li><li><a href="testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Guide: Rendering &amp; Lights</h1>
+<p>How things get on screen: primitives, cameras, the sun, the
+environment (ambient, fog, tone mapping), and quality presets.</p>
+<h2 id="drawing-primitives">Drawing primitives<a class="anchor" href="#drawing-primitives" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>entity.add(at.MeshRenderer.cube(size=<span class="tok-n">1.0</span>, color=(r, g, b, a)))
+entity.add(at.MeshRenderer.quad(size=<span class="tok-n">1.0</span>, color=(r, g, b, a)))</code></pre></div>
+<ul><li><code>size</code> sets the primitive's base size; the entity's <code>Transform.scale</code>
+multiplies it. A floor is a unit cube with <code>scale=(40, 1, 40)</code>.</li><li><code>quad</code> lies in the XY plane facing +Z — billboards, cards, flat details.</li><li>Colors are linear-space floats in <code>0.0..=1.0</code>.</li><li>Primitives are <strong>plain data</strong>: safe to stage before a window exists and
+inert in headless mode. The windowed driver uploads them to the GPU on
+the first frame automatically.</li></ul>
+<aside class="note"><p>There is no texture or custom-mesh API in Python yet — the look is flat
+colors + lighting. That's a deliberate indie aesthetic and a roadmap
+item, not an oversight you can configure away.</p></aside>
+<h2 id="cameras">Cameras<a class="anchor" href="#cameras" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Camera3D(position=(<span class="tok-n">0</span>, <span class="tok-n">3.5</span>, <span class="tok-n">9</span>), target=(<span class="tok-n">0</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>), fov=<span class="tok-n">60.0</span>)
+at.Camera2D(center=(<span class="tok-n">0</span>, <span class="tok-n">0</span>), half_height=<span class="tok-n">100.0</span>)</code></pre></div>
+<ul><li>The <strong>first entity</strong> with a camera component is the frame's camera
+(3D for meshes, 2D for sprites).</li><li>No camera → meshes fall back to <code>(0, 0, 5)</code> looking at the origin;
+sprites fall back to screen-space pixels, origin top-left, +Y down.</li></ul>
+<p><strong>Follow camera</strong> — cameras are writable per frame, so tracking a player is
+three lines (smooth exponential follow):</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    px, py, _ = ctx.scene[<span class="tok-s">&quot;player&quot;</span>].transform.position
+    blend = <span class="tok-b">min</span>(<span class="tok-n">1.0</span>, <span class="tok-n">8.0</span> * ctx.time.delta)        <span class="tok-c"># frame-rate independent</span>
+    <span class="tok-b">self</span>.cam_x += (px - <span class="tok-b">self</span>.cam_x) * blend
+    <span class="tok-b">self</span>.cam_y += (<span class="tok-b">max</span>(py + <span class="tok-n">1.6</span>, <span class="tok-n">2.6</span>) - <span class="tok-b">self</span>.cam_y) * blend
+    ctx.scene[<span class="tok-s">&quot;camera&quot;</span>].camera_3d = at.Camera3D(
+        position=(<span class="tok-b">self</span>.cam_x, <span class="tok-b">self</span>.cam_y, <span class="tok-n">10.0</span>),
+        target=(<span class="tok-b">self</span>.cam_x, <span class="tok-b">self</span>.cam_y - <span class="tok-n">1.4</span>, <span class="tok-n">0.0</span>),
+    )</code></pre></div>
+<h2 id="the-sun">The sun<a class="anchor" href="#the-sun" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>scene.add(
+    at.Entity(<span class="tok-s">&quot;sun&quot;</span>).add(
+        at.DirectionalLight(
+            direction=(-<span class="tok-n">0.45</span>, -<span class="tok-n">1.0</span>, -<span class="tok-n">0.3</span>),  <span class="tok-c"># where the light travels</span>
+            color=(<span class="tok-n">1.0</span>, <span class="tok-n">0.96</span>, <span class="tok-n">0.88</span>),        <span class="tok-c"># warm afternoon</span>
+            ambient=<span class="tok-n">0.35</span>,                   <span class="tok-c"># fill on shadowed faces</span>
+            shadows=<span class="tok-b">True</span>,                   <span class="tok-c"># shadow mapping on</span>
+        )
+    )
+)</code></pre></div>
+<ul><li>The first <code>DirectionalLight</code> entity lights the frame. No light entity →
+a neutral shadowless default (the scene is still visible).</li><li>Meshes are Blinn-Phong shaded: <code>ambient * color</code> everywhere, plus
+sun-colored diffuse and a subtle specular highlight where lit.</li><li><strong>Shadows</strong> are shadow-mapped automatically: the engine fits the sun's
+frustum around your scene every frame, so any level size works. Shadowed
+regions keep the ambient term.</li></ul>
+<h2 id="environment">Environment<a class="anchor" href="#environment" aria-label="Link to this section">#</a></h2>
+<p>The <code>Environment</code> component sets the look of the whole frame:</p>
+<ul><li>hemisphere ambient light (sky above, ground below)</li><li>the background colour</li><li>exposure and tone mapping</li><li>distance fog</li></ul>
+<p>The first entity that carries one wins.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>scene.add(at.Entity(<span class="tok-s">&quot;look&quot;</span>).add(at.Environment.preset(<span class="tok-s">&quot;dusk&quot;</span>)))</code></pre></div>
+<p>or spelled out:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>scene.add(
+    at.Entity(<span class="tok-s">&quot;look&quot;</span>).add(
+        at.Environment(
+            sky_color=(<span class="tok-n">0.75</span>, <span class="tok-n">0.85</span>, <span class="tok-n">1.0</span>),     <span class="tok-c"># ambient from above</span>
+            ground_color=(<span class="tok-n">0.45</span>, <span class="tok-n">0.4</span>, <span class="tok-n">0.35</span>),  <span class="tok-c"># ambient from below (bounce)</span>
+            background=(<span class="tok-n">0.55</span>, <span class="tok-n">0.68</span>, <span class="tok-n">0.85</span>),   <span class="tok-c"># replaces Game.clear_color</span>
+            exposure=<span class="tok-n">1.1</span>,
+            tonemapping=<span class="tok-s">&quot;aces&quot;</span>,              <span class="tok-c"># &quot;none&quot; | &quot;reinhard&quot; | &quot;aces&quot; | &quot;agx&quot;</span>
+            fog=<span class="tok-b">True</span>,
+            fog_color=(<span class="tok-n">0.55</span>, <span class="tok-n">0.68</span>, <span class="tok-n">0.85</span>),    <span class="tok-c"># match the background</span>
+            fog_density=<span class="tok-n">0.012</span>,               <span class="tok-c"># per metre; 0.05 is thick</span>
+            fog_start=<span class="tok-n">10.0</span>,                  <span class="tok-c"># metres of clear air first</span>
+        )
+    )
+)</code></pre></div>
+<div class="table"><table><thead><tr><th>Preset</th><th>Look</th></tr></thead><tbody><tr><td><code>&quot;neutral&quot;</code></td><td>The default: white ambient, no fog, no tone mapping</td></tr><tr><td><code>&quot;daylight&quot;</code></td><td>Blue sky, warm bounce, light haze, ACES</td></tr><tr><td><code>&quot;dusk&quot;</code></td><td>Violet sky, dark red ground, dense warm fog, AgX</td></tr><tr><td><code>&quot;night&quot;</code></td><td>Cold dark ambient, black fog close to the camera, ACES</td></tr></tbody></table></div>
+<p>How it combines with the sun:</p>
+<ul><li>Ambient is <code>DirectionalLight.ambient × mix(ground, sky)</code>, picked by how
+much a surface faces up. Keep the sky and ground colours near 1.0 in
+brightness and control strength with <code>ambient</code>.</li><li><strong>Fog</strong> fades lit colour toward <code>fog_color</code> as
+<code>1 − exp(−density × (distance − start))</code>.</li><li><strong>Tone mapping</strong> runs last. ACES and AgX roll off highlights smoothly,
+so you can use brighter suns and colours without clipping. Raise
+<code>exposure</code> a little to compensate for their darker mid-tones.</li><li>An Environment is staged data like any other component. It's saved in
+scene files and edited in <a href="../oberon/graphics.html">Oberon's Graphics tab</a>.</li></ul>
+<h2 id="sky-and-quality">Sky and quality<a class="anchor" href="#sky-and-quality" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">MyGame</span>(at.Game):
+    clear_color = (<span class="tok-n">0.55</span>, <span class="tok-n">0.78</span>, <span class="tok-n">0.95</span>, <span class="tok-n">1.0</span>)   <span class="tok-c"># the &quot;sky&quot; each frame clears to</span>
+    graphics = at.GraphicsQuality.HIGH</code></pre></div>
+<div class="table"><table><thead><tr><th>Preset</th><th>Shadows</th><th>Shadow map</th></tr></thead><tbody><tr><td><code>GraphicsQuality.LOW</code></td><td>off</td><td>—</td></tr><tr><td><code>GraphicsQuality.MEDIUM</code></td><td>on</td><td>1024px</td></tr><tr><td><code>GraphicsQuality.HIGH</code> (default)</td><td>on</td><td>2048px</td></tr><tr><td><code>GraphicsQuality.ULTRA</code></td><td>on</td><td>4096px</td></tr></tbody></table></div>
+<p><code>LOW</code> is also a <em>style</em>: pure flat-color faces with no shadow shading reads
+as clean minimalism. Finer-grained knobs (render scale, MSAA) build on this
+same setting as the renderer grows.</p>
+<h2 id="mood-recipes">Mood recipes<a class="anchor" href="#mood-recipes" aria-label="Link to this section">#</a></h2>
+<p>Without an Environment, these recipes use the plain look. Add a preset on
+top to get fog and tone mapping too.</p>
+<div class="table"><table><thead><tr><th>Look</th><th>clear_color</th><th>sun color</th><th>ambient</th></tr></thead><tbody><tr><td>Noon</td><td><code>(0.55, 0.78, 0.95, 1)</code></td><td><code>(1.0, 1.0, 1.0)</code></td><td>0.35</td></tr><tr><td>Golden hour</td><td><code>(0.98, 0.75, 0.55, 1)</code></td><td><code>(1.0, 0.8, 0.6)</code></td><td>0.25</td></tr><tr><td>Night</td><td><code>(0.05, 0.07, 0.15, 1)</code></td><td><code>(0.6, 0.7, 1.0)</code></td><td>0.15</td></tr><tr><td>Noir</td><td><code>(0.02, 0.02, 0.03, 1)</code></td><td><code>(1.0, 1.0, 1.0)</code></td><td>0.05</td></tr></tbody></table></div>
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="game-loop.html">The Game Loop</a> — when frames render</li><li><a href="scenes-and-entities.html">Scenes &amp; Entities</a> — transforms and the scale trick</li><li><a href="cameras.html">Cameras</a> — follow, orbit, rails, shake, zoom</li><li><a href="../cookbook.html#cameras">Cookbook</a> — orbit cams, screen shake</li><li><a href="../oberon/graphics.html">Oberon: Graphics</a> — tune all of this visually</li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="scenes-and-entities.html"><small>Previous</small>Scenes &amp; entities</a><a class="next" href="cameras.html"><small>Next</small>Cameras</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/rendering-and-lights.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#drawing-primitives">Drawing primitives</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#the-sun">The sun</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#sky-and-quality">Sky and quality</a></li><li class="l2"><a href="#mood-recipes">Mood recipes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

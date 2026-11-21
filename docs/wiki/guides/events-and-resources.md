@@ -67,4 +67,4 @@ many games without cross-contamination.
 
 - [The Game Loop](game-loop.md) — the two-frame rule in context
 - [OOP Style](oop-style.md) — handler auto-registration rules
-- [API Reference](../api-reference.md#events-and-resources)
+- [API Reference](../api-reference.md#framecontext-ctx)

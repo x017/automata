@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prefabs &amp; attributes · AUTOMATA docs</title>
+<meta name="description" content="Attributes are named values that you set per entity in the Inspector and read from scripts. Use them to tune gameplay without touching code: a coin&#x27;s value, an enemy&#x27;s speed, a door&#x27;s key colour.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="index.html">Introduction</a></li><li><a href="interface.html">The interface</a></li><li><a href="scripting.html">Scripting</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="graphics.html">Graphics</a></li><li><a href="code-editor.html">The code editor</a></li><li><a href="prefabs-and-attributes.html" aria-current="page">Prefabs &amp; attributes</a></li><li><a href="shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Prefabs &amp; attributes</h1>
+<h2 id="attributes">Attributes<a class="anchor" href="#attributes" aria-label="Link to this section">#</a></h2>
+<p>Attributes are named values that you set per entity in the Inspector and
+read from scripts. Use them to tune gameplay without touching code: a
+coin's value, an enemy's speed, a door's key colour.</p>
+<p><strong>Inspector → Attributes → + Add attribute</strong> asks for a name and a type:</p>
+<div class="table"><table><thead><tr><th>Type</th><th>Python value</th><th>Example</th></tr></thead><tbody><tr><td>Bool</td><td><code>True</code> / <code>False</code></td><td><code>locked</code></td></tr><tr><td>Int</td><td><code>int</code></td><td><code>value = 10</code></td></tr><tr><td>Float</td><td><code>float</code></td><td><code>speed = 3.5</code></td></tr><tr><td>Text</td><td><code>str</code></td><td><code>next_level = &quot;cave.ron&quot;</code></td></tr><tr><td>Vec3</td><td><code>(x, y, z)</code> tuple</td><td><code>patrol_to</code></td></tr><tr><td>Color</td><td><code>(r, g, b, a)</code> tuple</td><td><code>tint</code></td></tr></tbody></table></div>
+<p>In a script, <code>entity.attributes</code> works like a dict:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    speed = entity.attributes.get(<span class="tok-s">&quot;speed&quot;</span>, <span class="tok-n">2.0</span>)
+    entity.transform.translate((speed * ctx.time.delta, <span class="tok-n">0</span>, <span class="tok-n">0</span>))
+
+    hp = entity.attributes[<span class="tok-s">&quot;health&quot;</span>]
+    <span class="tok-k">if</span> hp &lt;= <span class="tok-n">0</span>:
+        entity.attributes[<span class="tok-s">&quot;dead&quot;</span>] = <span class="tok-b">True</span>     <span class="tok-c"># writes back like any other change</span></code></pre></div>
+<ul><li>Attributes are saved in the scene file, so they're part of the level
+data.</li><li>Writes made during Play are visible to other scripts on the next
+frame. They're thrown away on Stop, like every other Play change.</li><li><code>entity.state</code> is the place for private values your script doesn't
+want to show in the Inspector.</li></ul>
+<h2 id="prefabs">Prefabs<a class="anchor" href="#prefabs" aria-label="Link to this section">#</a></h2>
+<p>A prefab is an entity saved to its own file (<code>.prefab</code>) so you can stamp
+copies of it into any scene.</p>
+<ul><li><strong>Save:</strong> right-click an entity → <strong>Save as Prefab…</strong>, or <strong>File → Save
+Selection as Prefab…</strong>. The entity's components, attributes, and
+attached script all go into the file.</li><li><strong>Use:</strong> <strong>File → Instantiate Prefab…</strong> drops a copy on the ground at
+the point the view is looking at.</li></ul>
+<p>Prefab files are plain RON scene snippets. You can diff them, review
+them, and generate them.</p>
+<h3 id="from-python">From Python<a class="anchor" href="#from-python" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+coin = at.Prefab.load(<span class="tok-s">&quot;prefabs/coin.prefab&quot;</span>)
+
+scene = at.Scene()
+<span class="tok-k">for</span> i <span class="tok-k">in</span> <span class="tok-b">range</span>(<span class="tok-n">10</span>):
+    scene.add(coin.instantiate(position=(i * <span class="tok-n">2.0</span>, <span class="tok-n">1.0</span>, <span class="tok-n">0.0</span>)))
+
+<span class="tok-c"># or at runtime, from a game update:</span>
+<span class="tok-k">def</span> <span class="tok-f">update</span>(ctx):
+    <span class="tok-k">if</span> ctx.input.just_pressed(at.Key.SPACE):
+        ctx.scene.spawn(coin, position=(<span class="tok-n">0</span>, <span class="tok-n">5</span>, <span class="tok-n">0</span>))</code></pre></div>
+<aside class="note"><p>Spawning from <strong>Oberon behaviour scripts</strong> isn't supported in the
+editor's Play mode yet. Place prefabs in the scene and enable or move
+them from scripts instead, or run the scene with <code>at.run_scene</code>, where
+the full engine API is available through <code>ctx.raw</code>.</p></aside>
+    </article>
+    <footer class="pager"><a class="prev" href="code-editor.html"><small>Previous</small>The code editor</a><a class="next" href="shortcuts.html"><small>Next</small>Keyboard shortcuts</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/prefabs-and-attributes.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#attributes">Attributes</a></li><li class="l2"><a href="#prefabs">Prefabs</a></li><li class="l3"><a href="#from-python">From Python</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

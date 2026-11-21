@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorial: Lighting &amp; mood · AUTOMATA docs</title>
+<meta name="description" content="Goal: give the same level three very different moods (bright afternoon, golden dusk, and moonlit night) using only Oberon&#x27;s Graphics tab. Then reproduce one of them in plain Python.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="first-scene.html">Your first scene</a></li><li><a href="coin-collector.html">Coin collector</a></li><li><a href="third-person-camera.html">Third-person camera</a></li><li><a href="camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="lighting-and-mood.html" aria-current="page">Lighting &amp; mood</a></li><li><a href="oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Tutorial: Lighting &amp; mood</h1>
+<p><strong>Goal:</strong> give the same level three very different moods (bright
+afternoon, golden dusk, and moonlit night) using only Oberon's
+<strong>Graphics</strong> tab. Then reproduce one of them in plain Python.</p>
+<p><strong>You'll learn:</strong></p>
+<ul><li>the sun's angles</li><li>hemisphere ambient</li><li>tone mapping and exposure</li><li>fog</li><li>using test scenes to judge a look fairly</li></ul>
+<p><strong>Start from:</strong> any scene with some objects, such as the coin collector.</p>
+<h2 id="0-set-up-a-fair-test">0. Set up a fair test<a class="anchor" href="#0-set-up-a-fair-test" aria-label="Link to this section">#</a></h2>
+<p>Open the <strong>Graphics</strong> tab and, under <strong>Test Scenes</strong>, click <strong>Color
+chart</strong> and <strong>Shadows</strong>.</p>
+<ul><li>The chart shows how every hue reacts to your settings.</li><li>The pillars show shadow direction and contrast.</li></ul>
+<p>They're named <code>Test …</code>, so you'll remove them all at the end with one
+click.</p>
+<p>Under <strong>Renderer</strong>, set Quality to <strong>High</strong> and note the frame time.</p>
+<h2 id="1-bright-afternoon">1. Bright afternoon<a class="anchor" href="#1-bright-afternoon" aria-label="Link to this section">#</a></h2>
+<ol><li><p><strong>Environment → Customize Environment</strong>, then the <strong>Daylight</strong>
+preset.</p></li><li><p><strong>Sun:</strong></p>
+<ul><li><strong>Elevation</strong> <code>55</code>: high sun, short shadows, clear shapes.</li><li><strong>Azimuth</strong> <code>35</code>: slightly from the side, so cubes show two
+different shades.</li><li><strong>Color</strong> <code>#FFF5E0</code>: barely warm.</li><li><strong>Ambient</strong> <code>0.45</code>.</li></ul></li><li><p><strong>Environment:</strong></p>
+<ul><li><strong>Tone Mapping</strong>: ACES.</li><li><strong>Exposure</strong>: <code>1.1</code>.</li></ul>
+<p>Look at the colour chart: saturated reds and blues stay rich, and
+highlights roll off instead of clipping.</p></li><li><p><strong>Fog</strong> on, <strong>Fog Density</strong> <code>0.01</code>, <strong>Fog Start</strong> <code>15</code>. Distant
+objects pick up a gentle haze, which adds depth.</p></li></ol>
+<h2 id="2-golden-dusk">2. Golden dusk<a class="anchor" href="#2-golden-dusk" aria-label="Link to this section">#</a></h2>
+<ol><li>Click the <strong>Dusk</strong> preset.</li><li><strong>Sun:</strong>
+<ul><li><strong>Elevation</strong> <code>8</code>: long dramatic shadows.</li><li><strong>Azimuth</strong>: rotate until shadows stretch across the play area
+toward the camera.</li><li><strong>Color</strong> <code>#FFB36B</code>: deep orange.</li><li><strong>Ambient</strong> <code>0.3</code>.</li></ul></li><li>Notice the ambient: the <strong>Sky</strong> is violet and the <strong>Ground</strong> a dark
+red. Faces pointing up get the cool sky, and the undersides get warm
+bounce. That colour contrast is most of what makes a scene feel like
+sunset.</li><li><strong>Tone Mapping</strong> is AgX. Compare it with ACES on the colour chart:
+AgX keeps the bright orange from turning neon yellow.</li><li>Click <strong>Fog depth</strong> under Test Scenes. Raise <strong>Fog Density</strong> until the
+farthest pillars just disappear (about <code>0.03</code>), and set <strong>Fog Start</strong>
+so the play area stays crisp.</li></ol>
+<h2 id="3-moonlit-night">3. Moonlit night<a class="anchor" href="#3-moonlit-night" aria-label="Link to this section">#</a></h2>
+<ol><li>Click the <strong>Night</strong> preset.</li><li><strong>Sun</strong> (it's the moon now):
+<ul><li><strong>Elevation</strong> <code>40</code>.</li><li><strong>Color</strong> <code>#9DB4FF</code>: cold blue.</li><li><strong>Ambient</strong> <code>0.2</code>.</li></ul></li><li>Night scenes fail when everything is just dark. Keep <strong>contrast</strong>:
+<ul><li>The moon stays fairly bright, so lit faces read.</li><li>Ambient stays low, so shadows are deep.</li><li>Fog is black and close (<strong>Fog Start</strong> <code>2</code>), so the world falls away
+into darkness.</li></ul></li><li>To make it moodier, lower <strong>Exposure</strong> to <code>0.8</code>. Don't lower the
+moon's colour, which loses the shape of objects.</li></ol>
+<h2 id="4-check-performance">4. Check performance<a class="anchor" href="#4-check-performance" aria-label="Link to this section">#</a></h2>
+<p>Click <strong>400 cubes</strong>. Switch Quality between Low, Medium, High, and Ultra
+and watch the frame time in <strong>Renderer</strong>. The shadow map is the main cost.
+Medium is usually indistinguishable from High at a distance.</p>
+<h2 id="5-clean-up-and-save">5. Clean up and save<a class="anchor" href="#5-clean-up-and-save" aria-label="Link to this section">#</a></h2>
+<p>Under Test Scenes, click <strong>Remove N test objects</strong>, then <strong>Ctrl+S</strong>. The
+look is stored in the scene's <strong>Environment</strong> and <strong>Directional Light</strong>
+entities. Select them in the Hierarchy and the Inspector shows the same
+fields.</p>
+<h2 id="6-the-same-look-in-python">6. The same look in Python<a class="anchor" href="#6-the-same-look-in-python" aria-label="Link to this section">#</a></h2>
+<p>Everything above is data, so code-first games get the same result:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+scene = at.Scene()
+scene.add(
+    at.Entity(<span class="tok-s">&quot;moon&quot;</span>).add(
+        at.DirectionalLight(direction=(-<span class="tok-n">0.3</span>, -<span class="tok-n">0.64</span>, -<span class="tok-n">0.7</span>), color=(<span class="tok-n">0.62</span>, <span class="tok-n">0.7</span>, <span class="tok-n">1.0</span>), ambient=<span class="tok-n">0.2</span>)
+    )
+)
+scene.add(
+    at.Entity(<span class="tok-s">&quot;look&quot;</span>).add(
+        at.Environment(
+            sky_color=(<span class="tok-n">0.25</span>, <span class="tok-n">0.3</span>, <span class="tok-n">0.5</span>),
+            ground_color=(<span class="tok-n">0.05</span>, <span class="tok-n">0.05</span>, <span class="tok-n">0.08</span>),
+            background=(<span class="tok-n">0.008</span>, <span class="tok-n">0.01</span>, <span class="tok-n">0.02</span>),
+            exposure=<span class="tok-n">0.8</span>,
+            tonemapping=<span class="tok-s">&quot;aces&quot;</span>,
+            fog=<span class="tok-b">True</span>,
+            fog_color=(<span class="tok-n">0.008</span>, <span class="tok-n">0.01</span>, <span class="tok-n">0.02</span>),
+            fog_density=<span class="tok-n">0.05</span>,
+            fog_start=<span class="tok-n">2.0</span>,
+        )
+    )
+)</code></pre></div>
+<p>Or start from a preset with <code>at.Environment.preset(&quot;night&quot;)</code>.</p>
+<aside class="note"><p><strong>Direction from angles:</strong> the light travels <em>toward</em>
+<code>-(cos(el)·sin(az), sin(el), cos(el)·cos(az))</code>, where <code>az</code> is Azimuth
+and <code>el</code> is Elevation in radians.</p></aside>
+<h2 id="cheat-sheet">Cheat sheet<a class="anchor" href="#cheat-sheet" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Want</th><th>Change</th></tr></thead><tbody><tr><td>More drama</td><td>Lower Elevation; lower Ambient</td></tr><tr><td>Softer, friendlier</td><td>Higher Ambient; Sky and Ground closer together</td></tr><tr><td>Depth</td><td>Fog with Fog Color = Background</td></tr><tr><td>Punchy colour</td><td>ACES</td></tr><tr><td>Bright colours without neon</td><td>AgX</td></tr><tr><td>Everything too dark after tone mapping</td><td>Raise Exposure, not the sun</td></tr><tr><td>Flat-looking cubes</td><td>Azimuth off-axis, so neighbouring faces differ</td></tr></tbody></table></div>
+<p><strong>Next:</strong> <a href="oberon-to-python.html">From Oberon to Python</a>.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="camera-rail.html"><small>Previous</small>Camera rail &amp; intro shot</a><a class="next" href="oberon-to-python.html"><small>Next</small>From Oberon to Python</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/tutorials/lighting-and-mood.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#0-set-up-a-fair-test">0. Set up a fair test</a></li><li class="l2"><a href="#1-bright-afternoon">1. Bright afternoon</a></li><li class="l2"><a href="#2-golden-dusk">2. Golden dusk</a></li><li class="l2"><a href="#3-moonlit-night">3. Moonlit night</a></li><li class="l2"><a href="#4-check-performance">4. Check performance</a></li><li class="l2"><a href="#5-clean-up-and-save">5. Clean up and save</a></li><li class="l2"><a href="#6-the-same-look-in-python">6. The same look in Python</a></li><li class="l2"><a href="#cheat-sheet">Cheat sheet</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

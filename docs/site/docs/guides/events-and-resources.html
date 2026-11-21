@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide: Events &amp; Resources · AUTOMATA docs</title>
+<meta name="description" content="Two small systems that replace a lot of architecture: events for things that happen, resources for things that are.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="game-loop.html">The game loop</a></li><li><a href="scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="input.html">Input</a></li><li><a href="physics.html">Physics</a></li><li><a href="events-and-resources.html" aria-current="page">Events &amp; resources</a></li><li><a href="oop-style.html">OOP style</a></li><li><a href="scene-files.html">Scene files</a></li><li><a href="project-structure.html">Project structure</a></li><li><a href="testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Guide: Events &amp; Resources</h1>
+<p>Two small systems that replace a lot of architecture: <strong>events</strong> for things
+that <em>happen</em>, <strong>resources</strong> for things that <em>are</em>.</p>
+<h2 id="events">Events<a class="anchor" href="#events" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.events.send(<span class="tok-s">&quot;coin_pickup&quot;</span>, {<span class="tok-s">&quot;score&quot;</span>: <span class="tok-n">5</span>})   <span class="tok-c"># any name, any payload</span>
+<span class="tok-k">for</span> payload <span class="tok-k">in</span> ctx.events.read(<span class="tok-s">&quot;coin_pickup&quot;</span>):  <span class="tok-c"># readable next frame</span>
+    ...</code></pre></div>
+<ul><li>Payloads are arbitrary Python objects.</li><li>Events live for <strong>one frame</strong>: the one after they're sent. Send in frame
+N, read in frame N+1 — then they're gone. Nothing queues longer than
+that — events are notifications, not a log.</li><li>Any part of the game can send; any part can read. Physics collisions,
+pickups, "level complete", UI clicks — all just names and payloads.</li></ul>
+<h3 id="handlers">Handlers<a class="anchor" href="#handlers" aria-label="Link to this section">#</a></h3>
+<p>OOP style registers methods by name automatically:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">Platformer</span>(at.Game):
+    <span class="tok-k">def</span> <span class="tok-f">on_coin_pickup</span>(<span class="tok-b">self</span>, payload):     <span class="tok-c"># called once per event</span>
+        <span class="tok-b">self</span>.score = payload[<span class="tok-s">&quot;score&quot;</span>]</code></pre></div>
+<p>Decorator style:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-d">@game.on_event</span>(<span class="tok-s">&quot;coin_pickup&quot;</span>)
+<span class="tok-k">def</span> <span class="tok-f">handle</span>(payload):
+    ...</code></pre></div>
+<p>Handlers run right after the update callback each frame, once per matching
+event readable that frame — i.e. the frame after it was sent.</p>
+<h2 id="resources">Resources<a class="anchor" href="#resources" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    score = ctx.resources.get(<span class="tok-s">&quot;score&quot;</span>) <span class="tok-k">or</span> <span class="tok-n">0</span>   <span class="tok-c"># None when unset</span>
+    ctx.resources.<span class="tok-b">set</span>(<span class="tok-s">&quot;score&quot;</span>, score + <span class="tok-n">1</span>)
+    ctx.resources.remove(<span class="tok-s">&quot;score&quot;</span>)             <span class="tok-c"># delete</span>
+    <span class="tok-s">&quot;score&quot;</span> <span class="tok-k">in</span> ctx.resources                  <span class="tok-c"># membership</span>
+    ctx.resources.names()                     <span class="tok-c"># list keys</span></code></pre></div>
+<p>Resources are the game's shared whiteboard: score, current level number,
+a seeded RNG, a reference to your save-file object. If you'd otherwise make
+it a module-level global, put it in resources instead — tests can then run
+many games without cross-contamination.</p>
+<h2 id="events-vs-resources">Events vs resources<a class="anchor" href="#events-vs-resources" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th></th><th>Events</th><th>Resources</th></tr></thead><tbody><tr><td>Lifetime</td><td>next frame only</td><td>until removed</td></tr><tr><td>Question it answers</td><td>"what just happened?"</td><td>"what is true right now?"</td></tr><tr><td>Examples</td><td>hit, pickup, death, level_complete</td><td>score, lives, inventory, settings</td></tr></tbody></table></div>
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="game-loop.html">The Game Loop</a> — the two-frame rule in context</li><li><a href="oop-style.html">OOP Style</a> — handler auto-registration rules</li><li><a href="../api-reference.html#framecontext-ctx">API Reference</a></li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="physics.html"><small>Previous</small>Physics</a><a class="next" href="oop-style.html"><small>Next</small>OOP style</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/events-and-resources.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#events">Events</a></li><li class="l3"><a href="#handlers">Handlers</a></li><li class="l2"><a href="#resources">Resources</a></li><li class="l2"><a href="#events-vs-resources">Events vs resources</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

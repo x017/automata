@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scripting in Oberon · AUTOMATA docs</title>
+<meta name="description" content="You write gameplay as behaviour scripts. A behaviour script is a Python file with up to three functions, and you attach it to an entity. Oberon calls those functions while the scene plays.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="index.html">Introduction</a></li><li><a href="interface.html">The interface</a></li><li><a href="scripting.html" aria-current="page">Scripting</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="graphics.html">Graphics</a></li><li><a href="code-editor.html">The code editor</a></li><li><a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Scripting in Oberon</h1>
+<p>You write gameplay as <strong>behaviour scripts</strong>. A behaviour script is a Python
+file with up to three functions, and you attach it to an entity. Oberon
+calls those functions while the scene plays.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># scripts/spinner.py</span>
+SPEED = <span class="tok-n">1.5</span>  <span class="tok-c"># radians per second</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;turns&quot;</span>] = <span class="tok-n">0</span>
+    <span class="tok-b">print</span>(<span class="tok-s">f&quot;{entity.name} is spinning&quot;</span>)
+
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    x, y, z = entity.transform.rotation_euler
+    entity.transform.rotation_euler = (x, y + SPEED * ctx.time.delta, z)
+
+
+<span class="tok-k">def</span> <span class="tok-f">stop</span>(entity, ctx):
+    <span class="tok-b">print</span>(<span class="tok-s">&quot;stopped&quot;</span>)</code></pre></div>
+<p>All three functions are optional.</p>
+<ul><li><code>start(entity, ctx)</code> runs once, on the entity's first Play frame.</li><li><code>update(entity, ctx)</code> runs every frame.</li><li><code>stop(entity, ctx)</code> runs when you press Stop.</li></ul>
+<h2 id="attach-a-script">Attach a script<a class="anchor" href="#attach-a-script" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Inspector → Add Component → Script…</strong>, or right-click an entity →
+<strong>Attach Script…</strong>.</li><li>Pick an existing <code>.py</code> file or type a new name. A new file starts from a
+template: a small character controller with a cheat-sheet docstring.</li><li>The script path is saved <strong>relative to the scene file</strong>. You can move the
+project folder and the link still works.</li></ul>
+<p>Several entities can share one script. Each entity gets its own <code>entity</code>
+handle and its own <code>entity.state</code>.</p>
+<h2 id="the-frame-model">The frame model<a class="anchor" href="#the-frame-model" aria-label="Link to this section">#</a></h2>
+<p>Every frame, Oberon sends the scene state to the Python runner. The runner
+calls every script, and the scripts' changes come back and apply before the
+frame renders. Two rules follow from this:</p>
+<ol><li><strong>Reads see the start of the frame</strong>, plus your own writes made earlier
+in the same frame.</li><li><strong>Writes apply after all scripts have run.</strong> If two scripts write the
+same value, the last one wins.</li></ol>
+<h2 id="entity"><code>entity</code><a class="anchor" href="#entity" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Member</th><th>Meaning</th></tr></thead><tbody><tr><td><code>entity.name</code>, <code>entity.id</code></td><td>Name from the hierarchy; stable numeric id</td></tr><tr><td><code>entity.transform.position</code></td><td><code>(x, y, z)</code>. Read it, or assign a tuple</td></tr><tr><td><code>entity.transform.rotation_euler</code></td><td><code>(x, y, z)</code> in <strong>radians</strong> (the Inspector shows degrees)</td></tr><tr><td><code>entity.transform.scale</code></td><td><code>(x, y, z)</code></td></tr><tr><td><code>entity.transform.translate(d)</code> / <code>.rotate(d)</code></td><td>Add a delta (Oberon only)</td></tr><tr><td><code>entity.character_velocity</code></td><td>Set it to move a Character Controller</td></tr><tr><td><code>entity.grounded</code></td><td>True when a character is standing on something</td></tr><tr><td><code>entity.attributes[&quot;key&quot;]</code></td><td>Custom values from the Inspector; read and write like a dict</td></tr><tr><td><code>entity.camera</code></td><td>The entity's camera, or <code>None</code> (<a href="cameras.html">Cameras</a>)</td></tr><tr><td><code>entity.state</code></td><td>A dict of your own that persists between frames (not saved)</td></tr></tbody></table></div>
+<h2 id="ctx"><code>ctx</code><a class="anchor" href="#ctx" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Member</th><th>Meaning</th></tr></thead><tbody><tr><td><code>ctx.time.delta</code></td><td>Seconds since the last frame (multiply speeds by it)</td></tr><tr><td><code>ctx.time.elapsed</code>, <code>ctx.time.frame</code></td><td>Seconds since Play started; frame number, starting at 1</td></tr><tr><td><code>ctx.input.pressed(&quot;w&quot;)</code></td><td>Key held down</td></tr><tr><td><code>ctx.input.just_pressed(&quot;space&quot;)</code></td><td>Pressed this frame</td></tr><tr><td><code>ctx.input.just_released(&quot;e&quot;)</code></td><td>Released this frame</td></tr><tr><td><code>ctx.input.axis(&quot;a&quot;, &quot;d&quot;)</code></td><td>−1, 0, or 1 from two keys (Oberon only)</td></tr><tr><td><code>ctx.physics.grounded(entity)</code></td><td>Same as <code>entity.grounded</code></td></tr><tr><td><code>ctx.scene[&quot;Name&quot;]</code></td><td>Another entity by name (raises <code>KeyError</code> if missing)</td></tr><tr><td><code>ctx.scene.find(&quot;Name&quot;)</code></td><td>The same, but returns <code>None</code> if missing</td></tr><tr><td><code>for e in ctx.scene:</code></td><td>Every entity</td></tr><tr><td><code>ctx.camera</code></td><td>The camera Play renders through, or <code>None</code></td></tr><tr><td><code>ctx.log(...)</code>, <code>ctx.warn(...)</code></td><td>Write to the Console. <code>print()</code> works too</td></tr></tbody></table></div>
+<p><strong>Key names</strong> are lowercase: <code>&quot;a&quot;</code>–<code>&quot;z&quot;</code>, <code>&quot;0&quot;</code>–<code>&quot;9&quot;</code>, <code>&quot;space&quot;</code>,
+<code>&quot;enter&quot;</code>, <code>&quot;escape&quot;</code>, <code>&quot;tab&quot;</code>, <code>&quot;backspace&quot;</code>, the arrows <code>&quot;arrow_left&quot;</code>,
+<code>&quot;arrow_right&quot;</code>, <code>&quot;arrow_up&quot;</code> and <code>&quot;arrow_down&quot;</code> (or just <code>&quot;left&quot;</code>,
+<code>&quot;right&quot;</code>, <code>&quot;up&quot;</code>, <code>&quot;down&quot;</code>), and <code>&quot;shift&quot;</code> / <code>&quot;ctrl&quot;</code> / <code>&quot;alt&quot;</code>. The last
+three match either side of the keyboard; use <code>&quot;shift_left&quot;</code> or
+<code>&quot;shift_right&quot;</code> (and likewise for ctrl and alt) to require one side.</p>
+<h2 id="hot-reload">Hot reload<a class="anchor" href="#hot-reload" aria-label="Link to this section">#</a></h2>
+<p>Save a script (Ctrl+S in the code editor, or from any external editor)
+while the scene is playing. Oberon reloads it within half a second, and the
+Console shows <code>Reloaded spinner.py</code>. <code>entity.state</code> survives the reload,
+and <code>start</code> is <strong>not</strong> called again. To rerun <code>start</code>, press Stop and then
+Play.</p>
+<h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Link to this section">#</a></h2>
+<p>When a script raises an exception, the Console shows the traceback with a
+clickable <strong>file:line</strong> link that jumps to the code editor. That script
+then <strong>pauses</strong> so you don't get the same error 60 times a second. The rest
+of the scene keeps running. Fix the file and save, and the script resumes.</p>
+<p>A syntax error found when the script loads works the same way.</p>
+<h2 id="which-python">Which Python?<a class="anchor" href="#which-python" aria-label="Link to this section">#</a></h2>
+<p>Oberon runs scripts with <code>python3</code> from your <code>PATH</code> by default. To pick a
+specific interpreter, such as a virtualenv, open <strong>Settings → Python →
+Interpreter</strong>. The runner needs only the standard library. Any packages
+you install in that environment can be imported from your scripts.</p>
+<h2 id="same-scripts-real-engine">Same scripts, real engine<a class="anchor" href="#same-scripts-real-engine" aria-label="Link to this section">#</a></h2>
+<p>The scene file plus its scripts run unchanged outside Oberon:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+at.run_scene(<span class="tok-s">&quot;level.ron&quot;</span>)                          <span class="tok-c"># windowed</span>
+at.run_scene(<span class="tok-s">&quot;level.ron&quot;</span>, headless=<span class="tok-b">True</span>, max_frames=<span class="tok-n">600</span>)   <span class="tok-c"># CI test</span></code></pre></div>
+<p>Under <code>run_scene</code>, <code>ctx</code> also exposes the full engine:</p>
+<ul><li><code>ctx.events</code></li><li><code>ctx.resources</code></li><li>the complete <code>ctx.physics</code> (raycasts, impulses)</li><li><code>ctx.quit()</code></li></ul>
+<p>To keep a script portable, use only the members above that aren't marked
+"Oberon only". See <a href="../tutorials/oberon-to-python.html">From Oberon to Python</a>.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="interface.html"><small>Previous</small>The interface</a><a class="next" href="cameras.html"><small>Next</small>Cameras</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/scripting.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#attach-a-script">Attach a script</a></li><li class="l2"><a href="#the-frame-model">The frame model</a></li><li class="l2"><a href="#entity">entity</a></li><li class="l2"><a href="#ctx">ctx</a></li><li class="l2"><a href="#hot-reload">Hot reload</a></li><li class="l2"><a href="#errors">Errors</a></li><li class="l2"><a href="#which-python">Which Python?</a></li><li class="l2"><a href="#same-scripts-real-engine">Same scripts, real engine</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

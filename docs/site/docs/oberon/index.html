@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oberon · AUTOMATA docs</title>
+<meta name="description" content="Oberon is the AUTOMATA editor. It&#x27;s a native desktop app written in Rust. You build scenes visually and attach Python behaviour scripts. Then you press Play to run the scene inside the editor.…">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="index.html" aria-current="page">Introduction</a></li><li><a href="interface.html">The interface</a></li><li><a href="scripting.html">Scripting</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="graphics.html">Graphics</a></li><li><a href="code-editor.html">The code editor</a></li><li><a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Oberon</h1>
+<p>Oberon is the AUTOMATA editor. It's a native desktop app written in Rust. You
+build scenes visually and attach Python behaviour scripts. Then you press
+Play to run the scene inside the editor. Scenes save as plain <code>.ron</code> files,
+and the same files run from Python with <code>automata.run_scene</code>.</p>
+<p><img src="../../../assets/oberon/editor.png" alt="Oberon with a scene open" loading="lazy" decoding="async"></p>
+<h2 id="run-it">Run it<a class="anchor" href="#run-it" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>git clone https://github.com/x017/automata &amp;&amp; cd automata
+cargo run -p oberon --release              # an empty starter scene
+cargo run -p oberon --release level.ron    # open a scene file</code></pre></div>
+<p>Oberon needs a GPU that supports Vulkan, Metal, or DX12 to render the
+viewport. Without one it still runs and draws the scene as wireframes, so
+editing works anywhere.</p>
+<p>For Play mode, Oberon starts a Python interpreter (<code>python3</code>, or the one you
+pick in <strong>Settings → Python</strong>). That interpreter needs only the standard
+library. The <code>automata</code> package is required only when you run scenes outside
+the editor.</p>
+<h2 id="the-manual">The manual<a class="anchor" href="#the-manual" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Page</th><th>What it covers</th></tr></thead><tbody><tr><td><a href="interface.html">The interface</a></td><td>Every panel, moving around the scene, gizmos, Play mode</td></tr><tr><td><a href="shortcuts.html">Keyboard shortcuts</a></td><td>The complete list</td></tr><tr><td><a href="scripting.html">Scripting</a></td><td>Behaviour scripts, the <code>entity</code> / <code>ctx</code> API, hot reload, errors</td></tr><tr><td><a href="cameras.html">Cameras</a></td><td>Scene cameras, the preview, Look Through, driving cameras from Python</td></tr><tr><td><a href="graphics.html">Graphics</a></td><td>The Graphics panel: quality, sun, environment, fog, test scenes</td></tr><tr><td><a href="code-editor.html">The code editor</a></td><td>Writing scripts inside Oberon: completion, language servers, find/replace</td></tr><tr><td><a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a></td><td>Reusable objects and custom per-entity data</td></tr></tbody></table></div>
+<p>New to Oberon? Do the <a href="../tutorials/first-scene.html">first scene tutorial</a>
+first. It takes about ten minutes and covers the main ideas.</p>
+<h2 id="how-oberon-fits-with-the-engine">How Oberon fits with the engine<a class="anchor" href="#how-oberon-fits-with-the-engine" aria-label="Link to this section">#</a></h2>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>          Oberon (Rust)                         Python
+ ┌──────────────────────────────┐    JSON    ┌──────────────────┐
+ │ scene document · undo        │  per frame │ bridge runner    │
+ │ wgpu viewport · physics      │ ─────────▶ │ your scripts&#x27;    │
+ │ Play loop                    │ ◀───────── │ start / update   │
+ └──────────────────────────────┘   writes   └──────────────────┘
+              │ Ctrl+S
+              ▼
+         level.ron ──────────▶ at.run_scene(&quot;level.ron&quot;)   (the real engine)</code></pre></div>
+<ul><li><strong>Editing</strong> happens in Rust. The scene is a document with undo history,
+and every edit is one undo step.</li><li><strong>Play</strong> clones the scene and runs physics and the renderer in Oberon.
+Your scripts run in a separate Python process. Every frame Oberon sends
+that process the scene state, and the scripts send back their changes.
+The process is separate on purpose: a script crash can't take down the
+editor, and you can switch Python environments without restarting.</li><li><strong>Stop</strong> throws the Play copy away. Your edited scene is unchanged.</li><li><strong>Shipping</strong> doesn't need Oberon at all. <code>at.run_scene(&quot;level.ron&quot;)</code> runs
+the same scene and scripts in the engine.</li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="../zero-to-hero.html"><small>Previous</small>Zero to hero (Python)</a><a class="next" href="interface.html"><small>Next</small>The interface</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/README.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#run-it">Run it</a></li><li class="l2"><a href="#the-manual">The manual</a></li><li class="l2"><a href="#how-oberon-fits-with-the-engine">How Oberon fits with the engine</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

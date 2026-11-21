@@ -49,6 +49,14 @@ Start with the [tutorials](docs/wiki/tutorials/README.md) or the
 
 ## Documentation
 
+The whole manual is also a website: open `docs/site/index.html` (the landing
+page) or `docs/site/docs/index.html` (the docs). To browse it locally with
+working screenshots, serve the `docs/` folder:
+
+```console
+python3 -m http.server -d docs 8000   # then open http://localhost:8000/site/
+```
+
 - [Wiki home](docs/wiki/README.md): guides for the Python API and Oberon
 - [Tutorials](docs/wiki/tutorials/README.md): first scene, coin collector,
   third-person camera, camera rails, lighting & mood, shipping

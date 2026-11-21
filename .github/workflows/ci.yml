@@ -115,6 +115,14 @@ jobs:
       - name: Documentation
         run: cargo doc --workspace --no-deps
 
+  site:
+    name: Docs site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs/site/docs is up to date with the Markdown
+        run: python3 scripts/build_site.py --check
+
   python:
     name: Python bindings
     runs-on: ubuntu-latest

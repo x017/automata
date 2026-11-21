@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Reference · AUTOMATA docs</title>
+<meta name="description" content="Every public name in the automata package. Conventions: angles are radians (Transform) or degrees (Camera3D.fov); colors are float tuples in 0.0..=1.0; Vec3 = tuple[float, float, float].">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="_static/docs.css">
+<script>window.DOCS_ROOT = "";</script>
+<script defer src="_static/search-index.js"></script>
+<script defer src="_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../index.html">AUTOMATA</a>
+  <a class="section" href="index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="index.html">Overview</a></li><li><a href="getting-started.html">Getting started</a></li><li><a href="tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="tutorials/first-scene.html">Your first scene</a></li><li><a href="tutorials/coin-collector.html">Coin collector</a></li><li><a href="tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="oberon/index.html">Introduction</a></li><li><a href="oberon/interface.html">The interface</a></li><li><a href="oberon/scripting.html">Scripting</a></li><li><a href="oberon/cameras.html">Cameras</a></li><li><a href="oberon/graphics.html">Graphics</a></li><li><a href="oberon/code-editor.html">The code editor</a></li><li><a href="oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="guides/game-loop.html">The game loop</a></li><li><a href="guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="guides/cameras.html">Cameras</a></li><li><a href="guides/input.html">Input</a></li><li><a href="guides/physics.html">Physics</a></li><li><a href="guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="guides/oop-style.html">OOP style</a></li><li><a href="guides/scene-files.html">Scene files</a></li><li><a href="guides/project-structure.html">Project structure</a></li><li><a href="guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="api-reference.html" aria-current="page">API reference</a></li><li><a href="cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="engine/architecture.html">Architecture</a></li><li><a href="engine/development.html">Development</a></li><li><a href="engine/api.html">API design</a></li><li><a href="engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>API Reference</h1>
+<p>Every public name in the <code>automata</code> package. Conventions: angles are
+radians (<code>Transform</code>) or degrees (<code>Camera3D.fov</code>); colors are float tuples
+in <code>0.0..=1.0</code>; <code>Vec3 = tuple[float, float, float]</code>.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+at.__version__          <span class="tok-c"># engine version string</span>
+at.Error                <span class="tok-c"># engine runtime failure exception</span></code></pre></div>
+<h2 id="game">Game<a class="anchor" href="#game" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Game(
+    title=<span class="tok-s">&quot;AUTOMATA&quot;</span>,
+    resolution=(<span class="tok-n">1280</span>, <span class="tok-n">720</span>),
+    headless=<span class="tok-b">False</span>,                     <span class="tok-c"># no window/GPU; for tests and CI</span>
+    resizable=<span class="tok-b">True</span>,
+    vsync=<span class="tok-b">True</span>,
+    log_filter=<span class="tok-b">None</span>,                    <span class="tok-c"># e.g. &quot;debug&quot;; RUST_LOG overrides</span>
+    target_fps=<span class="tok-b">None</span>,                    <span class="tok-c"># int fps cap; None = engine default 60</span>
+    clear_color=<span class="tok-b">None</span>,                   <span class="tok-c"># (r, g, b, a) window background</span>
+    graphics=<span class="tok-b">None</span>,                      <span class="tok-c"># at.GraphicsQuality.HIGH etc.</span>
+)</code></pre></div>
+<div class="table"><table><thead><tr><th>Member</th><th>Type</th><th>Notes</th></tr></thead><tbody><tr><td><code>run(update=None, max_frames=None) -&gt; int</code></td><td>method</td><td>drives the loop; returns frames run; a Game runs once</td></tr><tr><td><code>load_scene(scene)</code></td><td>method</td><td>replaces the world; callable before <code>run</code> or inside <code>update</code></td></tr><tr><td><code>quit()</code></td><td>method</td><td>requests shutdown</td></tr><tr><td><code>state</code></td><td>property</td><td><code>&quot;created&quot;</code> / <code>&quot;running&quot;</code> / <code>&quot;shutdown&quot;</code></td></tr><tr><td><code>update(fn)</code></td><td>decorator</td><td>registers the per-frame callback</td></tr><tr><td><code>on_event(name)</code></td><td>decorator</td><td>registers a handler for events named <code>name</code></td></tr></tbody></table></div>
+<p>OOP subclass hooks: <code>on_start()</code>, <code>on_update(ctx)</code>, <code>on_&lt;event&gt;(payload)</code>.
+Class attributes mirror every constructor option; kwargs win over them.</p>
+<h2 id="scene--entity-staging">Scene &amp; Entity (staging)<a class="anchor" href="#scene--entity-staging" aria-label="Link to this section">#</a></h2>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>scene = at.Scene().add(entity)     # chainable
+len(scene)  scene.entity_count
+
+scene.to_ron() -&gt; str              # staged scene -&gt; RON text
+scene.save(path)                   # write the RON scene file
+at.Scene.from_ron(text) -&gt; Scene   # ValueError on bad/newer files
+at.Scene.load(path) -&gt; Scene       # IOError on missing files
+
+game.scene_to_ron() -&gt; str         # the LIVE world (post-physics) -&gt; RON
+game.save_scene(path)              # same, straight to disk
+
+entity = at.Entity(name=None)      # name optional, used for ctx.scene lookup
+entity.add(component)              # chainable; TypeError for unknown types
+entity.name                        # get/set</code></pre></div>
+<p>See <a href="guides/scene-files.html">Guide: Scene Files</a> for the format and its
+durability rules.</p>
+<p><code>at.Component</code> — the union of everything <code>add</code> accepts (for annotations).</p>
+<h3 id="transform">Transform<a class="anchor" href="#transform" aria-label="Link to this section">#</a></h3>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Transform(position=(0, 0, 0), rotation_euler=(0, 0, 0), scale=(1, 1, 1))
+t.position / t.rotation_euler / t.scale      # get/set (radians, XYZ order)
+t.copy() -&gt; Transform</code></pre></div>
+<h3 id="cameras">Cameras<a class="anchor" href="#cameras" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Camera3D(position=(<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>), target=(<span class="tok-n">0</span>, <span class="tok-n">0</span>, -<span class="tok-n">1</span>), fov=<span class="tok-n">60.0</span>)   <span class="tok-c"># fov in degrees</span>
+at.Camera2D(center=(<span class="tok-n">0.0</span>, <span class="tok-n">0.0</span>), half_height=<span class="tok-n">100.0</span>)</code></pre></div>
+<p>Read-only properties: <code>position</code>, <code>target</code>, <code>fov</code> / <code>center</code>,
+<code>half_height</code>. The first camera entity in the scene wins each frame;
+replace per frame via <code>EntityView.camera_3d</code>.</p>
+<h3 id="visuals">Visuals<a class="anchor" href="#visuals" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.MeshRenderer.cube(size=<span class="tok-n">1.0</span>, color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>))
+at.MeshRenderer.quad(size=<span class="tok-n">1.0</span>, color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>))
+m.kind                      <span class="tok-c"># &quot;cube&quot; or &quot;quad&quot;</span>
+m.color                     <span class="tok-c"># (r, g, b, a)</span></code></pre></div>
+<p>Plain data; materialized on the GPU by the windowed driver, inert headless.
+<code>Transform.scale</code> sizes the primitive.</p>
+<h3 id="directionallight">DirectionalLight<a class="anchor" href="#directionallight" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.DirectionalLight(direction=(-<span class="tok-n">0.5</span>, -<span class="tok-n">1.0</span>, -<span class="tok-n">0.35</span>),
+                    color=(<span class="tok-n">1.0</span>, <span class="tok-n">1.0</span>, <span class="tok-n">1.0</span>), ambient=<span class="tok-n">0.3</span>, shadows=<span class="tok-b">True</span>)</code></pre></div>
+<p>The scene's sun; the first entity carrying one lights the frame. Getters:
+<code>direction</code>, <code>color</code>, <code>ambient</code>, <code>shadows</code>. Without one, a neutral
+shadowless default is used.</p>
+<h3 id="environment">Environment<a class="anchor" href="#environment" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Environment(sky_color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>), ground_color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>),
+               background=(<span class="tok-n">0.012</span>, <span class="tok-n">0.012</span>, <span class="tok-n">0.012</span>), exposure=<span class="tok-n">1.0</span>,
+               tonemapping=<span class="tok-s">&quot;none&quot;</span>, fog=<span class="tok-b">False</span>, fog_color=(<span class="tok-n">0.5</span>, <span class="tok-n">0.55</span>, <span class="tok-n">0.6</span>),
+               fog_density=<span class="tok-n">0.02</span>, fog_start=<span class="tok-n">0.0</span>)
+at.Environment.preset(<span class="tok-s">&quot;neutral&quot;</span> | <span class="tok-s">&quot;daylight&quot;</span> | <span class="tok-s">&quot;dusk&quot;</span> | <span class="tok-s">&quot;night&quot;</span>)</code></pre></div>
+<p>The scene look. The first entity carrying one wins. It sets hemisphere
+ambient (sky above, ground below, scaled by the sun's <code>ambient</code>), the
+background clear colour (overriding <code>Game.clear_color</code>), exposure, tone
+mapping (<code>&quot;none&quot;</code>, <code>&quot;reinhard&quot;</code>, <code>&quot;aces&quot;</code>, <code>&quot;agx&quot;</code>), and exponential
+distance fog. All arguments are readable as properties. Unknown tone
+mapping or preset names raise <code>ValueError</code>. It's saved in scene files.
+Guide: <a href="guides/rendering-and-lights.html#environment">Rendering &amp; Lights</a>.</p>
+<h3 id="physics-components">Physics components<a class="anchor" href="#physics-components" aria-label="Link to this section">#</a></h3>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.RigidBody(body_type=&quot;dynamic&quot;, *, gravity_scale=1.0,
+             linear_damping=0.0, angular_damping=0.0, enabled=True)
+at.RigidBody.dynamic() / .fixed() / .kinematic_velocity() / .kinematic_position()
+body.body_type
+
+at.Collider3D.cuboid(x, y, z)      # FULL sizes
+at.Collider3D.ball(radius)
+at.Collider3D.capsule(half_height, radius)
+# modifiers chain: .sensor(bool) .density(d) .friction(f) .restitution(r)
+
+at.Collider2D.cuboid(x, y) / .ball(radius) / .capsule(half_height, radius)
+# same modifiers
+
+at.CharacterController(mode=&quot;normal&quot;, max_slope_climb_angle=0.7853982,
+                       min_slope_slide_angle=0.5235988, autostep=None,
+                       snap_to_ground=None, offset=0.05, slide=True)
+
+at.CharacterVelocity(velocity=(0, 0, 0))   # .velocity get/set</code></pre></div>
+<h2 id="framecontext-ctx">FrameContext (<code>ctx</code>)<a class="anchor" href="#framecontext-ctx" aria-label="Link to this section">#</a></h2>
+<p>Passed to every update callback. Reads are start-of-frame snapshots
+(reading an entity you just wrote returns your pending write); writes apply
+after the callback.</p>
+<div class="table"><table><thead><tr><th>Member</th><th>Contents</th></tr></thead><tbody><tr><td><code>ctx.time</code></td><td><code>FrameTime</code>: <code>delta</code> (s), <code>elapsed</code> (s), <code>frame</code> (1-based)</td></tr><tr><td><code>ctx.input</code></td><td><code>Input</code> snapshot (below)</td></tr><tr><td><code>ctx.scene</code></td><td><code>SceneView</code> (below)</td></tr><tr><td><code>ctx.events</code></td><td><code>Events</code>: <code>send(name, payload=None)</code>, <code>read(name) -&gt; list</code></td></tr><tr><td><code>ctx.resources</code></td><td><code>Resources</code>: <code>set/get/remove/clear/names</code>, <code>in</code>, <code>len</code></td></tr><tr><td><code>ctx.physics</code></td><td>3D physics queries (below)</td></tr><tr><td><code>ctx.physics2d</code></td><td>2D physics queries</td></tr><tr><td><code>ctx.audio</code></td><td><code>Audio</code>: play and control sounds (below)</td></tr><tr><td><code>ctx.quit()</code></td><td>ends the loop</td></tr></tbody></table></div>
+<h3 id="sceneview--entityview">SceneView / EntityView<a class="anchor" href="#sceneview--entityview" aria-label="Link to this section">#</a></h3>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.scene.entity_count
+ctx.scene.names() -&gt; list[str]
+ctx.scene.find(name) -&gt; EntityView | None
+ctx.scene[&quot;name&quot;]                    # KeyError when missing
+for view in ctx.scene: ...
+ctx.scene.spawn(entity)              # appears next frame
+ctx.scene.despawn(id)</code></pre></div>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>view.id                  # stable while alive
+view.name
+view.transform           # TransformRef; assign a Transform to replace
+view.transform.position / .rotation_euler / .scale    # get/set
+view.transform.set(transform); view.transform.copy()
+view.character_velocity  # (vx, vy, vz) | None; assign to drive characters
+view.camera_3d           # Camera3D copy | None; assign to move the camera
+view.despawn()           # queues removal (children too)</code></pre></div>
+<h3 id="input">Input<a class="anchor" href="#input" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.input.pressed(key) / just_pressed(key) / just_released(key)
+ctx.input.mouse_pressed(btn) / mouse_just_pressed(btn) / mouse_just_released(btn)
+ctx.input.cursor        <span class="tok-c"># (x, y) | None</span>
+ctx.input.scroll        <span class="tok-c"># (dx, dy)</span>
+ctx.input.modifiers     <span class="tok-c"># .shift .ctrl .alt .super_key</span>
+ctx.input.gamepads      <span class="tok-c"># Gamepads (below)</span></code></pre></div>
+<p><code>Gamepads</code>: <code>ids()</code>, <code>get(id)</code>, <code>primary()</code>, <code>any_connected()</code>,
+<code>pressed(id, button)</code>, <code>pressed_any(button)</code>, <code>axis(id, axis)</code>,
+<code>axis_any(axis)</code>, <code>events</code>, <code>len</code>, iteration.
+<code>Gamepad</code>: <code>id</code>, <code>name</code>, <code>pressed(button)</code>, <code>axis(axis)</code>,
+<code>left_stick()</code>, <code>right_stick()</code>.
+<code>GamepadEvent</code>: <code>kind</code> ("connected"/"disconnected"/"button"/"axis"),
+<code>id</code>, <code>name</code>, <code>button</code>, <code>pressed</code>, <code>axis</code>, <code>value</code>.</p>
+<h3 id="physics-ctxphysics">Physics (ctx.physics)<a class="anchor" href="#physics-ctxphysics" aria-label="Link to this section">#</a></h3>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.physics.grounded(entity) -&gt; bool
+ctx.physics.velocity(entity) -&gt; Vec3
+ctx.physics.set_velocity(entity, (vx, vy, vz))
+ctx.physics.apply_impulse(entity, (ix, iy, iz))
+ctx.physics.apply_force(entity, (fx, fy, fz))
+ctx.physics.gravity() -&gt; Vec3
+ctx.physics.set_gravity((gx, gy, gz))
+ctx.physics.body_count() -&gt; int
+key = ctx.physics.cast_ray(origin, direction, max_distance=1000.0, exclude=None)
+ctx.physics.ray_result(key) -&gt; (entity_id, point, normal, distance) | None</code></pre></div>
+<p><code>ctx.physics2d</code>: <code>apply_impulse(entity, (x, y))</code>, <code>grounded(entity)</code>,
+<code>body_count()</code>. Entities are <code>EntityView</code>s or integer ids.</p>
+<h3 id="audio-ctxaudio">Audio (ctx.audio)<a class="anchor" href="#audio-ctxaudio" aria-label="Link to this section">#</a></h3>
+<p>Plays and controls sounds. Unlike scene/physics writes, audio operations apply
+<strong>immediately</strong> and queries observe live state — including within the frame
+that issued them. <code>play</code> returns an integer sound id used by the other
+methods. Volume is a linear amplitude (<code>1.0</code> = full, <code>0.0</code> = silent).</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>sid = ctx.audio.play(<span class="tok-s">&quot;assets/jump.wav&quot;</span>)          <span class="tok-c"># -&gt; sound id (int)</span>
+ctx.audio.play(<span class="tok-s">&quot;assets/music.ogg&quot;</span>, volume=<span class="tok-n">0.6</span>, loop_=<span class="tok-b">True</span>)
+ctx.audio.play(<span class="tok-s">&quot;assets/beep.wav&quot;</span>, playback_rate=<span class="tok-n">1.5</span>, panning=-<span class="tok-n">0.3</span>)
+
+ctx.audio.stop(sid, fade_out=<span class="tok-n">0.2</span>)                <span class="tok-c"># fade out over 0.2 s, then stop</span>
+ctx.audio.stop_all(fade_out=<span class="tok-n">0.0</span>)                 <span class="tok-c"># stop every sound</span>
+ctx.audio.pause(sid) / ctx.audio.resume(sid)
+ctx.audio.seek_to(sid, <span class="tok-n">1.5</span>)                      <span class="tok-c"># seconds</span>
+ctx.audio.set_volume(sid, <span class="tok-n">0.8</span>, fade=<span class="tok-n">0.1</span>)
+ctx.audio.set_playback_rate(sid, <span class="tok-n">0.9</span>)
+ctx.audio.set_panning(sid, <span class="tok-n">0.5</span>)                  <span class="tok-c"># -1.0 left .. 1.0 right</span>
+ctx.audio.set_master_volume(<span class="tok-n">0.7</span>, fade=<span class="tok-n">0.5</span>)
+
+ctx.audio.is_playing(sid) -&gt; <span class="tok-b">bool</span>
+ctx.audio.position(sid) -&gt; <span class="tok-b">float</span> | <span class="tok-b">None</span>          <span class="tok-c"># seconds; None if unknown</span>
+ctx.audio.sound_count() -&gt; <span class="tok-b">int</span></code></pre></div>
+<p>Supported formats: WAV, OGG/Vorbis, MP3, FLAC, PCM. A missing or undecodable
+file raises <code>ValueError</code>; an unknown sound id raises <code>KeyError</code>.</p>
+<p><strong>Backend:</strong> the default build runs a <em>silent</em> backend — no audio device is
+touched, no sound is produced, but playback positions and states still advance
+deterministically, so headless runs and CI exercise identical code paths. Real
+device output requires the <code>audio-cpal</code> build feature (<code>scripts/build.py</code>
+enables it automatically when ALSA headers are present). If a device build
+finds no output device, it falls back to silent rather than failing.</p>
+<h2 id="input-mapping">Input mapping<a class="anchor" href="#input-mapping" aria-label="Link to this section">#</a></h2>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>controls = at.ActionMap()
+controls.bind(action, binding)        # stacks
+controls.bind_axis(name, axis)        # stacks; values sum, clamp -1..1
+controls.rebind(action, bindings)     # replace
+controls.unbind(action)  /  controls.unbind_axis(name)
+controls.bindings(action)  /  controls.actions()  /  controls.axis_names()
+controls.pressed(action, ctx.input)
+controls.just_pressed(action, ctx.input)
+controls.axis(name, ctx.input) -&gt; float
+controls.axis_pair(x, y, ctx.input) -&gt; (float, float)
+action in controls  /  len(controls)</code></pre></div>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Binding.key(key) / .mouse(button) / .gamepad_button(button)
+at.Binding.gamepad_axis_positive(axis) / .gamepad_axis_negative(axis)
+at.AxisBinding.key_pair(neg_key, pos_key)
+at.AxisBinding.button_pair(neg_binding, pos_binding)
+at.AxisBinding.gamepad_axis(axis, scale=1.0)</code></pre></div>
+<p>Unknown key/button/axis names raise <code>KeyError</code> at bind time.</p>
+<h2 id="enums">Enums<a class="anchor" href="#enums" aria-label="Link to this section">#</a></h2>
+<p>All are <code>str</code> enums — members work anywhere the plain string does.</p>
+<div class="table"><table><thead><tr><th>Enum</th><th>Members (sample)</th><th>Full set</th></tr></thead><tbody><tr><td><code>at.Key</code></td><td><code>A</code>–<code>Z</code>, <code>DIGIT_0</code>–<code>9</code>, <code>SPACE</code>, <code>ENTER</code>, <code>ESCAPE</code>, <code>TAB</code>, arrows, <code>F1</code>–<code>F12</code>, modifiers, punctuation</td><td>80</td></tr><tr><td><code>at.MouseButton</code></td><td><code>LEFT</code>, <code>RIGHT</code>, <code>MIDDLE</code>, <code>BACK</code>, <code>FORWARD</code></td><td>5</td></tr><tr><td><code>at.GamepadButton</code></td><td><code>SOUTH</code>, <code>EAST</code>, <code>NORTH</code>, <code>WEST</code>, triggers, thumbs, d-pad, <code>START</code>, <code>SELECT</code>…</td><td>19</td></tr><tr><td><code>at.GamepadAxis</code></td><td><code>LEFT_STICK_X/Y</code>, <code>RIGHT_STICK_X/Y</code>, <code>LEFT_Z</code>, <code>RIGHT_Z</code>, <code>DPAD_X/Y</code></td><td>8</td></tr><tr><td><code>at.GraphicsQuality</code></td><td><code>LOW</code> (no shadows), <code>MEDIUM</code> (1024), <code>HIGH</code> (2048), <code>ULTRA</code> (4096)</td><td>4</td></tr></tbody></table></div>
+<h2 id="behaviour-scripts-automatarun_scene">Behaviour scripts (<code>automata.run_scene</code>)<a class="anchor" href="#behaviour-scripts-automatarun_scene" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.run_scene(path, *, max_frames=<span class="tok-b">None</span>, update=<span class="tok-b">None</span>, **game_options) -&gt; <span class="tok-b">int</span></code></pre></div>
+<p>Plays an Oberon scene file with its behaviour scripts:
+<code>start(entity, ctx)</code>, <code>update(entity, ctx)</code>, <code>stop(entity, ctx)</code>. It
+returns the number of frames run.</p>
+<div class="table"><table><thead><tr><th><code>entity</code></th><th></th></tr></thead><tbody><tr><td><code>name</code>, <code>id</code>, <code>state</code> (dict), <code>grounded</code></td><td></td></tr><tr><td><code>transform</code></td><td><code>position</code>, <code>rotation_euler</code> (radians), <code>scale</code>. Read, or assign</td></tr><tr><td><code>character_velocity</code></td><td>Set to move a character</td></tr><tr><td><code>attributes</code></td><td>Dict-like, saved in the scene</td></tr><tr><td><code>camera</code></td><td><code>ScriptCamera</code> or <code>None</code></td></tr><tr><td><code>camera_3d</code></td><td>Raw <code>Camera3D</code> get/set</td></tr><tr><td><code>despawn()</code></td><td></td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th><code>ctx</code></th><th></th></tr></thead><tbody><tr><td><code>time</code>, <code>scene</code>, <code>events</code>, <code>resources</code>, <code>raw</code></td><td>Engine objects (<code>ctx.scene</code> finds script handles by name)</td></tr><tr><td><code>input</code></td><td>Engine input plus <code>axis(neg, pos)</code> and the aliases <code>&quot;shift&quot;</code>, <code>&quot;ctrl&quot;</code>, <code>&quot;alt&quot;</code> (either side), <code>&quot;left&quot;</code>/<code>&quot;right&quot;</code>/<code>&quot;up&quot;</code>/<code>&quot;down&quot;</code></td></tr><tr><td><code>physics</code></td><td>Engine physics; also accepts script handles</td></tr><tr><td><code>camera</code></td><td>The first <code>Camera3D</code> in the scene as a <code>ScriptCamera</code></td></tr><tr><td><code>log(...)</code>, <code>warn(...)</code>, <code>quit()</code></td><td></td></tr></tbody></table></div>
+<p><strong><code>ScriptCamera</code></strong>: <code>position</code>, <code>target</code>, <code>fov</code> (read/assign),
+<code>look_at(point_or_entity)</code>, and
+<code>follow(entity, offset=(0, 3, 8), smooth=8.0, look_height=0.6)</code>. Several
+writes in one frame accumulate. The same API exists in Oberon's Play mode.
+See <a href="oberon/cameras.html">Oberon: Cameras</a>.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="guides/testing.html"><small>Previous</small>Testing</a><a class="next" href="cookbook.html"><small>Next</small>Cookbook</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/api-reference.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#game">Game</a></li><li class="l2"><a href="#scene--entity-staging">Scene &amp; Entity (staging)</a></li><li class="l3"><a href="#transform">Transform</a></li><li class="l3"><a href="#cameras">Cameras</a></li><li class="l3"><a href="#visuals">Visuals</a></li><li class="l3"><a href="#directionallight">DirectionalLight</a></li><li class="l3"><a href="#environment">Environment</a></li><li class="l3"><a href="#physics-components">Physics components</a></li><li class="l2"><a href="#framecontext-ctx">FrameContext (ctx)</a></li><li class="l3"><a href="#sceneview--entityview">SceneView / EntityView</a></li><li class="l3"><a href="#input">Input</a></li><li class="l3"><a href="#physics-ctxphysics">Physics (ctx.physics)</a></li><li class="l3"><a href="#audio-ctxaudio">Audio (ctx.audio)</a></li><li class="l2"><a href="#input-mapping">Input mapping</a></li><li class="l2"><a href="#enums">Enums</a></li><li class="l2"><a href="#behaviour-scripts-automatarun_scene">Behaviour scripts (automata.run_scene)</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

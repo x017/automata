@@ -104,4 +104,4 @@ def on_update(self, ctx):
 
 - [Scenes & Entities](scenes-and-entities.md) — component basics
 - [Cookbook](../cookbook.md#movement) — coyote time, jump buffering
-- [API Reference](../api-reference.md#physics)
+- [API Reference](../api-reference.md#physics-ctxphysics)

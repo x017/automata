@@ -76,6 +76,23 @@ embeds Python fails locally. Workarounds baked into the workflow:
 - Python-side behavior is covered locally by the pytest suite against the
   maturin-built wheel, which links without libpython by design.
 
+### Documentation site
+
+The wiki and engine docs are also published as static HTML under
+`docs/site/docs/`, generated from the Markdown by `scripts/build_site.py`
+(standard library only). The Markdown is the source of truth: after editing
+any page under `docs/wiki/` or `docs/*.md`, rebuild and commit the output.
+
+```console
+python3 scripts/build_site.py           # regenerate docs/site/docs/
+python3 scripts/build_site.py --check   # what CI runs: fails if stale
+python3 -m http.server -d docs 8000     # preview at http://localhost:8000/site/
+```
+
+New pages must be added to `NAV` in the script to get a sidebar entry. The
+page styles and scripts live in `scripts/site/` and are copied into
+`docs/site/docs/_static/`.
+
 ## Coding conventions
 
 - **Edition 2021**, MSRV 1.86 (bumped deliberately, not casually).
