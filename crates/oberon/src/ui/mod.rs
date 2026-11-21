@@ -3464,16 +3464,20 @@ impl Ui {
             self.cursor = CursorHint::Grab;
         }
 
-        // --- Overlays. ---
-        draw_markers(canvas, doc, &proj, rect);
-        draw_camera_frustums(canvas, doc, &proj, selected.map(|e| e.id));
-        if let Some(e) = selected {
-            draw_selection(canvas, &e.data, &proj);
+        // --- Overlays (editor helpers only: while playing, the view is the
+        // game's — often through the scene's own camera, which the editor
+        // camera's projection wouldn't even line up with). ---
+        if editing {
+            draw_markers(canvas, doc, &proj, rect);
+            draw_camera_frustums(canvas, doc, &proj, selected.map(|e| e.id));
+            if let Some(e) = selected {
+                draw_selection(canvas, &e.data, &proj);
+            }
+            if let Some(g) = &gizmo {
+                draw_gizmo(canvas, g, self.hover_axis);
+            }
+            self.draw_axes_widget(canvas, rect);
         }
-        if let Some(g) = &gizmo {
-            draw_gizmo(canvas, g, self.hover_axis);
-        }
-        self.draw_axes_widget(canvas, rect);
 
         if editing {
             self.tool_group(canvas, rect);
@@ -4384,6 +4388,41 @@ mod tests {
         let (x, y) = proj.project(Vec3::new(0.0, 0.5, 0.0)).unwrap();
         let out = click(&mut ui, &mut c, &doc, x, y);
         assert!(out.contains(&Intent::Select(Some(cube))), "{out:?}");
+    }
+
+    #[test]
+    fn play_mode_hides_editor_overlays() {
+        // The viewport's pixels with and without a light (a marker + label
+        // in the editor): different while editing, identical while playing.
+        let view = |play: PlayState, with_sun: bool| {
+            let mut doc = Document::starter();
+            doc.select(None);
+            if !with_sun {
+                doc.entities.retain(|e| e.data.directional_light.is_none());
+            }
+            let mut ui = Ui::new();
+            ui.play = play;
+            let mut c = canvas();
+            ui.frame(&mut c, &doc, Pointer::default(), None);
+            let r = lay().viewport;
+            let (w, px) = (c.size().0 as usize, c.pixels());
+            let mut out = Vec::new();
+            for y in r.y as usize + 2..(r.y + r.h) as usize - 2 {
+                let row = y * w * 4;
+                out.extend_from_slice(
+                    &px[row + (r.x as usize + 2) * 4..row + ((r.x + r.w) as usize - 2) * 4],
+                );
+            }
+            out
+        };
+        assert_ne!(
+            view(PlayState::Editing, true),
+            view(PlayState::Editing, false)
+        );
+        assert_eq!(
+            view(PlayState::Playing, true),
+            view(PlayState::Playing, false)
+        );
     }
 
     #[test]
