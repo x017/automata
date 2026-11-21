@@ -84,15 +84,28 @@ class Camera2D:
     def half_height(self) -> float: ...
 
 class MeshRenderer:
-    """A built-in primitive mesh with a flat color, rendered in 3D.
+    """A mesh rendered in 3D: a built-in primitive with a flat color, or a
+    model file (``MeshRenderer.model("models/tree.glb")``).
 
     Plain data — the engine materializes it on the GPU in windowed mode;
-    headless runs ignore it. The entity's Transform scale sizes the
-    primitive.
+    headless runs ignore it. The entity's Transform scale sizes it.
     """
 
     kind: str
     color: tuple[float, float, float, float]
+    path: str | None
+    bounds: tuple[tuple[float, float, float], tuple[float, float, float]] | None
+    @classmethod
+    def model(
+        cls, path: str, color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
+    ) -> MeshRenderer:
+        """A glTF 2.0 (.glb / .gltf) or .obj model, tinted by `color`.
+
+        Relative paths resolve against the asset root (the scene's folder,
+        else the running script's folder). Raises FileNotFoundError or
+        ValueError.
+        """
+        ...
     @classmethod
     def cube(
         cls, size: float = 1.0, color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
@@ -511,6 +524,7 @@ class Collider3D:
     def density(self, density: float) -> Collider3D: ...
     def friction(self, friction: float) -> Collider3D: ...
     def restitution(self, restitution: float) -> Collider3D: ...
+    def offset(self, x: float, y: float, z: float) -> Collider3D: ...
 
 class Collider2D:
     """A 2D physics collider component."""
@@ -525,6 +539,7 @@ class Collider2D:
     def density(self, density: float) -> Collider2D: ...
     def friction(self, friction: float) -> Collider2D: ...
     def restitution(self, restitution: float) -> Collider2D: ...
+    def offset(self, x: float, y: float) -> Collider2D: ...
 
 class CharacterController:
     """A kinematic character controller component."""
@@ -580,3 +595,11 @@ class Game:
     def save_scene(self, path: str) -> None:
         """Saves the live world to `path` as a RON scene file."""
         ...
+
+def set_asset_root(path: str | None) -> None:
+    """Sets the folder relative model paths resolve against."""
+    ...
+
+def asset_root() -> str | None:
+    """The folder relative model paths resolve against, or None."""
+    ...

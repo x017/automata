@@ -293,3 +293,29 @@ fn despawned_entity_leaves_physics_world() {
     physics.sync_from_scene(&mut scene);
     assert_eq!(physics.body_count(), 0);
 }
+
+#[test]
+fn collider_offset_moves_the_shape_off_the_entity_origin() {
+    // A model whose geometry sits above its origin gets a collider offset
+    // so the box covers the mesh, not the pivot.
+    let mut scene = SceneWorld::new();
+    let target = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 0.0, -5.0)),
+        RigidBody::fixed(),
+        Collider3D::cuboid(1.0, 1.0, 1.0).offset([0.0, 0.0, 2.0]),
+    ));
+    let mut physics = PhysicsWorld3D::new();
+    physics.sync_from_scene(&mut scene);
+    physics.step(&mut scene, DT);
+    let hit = physics
+        .cast_ray(
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, -1.0),
+            100.0,
+            &RayFilter::everything(),
+        )
+        .expect("ray should hit the offset cube");
+    assert_eq!(hit.entity, target);
+    // The box is centred at z = -3, so its near face is at z = -2.5.
+    assert!((hit.distance - 2.5).abs() < 0.01, "hit at {}", hit.distance);
+}

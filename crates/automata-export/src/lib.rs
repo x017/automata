@@ -308,7 +308,8 @@ impl Message {
 }
 
 /// Checks a project before exporting: the start scene loads, every script
-/// it names exists, and a start point is set.
+/// and model it names exists inside the project (only the project folder
+/// ships), and a start point is set.
 #[must_use]
 pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
     let mut out = Vec::new();
@@ -342,6 +343,12 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
                                     )));
                                 }
                             }
+                            if let Some(automata_core::scene_file::PrimitiveData::Model { path }) =
+                                entity.mesh_visual.as_ref().map(|m| &m.primitive)
+                            {
+                                let who = entity.name.as_deref().unwrap_or("an entity");
+                                check_model(project, base, who, path, &mut out);
+                            }
                         }
                     }
                 },
@@ -355,6 +362,45 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
         out.push(Message::error("No target platforms selected."));
     }
     out
+}
+
+/// Checks one model reference: the file and the files it uses (buffers,
+/// textures, `.mtl`) exist and sit inside the project, so they ship.
+fn check_model(project: &Path, base: &Path, who: &str, rel: &str, out: &mut Vec<Message>) {
+    let file = if Path::new(rel).is_absolute() {
+        PathBuf::from(rel)
+    } else {
+        automata_assets::join_relative(base, rel)
+    };
+    if !file.is_file() {
+        out.push(Message::error(format!("{who}: model {rel} not found")));
+        return;
+    }
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let root = canon(project);
+    if !canon(&file).starts_with(&root) {
+        out.push(Message::error(format!(
+            "{who}: model {rel} is outside the project folder and won't ship \
+             (drop it into the editor to import it into models/)"
+        )));
+        return;
+    }
+    for dep in automata_assets::dependencies(&file) {
+        let shown = dep
+            .strip_prefix(&root)
+            .unwrap_or(&dep)
+            .display()
+            .to_string();
+        if !dep.is_file() {
+            out.push(Message::warn(format!(
+                "{who}: model {rel} uses {shown}, which is missing"
+            )));
+        } else if !canon(&dep).starts_with(&root) {
+            out.push(Message::warn(format!(
+                "{who}: model {rel} uses {shown}, outside the project; it won't ship"
+            )));
+        }
+    }
 }
 
 /// Where templates are installed: `$AUTOMATA_TEMPLATES`, else
@@ -1034,6 +1080,62 @@ mod tests {
         assert!(problems
             .iter()
             .any(|m| m.text.contains("Coin: script scripts/gone.py not found")));
+    }
+
+    #[test]
+    fn validation_checks_models_ship_with_the_game() {
+        use automata_core::scene_file::{EntityData, MeshVisualData, PrimitiveData, SceneFile};
+        let dir = project("models");
+        let outside = std::env::temp_dir().join(format!("export-outside-{}", std::process::id()));
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::create_dir_all(dir.join("models")).unwrap();
+        let tri = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        std::fs::write(dir.join("models/rock.obj"), tri).unwrap();
+        std::fs::write(
+            dir.join("models/crate.obj"),
+            format!("mtllib crate.mtl\n{tri}"),
+        )
+        .unwrap();
+        std::fs::write(outside.join("far.obj"), tri).unwrap();
+        let model = |name: &str, path: String| EntityData {
+            name: Some(name.into()),
+            mesh_visual: Some(MeshVisualData {
+                primitive: PrimitiveData::Model { path },
+                color: [1.0; 4],
+            }),
+            ..Default::default()
+        };
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                model("Rock", "models/rock.obj".into()),
+                model("Crate", "models/crate.obj".into()),
+                model("Ghost", "models/ghost.glb".into()),
+                model("Far", outside.join("far.obj").display().to_string()),
+            ],
+        };
+        std::fs::write(dir.join("models.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("models.ron".into()),
+            ..BuildConfig::default()
+        };
+        let problems = validate(&dir, &cfg);
+        let has = |level: Level, text: &str| {
+            problems
+                .iter()
+                .any(|m| m.level == level && m.text.contains(text))
+        };
+        assert!(
+            !problems.iter().any(|m| m.text.starts_with("Rock")),
+            "{problems:?}"
+        );
+        assert!(
+            has(Level::Warning, "Crate: model models/crate.obj uses"),
+            "{problems:?}"
+        );
+        assert!(has(Level::Error, "Ghost: model models/ghost.glb not found"));
+        assert!(has(Level::Error, "is outside the project folder"));
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]

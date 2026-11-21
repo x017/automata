@@ -2,7 +2,9 @@
 //! left sidebar under the Hierarchy.
 //!
 //! Click a folder to expand or collapse it. Double-click a file to open it:
-//! scenes load, scripts open in the code editor, prefabs are instantiated.
+//! scenes load, scripts open in the code editor, prefabs are instantiated,
+//! models are added to the scene. Drag a model onto the scene view to place
+//! it there, or onto the Inspector to use it on the selected entity.
 //! Right-click offers the same plus creation of scripts and folders in that
 //! folder. The open scene and the active script are highlighted.
 
@@ -49,6 +51,17 @@ pub struct ProjectState {
     selected: Option<PathBuf>,
 }
 
+/// A file dragged out of the Files panel.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileDrag {
+    /// The file.
+    pub path: PathBuf,
+    /// Where the press happened (the drag starts after a few pixels).
+    pub origin: (f32, f32),
+    /// Whether the pointer moved far enough to count as a drag.
+    pub active: bool,
+}
+
 /// What kind of asset a file is (drives icon, color, and open action).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssetKind {
@@ -60,6 +73,8 @@ pub enum AssetKind {
     Prefab,
     /// A `.py` script.
     Script,
+    /// A 3D model (`.glb`, `.gltf`, `.obj`).
+    Model,
     /// Anything else.
     Other,
 }
@@ -79,6 +94,7 @@ pub fn asset_kind(path: &Path, dir: bool) -> AssetKind {
         Some("ron") => AssetKind::Scene,
         Some("prefab") => AssetKind::Prefab,
         Some("py") => AssetKind::Script,
+        Some("glb" | "gltf" | "obj") => AssetKind::Model,
         _ => AssetKind::Other,
     }
 }
@@ -90,6 +106,10 @@ pub fn open_intent(path: &Path, dir: bool) -> Option<Intent> {
         AssetKind::Scene => Some(Intent::Open(path.to_path_buf())),
         AssetKind::Prefab => Some(Intent::InstantiatePrefab(path.to_path_buf())),
         AssetKind::Script => Some(Intent::OpenScript(path.to_path_buf())),
+        AssetKind::Model => Some(Intent::AddModel {
+            path: path.to_path_buf(),
+            at: None,
+        }),
         AssetKind::Folder | AssetKind::Other => None,
     }
 }
@@ -286,6 +306,13 @@ impl Ui {
                 if self.p.pressed {
                     clicked_row = true;
                     self.project.selected = Some(item.path.clone());
+                    if kind == AssetKind::Model && editing && !self.p.double_click {
+                        self.file_drag = Some(FileDrag {
+                            path: item.path.clone(),
+                            origin: (self.p.x, self.p.y),
+                            active: false,
+                        });
+                    }
                     if item.dir {
                         toggle = Some(item.path.clone());
                     } else if self.p.double_click {
@@ -399,6 +426,25 @@ impl Ui {
                         label: format!("Attach to {}", doc.entities[i].name()),
                         shortcut: "",
                         action: Some(Action::Intent(Intent::AttachScript {
+                            id: doc.entities[i].id,
+                            path: item.path.clone(),
+                        })),
+                        enabled: editing,
+                    });
+                }
+            }
+            AssetKind::Model => {
+                menu.push(MenuItem {
+                    label: "Add to Scene".into(),
+                    shortcut: "",
+                    action: open_intent(&item.path, false).map(Action::Intent),
+                    enabled: editing,
+                });
+                if let Some(i) = doc.selected_index() {
+                    menu.push(MenuItem {
+                        label: format!("Use on {}", doc.entities[i].name()),
+                        shortcut: "",
+                        action: Some(Action::Intent(Intent::SetModel {
                             id: doc.entities[i].id,
                             path: item.path.clone(),
                         })),
@@ -541,8 +587,30 @@ pub fn draw_tree_icon(canvas: &mut Canvas, kind: AssetKind, cx: f32, cy: f32) {
             canvas.fill_rect(cx - 2.5, cy - 2.5, 5.0, 1.2, color::axis_y());
             canvas.fill_rect(cx - 2.5, cy + 0.5, 3.5, 1.2, color::axis_y());
         }
+        AssetKind::Model => draw_model_icon(canvas, cx, cy, color::accent_soft()),
         AssetKind::Other => super::draw_small_file_icon(canvas, cx, cy, false),
     }
+}
+
+/// A wireframe cube in two-point view: the model file icon.
+pub fn draw_model_icon(canvas: &mut Canvas, cx: f32, cy: f32, c: tiny_skia::Color) {
+    let top = (cx, cy - 6.0);
+    let left = (cx - 5.5, cy - 3.0);
+    let right = (cx + 5.5, cy - 3.0);
+    let mid = (cx, cy);
+    canvas.polyline(&[left, top, right, mid, left], c, 1.2);
+    canvas.polyline(
+        &[
+            left,
+            (cx - 5.5, cy + 3.0),
+            (cx, cy + 6.0),
+            (cx + 5.5, cy + 3.0),
+            right,
+        ],
+        c,
+        1.2,
+    );
+    canvas.polyline(&[mid, (cx, cy + 6.0)], c, 1.2);
 }
 
 #[cfg(test)]
@@ -561,6 +629,11 @@ mod tests {
             AssetKind::Prefab
         );
         assert_eq!(asset_kind(Path::new("player.py"), false), AssetKind::Script);
+        assert_eq!(asset_kind(Path::new("tree.GLB"), false), AssetKind::Model);
+        assert!(matches!(
+            open_intent(Path::new("rock.obj"), false),
+            Some(Intent::AddModel { at: None, .. })
+        ));
         assert_eq!(asset_kind(Path::new("scripts"), true), AssetKind::Folder);
         assert!(matches!(
             open_intent(Path::new("x.py"), false),

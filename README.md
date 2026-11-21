@@ -22,7 +22,8 @@ wgpu rendering, scene/events core, Python bindings, and physics + input.
   `automata-scene` (hecs ECS, events, resources), `automata-renderer`
   (wgpu 2D/3D), `automata-input` (keyboard/mouse/gamepad, action mapping),
   `automata-physics` (Rapier 2D/3D, raycasts, character controllers),
-  `automata-python` (PyO3 bindings)
+  `automata-assets` (glTF / OBJ model import), `automata-python` (PyO3
+  bindings)
 - Python API: decorator, procedural, and OOP (subclassing) styles —
   see [`docs/api.md`](docs/api.md) and [`examples/python/`](examples/python)
 - CI enforces fmt, Clippy (`-D warnings`), tests, docs, and the Python
@@ -102,6 +103,7 @@ automata/
 │   ├── automata-renderer/  # wgpu device, surface, presentation
 │   ├── automata-input/     # Keyboard/mouse/gamepad state, action mapping
 │   ├── automata-physics/   # Rapier 2D/3D worlds, raycasts, controllers
+│   ├── automata-assets/    # glTF / OBJ model loading and caching
 │   └── automata-python/    # PyO3 bindings + the `automata` package
 ├── docs/                   # Architecture, development, and API documentation
 ├── examples/python/        # Runnable example games (headless-capable)

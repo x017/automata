@@ -191,7 +191,7 @@ pub enum Shape3D {
 /// [`Collider2D`] / [`Collider3D`] aliases.
 ///
 /// Requires a [`RigidBody`] on the same entity. Shapes are centred on the
-/// entity's origin; use `density` to control mass and
+/// entity's origin plus `offset`; use `density` to control mass and
 /// `friction`/`restitution` for contact response.
 ///
 /// ```rust
@@ -212,6 +212,15 @@ pub struct Collider<S> {
     pub sensor: bool,
     /// Set to `false` to disable collisions for this collider.
     pub enabled: bool,
+    /// The shape's centre relative to the entity's origin, in the entity's
+    /// local axes and world units (2D colliders use `x` and `y`).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub offset: [f32; 3],
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if signature
+fn is_zero(v: &[f32; 3]) -> bool {
+    v.iter().all(|c| c.abs() <= f32::EPSILON)
 }
 
 /// Collider with a 2D shape.
@@ -229,6 +238,7 @@ impl<S> Collider<S> {
             restitution: 0.0,
             sensor: false,
             enabled: true,
+            offset: [0.0; 3],
         }
     }
 
@@ -264,6 +274,14 @@ impl<S> Collider<S> {
     #[must_use]
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Builder-style `offset` setter: moves the shape's centre away from
+    /// the entity's origin.
+    #[must_use]
+    pub fn offset(mut self, offset: [f32; 3]) -> Self {
+        self.offset = offset;
         self
     }
 }

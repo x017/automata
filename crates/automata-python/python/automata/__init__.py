@@ -101,6 +101,8 @@ from ._core import (
     Transform,
     TransformRef,
     __version__,
+    asset_root,
+    set_asset_root,
 )
 
 
@@ -236,6 +238,8 @@ __all__ = [
     "Transform",
     "TransformRef",
     "__version__",
+    "asset_root",
+    "set_asset_root",
 ]
 
 

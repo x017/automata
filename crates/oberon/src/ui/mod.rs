@@ -379,6 +379,24 @@ pub enum Intent {
     },
     /// Add a prefab's entities to the scene.
     InstantiatePrefab(PathBuf),
+    /// Create an entity showing a model file. `at` is the screen point it
+    /// was dropped on (it lands on the ground there); `None` places it
+    /// where the scene camera is looking.
+    AddModel {
+        /// The model file.
+        path: PathBuf,
+        /// Drop point in logical pixels.
+        at: Option<(f32, f32)>,
+    },
+    /// Show a model file on an existing entity.
+    SetModel {
+        /// Entity id.
+        id: u64,
+        /// The model file.
+        path: PathBuf,
+    },
+    /// Refit an entity's box collider to its mesh.
+    FitCollider(u64),
     /// Open a script in the code editor.
     OpenScript(PathBuf),
     /// Create a script from the template (if missing) and open it.
@@ -640,6 +658,15 @@ pub struct Ui {
     /// The project directory (file dialogs and the Files panel), set by
     /// the app.
     pub project_root: PathBuf,
+    /// A file being dragged out of the Files panel (drop a model on the
+    /// scene view to add it, or on the Inspector to use it).
+    file_drag: Option<project_panel::FileDrag>,
+    /// Whether the OS is dragging files over the window (shows the drop
+    /// hint), set by the app.
+    pub os_file_hover: bool,
+    /// The scene view's rectangle in the last frame (maps drop points to
+    /// the ground).
+    last_viewport: Rect,
     /// Panel sizes and visibility.
     pub panels: PanelSizes,
     /// Active bottom-dock tab.
@@ -738,6 +765,9 @@ impl Ui {
             dialog: None,
             recent: Vec::new(),
             project_root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            file_drag: None,
+            os_file_hover: false,
+            last_viewport: Rect::default(),
             build_status: None,
             build_last: None,
             build_cfg: None,
@@ -784,6 +814,12 @@ impl Ui {
     }
 
     // ----- public API used by the app -------------------------------------
+
+    /// The scene view's rectangle in the last frame (logical pixels).
+    #[must_use]
+    pub fn viewport_rect(&self) -> Rect {
+        self.last_viewport
+    }
 
     /// Shows the Console tab in the bottom dock.
     pub fn show_console(&mut self) {
@@ -1207,8 +1243,91 @@ impl Ui {
         self.draw_switcher(canvas, w);
         self.draw_dialog(canvas, w, h);
         self.draw_tooltip(canvas, w, h);
+        self.last_viewport = lay.viewport;
+        self.update_file_drag(canvas, doc, &lay);
 
         std::mem::take(&mut self.out)
+    }
+
+    /// Where a dragged model would go if dropped at `(x, y)`.
+    fn file_drop_target(&self, doc: &Document, lay: &Layout, x: f32, y: f32) -> FileDrop {
+        if self.panels.show_inspector && lay.inspector.contains(x, y) {
+            if let Some(i) = doc.selected_index() {
+                return FileDrop::Entity(doc.entities[i].id, lay.inspector);
+            }
+        }
+        if self.code.active.is_none() && lay.viewport.contains(x, y) {
+            return FileDrop::Scene(lay.viewport);
+        }
+        FileDrop::Nothing
+    }
+
+    /// Drives a file dragged out of the Files panel (or over the window from
+    /// the OS): highlights where it would land, and on release adds the
+    /// model to the scene or puts it on the selected entity.
+    fn update_file_drag(&mut self, canvas: &mut Canvas, doc: &Document, lay: &Layout) {
+        let (x, y) = (self.raw.x, self.raw.y);
+        if self.os_file_hover {
+            if self.code.active.is_none() {
+                draw_drop_zone(canvas, lay.viewport, "Drop a model to add it to the scene");
+            }
+            return;
+        }
+        let Some(drag) = self.file_drag.as_mut() else {
+            return;
+        };
+        if !drag.active && ((x - drag.origin.0).abs() > 4.0 || (y - drag.origin.1).abs() > 4.0) {
+            drag.active = true;
+        }
+        let drag = drag.clone();
+        let target = self.file_drop_target(doc, lay, x, y);
+        if !self.raw.down {
+            self.file_drag = None;
+            if drag.active && self.play == PlayState::Editing {
+                match target {
+                    FileDrop::Scene(_) => self.out.push(Intent::AddModel {
+                        path: drag.path,
+                        at: Some((x, y)),
+                    }),
+                    FileDrop::Entity(id, _) => self.out.push(Intent::SetModel {
+                        id,
+                        path: drag.path,
+                    }),
+                    FileDrop::Nothing => {}
+                }
+            }
+            return;
+        }
+        if !drag.active {
+            return;
+        }
+        let name = drag
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        match target {
+            FileDrop::Scene(r) => draw_drop_zone(canvas, r, "Add to scene"),
+            FileDrop::Entity(id, r) => {
+                let who = doc.index_of(id).map_or("", |i| doc.entities[i].name());
+                draw_drop_zone(canvas, r, &format!("Use on {who}"));
+            }
+            FileDrop::Nothing => self.cursor = CursorHint::Grabbing,
+        }
+        // The file follows the pointer.
+        let tw = canvas.measure_text(layout::SMALL_SIZE, &name) + 34.0;
+        let (gx, gy) = (x + 14.0, y + 10.0);
+        canvas.fill_rounded(gx + 1.0, gy + 3.0, tw, 24.0, 5.0, color::shadow());
+        canvas.fill_rounded(gx, gy, tw, 24.0, 5.0, color::raised());
+        canvas.stroke_rounded(gx, gy, tw, 24.0, 5.0, color::border(), 1.0);
+        project_panel::draw_model_icon(canvas, gx + 14.0, gy + 12.0, color::accent_soft());
+        canvas.text(
+            gx + 26.0,
+            gy + 5.0,
+            layout::SMALL_SIZE,
+            &name,
+            color::text(),
+        );
     }
 
     /// Hides the pointer from ordinary widgets (an overlay owns it).
@@ -1885,8 +2004,14 @@ impl Ui {
             y = ny;
             if open {
                 y = self.choice_row(canvas, x, y, w, e, "Primitive", Choice::MeshPrimitive);
+                y = self.model_rows(canvas, doc, x, y, w, e);
                 y = self.float_row(canvas, x, y, w, e, "Size", Field::MeshSize);
-                y = self.color_row(canvas, x, y, w, e, "Color", ColorTarget::Mesh);
+                let is_model = matches!(
+                    d.mesh_visual.as_ref().map(|m| &m.primitive),
+                    Some(automata_core::PrimitiveData::Model { .. })
+                );
+                let color_label = if is_model { "Tint" } else { "Color" };
+                y = self.color_row(canvas, x, y, w, e, color_label, ColorTarget::Mesh);
                 y += 6.0;
             }
         }
@@ -2351,12 +2476,129 @@ impl Ui {
                             })),
                             enabled: true,
                         })
-                        .collect();
+                        .collect::<Vec<_>>();
+                    let mut items = items;
+                    if choice == Choice::MeshPrimitive {
+                        items.push(menus::MenuItem::separator());
+                        items.push(menus::MenuItem {
+                            label: "   Model…".into(),
+                            shortcut: "",
+                            action: Some(menus::Action::Ui(menus::UiAction::PickModel(Some(e.id)))),
+                            enabled: true,
+                        });
+                    }
                     self.open_menu(b.x, b.y + b.h + 2.0, items);
                 }
             }
         }
         y + layout::ROW_STEP
+    }
+
+    /// The Mesh section's model rows (file, summary, actions) when the mesh
+    /// is a model file. Returns the y after them.
+    fn model_rows(
+        &mut self,
+        canvas: &mut Canvas,
+        doc: &Document,
+        x: f32,
+        mut y: f32,
+        w: f32,
+        e: &EntityEntry,
+    ) -> f32 {
+        let Some(automata_core::PrimitiveData::Model { path: rel }) =
+            e.data.mesh_visual.as_ref().map(|m| &m.primitive)
+        else {
+            return y;
+        };
+        let editing = self.play == PlayState::Editing;
+        let loaded = automata_assets::load(rel);
+        let file = doc.resolve(rel);
+        if self.row_visible(Rect::new(x, y, w, layout::FIELD_H)) {
+            self.row_label(canvas, x, y, "File");
+            let r = Rect::new(x + layout::LABEL_W, y, w - layout::LABEL_W, layout::FIELD_H);
+            canvas.fill_rounded(r.x, r.y, r.w, r.h, 3.0, color::field());
+            canvas.stroke_rounded(r.x, r.y, r.w, r.h, 3.0, color::border(), 1.0);
+            canvas.text_clipped(
+                r.x + 6.0,
+                r.y + 3.0,
+                layout::FONT_SIZE,
+                rel,
+                if loaded.is_ok() {
+                    color::accent_soft()
+                } else {
+                    color::danger()
+                },
+                r.w - 12.0,
+            );
+            self.tip(
+                r,
+                "Double-click to show it in Files · drop a model here to swap",
+            );
+            if self.hot(r) {
+                self.cursor = CursorHint::Pointer;
+                if self.p.double_click && file.exists() {
+                    self.reveal_in_files(&file);
+                }
+            }
+        }
+        y += layout::ROW_STEP;
+        // What was loaded, or why it wasn't.
+        let (line, tint) = match &loaded {
+            Ok(model) => (crate::models::describe(model), color::text_dim()),
+            Err(automata_assets::ModelError::NotFound(_)) => {
+                ("File not found".to_string(), color::danger())
+            }
+            Err(err) => (err.to_string(), color::danger()),
+        };
+        let label_w = w - layout::LABEL_W;
+        for chunk in wrap_words(canvas, &line, label_w).into_iter().take(3) {
+            if self.row_visible(Rect::new(x, y, w, 16.0)) {
+                canvas.text(x + layout::LABEL_W, y, layout::SMALL_SIZE, &chunk, tint);
+            }
+            y += 16.0;
+        }
+        y += 4.0;
+        let bw = (label_w - 6.0) / 2.0;
+        let change = Rect::new(x + layout::LABEL_W, y, bw, 22.0);
+        if self.row_visible(change) {
+            let style = if editing {
+                ButtonStyle::Normal
+            } else {
+                ButtonStyle::Disabled
+            };
+            if self.button(canvas, change, "Change…", style) && editing {
+                self.open_model_picker(Some(e.id));
+            }
+            let fit = Rect::new(change.x + bw + 6.0, y, bw, 22.0);
+            let has_collider = e.data.collider_3d.is_some();
+            let ok = editing && loaded.is_ok();
+            let style = if ok {
+                ButtonStyle::Normal
+            } else {
+                ButtonStyle::Disabled
+            };
+            let label = if has_collider {
+                "Fit Collider"
+            } else {
+                "Add Collider"
+            };
+            self.tip(
+                fit,
+                if has_collider {
+                    "Resize the box collider to the model's bounds"
+                } else {
+                    "Add a box collider sized to the model"
+                },
+            );
+            if self.button(canvas, fit, label, style) && ok {
+                self.out.push(if has_collider {
+                    Intent::FitCollider(e.id)
+                } else {
+                    Intent::AddComponent(e.id, ComponentKind::Collider)
+                });
+            }
+        }
+        y + 28.0
     }
 
     fn is_editing(&self, id: u64, target: EditTarget) -> bool {
@@ -3173,6 +3415,11 @@ fn entity_icon(canvas: &mut Canvas, cx: f32, cy: f32, d: &EntityData) {
             &[(cx + 3.0, cy), (cx + 7.0, cy - 4.0), (cx + 7.0, cy + 4.0)],
             color::camera_icon(),
         );
+    } else if matches!(
+        d.mesh_visual.as_ref().map(|m| &m.primitive),
+        Some(automata_core::PrimitiveData::Model { .. })
+    ) {
+        project_panel::draw_model_icon(canvas, cx, cy, color::text_dim());
     } else if d.mesh_visual.is_some() {
         let c = color::text_dim();
         canvas.fill_polygon(
@@ -3468,6 +3715,65 @@ pub(super) fn draw_axis_tag(canvas: &mut Canvas, r: Rect, c: Color) -> f32 {
 }
 
 /// A 14 px folder or file outline centred on `(cx, cy)`.
+/// Splits `text` into lines no wider than `max` at word boundaries (a word
+/// longer than a line gets a line of its own).
+fn wrap_words(canvas: &mut Canvas, text: &str, max: f32) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let candidate = if line.is_empty() {
+            word.to_string()
+        } else {
+            format!("{line} {word}")
+        };
+        if !line.is_empty() && canvas.measure_text(layout::SMALL_SIZE, &candidate) > max {
+            lines.push(std::mem::take(&mut line));
+            line = word.to_string();
+        } else {
+            line = candidate;
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+/// Where a dragged file would land.
+#[derive(Debug, Clone, Copy)]
+enum FileDrop {
+    /// The scene view: add a new entity.
+    Scene(Rect),
+    /// The Inspector: use it on this entity.
+    Entity(u64, Rect),
+    /// Nowhere useful.
+    Nothing,
+}
+
+/// An accent outline around a drop target with a label at its top.
+fn draw_drop_zone(canvas: &mut Canvas, r: Rect, label: &str) {
+    canvas.stroke_rounded(
+        r.x + 3.0,
+        r.y + 3.0,
+        r.w - 6.0,
+        r.h - 6.0,
+        6.0,
+        color::accent(),
+        1.5,
+    );
+    let tw = canvas.measure_text(layout::SMALL_SIZE, label) + 20.0;
+    let x = r.x + (r.w - tw) / 2.0;
+    let y = r.y + 12.0;
+    canvas.fill_rounded(x, y, tw, 24.0, 12.0, color::accent());
+    canvas.text(
+        x + 10.0,
+        y + 5.0,
+        layout::SMALL_SIZE,
+        label,
+        color::background(),
+    );
+}
+
 pub(super) fn draw_small_file_icon(canvas: &mut Canvas, cx: f32, cy: f32, dir: bool) {
     let c = color::text_dim();
     if dir {
@@ -3785,6 +4091,163 @@ mod tests {
             None,
         );
         assert!(out.contains(&Intent::EndGesture));
+    }
+
+    /// A project folder holding one model, `rock.obj`. Returns (root, model).
+    fn model_project(tag: &str) -> (PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("oberon-ui-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let model = root.join("rock.obj");
+        std::fs::write(&model, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+        (root, model)
+    }
+
+    /// Drags from `from` to `to` over a few frames and releases.
+    fn drag(
+        ui: &mut Ui,
+        c: &mut Canvas,
+        doc: &Document,
+        from: (f32, f32),
+        to: (f32, f32),
+    ) -> Vec<Intent> {
+        let at = |x, y, down, pressed| Pointer {
+            x,
+            y,
+            down,
+            pressed,
+            ..Pointer::default()
+        };
+        let mut out = ui.frame(c, doc, at(from.0, from.1, true, true), None);
+        for i in 1..=4 {
+            let t = i as f32 / 4.0;
+            let p = (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
+            out.extend(ui.frame(c, doc, at(p.0, p.1, true, false), None));
+        }
+        out.extend(ui.frame(c, doc, at(to.0, to.1, false, false), None));
+        out
+    }
+
+    #[test]
+    fn dragging_a_model_from_files_into_the_scene_adds_it_there() {
+        let (root, model) = model_project("drag");
+        let mut c = canvas();
+        let mut doc = Document::starter();
+        doc.select(None);
+        let mut ui = Ui::new();
+        ui.project_root = root.clone();
+        let files = lay().files;
+        let row = (files.x + 60.0, files.y + layout::TITLEBAR_H + 4.0 + 11.0);
+        let (vx, vy) = center_of(lay().viewport);
+        let target = (vx + 40.0, vy + 60.0);
+        let out = drag(&mut ui, &mut c, &doc, row, target);
+        assert!(
+            out.contains(&Intent::AddModel {
+                path: model.clone(),
+                at: Some(target),
+            }),
+            "{out:?}"
+        );
+        assert!(ui.file_drag.is_none());
+        assert_eq!(ui.viewport_rect(), lay().viewport);
+
+        // Dropped on the Inspector, it goes onto the selected entity.
+        let cube = doc.entities.iter().find(|e| e.name() == "Cube").unwrap().id;
+        doc.select(Some(cube));
+        let insp = center_of(lay().inspector);
+        let out = drag(&mut ui, &mut c, &doc, row, insp);
+        assert!(
+            out.contains(&Intent::SetModel {
+                id: cube,
+                path: model.clone()
+            }),
+            "{out:?}"
+        );
+
+        // A plain click (no movement) only selects the file.
+        let out = click(&mut ui, &mut c, &doc, row.0, row.1);
+        assert!(
+            !out.iter().any(|i| matches!(i, Intent::AddModel { .. })),
+            "{out:?}"
+        );
+        // Double-clicking adds it where the camera looks.
+        let press = Pointer {
+            x: row.0,
+            y: row.1,
+            down: true,
+            pressed: true,
+            double_click: true,
+            ..Pointer::default()
+        };
+        let out = ui.frame(&mut c, &doc, press, None);
+        assert!(
+            out.contains(&Intent::AddModel {
+                path: model,
+                at: None
+            }),
+            "{out:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_model_picker_lists_project_models_and_imports() {
+        let (root, model) = model_project("picker");
+        let mut c = canvas();
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        ui.project_root = root.clone();
+        ui.open_model_picker(Some(7));
+        let labels: Vec<String> = ui
+            .palette
+            .as_ref()
+            .unwrap()
+            .matches()
+            .iter()
+            .map(|i| i.label.clone())
+            .collect();
+        assert_eq!(labels, ["rock.obj", "Import from file…"]);
+        ui.palette_key(palette::PaletteKey::Enter, &doc);
+        let out = ui.frame(&mut c, &doc, Pointer::default(), None);
+        assert!(
+            out.contains(&Intent::SetModel { id: 7, path: model }),
+            "{out:?}"
+        );
+
+        // "Import from file…" opens the model file browser.
+        ui.open_model_picker(None);
+        ui.palette_text("import");
+        ui.palette_key(palette::PaletteKey::Enter, &doc);
+        assert!(matches!(&ui.dialog, Some(dialogs::Dialog::File(_))));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_mesh_section_shows_the_model_and_its_actions() {
+        let (root, model) = model_project("inspector");
+        let mut c = canvas();
+        let mut doc = Document::new();
+        let id = doc.create_model(&model.to_string_lossy(), "Rock", [0.0; 3]);
+        let mut ui = Ui::new();
+        ui.project_root = root.clone();
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        // The selection box hugs the model (centred off the origin).
+        let e = &doc.entities[doc.index_of(id).unwrap()];
+        let (center, half) = crate::view::local_bounds(&e.data);
+        assert!((center.x - 0.5).abs() < 1e-5 && (half.y - 0.5).abs() < 1e-5);
+        // "Add Collider" adds a fitted collider.
+        let insp = lay().inspector;
+        let mut found = None;
+        for y in (insp.y as i32..(insp.y + insp.h) as i32).step_by(4) {
+            let x = insp.x + insp.w - 40.0;
+            let out = click(&mut ui, &mut c, &doc, x, y as f32);
+            if out.contains(&Intent::AddComponent(id, ComponentKind::Collider)) {
+                found = Some(y);
+                break;
+            }
+        }
+        assert!(found.is_some(), "Add Collider button");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -27,6 +27,13 @@ pub enum PaletteAction {
     Script(PathBuf),
     /// Open a Settings page.
     Settings(SettingsPage),
+    /// Add a model to the scene (`target: None`) or show it on an entity.
+    Model {
+        /// The model file.
+        path: PathBuf,
+        /// The entity to show it on.
+        target: Option<u64>,
+    },
 }
 
 /// One searchable entry.
@@ -66,6 +73,8 @@ pub struct Palette {
     items: Vec<PaletteItem>,
     /// Go to File mode (Ctrl+E): scripts only.
     pub files_only: bool,
+    /// Search box hint replacing the default one (file pickers).
+    pub placeholder: Option<&'static str>,
 }
 
 impl Palette {
@@ -252,6 +261,7 @@ impl Ui {
             selected: 0,
             items,
             files_only: false,
+            placeholder: None,
         });
     }
 
@@ -301,6 +311,7 @@ impl Ui {
             selected: 0,
             items,
             files_only: true,
+            placeholder: None,
         });
     }
 
@@ -349,7 +360,52 @@ impl Ui {
                 self.settings_page = page;
                 self.open_settings();
             }
+            PaletteAction::Model { path, target } => self.out.push(match target {
+                Some(id) => Intent::SetModel { id, path },
+                None => Intent::AddModel { path, at: None },
+            }),
         }
+    }
+
+    /// The model picker: the project's models (`.glb`, `.gltf`, `.obj`) by
+    /// name, plus "Import from file…" for one outside the project. Picks a
+    /// model for a new entity (`target: None`) or for entity `target`.
+    pub fn open_model_picker(&mut self, target: Option<u64>) {
+        let root = self.project_root.clone();
+        let rel = |p: &Path| p.strip_prefix(&root).unwrap_or(p).display().to_string();
+        let mut items: Vec<PaletteItem> = crate::models::project_models(&root, 2000)
+            .into_iter()
+            .map(|path| PaletteItem {
+                label: path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                group: "Model",
+                hint: rel(&path),
+                action: PaletteAction::Model { path, target },
+            })
+            .collect();
+        items.push(PaletteItem {
+            label: "Import from file…".into(),
+            group: "Import",
+            hint: "copies it into models/".into(),
+            action: PaletteAction::Menu(Action::Ui(super::menus::UiAction::Dialog(
+                super::menus::DialogKind::ImportModel(target),
+            ))),
+        });
+        self.menu = None;
+        self.picker = None;
+        self.palette = Some(Palette {
+            query: String::new(),
+            selected: 0,
+            items,
+            files_only: true,
+            placeholder: Some(if target.is_some() {
+                "Choose a model for this entity…"
+            } else {
+                "Add a model to the scene…"
+            }),
+        });
     }
 
     /// The palette's rectangle for a `w`-wide window.
@@ -395,7 +451,9 @@ impl Ui {
                 tx,
                 r.y + 17.0,
                 14.0,
-                if p.files_only {
+                if let Some(hint) = p.placeholder {
+                    hint
+                } else if p.files_only {
                     "Go to script by name…"
                 } else {
                     "Search commands, entities, scripts, settings…"

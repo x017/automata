@@ -460,11 +460,12 @@ impl PyCamera2D {
     }
 }
 
-/// A built-in primitive mesh with a flat color, rendered in 3D.
+/// A mesh rendered in 3D: a built-in primitive with a flat color, or a
+/// model file (`MeshRenderer.model("models/tree.glb")`).
 ///
 /// This is a plain-data visual: no GPU handles cross into Python. The
 /// engine's windowed loop materializes it on the first frame; in headless
-/// mode it is inert. The entity's `Transform` scale sizes the primitive.
+/// mode it is inert. The entity's `Transform` scale sizes it.
 #[pyclass(name = "MeshRenderer", module = "automata._core", frozen)]
 #[derive(Debug, Clone)]
 pub struct PyMeshRenderer {
@@ -495,20 +496,77 @@ impl PyMeshRenderer {
         }
     }
 
-    /// The primitive kind: "cube" or "quad".
+    /// A model file: glTF 2.0 (`.glb`, `.gltf`) or Wavefront `.obj`. Every
+    /// part keeps its own colors and textures; `color` tints them all
+    /// (white keeps the file's look).
+    ///
+    /// Relative paths resolve against the asset root: the open scene's
+    /// folder (set by `Scene.load`), else the folder of the script you ran,
+    /// else the working directory. See `set_asset_root`.
+    ///
+    /// Raises `FileNotFoundError` when the file is missing and `ValueError`
+    /// when it isn't a readable model.
+    #[classmethod]
+    #[pyo3(signature = (path, color=(1.0, 1.0, 1.0, 1.0)))]
+    fn model(
+        cls: &Bound<'_, pyo3::types::PyType>,
+        path: &str,
+        color: (f32, f32, f32, f32),
+    ) -> PyResult<Self> {
+        default_asset_root(cls.py());
+        let inner =
+            automata_scene::MeshVisual::try_model(path, color.into()).map_err(|e| match e {
+                automata_assets::ModelError::NotFound(_) => {
+                    pyo3::exceptions::PyFileNotFoundError::new_err(e.to_string())
+                }
+                _ => pyo3::exceptions::PyValueError::new_err(e.to_string()),
+            })?;
+        Ok(Self {
+            inner,
+            kind: "model",
+        })
+    }
+
+    /// The kind: "cube", "quad", "custom" or "model".
     #[getter]
     fn kind(&self) -> &'static str {
         self.kind
     }
 
-    /// The flat RGBA color.
+    /// The flat RGBA color (for models, the tint).
     #[getter]
     fn color(&self) -> (f32, f32, f32, f32) {
         self.inner.color.into()
     }
 
+    /// The model file, for `MeshRenderer.model`; otherwise `None`.
+    #[getter]
+    fn path(&self) -> Option<String> {
+        match &self.inner.kind {
+            automata_scene::MeshVisualKind::Model { path } => Some(path.clone()),
+            _ => None,
+        }
+    }
+
+    /// The model's bounding box as `((min_x, min_y, min_z), (max_x, max_y,
+    /// max_z))` in model units, or `None` for primitives and models that
+    /// failed to load.
+    #[getter]
+    #[allow(clippy::type_complexity)]
+    fn bounds(&self) -> Option<((f32, f32, f32), (f32, f32, f32))> {
+        self.inner
+            .model
+            .as_ref()
+            .map(|m| (m.min.into(), m.max.into()))
+    }
+
     fn __repr__(&self) -> String {
-        format!("MeshRenderer.{}(color={:?})", self.kind, self.inner.color)
+        match &self.inner.kind {
+            automata_scene::MeshVisualKind::Model { path } => {
+                format!("MeshRenderer.model({path:?}, color={:?})", self.inner.color)
+            }
+            _ => format!("MeshRenderer.{}(color={:?})", self.kind, self.inner.color),
+        }
     }
 }
 
@@ -525,9 +583,45 @@ impl PyMeshRenderer {
             automata_scene::MeshVisualKind::Cube { .. } => "cube",
             automata_scene::MeshVisualKind::Quad { .. } => "quad",
             automata_scene::MeshVisualKind::Custom => "custom",
+            automata_scene::MeshVisualKind::Model { .. } => "model",
         };
         Self { inner, kind }
     }
+}
+
+/// When no asset root is set, uses the folder of the script being run
+/// (`__main__.__file__`), so `python game.py` finds `models/` beside it.
+fn default_asset_root(py: Python<'_>) {
+    if automata_assets::root().is_some() {
+        return;
+    }
+    let main_file = py
+        .import("sys")
+        .and_then(|sys| sys.getattr("modules"))
+        .and_then(|m| m.get_item("__main__"))
+        .and_then(|main| main.getattr("__file__"))
+        .and_then(|f| f.extract::<String>());
+    if let Ok(file) = main_file {
+        if let Some(dir) = std::path::Path::new(&file).parent() {
+            if !dir.as_os_str().is_empty() {
+                automata_assets::set_root(Some(dir));
+            }
+        }
+    }
+}
+
+/// Sets the folder relative model paths resolve against. `None` clears it
+/// (the working directory is used).
+#[pyfunction]
+#[pyo3(signature = (path))]
+pub fn set_asset_root(path: Option<&str>) {
+    automata_assets::set_root(path.map(std::path::Path::new));
+}
+
+/// The folder relative model paths resolve against, or `None`.
+#[pyfunction]
+pub fn asset_root() -> Option<String> {
+    automata_assets::root().map(|p| p.to_string_lossy().into_owned())
 }
 
 /// A component staged on a Python-side entity, ready to be inserted into

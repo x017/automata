@@ -264,6 +264,17 @@ impl Renderer {
         }
     }
 
+    /// Creates a repeating, mipmapped texture from raw RGBA8 data, for 3D
+    /// model surfaces (tiled UVs, seen at every distance).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `rgba.len() != width * height * 4`.
+    #[must_use]
+    pub fn create_texture_rgba_mipmapped(&self, width: u32, height: u32, rgba: &[u8]) -> Texture {
+        Texture::from_rgba_mipmapped(self.ctx.device(), self.ctx.queue(), width, height, rgba)
+    }
+
     /// Creates a texture from raw RGBA8 data.
     ///
     /// # Panics

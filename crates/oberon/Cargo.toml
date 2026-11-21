@@ -17,6 +17,7 @@ publish = false
 workspace = true
 
 [dependencies]
+automata-assets = { path = "../automata-assets" }
 automata-core = { path = "../automata-core" }
 automata-export = { path = "../automata-export" }
 automata-physics = { path = "../automata-physics" }

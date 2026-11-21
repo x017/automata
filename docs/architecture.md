@@ -33,7 +33,7 @@ worlds.
 | `automata-scene` | ✅ Phase 4 | Scenes, entities, ECS, transforms |
 | `automata-physics` | Phase 6 | Rapier 2D/3D integration |
 | `automata-audio` | Phase 7 | Kira-based audio |
-| `automata-assets` | Phase 7 | Resource loading, caching, handles |
+| `automata-assets` | ✅ Models | glTF 2.0 / OBJ model loading (meshes, base colour, textures), a hot-reloading cache, asset-root path resolution |
 | `automata-python` | ✅ Phase 5 | PyO3 bindings and Python API |
 
 New crates are introduced only when a subsystem boundary becomes meaningful —

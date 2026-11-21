@@ -200,6 +200,11 @@ impl PhysicsWorld3D {
         .friction(collider.friction)
         .restitution(collider.restitution)
         .sensor(collider.sensor)
+        .translation(Vector::new(
+            collider.offset[0],
+            collider.offset[1],
+            collider.offset[2],
+        ))
         .active_events(ActiveEvents::COLLISION_EVENTS)
         .user_data(entity_to_user_data(entity));
 

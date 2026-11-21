@@ -181,6 +181,8 @@ struct EditorApp {
     build: Option<crate::build::BuildJob>,
     /// The app should exit at the next opportunity.
     quit: bool,
+    /// When model files were last checked for changes (hot reload).
+    last_model_check: Instant,
 }
 
 impl EditorApp {
@@ -231,6 +233,7 @@ impl EditorApp {
             last_autosave: Instant::now(),
             build: None,
             quit: false,
+            last_model_check: Instant::now(),
         })
     }
 
@@ -488,6 +491,21 @@ impl EditorApp {
                 self.ui.files_changed(Some(&path));
             }
             Intent::InstantiatePrefab(path) => self.instantiate_prefab(&path),
+            Intent::AddModel { path, at } => self.add_model(&path, at),
+            Intent::SetModel { id, path } => {
+                if let Some(rel) = self.import_model(&path) {
+                    if self.doc.set_model(id, &rel) {
+                        // A collider sized for the old mesh would be wrong.
+                        self.doc.fit_collider(id);
+                        self.ui.log(LogLevel::Info, format!("Mesh set to {rel}"));
+                    }
+                }
+            }
+            Intent::FitCollider(id) => {
+                if self.doc.fit_collider(id) {
+                    self.ui.log(LogLevel::Info, "Collider fitted to the mesh");
+                }
+            }
             Intent::OpenScript(path) => self.open_script(&path, None),
             Intent::OpenScriptAt { path, line } => self.open_script(&path, Some(line)),
             Intent::NewScript(path) => {
@@ -592,6 +610,108 @@ impl EditorApp {
                 .ui
                 .log(LogLevel::Error, format!("Save prefab failed: {e}")),
         }
+    }
+
+    /// Keeps model paths resolving against the scene's folder, and reloads
+    /// models whose files changed on disk (checked twice a second).
+    fn watch_models(&mut self) {
+        let root = self.doc.base_dir();
+        if automata_assets::root().as_deref() != Some(root.as_path()) {
+            automata_assets::set_root(Some(&root));
+            self.viewport.invalidate();
+        }
+        if self.last_model_check.elapsed() >= Duration::from_millis(500) {
+            self.last_model_check = Instant::now();
+            if automata_assets::refresh() {
+                self.viewport.invalidate();
+                self.ui
+                    .log(LogLevel::Info, "Model files changed on disk; reloaded");
+            }
+        }
+    }
+
+    /// A file dropped on the window from the system file manager: models
+    /// are imported and added where they were dropped.
+    fn dropped_file(&mut self, path: &std::path::Path) {
+        if !automata_assets::is_model_path(path) {
+            self.ui.log(
+                LogLevel::Warn,
+                format!(
+                    "Can't import {}: drop .glb, .gltf or .obj models",
+                    path.display()
+                ),
+            );
+            return;
+        }
+        if self.ui.play != PlayState::Editing {
+            self.ui.log(LogLevel::Warn, "Stop play mode to add models");
+            return;
+        }
+        let scale = self
+            .window
+            .as_ref()
+            .map_or(1.0, |w| w.scale_factor() as f32)
+            * self.ui.prefs.ui_scale.clamp(0.5, 3.0);
+        let (x, y) = (self.input.cursor.0 / scale, self.input.cursor.1 / scale);
+        let at = self.ui.viewport_rect().contains(x, y).then_some((x, y));
+        self.add_model(path, at);
+    }
+
+    /// Brings a model into the project (copying it into `models/` when it
+    /// lives outside) and checks it loads. Returns its scene-relative path,
+    /// or `None` after logging why not.
+    fn import_model(&mut self, path: &std::path::Path) -> Option<String> {
+        let root = self.doc.base_dir();
+        let dest = match crate::models::import_model(path, &root) {
+            Ok(dest) => dest,
+            Err(e) => {
+                self.ui.log(LogLevel::Error, format!("Import failed: {e}"));
+                self.ui.show_console();
+                return None;
+            }
+        };
+        let copied = dest != path;
+        if let Err(e) = automata_assets::load(&dest.to_string_lossy()) {
+            self.ui.log(LogLevel::Error, e.to_string());
+            self.ui.show_console();
+            return None;
+        }
+        let rel = self.doc.relative(&dest);
+        if copied {
+            self.ui.files_changed(Some(&dest));
+            self.ui.log(LogLevel::Info, format!("Imported {rel}"));
+        }
+        Some(rel)
+    }
+
+    /// Adds an entity showing the model at `path`. `at` is a drop point in
+    /// the scene view (the model stands on the ground there); `None` puts it
+    /// where the scene camera is looking.
+    fn add_model(&mut self, path: &std::path::Path, at: Option<(f32, f32)>) {
+        let Some(rel) = self.import_model(path) else {
+            return;
+        };
+        let target = glam::Vec3::from(self.ui.camera.target);
+        let spot = match at {
+            Some((x, y)) => {
+                let proj = crate::view::Projector::new(&self.ui.camera, self.ui.viewport_rect());
+                let fallback = (proj.eye() - target).length();
+                proj.ground_point(x, y, fallback)
+            }
+            None => target,
+        };
+        let name = crate::models::entity_name(path);
+        let id = self.doc.create_model(&rel, &name, spot.to_array());
+        let summary = automata_assets::load(&rel)
+            .map(|m| crate::models::describe(&m))
+            .unwrap_or_default();
+        let name = self
+            .doc
+            .index_of(id)
+            .map(|i| self.doc.entities[i].name().to_string())
+            .unwrap_or_default();
+        self.ui
+            .log(LogLevel::Info, format!("Added {name} ({summary})"));
     }
 
     fn instantiate_prefab(&mut self, path: &std::path::Path) {
@@ -1385,6 +1505,7 @@ impl EditorApp {
         self.last_frame = now;
         self.tick_scripts(dt);
         self.poll_build();
+        self.watch_models();
         let ms = dt * 1000.0;
         let prev = self.ui.stats.frame_ms;
         self.ui.stats.frame_ms = if prev <= 0.0 || ms > 250.0 {
@@ -1643,6 +1764,12 @@ impl ApplicationHandler for EditorApp {
                 }
             }
             WindowEvent::ScaleFactorChanged { .. } => {}
+            WindowEvent::HoveredFile(_) => self.ui.os_file_hover = true,
+            WindowEvent::HoveredFileCancelled => self.ui.os_file_hover = false,
+            WindowEvent::DroppedFile(path) => {
+                self.ui.os_file_hover = false;
+                self.dropped_file(&path);
+            }
             WindowEvent::Focused(focused) => {
                 // Buttons and keys released outside the window never report;
                 // don't leave a drag or a modifier stuck. On regaining focus

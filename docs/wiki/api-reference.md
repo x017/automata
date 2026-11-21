@@ -86,12 +86,26 @@ replace per frame via `EntityView.camera_3d`.
 ```python
 at.MeshRenderer.cube(size=1.0, color=(1, 1, 1, 1))
 at.MeshRenderer.quad(size=1.0, color=(1, 1, 1, 1))
-m.kind                      # "cube" or "quad"
-m.color                     # (r, g, b, a)
+at.MeshRenderer.model(path, color=(1, 1, 1, 1))   # .glb / .gltf / .obj
+m.kind                      # "cube", "quad" or "model"
+m.color                     # (r, g, b, a); tints a model
+m.path                      # the model file, or None
+m.bounds                    # ((min x, y, z), (max x, y, z)) or None
+
+at.set_asset_root(path)     # where relative model paths resolve (None resets)
+at.asset_root()             # the current root, or None
 ```
 
 Plain data; materialized on the GPU by the windowed driver, inert headless.
 `Transform.scale` sizes the primitive.
+
+`model` loads the file right away, so a missing file raises
+`FileNotFoundError` and a broken one raises `ValueError` where you create the
+component. Relative paths resolve against the asset root.
+`Scene.load` / `run_scene` set the root to the scene's folder. If no root is
+set, the folder of the running script is used, then the working directory.
+The file is cached, so a thousand trees load it once. Guide:
+[Models](oberon/models.md).
 
 ### DirectionalLight
 
@@ -134,9 +148,10 @@ at.Collider3D.cuboid(x, y, z)      # FULL sizes
 at.Collider3D.ball(radius)
 at.Collider3D.capsule(half_height, radius)
 # modifiers chain: .sensor(bool) .density(d) .friction(f) .restitution(r)
+#                  .offset(x, y, z)   shape centre relative to the entity
 
 at.Collider2D.cuboid(x, y) / .ball(radius) / .capsule(half_height, radius)
-# same modifiers
+# same modifiers (.offset(x, y))
 
 at.CharacterController(mode="normal", max_slope_climb_angle=0.7853982,
                        min_slope_slide_angle=0.5235988, autostep=None,

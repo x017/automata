@@ -122,7 +122,7 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::Scale(i) => data.transform?.scale[axis(i)],
         F::MeshSize => match data.mesh_visual.as_ref()?.primitive {
             PrimitiveData::Cube { size } | PrimitiveData::Quad { size } => size,
-            PrimitiveData::Custom { .. } => return None,
+            PrimitiveData::Custom { .. } | PrimitiveData::Model { .. } => return None,
         },
         F::MeshColor(i) => data.mesh_visual.as_ref()?.color[usize::from(i.min(3))],
         F::LightDirection(i) => data.directional_light?.direction.to_array()[axis(i)],
@@ -405,6 +405,7 @@ pub fn choice_label(data: &EntityData, choice: Choice) -> Option<&'static str> {
             PrimitiveData::Cube { .. } => "Cube",
             PrimitiveData::Quad { .. } => "Quad",
             PrimitiveData::Custom { .. } => "Custom",
+            PrimitiveData::Model { .. } => "Model",
         },
         Choice::BodyType => match data.rigid_body.as_ref()?.body_type {
             BodyType::Dynamic => "Dynamic",
@@ -440,6 +441,9 @@ pub fn cycle(data: &mut EntityData, choice: Choice) -> bool {
                 };
                 *p = PrimitiveData::Cube { size };
             }
+            // A model switches back to a plain cube (Model… in the menu
+            // picks a file instead of cycling to one).
+            Some(p @ PrimitiveData::Model { .. }) => *p = PrimitiveData::Cube { size: 1.0 },
             _ => return false,
         },
         Choice::BodyType => match &mut data.rigid_body {

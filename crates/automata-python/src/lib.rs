@@ -74,5 +74,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<components::PyMeshRenderer>()?;
     m.add_class::<components::PyDirectionalLight>()?;
     m.add_class::<components::PyEnvironment>()?;
+    m.add_function(wrap_pyfunction!(components::set_asset_root, m)?)?;
+    m.add_function(wrap_pyfunction!(components::asset_root, m)?)?;
     Ok(())
 }

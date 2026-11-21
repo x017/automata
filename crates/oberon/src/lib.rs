@@ -43,6 +43,7 @@ pub mod doc;
 pub mod fields;
 pub mod json;
 pub mod lsp;
+pub mod models;
 pub mod play;
 pub mod present;
 pub mod project;

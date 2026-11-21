@@ -49,6 +49,10 @@ share the space, or hide either one from the **Window** menu.
   panel's title bar folds everything back up.
 - Double-click a `.py` file to open it in the code editor, a `.ron` file
   to open it as a scene, or a `.prefab` to place it in the scene.
+- Models (`.glb`, `.gltf`, `.obj`, shown with a cube icon) can be dragged
+  onto the scene view to place them, or onto the Inspector to give them to
+  the selected entity. Double-click a model to add it where you're
+  looking. See [Models](models.md).
 - The open scene and the script you're editing are shown in bright text
   with a dot.
 - Right-click a file for Open, Edit Script, **Attach to** the selected

@@ -61,6 +61,8 @@ impl FileDialog {
             DialogKind::OpenScript => "Open Script",
             DialogKind::NewScript => "New Script",
             DialogKind::AttachScript(_) => "Attach Script (pick or name a new .py)",
+            DialogKind::ImportModel(None) => "Import Model (.glb, .gltf, .obj)",
+            DialogKind::ImportModel(Some(_)) => "Choose Model (.glb, .gltf, .obj)",
             DialogKind::Shortcuts | DialogKind::About => "",
         }
     }
@@ -69,8 +71,19 @@ impl FileDialog {
         match self.kind {
             DialogKind::SavePrefab(_) | DialogKind::InstantiatePrefab => "prefab",
             DialogKind::OpenScript | DialogKind::NewScript | DialogKind::AttachScript(_) => "py",
+            DialogKind::ImportModel(_) => "glb",
             _ => "ron",
         }
+    }
+
+    /// Whether the browser lists a file called `name`.
+    fn shows(&self, name: &str) -> bool {
+        if matches!(self.kind, DialogKind::ImportModel(_)) {
+            return automata_assets::is_model_path(Path::new(name));
+        }
+        Path::new(name)
+            .extension()
+            .is_some_and(|x| x.eq_ignore_ascii_case(self.extension()))
     }
 
     fn saves(&self) -> bool {
@@ -86,12 +99,13 @@ impl FileDialog {
             DialogKind::InstantiatePrefab => "Instantiate",
             DialogKind::NewScript => "Create",
             DialogKind::AttachScript(_) => "Attach",
+            DialogKind::ImportModel(None) => "Import",
+            DialogKind::ImportModel(Some(_)) => "Use",
             _ => "Save",
         }
     }
 
     fn refresh(&mut self) {
-        let ext = self.extension();
         let mut entries = Vec::new();
         match std::fs::read_dir(&self.dir) {
             Ok(read) => {
@@ -101,10 +115,7 @@ impl FileDialog {
                         continue;
                     }
                     let dir = e.file_type().is_ok_and(|t| t.is_dir());
-                    let matches = Path::new(&name)
-                        .extension()
-                        .is_some_and(|x| x.eq_ignore_ascii_case(ext));
-                    if dir || matches {
+                    if dir || self.shows(&name) {
                         entries.push(Entry { name, dir });
                     }
                 }
@@ -211,6 +222,7 @@ impl Ui {
                     DialogKind::NewScript
                     | DialogKind::OpenScript
                     | DialogKind::AttachScript(_) => Some("scripts"),
+                    DialogKind::ImportModel(_) => Some(crate::models::MODELS_DIR),
                     _ => None,
                 };
                 if let Some(sub) = sub {
@@ -323,7 +335,10 @@ impl Ui {
         }
         let needs_existing = matches!(
             fd.kind,
-            DialogKind::OpenScene | DialogKind::InstantiatePrefab | DialogKind::OpenScript
+            DialogKind::OpenScene
+                | DialogKind::InstantiatePrefab
+                | DialogKind::OpenScript
+                | DialogKind::ImportModel(_)
         );
         if needs_existing && !exists {
             fd.error = Some(format!("{} not found", path.display()));
@@ -338,6 +353,8 @@ impl Ui {
             DialogKind::OpenScript => Intent::OpenScript(path),
             DialogKind::NewScript => Intent::NewScript(path),
             DialogKind::AttachScript(id) => Intent::AttachScript { id, path },
+            DialogKind::ImportModel(None) => Intent::AddModel { path, at: None },
+            DialogKind::ImportModel(Some(id)) => Intent::SetModel { id, path },
             DialogKind::Shortcuts | DialogKind::About => return None,
         };
         self.dialog = None;

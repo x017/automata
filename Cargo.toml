@@ -17,6 +17,7 @@ repository = "https://github.com/x017/automata"
 # all subsystem crates resolve the same releases.
 [workspace.dependencies]
 # Engine crates
+automata-assets = { path = "crates/automata-assets" }
 automata-core = { path = "crates/automata-core" }
 automata-input = { path = "crates/automata-input" }
 automata-physics = { path = "crates/automata-physics" }

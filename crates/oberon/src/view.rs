@@ -7,7 +7,7 @@
 
 #![forbid(unsafe_code)]
 
-use automata_core::{EntityData, PrimitiveData, TransformData};
+use automata_core::{EntityData, TransformData};
 use glam::{EulerRot, Mat4, Quat, Vec3, Vec4};
 
 use crate::doc::Document;
@@ -173,6 +173,22 @@ impl Projector {
         (near, (far - near).normalize_or_zero())
     }
 
+    /// Where screen point `(sx, sy)` meets the ground (y = 0): the drop
+    /// point for files dragged into the scene. When the ray misses the
+    /// ground (looking up, or nearly level), a point `fallback` metres along
+    /// it instead.
+    #[must_use]
+    pub fn ground_point(&self, sx: f32, sy: f32, fallback: f32) -> Vec3 {
+        let (origin, dir) = self.ray(sx, sy);
+        if dir.y < -1e-3 {
+            let t = -origin.y / dir.y;
+            if t > 0.0 && t < 500.0 {
+                return origin + dir * t;
+            }
+        }
+        origin + dir * fallback
+    }
+
     /// World units per screen pixel at the depth of `p` (gizmo sizing).
     #[must_use]
     pub fn world_per_pixel(&self, p: Vec3) -> f32 {
@@ -202,18 +218,17 @@ impl Projector {
 /// transform scale), or a small marker box for entities without a mesh.
 #[must_use]
 pub fn local_half_extents(data: &EntityData) -> Vec3 {
-    match data.mesh_visual.as_ref().map(|m| &m.primitive) {
-        Some(PrimitiveData::Cube { size }) => Vec3::splat(size * 0.5),
-        Some(PrimitiveData::Quad { size }) => Vec3::new(size * 0.5, size * 0.5, 0.01),
-        Some(PrimitiveData::Custom { mesh }) => {
-            let mut m = Vec3::splat(0.05);
-            for v in &mesh.vertices {
-                m = m.max(Vec3::from(v.position).abs());
-            }
-            m
-        }
-        None => Vec3::splat(0.3),
-    }
+    local_bounds(data).1
+}
+
+/// An entity's local bounding box as `(center, half extents)`: the mesh's
+/// box (models aren't always centred on their origin), or a small marker
+/// box for mesh-less entities and models that failed to load.
+#[must_use]
+pub fn local_bounds(data: &EntityData) -> (Vec3, Vec3) {
+    crate::doc::mesh_bounds(data).map_or((Vec3::ZERO, Vec3::splat(0.3)), |(c, s)| {
+        (c, (s * 0.5).max(Vec3::splat(0.01)))
+    })
 }
 
 /// An entity's model matrix from its transform data.
@@ -243,10 +258,10 @@ pub fn rotation_of(t: &TransformData) -> Quat {
 pub fn box_corners(data: &EntityData) -> Option<[Vec3; 8]> {
     let t = data.transform?;
     let model = model_matrix(&t);
-    let h = local_half_extents(data);
+    let (c, h) = local_bounds(data);
     let mut out = [Vec3::ZERO; 8];
     for (i, corner) in out.iter_mut().enumerate() {
-        let local = Vec3::new(
+        let local = c + Vec3::new(
             if i & 1 == 0 { -h.x } else { h.x },
             if i & 2 == 0 { -h.y } else { h.y },
             if i & 4 == 0 { -h.z } else { h.z },
@@ -303,7 +318,8 @@ pub fn pick(doc: &Document, proj: &Projector, sx: f32, sy: f32) -> Option<u64> {
             continue;
         };
         let (model, half) = if entity.data.mesh_visual.is_some() {
-            (model_matrix(&t), local_half_extents(&entity.data))
+            let (center, half) = local_bounds(&entity.data);
+            (model_matrix(&t) * Mat4::from_translation(center), half)
         } else {
             // Mesh-less entities (lights, cameras, empties) get a fixed-size
             // marker box, unaffected by scale and rotation.

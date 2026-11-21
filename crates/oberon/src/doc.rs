@@ -54,6 +54,46 @@ pub struct Document {
     mid_gesture: bool,
 }
 
+/// The local bounding box `(center, size)` of an entity's mesh, before the
+/// transform's scale: primitives from their size, models from the loaded
+/// file. `None` without a mesh (or for a model that failed to load).
+#[must_use]
+pub fn mesh_bounds(data: &EntityData) -> Option<(glam::Vec3, glam::Vec3)> {
+    use glam::Vec3;
+    Some(match &data.mesh_visual.as_ref()?.primitive {
+        PrimitiveData::Cube { size } => (Vec3::ZERO, Vec3::splat(*size)),
+        PrimitiveData::Quad { size } => (Vec3::ZERO, Vec3::new(*size, *size, 0.02)),
+        PrimitiveData::Custom { mesh } => {
+            let mut lo = Vec3::splat(f32::INFINITY);
+            let mut hi = Vec3::splat(f32::NEG_INFINITY);
+            for v in &mesh.vertices {
+                lo = lo.min(Vec3::from(v.position));
+                hi = hi.max(Vec3::from(v.position));
+            }
+            if !lo.is_finite() {
+                return None;
+            }
+            ((lo + hi) * 0.5, hi - lo)
+        }
+        PrimitiveData::Model { path } => {
+            let model = automata_assets::load(path).ok()?;
+            (model.center(), model.size())
+        }
+    })
+}
+
+/// A box collider fitted to the entity's visible mesh (physics ignores
+/// scale, so the collider carries the world size and offset). Entities
+/// without a mesh get a 1 m cube.
+#[must_use]
+pub fn fitted_collider(data: &EntityData) -> automata_physics::Collider3D {
+    let (center, size) = mesh_bounds(data).unwrap_or((glam::Vec3::ZERO, glam::Vec3::ONE));
+    let scale = glam::Vec3::from(data.transform.map_or([1.0; 3], |t| t.scale));
+    let ext = (size * scale.abs()).max(glam::Vec3::splat(0.01));
+    let offset = center * scale;
+    automata_physics::Collider3D::cuboid(ext.x, ext.y, ext.z).offset(offset.to_array())
+}
+
 /// The kinds of entity the Create menu can spawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreateKind {
@@ -194,17 +234,9 @@ impl ComponentKind {
                     .get_or_insert_with(automata_physics::RigidBody::default);
             }
             Self::Collider => {
-                // Fit the box to the visible mesh (physics ignores scale, so
-                // the collider carries the world size).
-                let size = match data.mesh_visual.as_ref().map(|m| &m.primitive) {
-                    Some(PrimitiveData::Cube { size }) => *size,
-                    _ => 1.0,
-                };
-                let scale = data.transform.map_or([1.0; 3], |t| t.scale);
-                let ext = |i: usize| (size * scale[i].abs()).max(0.01);
-                data.collider_3d.get_or_insert_with(|| {
-                    automata_physics::Collider3D::cuboid(ext(0), ext(1), ext(2))
-                });
+                if data.collider_3d.is_none() {
+                    data.collider_3d = Some(fitted_collider(data));
+                }
             }
             Self::Character => {
                 // A character needs a kinematic body and a collider.
@@ -758,6 +790,64 @@ impl Document {
         true
     }
 
+    /// Creates an entity showing the model at `rel` (scene-relative), named
+    /// `name`, standing on `at` (its lowest point at `at.y`), and selects it.
+    /// One undo step.
+    pub fn create_model(&mut self, rel: &str, name: &str, at: [f32; 3]) -> u64 {
+        let mut data = EntityData {
+            name: Some(self.unique_name(name)),
+            transform: Some(TransformData::default()),
+            mesh_visual: Some(MeshVisualData {
+                primitive: PrimitiveData::Model {
+                    path: rel.replace('\\', "/"),
+                },
+                color: [1.0; 4],
+            }),
+            ..Default::default()
+        };
+        let lift = mesh_bounds(&data).map_or(0.0, |(c, s)| -(c.y - s.y * 0.5));
+        if let Some(t) = &mut data.transform {
+            t.position = [at[0], at[1] + lift, at[2]];
+        }
+        self.push_undo();
+        let id = self.alloc_id();
+        self.entities.push(EntityEntry { id, data });
+        self.selected = Some(id);
+        self.touch();
+        id
+    }
+
+    /// Points entity `id`'s mesh at the model `rel` (adding a mesh if it has
+    /// none; a primitive's color becomes the model's white tint).
+    pub fn set_model(&mut self, id: u64, rel: &str) -> bool {
+        let rel = rel.replace('\\', "/");
+        self.modify(id, false, |d| {
+            let color = match &d.mesh_visual {
+                Some(m) if matches!(m.primitive, PrimitiveData::Model { .. }) => m.color,
+                _ => [1.0; 4],
+            };
+            d.mesh_visual = Some(MeshVisualData {
+                primitive: PrimitiveData::Model { path: rel.clone() },
+                color,
+            });
+        })
+    }
+
+    /// Refits entity `id`'s box collider to its mesh, keeping the collider's
+    /// material settings. Returns true when it has a collider.
+    pub fn fit_collider(&mut self, id: u64) -> bool {
+        let has = self
+            .index_of(id)
+            .is_some_and(|i| self.entities[i].data.collider_3d.is_some());
+        has && self.modify(id, false, |d| {
+            let fitted = fitted_collider(d);
+            if let Some(c) = &mut d.collider_3d {
+                c.shape = fitted.shape;
+                c.offset = fitted.offset;
+            }
+        })
+    }
+
     /// Creates a camera entity looking through `view` (one undo step), so a
     /// new camera starts out framing what the user is looking at.
     pub fn create_camera_at(&mut self, view: automata_renderer::Camera3D) -> u64 {
@@ -1212,6 +1302,92 @@ impl Document {
 
 #[cfg(test)]
 mod tests {
+    /// A triangle model spanning x 0..1, y 1..3 (not centred on its
+    /// origin), written to a temp file. Returns its absolute path.
+    fn offset_model(tag: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("oberon-doc-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("spire.obj");
+        std::fs::write(&path, "v 0 1 0\nv 1 1 0\nv 0 3 0\nf 1 2 3\n").unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn models_are_created_standing_on_the_drop_point() {
+        let path = offset_model("create");
+        let mut doc = Document::new();
+        let id = doc.create_model(&path, "Spire", [2.0, 0.0, -1.0]);
+        let e = &doc.entities[doc.index_of(id).unwrap()];
+        assert_eq!(e.name(), "Spire");
+        assert_eq!(doc.selected, Some(id));
+        // The lowest point (local y = 1) lands on y = 0.
+        let p = e.data.transform.unwrap().position;
+        assert!(
+            (p[0] - 2.0).abs() < 1e-5 && (p[1] + 1.0).abs() < 1e-5,
+            "{p:?}"
+        );
+        let (center, size) = mesh_bounds(&e.data).unwrap();
+        assert!((center - glam::Vec3::new(0.5, 2.0, 0.0)).length() < 1e-5);
+        assert!((size - glam::Vec3::new(1.0, 2.0, 0.0)).length() < 1e-5);
+        // A second one gets a fresh name; one undo removes it.
+        let id2 = doc.create_model(&path, "Spire", [0.0; 3]);
+        assert_eq!(doc.entities[doc.index_of(id2).unwrap()].name(), "Spire 2");
+        assert!(doc.undo());
+        assert!(doc.index_of(id2).is_none());
+    }
+
+    #[test]
+    fn colliders_fit_the_model_bounds_and_follow_a_swap() {
+        let path = offset_model("fit");
+        let mut doc = Document::new();
+        let id = doc.create(CreateKind::Cube);
+        doc.modify(id, false, |d| {
+            if let Some(t) = &mut d.transform {
+                t.scale = [2.0, 2.0, 2.0];
+            }
+        });
+        doc.modify(id, false, |d| ComponentKind::Collider.add_to(d));
+        let collider = |doc: &Document| {
+            doc.entities[doc.index_of(id).unwrap()]
+                .data
+                .collider_3d
+                .clone()
+        };
+        // A cube of size 1 at scale 2: a 2 m box, centred.
+        let c = collider(&doc).unwrap();
+        assert!(
+            matches!(c.shape, automata_physics::Shape3D::Cuboid { extents } if (extents.x - 2.0).abs() < 1e-5),
+            "{c:?}"
+        );
+        assert_eq!(c.offset, [0.0; 3]);
+
+        // Swap the mesh for the model: tint resets to white, then refit.
+        assert!(doc.set_model(id, &path));
+        let mesh = doc.entities[doc.index_of(id).unwrap()]
+            .data
+            .mesh_visual
+            .clone()
+            .unwrap();
+        assert_eq!(mesh.color, [1.0; 4]);
+        assert!(matches!(mesh.primitive, PrimitiveData::Model { .. }));
+        assert!(doc.fit_collider(id));
+        let c = collider(&doc).unwrap();
+        // Bounds centre (0.5, 2, 0) × scale 2 = offset (1, 4, 0).
+        assert!(
+            (c.offset[0] - 1.0).abs() < 1e-5 && (c.offset[1] - 4.0).abs() < 1e-5,
+            "{c:?}"
+        );
+        let automata_physics::Shape3D::Cuboid { extents } = c.shape else {
+            panic!("box collider expected: {c:?}");
+        };
+        // Size (1, 2, ~0) × 2 → full extents (2, 4, 0.01 floor).
+        assert!((extents.x - 2.0).abs() < 1e-5 && (extents.y - 4.0).abs() < 1e-5);
+        assert!(extents.z > 0.0);
+        // Without a collider there is nothing to fit.
+        let bare = doc.create(CreateKind::Cube);
+        assert!(!doc.fit_collider(bare));
+    }
+
     #[test]
     fn test_scenes_add_and_clear_in_single_undo_steps() {
         let mut doc = Document::starter();

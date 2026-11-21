@@ -186,6 +186,16 @@ impl PyCollider3D {
         }
     }
 
+    /// Move the shape's centre away from the entity's origin (local axes,
+    /// world units): e.g. up by half its height for a model whose pivot is
+    /// at its feet.
+    #[pyo3(signature = (x, y, z))]
+    fn offset(&self, x: f32, y: f32, z: f32) -> Self {
+        Self {
+            inner: self.inner.clone().offset([x, y, z]),
+        }
+    }
+
     fn __repr__(&self) -> String {
         format!("Collider3D({:?})", self.inner.shape)
     }
@@ -260,6 +270,14 @@ impl PyCollider2D {
     fn restitution(&self, restitution: f32) -> Self {
         Self {
             inner: self.inner.clone().restitution(restitution),
+        }
+    }
+
+    /// Move the shape's centre away from the entity's origin.
+    #[pyo3(signature = (x, y))]
+    fn offset(&self, x: f32, y: f32) -> Self {
+        Self {
+            inner: self.inner.clone().offset([x, y, 0.0]),
         }
     }
 

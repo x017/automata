@@ -11,25 +11,44 @@
 use automata_renderer::{
     Camera2D, Camera3D, DrawList, Environment, Material, Mesh, MeshData, Sprite, Sun, Texture,
 };
+use std::sync::Arc;
+
+use automata_assets::Model;
 use glam::{EulerRot, Vec2};
 
 use crate::scene::SceneWorld;
 use crate::transform::GlobalTransform;
 
-/// Renders a 3D mesh with a material.
+/// Renders a 3D mesh with a material, plus any extra parts (a model with
+/// several materials draws its first part as `mesh` and the rest from
+/// `parts`, all with the entity's transform).
 #[derive(Debug, Clone)]
 pub struct MeshRenderer {
     /// The mesh to draw.
     pub mesh: Mesh,
     /// The material to draw it with.
     pub material: Material,
+    /// More meshes drawn with the same transform, each with its own
+    /// material.
+    pub parts: Vec<(Mesh, Material)>,
 }
 
 impl MeshRenderer {
     /// Creates a mesh renderer.
     #[must_use]
     pub fn new(mesh: Mesh, material: Material) -> Self {
-        Self { mesh, material }
+        Self {
+            mesh,
+            material,
+            parts: Vec::new(),
+        }
+    }
+
+    /// Adds a part drawn with the same transform.
+    #[must_use]
+    pub fn with_part(mut self, mesh: Mesh, material: Material) -> Self {
+        self.parts.push((mesh, material));
+        self
     }
 }
 
@@ -156,7 +175,11 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
     }
 
     for (renderer, global) in &mut world.query::<(&MeshRenderer, &GlobalTransform)>() {
-        draw.mesh(&renderer.mesh, global.matrix(), &renderer.material);
+        let model = global.matrix();
+        draw.mesh(&renderer.mesh, model, &renderer.material);
+        for (mesh, material) in &renderer.parts {
+            draw.mesh(mesh, model, material);
+        }
     }
 
     for (renderer, global) in &mut world.query::<(&SpriteRenderer, &GlobalTransform)>() {
@@ -181,16 +204,24 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
 /// The engine's windowed loop materializes it into a real [`MeshRenderer`]
 /// on the first frame via [`materialize_visuals`]; headless runs leave it
 /// untouched. The entity's [`crate::Transform`] scale sizes the primitive.
+///
+/// A model visual ([`MeshVisual::model`]) instead references a model file;
+/// its parts keep their own colors and textures, tinted by `color`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MeshVisual {
     /// Which primitive (or custom geometry) `data` holds. Kept alongside
     /// the baked mesh so scene files can record `Cube(size: 1.0)` instead
     /// of 24 raw vertices.
     pub kind: MeshVisualKind,
-    /// The primitive's geometry.
+    /// The primitive's geometry (empty for models).
     pub data: MeshData,
-    /// Flat base color, RGBA.
+    /// Flat base color, RGBA. For models, a tint multiplied with every
+    /// part's own color.
     pub color: [f32; 4],
+    /// The loaded model, for [`MeshVisualKind::Model`] (shared through the
+    /// asset cache). `None` when the file failed to load.
+    #[serde(skip)]
+    pub model: Option<Arc<Model>>,
 }
 
 /// The geometry source a [`MeshVisual`] was built from.
@@ -208,6 +239,12 @@ pub enum MeshVisualKind {
     },
     /// Hand-built geometry, stored verbatim.
     Custom,
+    /// A model file (`.glb`, `.gltf` or `.obj`), relative to the asset root
+    /// (normally the scene's folder).
+    Model {
+        /// The file path, `/`-separated.
+        path: String,
+    },
 }
 
 impl MeshVisual {
@@ -218,6 +255,7 @@ impl MeshVisual {
             kind: MeshVisualKind::Cube { size },
             data: MeshData::cube(size),
             color,
+            model: None,
         }
     }
 
@@ -229,12 +267,60 @@ impl MeshVisual {
             kind: MeshVisualKind::Quad { size },
             data: MeshData::quad(size),
             color,
+            model: None,
+        }
+    }
+
+    /// Hand-built geometry with a flat color.
+    #[must_use]
+    pub fn custom(data: MeshData, color: [f32; 4]) -> Self {
+        Self {
+            kind: MeshVisualKind::Custom,
+            data,
+            color,
+            model: None,
+        }
+    }
+
+    /// A model file, tinted by `tint` (white keeps the file's colors).
+    ///
+    /// # Errors
+    ///
+    /// Fails when the file is missing or can't be read as a model.
+    pub fn try_model(path: &str, tint: [f32; 4]) -> Result<Self, automata_assets::ModelError> {
+        let model = automata_assets::load(path)?;
+        Ok(Self::model_with(path, tint, Some(model)))
+    }
+
+    /// A model file, tinted by `tint`. A file that fails to load is logged
+    /// and draws nothing (the reference is kept, so fixing the file and
+    /// reloading brings it back).
+    #[must_use]
+    pub fn model(path: &str, tint: [f32; 4]) -> Self {
+        match automata_assets::load(path) {
+            Ok(model) => Self::model_with(path, tint, Some(model)),
+            Err(e) => {
+                tracing::warn!("{e}");
+                Self::model_with(path, tint, None)
+            }
+        }
+    }
+
+    fn model_with(path: &str, tint: [f32; 4], model: Option<Arc<Model>>) -> Self {
+        Self {
+            kind: MeshVisualKind::Model {
+                path: path.replace('\\', "/"),
+            },
+            data: MeshData::new(Vec::new(), Vec::new()),
+            color: tint,
+            model,
         }
     }
 }
 
 /// Entities carrying a [`MeshVisual`] that has not been materialized yet
-/// (no [`MeshRenderer`] attached).
+/// (no [`MeshRenderer`] attached). Models that failed to load stay pending
+/// but are skipped cheaply.
 fn pending_visuals(world: &SceneWorld) -> Vec<hecs::Entity> {
     world
         .query::<hecs::Entity>()
@@ -261,18 +347,40 @@ pub fn materialize_visuals(
             let Ok(visual) = world.get::<&MeshVisual>(entity) else {
                 continue;
             };
-            MeshVisual {
-                kind: visual.kind.clone(),
-                data: visual.data.clone(),
-                color: visual.color,
+            if visual.model.is_none() && matches!(visual.kind, MeshVisualKind::Model { .. }) {
+                continue; // the file failed to load: nothing to draw
             }
+            // The hecs `Ref` must drop before the insert below, so bind the
+            // clone first (returning it directly keeps the borrow alive).
+            #[allow(clippy::let_and_return)]
+            let cloned = MeshVisual::clone(&visual);
+            cloned
         };
-        let mesh = renderer.create_mesh(&visual.data);
-        let material = renderer.create_material(visual.color, None);
-        if world
-            .insert_one(entity, MeshRenderer::new(mesh, material))
-            .is_ok()
-        {
+        let component = if let Some(model) = &visual.model {
+            let tint = visual.color;
+            let mut parts = model
+                .gpu(renderer)
+                .iter()
+                .zip(&model.parts)
+                .map(|(gpu, part)| {
+                    let color = std::array::from_fn(|i| part.color[i] * tint[i]);
+                    (
+                        gpu.mesh.clone(),
+                        renderer.create_material(color, gpu.texture.clone()),
+                    )
+                });
+            let Some((mesh, material)) = parts.next() else {
+                continue;
+            };
+            let mut component = MeshRenderer::new(mesh, material);
+            component.parts.extend(parts);
+            component
+        } else {
+            let mesh = renderer.create_mesh(&visual.data);
+            let material = renderer.create_material(visual.color, None);
+            MeshRenderer::new(mesh, material)
+        };
+        if world.insert_one(entity, component).is_ok() {
             materialized += 1;
         }
     }

@@ -97,8 +97,12 @@ recorded at its resting position.
 - Scenes are **flat** — entity parenting (`Parent`) is not serialized yet.
 - `MeshVisual` primitives (`Cube`, `Quad`) serialize by tag; custom
   geometry works but stores raw vertices (`Custom` variant).
-- Sprites and textures are not part of the format yet (they arrive with
-  the asset pipeline).
+- Model files serialize as `Model(path: "models/tree.glb")`, a path
+  relative to the scene file. The model (and its textures) load from disk
+  when the scene does. See [Models](../oberon/models.md).
+- Colliders whose shape isn't centred on the entity carry an `offset`
+  (omitted when zero).
+- Sprites are not part of the format yet.
 - Serialization captures authoring data, not runtime physics state:
   velocities and contacts are rebuilt on load.
 

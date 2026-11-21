@@ -19,6 +19,7 @@ default = []
 audio-cpal = ["automata-core/cpal"]
 
 [dependencies]
+automata-assets = { workspace = true }
 automata-core = { workspace = true }
 automata-audio = { path = "../automata-audio", default-features = false }
 automata-input = { workspace = true }

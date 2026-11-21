@@ -28,9 +28,14 @@ fn main() {
         .ok()
         .and_then(|p| Document::load(std::path::Path::new(&p)).ok())
         .unwrap_or_else(Document::starter);
-    // Pre-select the cube so the inspector shows content.
-    if let Some(cube) = doc.entities.iter().find(|e| e.name() == "Cube") {
-        doc.select(Some(cube.id));
+    // Pre-select the cube (or `OBERON_SELECT=<name>`) so the inspector
+    // shows content.
+    let pick = std::env::var("OBERON_SELECT").unwrap_or_else(|_| "Cube".to_string());
+    if let Some(e) = doc.entities.iter().find(|e| e.name() == pick) {
+        doc.select(Some(e.id));
+    }
+    if let Some(dir) = doc.path.as_ref().map(|_| doc.base_dir()) {
+        automata_assets::set_root(Some(&dir));
     }
     let mut ui = Ui::new();
     if doc.path.is_some() {

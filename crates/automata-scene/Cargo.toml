@@ -12,6 +12,7 @@ publish = false
 workspace = true
 
 [dependencies]
+automata-assets.workspace = true
 automata-renderer.workspace = true
 glam.workspace = true
 hecs.workspace = true

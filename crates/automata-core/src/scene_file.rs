@@ -215,6 +215,12 @@ pub enum PrimitiveData {
         /// The full vertex/index data.
         mesh: MeshData,
     },
+    /// A model file (`.glb`, `.gltf` or `.obj`), `/`-separated and relative
+    /// to the scene file's folder. The visual's color tints it.
+    Model {
+        /// The model file.
+        path: String,
+    },
 }
 
 impl From<&MeshVisual> for MeshVisualData {
@@ -225,6 +231,7 @@ impl From<&MeshVisual> for MeshVisualData {
             MeshVisualKind::Custom => PrimitiveData::Custom {
                 mesh: visual.data.clone(),
             },
+            MeshVisualKind::Model { path } => PrimitiveData::Model { path: path.clone() },
         };
         Self {
             primitive,
@@ -235,19 +242,11 @@ impl From<&MeshVisual> for MeshVisualData {
 
 impl From<&MeshVisualData> for MeshVisual {
     fn from(data: &MeshVisualData) -> Self {
-        let (kind, mesh) = match &data.primitive {
-            PrimitiveData::Cube { size } => {
-                (MeshVisualKind::Cube { size: *size }, MeshData::cube(*size))
-            }
-            PrimitiveData::Quad { size } => {
-                (MeshVisualKind::Quad { size: *size }, MeshData::quad(*size))
-            }
-            PrimitiveData::Custom { mesh } => (MeshVisualKind::Custom, mesh.clone()),
-        };
-        Self {
-            kind,
-            data: mesh,
-            color: data.color,
+        match &data.primitive {
+            PrimitiveData::Cube { size } => MeshVisual::cube(*size, data.color),
+            PrimitiveData::Quad { size } => MeshVisual::quad(*size, data.color),
+            PrimitiveData::Custom { mesh } => MeshVisual::custom(mesh.clone(), data.color),
+            PrimitiveData::Model { path } => MeshVisual::model(path, data.color),
         }
     }
 }
@@ -445,6 +444,57 @@ mod tests {
             .unwrap();
         assert_eq!(enemy.attributes, file.entities[0].attributes);
         assert_eq!(enemy.script, file.entities[0].script);
+    }
+
+    #[test]
+    fn model_meshes_and_collider_offsets_round_trip() {
+        let dir = std::env::temp_dir().join(format!("scene-model-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file_path = dir.join("tri.obj");
+        std::fs::write(&file_path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+        let path = file_path.to_string_lossy().replace('\\', "/");
+        let data = EntityData {
+            name: Some("tree".into()),
+            transform: Some(TransformData::default()),
+            mesh_visual: Some(MeshVisualData {
+                primitive: PrimitiveData::Model { path: path.clone() },
+                color: [0.5, 1.0, 1.0, 1.0],
+            }),
+            collider_3d: Some(
+                automata_physics::Collider3D::cuboid(1.0, 1.0, 0.02).offset([0.5, 0.5, 0.0]),
+            ),
+            ..Default::default()
+        };
+        let file = SceneFile {
+            version: SCENE_FILE_VERSION,
+            entities: vec![data],
+        };
+        let text = file.to_ron().unwrap();
+        assert!(text.contains("Model"), "{text}");
+        assert!(text.contains("offset"), "{text}");
+        assert_eq!(SceneFile::from_ron(&text).unwrap(), file);
+
+        // Into a world: the visual carries the loaded model; and back.
+        let mut world = SceneWorld::new();
+        file.apply_to_world(&mut world);
+        let mut q = world.query::<&automata_scene::MeshVisual>();
+        let visual = q.iter().next().cloned().unwrap();
+        drop(q);
+        assert!(visual.model.is_some(), "the model loads");
+        let again = SceneFile::from_world(&world);
+        assert_eq!(again.entities[0].mesh_visual, file.entities[0].mesh_visual);
+        assert_eq!(again.entities[0].collider_3d, file.entities[0].collider_3d);
+
+        // Colliders without an offset don't write one.
+        let plain = SceneFile {
+            version: SCENE_FILE_VERSION,
+            entities: vec![EntityData {
+                collider_3d: Some(automata_physics::Collider3D::ball(0.5)),
+                ..Default::default()
+            }],
+        };
+        assert!(!plain.to_ron().unwrap().contains("offset"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn kitchen_sink_world() -> automata_scene::Scene {

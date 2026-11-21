@@ -55,6 +55,9 @@ pub enum DialogKind {
     NewScript,
     /// Attach a script (existing or new) to an entity.
     AttachScript(u64),
+    /// Import a model file (from anywhere) into the scene, or onto an
+    /// entity.
+    ImportModel(Option<u64>),
     /// Keyboard shortcut reference.
     Shortcuts,
     /// About Oberon.
@@ -96,6 +99,9 @@ pub enum UiAction {
     BuildSettings,
     /// A script tab's context menu command.
     Tab(TabCommand),
+    /// Pick a model from the project: for a new entity (`None`) or to show
+    /// on an entity.
+    PickModel(Option<u64>),
 }
 
 /// Commands from a script tab's context menu (VS Code's set).
@@ -357,10 +363,26 @@ impl Ui {
                 MenuItem::ui("Go to File…", "Ctrl+E", UiAction::QuickOpen, true),
                 MenuItem::ui("Settings…", "Ctrl+,", UiAction::Settings, true),
             ],
-            2 => CreateKind::ALL
-                .iter()
-                .map(|k| MenuItem::intent(k.label(), "", Intent::Create(*k), editing))
-                .collect(),
+            2 => {
+                let mut items: Vec<MenuItem> = CreateKind::ALL
+                    .iter()
+                    .map(|k| MenuItem::intent(k.label(), "", Intent::Create(*k), editing))
+                    .collect();
+                items.push(MenuItem::separator());
+                items.push(MenuItem::ui(
+                    "Model…",
+                    "",
+                    UiAction::PickModel(None),
+                    editing,
+                ));
+                items.push(MenuItem::ui(
+                    "Import Model…",
+                    "",
+                    UiAction::Dialog(DialogKind::ImportModel(None)),
+                    editing,
+                ));
+                items
+            }
             3 => match doc.selected_index() {
                 Some(i) => {
                     let mut items: Vec<MenuItem> = ComponentKind::ALL
@@ -517,7 +539,7 @@ impl Ui {
     /// The "Create …" items (shared by context menus and + Create).
     pub(super) fn create_items(&self) -> Vec<MenuItem> {
         let editing = self.play == PlayState::Editing;
-        CreateKind::ALL
+        let mut items: Vec<MenuItem> = CreateKind::ALL
             .iter()
             .map(|k| {
                 MenuItem::intent(
@@ -527,7 +549,14 @@ impl Ui {
                     editing,
                 )
             })
-            .collect()
+            .collect();
+        items.push(MenuItem::ui(
+            "Create Model…",
+            "",
+            UiAction::PickModel(None),
+            editing,
+        ));
+        items
     }
 
     /// The ⋮ menu of a component header.
@@ -629,6 +658,7 @@ impl Ui {
             UiAction::Settings => self.open_settings(),
             UiAction::CommandPalette => self.open_palette(doc),
             UiAction::QuickOpen => self.open_quick_open(),
+            UiAction::PickModel(target) => self.open_model_picker(target),
             UiAction::Tab(cmd) => self.tab_command(cmd),
         }
     }

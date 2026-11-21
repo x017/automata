@@ -265,6 +265,10 @@ impl PyScene {
     fn load(cls: &Bound<'_, pyo3::types::PyType>, path: &str) -> PyResult<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|err| pyo3::exceptions::PyIOError::new_err(err.to_string()))?;
+        // Model paths in the scene are relative to its folder.
+        if let Ok(abs) = std::path::absolute(path) {
+            automata_assets::set_root(abs.parent());
+        }
         Self::from_ron(cls, &text)
     }
 }
