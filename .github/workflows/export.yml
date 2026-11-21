@@ -101,6 +101,7 @@ jobs:
       # Export a real example with the fresh template and run it headless.
       - name: Export and run an example
         run: |
+          trap 'echo "::error title=Export step failed::line $LINENO: $BASH_COMMAND"' ERR
           export AUTOMATA_TEMPLATES="$PWD/templates"
           ./target/release/automata-export templates install \
             automata-template-${{ matrix.target }}-x86_64.tar.gz --target ${{ matrix.target }}
@@ -109,7 +110,22 @@ jobs:
           ./target/release/automata-export build /tmp/coin_run --target ${{ matrix.target }}
           exe="/tmp/coin_run/build/${{ matrix.target }}/Coin Run/Coin Run"
           if [ "${{ matrix.target }}" = windows ]; then exe="$exe.exe"; fi
-          "$exe" --headless --frames 30
+          set +e
+          "$exe" --headless --frames 30 > run.txt 2>&1
+          code=$?
+          set -e
+          cat run.txt
+          if [ $code -ne 0 ]; then
+            # Surface the failure as annotations (readable without the logs).
+            log="/tmp/coin_run/build/${{ matrix.target }}/Coin Run/logs/last_run.log"
+            for f in run.txt "$log"; do
+              [ -f "$f" ] || continue
+              msg=$(tail -c 3000 "$f" | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g' -e 's/\r//g')
+              echo "::error title=Exported game failed ($code) - $(basename "$f")::$msg"
+            done
+            ls -R "/tmp/coin_run/build/${{ matrix.target }}" | head -60
+            exit $code
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
