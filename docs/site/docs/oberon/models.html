@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Models · AUTOMATA docs</title>
-<meta name="description" content="From each material Oberon takes the base colour and the colour texture (PNG or JPEG). The model draws with the engine&#x27;s lighting, shadows and fog, like the built-in cubes. Animation, skinning and…">
+<meta name="description" content="From each material Oberon takes the base colour and the colour texture (PNG or JPEG). The model draws with the engine&#x27;s lighting, shadows and fog, like the built-in cubes. PBR maps (normal,…">
 <meta name="theme-color" content="#000000">
 <link rel="stylesheet" href="../_static/docs.css">
 <script>window.DOCS_ROOT = "../";</script>
@@ -39,9 +39,17 @@ reads two formats:</p>
 <div class="table"><table><thead><tr><th>Format</th><th>Files</th><th>Notes</th></tr></thead><tbody><tr><td>glTF 2.0</td><td><code>.glb</code> (one file) or <code>.gltf</code> (+ <code>.bin</code>, images)</td><td>Recommended. Blender: <strong>File → Export → glTF 2.0</strong>.</td></tr><tr><td>Wavefront OBJ</td><td><code>.obj</code> (+ <code>.mtl</code>, images)</td><td>Universal and simple. Has no node hierarchy.</td></tr></tbody></table></div>
 <p>From each material Oberon takes the <strong>base colour</strong> and the <strong>colour
 texture</strong> (PNG or JPEG). The model draws with the engine's lighting,
-shadows and fog, like the built-in cubes. Animation, skinning and PBR maps
-(normal, metallic-roughness) aren't imported yet. The model draws in its
-bind pose.</p>
+shadows and fog, like the built-in cubes. PBR maps (normal,
+metallic-roughness) aren't imported yet.</p>
+<h3 id="animated-models">Animated models<a class="anchor" href="#animated-models" aria-label="Link to this section">#</a></h3>
+<p>glTF files keep their <strong>skeleton and animations</strong>: skinned meshes (up to
+four bones per vertex, 128 bones per model) and parts moved by animated
+nodes, like a robot whose arms are separate meshes. The renderer poses
+them on the GPU, and shadows follow the pose.</p>
+<p>For now an animated model shows its rest pose in the scene view and in
+your game. Playing clips from scripts (<code>entity.animation.play(&quot;run&quot;)</code>) and
+previewing them in the Inspector come next. Rust games can already play
+clips with the <code>Animator</code> component.</p>
 <h2 id="add-a-model-to-the-scene">Add a model to the scene<a class="anchor" href="#add-a-model-to-the-scene" aria-label="Link to this section">#</a></h2>
 <p>Pick whichever way suits you:</p>
 <ul><li><strong>Pick it in the Assets tab</strong> (below). Every model in the project is
@@ -180,7 +188,7 @@ the files.</p>
     <footer class="pager"><a class="prev" href="code-editor.html"><small>Previous</small>The code editor</a><a class="next" href="audio.html"><small>Next</small>Audio</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/models.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#add-a-model-to-the-scene">Add a model to the scene</a></li><li class="l2"><a href="#the-assets-tab">The Assets tab</a></li><li class="l3"><a href="#what-importing-copies">What importing copies</a></li><li class="l2"><a href="#give-a-model-to-an-existing-entity">Give a model to an existing entity</a></li><li class="l2"><a href="#the-inspector">The Inspector</a></li><li class="l2"><a href="#import-settings">Import settings</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#editing-a-model-while-oberon-is-open">Editing a model while Oberon is open</a></li><li class="l2"><a href="#scene-files-and-paths">Scene files and paths</a></li><li class="l2"><a href="#from-python">From Python</a></li><li class="l2"><a href="#try-it">Try it</a></li><li class="l2"><a href="#troubleshooting">Troubleshooting</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l3"><a href="#animated-models">Animated models</a></li><li class="l2"><a href="#add-a-model-to-the-scene">Add a model to the scene</a></li><li class="l2"><a href="#the-assets-tab">The Assets tab</a></li><li class="l3"><a href="#what-importing-copies">What importing copies</a></li><li class="l2"><a href="#give-a-model-to-an-existing-entity">Give a model to an existing entity</a></li><li class="l2"><a href="#the-inspector">The Inspector</a></li><li class="l2"><a href="#import-settings">Import settings</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#editing-a-model-while-oberon-is-open">Editing a model while Oberon is open</a></li><li class="l2"><a href="#scene-files-and-paths">Scene files and paths</a></li><li class="l2"><a href="#from-python">From Python</a></li><li class="l2"><a href="#try-it">Try it</a></li><li class="l2"><a href="#troubleshooting">Troubleshooting</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

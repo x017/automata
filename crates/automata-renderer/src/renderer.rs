@@ -1288,6 +1288,8 @@ mod tests {
         let lit = |renderer: &mut Renderer, joint: glam::Mat4| {
             let joints: Arc<[glam::Mat4]> = vec![glam::Mat4::IDENTITY, joint].into();
             let mut draw = DrawList::new();
+            // Black, so the default (sRGB-brightened) clear can't pass as lit.
+            draw.set_clear_color(Color::BLACK);
             draw.set_camera_3d(camera);
             draw.skinned_mesh(&cube, glam::Mat4::IDENTITY, &material, &joints);
             renderer.render_offscreen(&draw, &target);
