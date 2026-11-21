@@ -162,11 +162,19 @@ jobs:
         run: pytest crates/automata-python/tests/python
 
       - name: Tutorials (Oberon track, Zero to Hero, Cookbook)
+        shell: bash
         run: |
-          pytest examples/oberon/coin_run/tests examples/oberon/fps/tests examples/python/zero_to_hero examples/python/tests
-          python examples/oberon/coin_run/main.py --headless
-          python examples/oberon/fps/main.py --headless
-          python examples/python/cookbook_platformer.py --headless
+          set -o pipefail
+          {
+            pytest examples/oberon/coin_run/tests examples/oberon/fps/tests examples/python/zero_to_hero examples/python/tests
+            python examples/oberon/coin_run/main.py --headless
+            python examples/oberon/fps/main.py --headless
+            python examples/python/cookbook_platformer.py --headless
+          } 2>&1 | tee /tmp/tutorials.log
+
+      - name: Annotate tutorials log
+        if: failure()
+        run: python3 .github/scripts/annotate_log.py tutorials
 
       - name: Headless demo
         run: python examples/python/headless_demo.py
