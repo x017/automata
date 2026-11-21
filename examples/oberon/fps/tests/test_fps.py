@@ -44,11 +44,26 @@ def project_copy(tmp_path, **changes):
 # --------------------------------------------------------------------------
 
 
+NUMBER = r"-?\d+\.\d+(?:[eE][-+]?\d+)?"
+
+
+def same_scene_text(a, b):
+    """Scene files equal up to float noise: rotations go through a
+    quaternion when saved, and the last digit depends on the platform's
+    maths library. Everything but the numbers must match exactly."""
+    import re
+
+    if re.split(NUMBER, a) != re.split(NUMBER, b):
+        return False
+    xs, ys = re.findall(NUMBER, a), re.findall(NUMBER, b)
+    return all(abs(float(x) - float(y)) <= 1e-5 for x, y in zip(xs, ys))
+
+
 def test_the_saved_level_matches_build_level(tmp_path):
     path = tmp_path / "fresh.ron"
     build_level.build().save(str(path))
     with open(LEVEL, encoding="utf-8") as saved:
-        assert path.read_text(encoding="utf-8") == saved.read(), (
+        assert same_scene_text(path.read_text(encoding="utf-8"), saved.read()), (
             "level.ron is stale: run build_level.py"
         )
 
