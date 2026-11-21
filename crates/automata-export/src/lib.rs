@@ -1174,6 +1174,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&outside);
     }
 
+    /// The FPS example exports cleanly: its scripts, models (with import
+    /// settings) and sounds are all where they belong.
+    #[test]
+    fn the_fps_example_validates() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/oberon/fps");
+        let cfg = BuildConfig::load(&dir).unwrap();
+        assert_eq!(cfg.start_scene.as_deref(), Some("level.ron"));
+        let problems: Vec<_> = validate(&dir, &cfg)
+            .into_iter()
+            .filter(|m| m.level != Level::Info)
+            .collect();
+        assert!(problems.is_empty(), "{problems:?}");
+    }
+
     #[test]
     fn validation_checks_audio_clips() {
         use automata_core::scene_file::{EntityData, SceneFile};

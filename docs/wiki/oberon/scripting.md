@@ -64,6 +64,9 @@ frame renders. Two rules follow from this:
 | `entity.grounded` | True when a character is standing on something |
 | `entity.attributes["key"]` | Custom values from the Inspector; read and write like a dict |
 | `entity.camera` | The entity's camera, or `None` ([Cameras](cameras.md)) |
+| `entity.audio.play()` / `.stop()` | Start (or restart) / stop the entity's Audio Source ([Audio](audio.md)) |
+| `entity.audio.playing` | Whether the Audio Source was playing at the start of the frame |
+| `entity.despawn()` | Remove the entity until Play stops |
 | `entity.state` | A dict of your own that persists between frames (not saved) |
 
 ## `ctx`
@@ -76,12 +79,25 @@ frame renders. Two rules follow from this:
 | `ctx.input.just_pressed("space")` | Pressed this frame |
 | `ctx.input.just_released("e")` | Released this frame |
 | `ctx.input.axis("a", "d")` | −1, 0, or 1 from two keys (Oberon only) |
+| `ctx.input.mouse_delta` | `(dx, dy)` mouse movement in pixels since last frame; +y is down |
+| `ctx.input.mouse_pressed("left")` | Mouse button held (`"left"`, `"right"`, `"middle"`); also `mouse_just_pressed` and `mouse_just_released` |
+| `ctx.input.lock_mouse(True)` | Hide and capture the cursor for mouse look. `False` frees it, and Stop always frees it |
+| `ctx.input.mouse_locked` | Whether the cursor is captured |
 | `ctx.physics.grounded(entity)` | Same as `entity.grounded` |
+| `ctx.physics.raycast(origin, direction, max_distance=100, ignore=None)` | The first collider along a ray, or `None`. Returns a `Hit` with `.entity`, `.point`, `.normal` and `.distance`. `ignore` skips one entity, usually the caster. Sensors are skipped |
+| `ctx.audio.play("sounds/hit.ogg", volume=1, pitch=1, position=None)` | Play a sound once. With a `position` (a point or an entity) it fades with distance |
+| `ctx.hud.image("sprites/crosshair.png", x, y, size=None, color=(1,1,1,1))` | Draw an image this frame, centred on `(x, y)` in screen pixels |
+| `ctx.hud.rect(x, y, width, height, color)` | Draw a filled rectangle this frame, centred on `(x, y)` |
+| `ctx.hud.size`, `ctx.hud.center` | The game view's size in pixels, and its centre |
 | `ctx.scene["Name"]` | Another entity by name (raises `KeyError` if missing) |
 | `ctx.scene.find("Name")` | The same, but returns `None` if missing |
 | `for e in ctx.scene:` | Every entity |
 | `ctx.camera` | The camera Play renders through, or `None` |
 | `ctx.log(...)`, `ctx.warn(...)` | Write to the Console. `print()` works too |
+
+HUD shapes last one frame, so draw them in `update` every frame you want
+them shown. Image paths are relative to the scene folder. Each call draws on
+top of the previous one.
 
 **Key names** are lowercase: `"a"`–`"z"`, `"0"`–`"9"`, `"space"`,
 `"enter"`, `"escape"`, `"tab"`, `"backspace"`, the arrows `"arrow_left"`,
@@ -106,6 +122,19 @@ then **pauses** so you don't get the same error 60 times a second. The rest
 of the scene keeps running. Fix the file and save, and the script resumes.
 
 A syntax error found when the script loads works the same way.
+
+## Testing scripts headless
+
+`run_scene(..., headless=True)` runs frames as fast as it can, so
+`ctx.time.delta` is close to zero and timers barely move. To test gameplay
+that depends on time (cooldowns, falling, damage over time), pace the run:
+
+```python
+frames = at.run_scene("level.ron", headless=True, max_frames=90, target_fps=60)
+```
+
+The [FPS tutorial](../tutorials/fps.md) and
+`examples/oberon/fps/tests/test_fps.py` show this in practice.
 
 ## Which Python?
 

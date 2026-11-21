@@ -885,6 +885,118 @@ mod tests {
         );
     }
 
+    /// The shipped FPS example, played through the real bridge: the player
+    /// captures the mouse, turns toward a drone with the mouse, holds the
+    /// trigger and hits it; the HUD, the held blaster and the blaster's
+    /// sound all come through (skipped without python3).
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn the_fps_example_plays_in_oberon() {
+        use crate::bridge::{BridgeMsg, HudKind, ScriptBridge};
+        use automata_core::AttributeValue as A;
+        let python = crate::bridge::default_python();
+        if std::process::Command::new(python)
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let game =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/oberon/fps");
+        let doc = Document::load(&game.join("level.ron")).unwrap();
+        let state = std::env::temp_dir().join(format!("oberon_fps_example_{}", std::process::id()));
+        let mut play = PlaySession::start(&doc);
+        play.update(TIMESTEP);
+        let mut bridge = ScriptBridge::start(python, &state, &game).unwrap();
+        let mut engine = AudioEngine::new();
+        let mut errors = Vec::new();
+        let mut lock = None;
+        let mut most_voices = 0;
+        let mut drone_health = 100;
+        let mut frames = 0;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while bridge.answered < 40 && std::time::Instant::now() < deadline {
+            for msg in bridge.poll() {
+                match msg {
+                    BridgeMsg::Frame(w) => {
+                        play.apply_frame(&w);
+                        lock = lock.or(play.lock_request.take());
+                    }
+                    BridgeMsg::Error { msg, traceback, .. } => {
+                        errors.push(format!("{msg}\n{traceback}"));
+                    }
+                    _ => {}
+                }
+            }
+            let problems = play.update_audio(&mut engine, &game);
+            assert!(problems.is_empty(), "{problems:?}");
+            most_voices = most_voices.max(play.voice_count());
+            if let Some(e) = play.doc.entities.iter().find(|e| e.name() == "Enemy 1") {
+                if let Some(A::Int(h)) = e.data.attributes.get("health") {
+                    drone_health = drone_health.min(*h);
+                }
+            } else {
+                drone_health = drone_health.min(0);
+            }
+            let mut input = play.frame_input();
+            input.screen = [1280, 720];
+            input.mouse_locked = lock == Some(true);
+            // One mouse move turns toward Enemy 1 at (-3.5, 2.5, -6): yaw
+            // atan2(3.5, 6) left, pitch about 0.2 up (700 px per radian).
+            if frames == 0 {
+                input.mouse_delta = [-0.528 * 700.0, -0.2 * 700.0];
+            }
+            if frames >= 2 {
+                input.mouse_buttons = vec!["left"];
+            }
+            let states = play.script_states(|rel| doc.resolve(rel));
+            if bridge.send_frame_with(TIMESTEP, play.elapsed, &[], &states, &input) {
+                play.update(TIMESTEP);
+                frames += 1;
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&state);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(lock, Some(true), "the player captures the mouse");
+        assert!(most_voices >= 1, "the blaster sounded");
+        assert!(drone_health < 100, "a volley hit Enemy 1");
+        let images: Vec<&str> = play
+            .hud
+            .iter()
+            .filter_map(|h| match &h.kind {
+                HudKind::Image(p) => Some(p.as_str()),
+                HudKind::Rect => None,
+            })
+            .collect();
+        assert!(images.contains(&"sprites/crosshair.png"), "{images:?}");
+        let pips = play
+            .hud
+            .iter()
+            .filter(|h| h.kind == HudKind::Rect && h.size == Some([14.0, 14.0]))
+            .count();
+        assert!((3..=4).contains(&pips), "a pip per drone: {pips}");
+        let find = |name: &str| {
+            play.doc
+                .entities
+                .iter()
+                .find(|e| e.name() == name)
+                .and_then(|e| e.data.transform)
+                .map(|t| glam::Vec3::from(t.position))
+                .unwrap()
+        };
+        let player = find("Player");
+        assert!((0.5..1.3).contains(&player.y), "on the platform: {player}");
+        assert!(
+            find("Blaster").distance(player) < 1.5,
+            "the blaster is held: {}",
+            find("Blaster")
+        );
+    }
+
     /// The whole loop with a real interpreter: Oberon state → Python script
     /// → writes applied to the simulation (skipped without python3).
     #[test]

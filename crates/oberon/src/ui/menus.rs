@@ -90,6 +90,8 @@ pub enum UiAction {
     PickColor(u64, super::picker::ColorTarget),
     /// Show the Console tab in the bottom dock.
     ShowConsole,
+    /// Show (or hide) the Assets tab of the bottom dock.
+    ShowAssets,
     /// Show the Files panel in the left sidebar.
     ShowFiles,
     /// Open the Settings dialog.
@@ -459,6 +461,15 @@ impl Ui {
                         UiAction::TogglePanel(Panel::Bottom),
                         true,
                     ),
+                    MenuItem::ui(
+                        check(
+                            self.panels.show_bottom && self.bottom_tab == super::BottomTab::Assets,
+                            "Assets",
+                        ),
+                        "",
+                        UiAction::ShowAssets,
+                        true,
+                    ),
                     MenuItem::separator(),
                     MenuItem::ui("Reset Layout", "", UiAction::ResetLayout, true),
                 ]
@@ -675,6 +686,7 @@ impl Ui {
                 self.bottom_tab = super::BottomTab::Console;
             }
             UiAction::ShowFiles => self.panels.show_files = true,
+            UiAction::ShowAssets => self.toggle_assets(),
             UiAction::BuildSettings => {
                 self.load_build_settings(doc.path.as_deref());
                 self.open_settings_page(super::settings::SettingsPage::Build);

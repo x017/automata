@@ -163,14 +163,15 @@ jobs:
 
       - name: Tutorials (Oberon track, Zero to Hero, Cookbook)
         run: |
-          pytest examples/oberon/coin_run/tests examples/python/zero_to_hero examples/python/tests
+          pytest examples/oberon/coin_run/tests examples/oberon/fps/tests examples/python/zero_to_hero examples/python/tests
           python examples/oberon/coin_run/main.py --headless
+          python examples/oberon/fps/main.py --headless
           python examples/python/cookbook_platformer.py --headless
 
       - name: Headless demo
         run: python examples/python/headless_demo.py
 
-      # Export Coin Run with a development template (launcher only; uses
+      # Export Coin Run and the FPS with a development template (launcher only; uses
       # this job's Python) and run the exported executable headless.
       - name: Export a game (Linux, development template)
         run: |
@@ -182,3 +183,7 @@ jobs:
           ./target/release/automata-export build "$RUNNER_TEMP/coin_run" --target linux
           AUTOMATA_PYTHON="$(command -v python)" "$RUNNER_TEMP/coin_run/build/linux/Coin Run/Coin Run" --headless --frames 30
           tar tzf "$RUNNER_TEMP/coin_run/build/Coin Run-0.1.0-linux-x86_64.tar.gz" | grep -q "Coin Run/game/game.json"
+          # The FPS example ships its own build.ron.
+          cp -r examples/oberon/fps "$RUNNER_TEMP/fps"
+          ./target/release/automata-export build "$RUNNER_TEMP/fps" --target linux
+          AUTOMATA_PYTHON="$(command -v python)" "$RUNNER_TEMP/fps/build/linux/Blaster Arena/Blaster Arena" --headless --frames 120

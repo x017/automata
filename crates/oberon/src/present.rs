@@ -640,6 +640,7 @@ impl EditorApp {
                 }
             }
             Intent::PreviewSound(path) => self.preview_clip(&path),
+            Intent::SetImport { model, settings } => self.set_import(&model, &settings),
             Intent::FitCollider(id) => {
                 if self.doc.fit_collider(id) {
                     self.ui.log(LogLevel::Info, "Collider fitted to the mesh");
@@ -748,6 +749,25 @@ impl EditorApp {
             Err(e) => self
                 .ui
                 .log(LogLevel::Error, format!("Save prefab failed: {e}")),
+        }
+    }
+
+    /// Saves a model's import settings and reloads it at once.
+    fn set_import(
+        &mut self,
+        model: &std::path::Path,
+        settings: &automata_assets::import::ImportSettings,
+    ) {
+        match automata_assets::import::write_settings(model, settings) {
+            Ok(()) => {
+                automata_assets::refresh();
+                self.viewport.invalidate();
+                self.ui.files_changed(None);
+            }
+            Err(e) => self.ui.log(
+                LogLevel::Error,
+                format!("Couldn't save import settings for {}: {e}", model.display()),
+            ),
         }
     }
 

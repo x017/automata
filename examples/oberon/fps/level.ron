@@ -1,0 +1,865 @@
+(
+    version: 1,
+    entities: [
+        (
+            name: Some("Sun"),
+            directional_light: Some((
+                direction: (-0.58, -0.77, 0.27),
+                color: (1.0, 0.98, 0.94),
+                ambient: 0.5,
+                shadows: true,
+            )),
+        ),
+        (
+            name: Some("Environment"),
+            environment: Some((
+                sky_color: (0.66, 0.69, 0.77),
+                ground_color: (0.45, 0.4, 0.35),
+                background: (0.36, 0.39, 0.46),
+                exposure: 1.05,
+                tonemapping: Aces,
+                fog: true,
+                fog_color: (0.36, 0.39, 0.46),
+                fog_density: 0.015,
+                fog_start: 20.0,
+            )),
+        ),
+        (
+            name: Some("Platform Large Grass 1"),
+            transform: Some((
+                position: (0.0, -0.5, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/platform-large-grass.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (5.2, 0.5, 5.2),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.25, 0.0),
+            )),
+        ),
+        (
+            name: Some("Platform Large Grass 2"),
+            transform: Some((
+                position: (-2.0, 0.5, -6.0),
+                rotation_euler: (-0.0, 0.26179942, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/platform-large-grass.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (5.2, 0.5, 5.2),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.25, 0.0),
+            )),
+        ),
+        (
+            name: Some("Platform Large Grass 3"),
+            transform: Some((
+                position: (-6.0, 1.0, 2.5),
+                rotation_euler: (0.0, -0.26179942, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/platform-large-grass.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (5.2, 0.5, 5.2),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.25, 0.0),
+            )),
+        ),
+        (
+            name: Some("Platform Large Grass 4"),
+            transform: Some((
+                position: (12.0, 2.5, -5.0),
+                rotation_euler: (0.0, -0.5235988, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/platform-large-grass.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (5.2, 0.5, 5.2),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.25, 0.0),
+            )),
+        ),
+        (
+            name: Some("Platform Large Grass 5"),
+            transform: Some((
+                position: (5.0, 0.5, 5.5),
+                rotation_euler: (-0.0, 0.26179942, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/platform-large-grass.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (5.2, 0.5, 5.2),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.25, 0.0),
+            )),
+        ),
+        (
+            name: Some("Platform 1"),
+            transform: Some((
+                position: (-2.5, 0.0, 6.5),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/platform.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (2.2, 0.5, 2.2),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.25, 0.0),
+            )),
+        ),
+        (
+            name: Some("Platform 2"),
+            transform: Some((
+                position: (-6.5, 2.5, -2.5),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/platform.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (2.2, 0.5, 2.2),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.25, 0.0),
+            )),
+        ),
+        (
+            name: Some("Platform 3"),
+            transform: Some((
+                position: (2.5, 3.0, -3.5),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/platform.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (2.2, 0.5, 2.2),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.25, 0.0),
+            )),
+        ),
+        (
+            name: Some("Platform 4"),
+            transform: Some((
+                position: (7.0, 1.0, -2.0),
+                rotation_euler: (0.0, -0.78539824, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/platform.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (2.2, 0.5, 2.2),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.25, 0.0),
+            )),
+        ),
+        (
+            name: Some("Wall High 1"),
+            transform: Some((
+                position: (-5.5, 1.5, 4.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/wall-high.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (1.5, 1.7, 0.7),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.85, 0.0),
+            )),
+        ),
+        (
+            name: Some("Wall High 2"),
+            transform: Some((
+                position: (11.5, 3.0, -5.5),
+                rotation_euler: (0.0, -0.78539824, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/wall-high.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (1.5, 1.7, 0.7),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.85, 0.0),
+            )),
+        ),
+        (
+            name: Some("Wall Low 1"),
+            transform: Some((
+                position: (-1.92, 1.05, -6.9),
+                rotation_euler: (-0.0, 0.26179942, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/wall-low.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (2.2, 0.8, 0.7),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.4, 0.0),
+            )),
+        ),
+        (
+            name: Some("Wall Low 2"),
+            transform: Some((
+                position: (6.08, 1.05, 6.6),
+                rotation_euler: (-3.1415927, -0.00000008742278, -3.1415927),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/wall-low.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (2.2, 0.8, 0.7),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.4, 0.0),
+            )),
+        ),
+        (
+            name: Some("Grass 1"),
+            transform: Some((
+                position: (1.6, 0.0, -1.2),
+                rotation_euler: (-0.0, 0.34906584, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/grass.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+        ),
+        (
+            name: Some("Grass 2"),
+            transform: Some((
+                position: (-1.4, 0.0, 1.5),
+                rotation_euler: (-0.0, 1.2217305, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/grass-small.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+        ),
+        (
+            name: Some("Grass 3"),
+            transform: Some((
+                position: (-3.4, 1.0, -5.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/grass.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+        ),
+        (
+            name: Some("Grass 4"),
+            transform: Some((
+                position: (-0.6, 1.0, -7.4),
+                rotation_euler: (-0.0, 0.6981316, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/grass-small.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+        ),
+        (
+            name: Some("Grass 5"),
+            transform: Some((
+                position: (-7.2, 1.5, 3.4),
+                rotation_euler: (-0.0, 0.17453292, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/grass.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+        ),
+        (
+            name: Some("Grass 6"),
+            transform: Some((
+                position: (4.1, 1.0, 6.8),
+                rotation_euler: (-0.0, 1.0471976, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/grass.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+        ),
+        (
+            name: Some("Grass 7"),
+            transform: Some((
+                position: (6.4, 1.0, 4.3),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/grass-small.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+        ),
+        (
+            name: Some("Grass 8"),
+            transform: Some((
+                position: (13.2, 3.0, -3.9),
+                rotation_euler: (-0.0, 0.5235988, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/grass.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+        ),
+        (
+            name: Some("Player"),
+            transform: Some((
+                position: (0.0, 1.0, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            camera_3d: Some((
+                position: (0.0, 1.6, 0.0),
+                target: (0.0, 1.6, -1.0),
+                up: (0.0, 1.0, 0.0),
+                fov_y_degrees: 80.0,
+                near: 0.1,
+                far: 1000.0,
+            )),
+            rigid_body: Some((
+                body_type: KinematicPosition,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Capsule(
+                    half_height: 0.5,
+                    radius: 0.3,
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+            character_controller: Some((
+                mode: Normal,
+                max_slope_climb_angle: 0.7853982,
+                min_slope_slide_angle: 0.5235988,
+                autostep_height: Some(0.3),
+                snap_to_ground: Some(0.3),
+                offset: 0.05,
+                slide: true,
+            )),
+            character_velocity: Some((
+                velocity: (0.0, 0.0, 0.0),
+            )),
+            attributes: {
+                "health": Int(100),
+            },
+            script: Some((
+                path: "scripts/player.py",
+            )),
+            audio_source: Some((
+                clip: "sounds/walking.ogg",
+                volume: 0.35,
+                pitch: 1.0,
+                looping: true,
+                play_on_start: false,
+                spatial: false,
+                range: 20.0,
+            )),
+        ),
+        (
+            name: Some("Blaster"),
+            transform: Some((
+                position: (0.0, -100.0, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.4, 0.4, 0.4),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/blaster.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+        ),
+        (
+            name: Some("Blaster Repeater"),
+            transform: Some((
+                position: (0.0, -100.0, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.4, 0.4, 0.4),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/blaster-repeater.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+        ),
+        (
+            name: Some("Enemy 1"),
+            transform: Some((
+                position: (-3.5, 2.5, -6.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/enemy-flying.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Ball(
+                    radius: 0.6,
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.45, 0.0),
+            )),
+            attributes: {
+                "health": Int(100),
+            },
+            script: Some((
+                path: "scripts/enemy.py",
+            )),
+        ),
+        (
+            name: Some("Enemy 2"),
+            transform: Some((
+                position: (-9.5, 2.5, 1.5),
+                rotation_euler: (0.0, 1.5707963, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/enemy-flying.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Ball(
+                    radius: 0.6,
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.45, 0.0),
+            )),
+            attributes: {
+                "health": Int(100),
+            },
+            script: Some((
+                path: "scripts/enemy.py",
+            )),
+        ),
+        (
+            name: Some("Enemy 3"),
+            transform: Some((
+                position: (5.5, 3.5, 9.0),
+                rotation_euler: (-3.1415927, 0.78539824, -3.1415927),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/enemy-flying.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Ball(
+                    radius: 0.6,
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.45, 0.0),
+            )),
+            attributes: {
+                "health": Int(100),
+            },
+            script: Some((
+                path: "scripts/enemy.py",
+            )),
+        ),
+        (
+            name: Some("Enemy 4"),
+            transform: Some((
+                position: (15.5, 4.0, -7.5),
+                rotation_euler: (0.0, -0.78539824, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/enemy-flying.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            collider_3d: Some((
+                shape: Ball(
+                    radius: 0.6,
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+                offset: (0.0, 0.45, 0.0),
+            )),
+            attributes: {
+                "health": Int(100),
+            },
+            script: Some((
+                path: "scripts/enemy.py",
+            )),
+        ),
+        (
+            name: Some("Cloud 1"),
+            transform: Some((
+                position: (-9.5, 8.5, 20.5),
+                rotation_euler: (0.34999996, 0.6999999, 0.25),
+                scale: (4.0, 4.0, 4.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/cloud.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            script: Some((
+                path: "scripts/cloud.py",
+            )),
+        ),
+        (
+            name: Some("Cloud 2"),
+            transform: Some((
+                position: (25.5, 6.4, -12.1),
+                rotation_euler: (0.69999963, 1.3999999, 0.00000017534151),
+                scale: (4.0, 4.0, 4.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/cloud.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            script: Some((
+                path: "scripts/cloud.py",
+            )),
+        ),
+        (
+            name: Some("Cloud 3"),
+            transform: Some((
+                position: (6.4, 6.4, -28.6),
+                rotation_euler: (-3.1415927, 1.0415928, -2.8915925),
+                scale: (4.0, 4.0, 4.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/cloud.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            script: Some((
+                path: "scripts/cloud.py",
+            )),
+        ),
+        (
+            name: Some("Cloud 4"),
+            transform: Some((
+                position: (-2.8, 2.4, 25.4),
+                rotation_euler: (-2.7915926, 0.34159273, -3.1415927),
+                scale: (3.0, 3.0, 3.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/cloud.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            script: Some((
+                path: "scripts/cloud.py",
+            )),
+        ),
+        (
+            name: Some("Cloud 5"),
+            transform: Some((
+                position: (27.5, 12.0, -5.4),
+                rotation_euler: (-2.4415927, -0.3584073, -2.8915927),
+                scale: (3.0, 3.0, 3.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/cloud.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            script: Some((
+                path: "scripts/cloud.py",
+            )),
+        ),
+        (
+            name: Some("Cloud 6"),
+            transform: Some((
+                position: (-28.6, 16.3, -4.9),
+                rotation_euler: (-3.1415927, -1.0584071, -3.1415927),
+                scale: (3.0, 3.0, 3.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/cloud.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            script: Some((
+                path: "scripts/cloud.py",
+            )),
+        ),
+        (
+            name: Some("Cloud 7"),
+            transform: Some((
+                position: (-25.1, 8.8, -24.3),
+                rotation_euler: (0.35000017, -1.3831854, 0.2500001),
+                scale: (3.0, 3.0, 3.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/cloud.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            script: Some((
+                path: "scripts/cloud.py",
+            )),
+        ),
+        (
+            name: Some("Cloud 8"),
+            transform: Some((
+                position: (14.1, 10.1, 17.5),
+                rotation_euler: (0.6999999, -0.6831854, 0.000000019213278),
+                scale: (2.0, 2.0, 2.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/cloud.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            script: Some((
+                path: "scripts/cloud.py",
+            )),
+        ),
+        (
+            name: Some("Cloud 9"),
+            transform: Some((
+                position: (-5.1, 2.4, -36.6),
+                rotation_euler: (-0.0, 0.016814886, 0.25),
+                scale: (2.0, 2.0, 2.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/cloud.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            script: Some((
+                path: "scripts/cloud.py",
+            )),
+        ),
+        (
+            name: Some("Cloud 10"),
+            transform: Some((
+                position: (-30.1, 2.4, -13.7),
+                rotation_euler: (0.34999996, 0.7168147, 0.000000009882688),
+                scale: (2.0, 2.0, 2.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/cloud.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            script: Some((
+                path: "scripts/cloud.py",
+            )),
+        ),
+        (
+            name: Some("Cloud 11"),
+            transform: Some((
+                position: (-0.9, 13.0, -30.2),
+                rotation_euler: (0.70000005, 1.4168144, 0.24999982),
+                scale: (3.0, 3.0, 3.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/cloud.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            script: Some((
+                path: "scripts/cloud.py",
+            )),
+        ),
+    ],
+)

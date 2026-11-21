@@ -19,6 +19,8 @@ bind pose.
 
 Pick whichever way suits you:
 
+- **Pick it in the Assets tab** (below). Every model in the project is
+  shown as a thumbnail.
 - **Drag a file from your system file manager** onto the scene view. Oberon
   copies it into the project's `models/` folder and places it where you
   dropped it, standing on the ground.
@@ -32,6 +34,31 @@ Pick whichever way suits you:
 The new entity is named after the file (`oak_tree.glb` becomes **Oak
 tree**). It shows the whole model: every mesh and material in the file
 draws as one entity, so you move, rotate and scale it as one object.
+
+## The Assets tab
+
+**Window → Assets** opens the Assets tab next to the Console. It shows every
+model in the project as a rendered thumbnail, so you can find the crate you
+want without reading file names.
+
+![The Assets tab showing Kenney's FPS models](../../assets/oberon/assets.png)
+
+| Control | What it does |
+|---|---|
+| **Models** / **Sounds** | Switch between model thumbnails and sound waveforms. The count is the number of files. |
+| **Filter** | Type part of a name or folder (`walls`, `enemy`) to narrow the grid. |
+| **Import…** | Copy a model or sound from anywhere on disk into the project. |
+
+Tiles work like files in the Files panel:
+
+- **Drag** a model tile onto the scene to place it there, or onto the
+  Inspector to give it to the selected entity.
+- **Double-click** a tile to add the model where the view is looking.
+- **Right-click** a tile for the same menu as in the Files panel (*Add to
+  Scene*, *Use on <entity>*, …).
+
+Thumbnails render on the CPU, so they work without a GPU too. They're
+cached, and they redraw when the file or its import settings change.
 
 ### What importing copies
 
@@ -67,6 +94,39 @@ With a model selected, the **Mesh Renderer** section shows:
 | **Change…** | Pick a different model. |
 | **Add Collider / Fit Collider** | Adds a box collider sized to the model, or refits the existing one. |
 | **Tint** | Multiplies every material's colour. Leave it white to see the model as authored. |
+
+## Import settings
+
+Models from different tools and stores rarely agree on size, facing or
+origin. Instead of fixing every entity that uses a model, fix the model
+once. Its **Import** block in the Inspector (under the Mesh Renderer) holds
+three settings:
+
+| Setting | What it does | Quick buttons |
+|---|---|---|
+| **Scale** | Multiplies the model's size. Use it for kits authored in centimetres or at toy scale. | **×0.01**, **×10** |
+| **Rotation** | Turns the model, in degrees about X, Y and Z, before the entity's own rotation. | **+90°** about Y |
+| **Pivot** | Where the entity's position sits on the model: **File** (the file's own origin), **Bottom** (centre of the base, so it stands on the ground) or **Centre**. | |
+
+Type a value or use a quick button, and every entity using that file
+updates at once, along with its thumbnail. **Reset** goes back to the file
+as it is. The settings apply wherever the model is used: in Play, under
+`run_scene`, and in exported games.
+
+Settings are saved next to the model as `<file>.import.ron`. For example,
+`models/blaster.glb.import.ron`:
+
+```ron
+(
+    scale: 1.0,
+    rotation: (0.0, 180.0, 0.0),
+    pivot: File,
+)
+```
+
+Commit these files with your models. A model without one is used exactly
+as the file describes it. Fitted colliders use the model's size after the
+import settings, so press **Fit Collider** after changing them.
 
 ## Colliders
 
@@ -134,6 +194,9 @@ yourself. A missing file raises `FileNotFoundError`. See the
 
 ## Try it
 
+`examples/oberon/fps/` uses ten of Kenney's CC0 models, three of them with
+import settings. See the [FPS tutorial](../tutorials/fps.md).
+
 `examples/models/` has a two-material glTF tree with an embedded texture,
 a textured OBJ crate, and `scene.ron` placing them. Open it:
 
@@ -151,7 +214,8 @@ the files.
 |---|---|
 | File row red, *File not found* | The model moved or the scene was saved elsewhere. **Change…** to re-pick it. |
 | *…mesh compression, which isn't supported* | Re-export without mesh compression. These glTF extensions aren't supported. |
-| Model is huge or tiny | Modelling tools disagree on units. Scale the entity, or export from Blender with **Apply Unit** checked. glTF is always metres. |
-| Model faces the wrong way | glTF's forward is +Z. Rotate the entity 180° about Y. |
+| Model is huge or tiny | Modelling tools disagree on units. Set **Import → Scale** (×0.01 for centimetres), or export from Blender with **Apply Unit** checked. glTF is always metres. |
+| Model faces the wrong way | glTF's forward is +Z. Press **Import → Rotation → +90°** until it faces the right way. |
+| Model floats or sinks when placed | Its origin isn't at its base. Set **Import → Pivot** to **Bottom**. |
 | Looks inside-out | The mesh's faces point inward. Recalculate normals in the modelling tool (Blender: **Mesh → Normals → Recalculate Outside**). |
 | Untextured but should be | Only the base colour texture is read. Check the image is PNG or JPEG and that the path in the `.mtl` / `.gltf` exists. |

@@ -16,6 +16,7 @@ You build in the editor and write small Python behaviour scripts.
 | [Camera rail & intro shot](camera-rail.md) | Keyframed camera moves, easing, handing off to gameplay | 15 min |
 | [Lighting & mood](lighting-and-mood.md) | The Graphics tab: sun, environment, tone mapping, fog, test scenes | 15 min |
 | [From Oberon to Python](oberon-to-python.md) | `at.run_scene`, headless tests in CI, shipping a game | 15 min |
+| [A first-person shooter](fps.md) | Kenney's CC0 models and sounds, import settings, mouse look, ray-cast shooting, a HUD, export | 40 min |
 
 The finished project from these tutorials is in
 [`examples/oberon/coin_run/`](../../../examples/oberon/coin_run). Open
@@ -33,6 +34,9 @@ cargo run -p oberon --release examples/oberon/coin_run/level.ron
 | Camera rail & intro shot | `Shot 1`–`Shot 3` markers and `scripts/camera_rail.py`, attached to Main Camera |
 | Lighting & mood | `level.ron` (afternoon), `level_dusk.ron`, `level_night.ron` |
 | From Oberon to Python | `main.py` and `tests/test_level.py` |
+
+The shooter is a separate project,
+[`examples/oberon/fps/`](../../../examples/oberon/fps) (*Blaster Arena*).
 
 `build_level.py` regenerates the three scene files from code. CI plays the
 project in both Oberon's script runner and the engine, and checks that the

@@ -52,7 +52,8 @@ fn main() {
     let frame = frame.to_vec();
 
     // Optional scene: `picker`, `menu`, `dialog`, `project`, `code`,
-    // `code-complete`, `code-api`, `settings`, `build`, `build-menu`, `palette`.
+    // `code-complete`, `code-api`, `settings`, `build`, `build-menu`, `palette`,
+    // `assets`, `assets-sounds`.
     let scene = std::env::args().nth(2).unwrap_or_default();
     let selected = doc.selected;
     let pointer = Pointer {
@@ -217,6 +218,16 @@ fn main() {
             ui.build_last = Some((true, "Build finished in 1.4 s → build".to_string()));
         }
         "build-menu" => ui.open_bar_menu(5, &doc),
+        "assets" | "assets-sounds" => {
+            ui.toggle_assets();
+            if scene == "assets-sounds" {
+                ui.assets.filter = oberon::ui::assets_panel::AssetFilter::Sounds;
+            }
+            // Thumbnails fill in a few per frame.
+            for _ in 0..6 {
+                let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+            }
+        }
         "palette" => {
             ui.open_palette(&doc);
             ui.palette_text("sa");

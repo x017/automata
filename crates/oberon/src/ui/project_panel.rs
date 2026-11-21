@@ -421,6 +421,19 @@ impl Ui {
     }
 
     /// The right-click menu for one file or folder.
+    /// The context menu of an asset file (the Assets tab's tiles).
+    pub(super) fn asset_menu(&self, doc: &Document, path: &Path, editing: bool) -> Vec<MenuItem> {
+        let item = Item {
+            name: path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            path: path.to_path_buf(),
+            dir: false,
+        };
+        self.file_menu(doc, &item, asset_kind(path, false), editing)
+    }
+
     fn file_menu(
         &self,
         doc: &Document,
@@ -524,6 +537,7 @@ impl Ui {
     /// re-reads listings and reveals what was created.
     pub fn files_changed(&mut self, created: Option<&Path>) {
         self.project.invalidate();
+        self.assets.invalidate();
         if let Some(path) = created {
             self.reveal_in_files(path);
         }

@@ -51,5 +51,6 @@ pub mod render;
 pub mod sounds;
 pub mod text;
 pub mod theme;
+pub mod thumbs;
 pub mod ui;
 pub mod view;

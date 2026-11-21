@@ -34,7 +34,8 @@ the editor.
 | [Cameras](cameras.md) | Scene cameras, the preview, Look Through, driving cameras from Python |
 | [Graphics](graphics.md) | The Graphics panel: quality, sun, environment, fog, test scenes |
 | [The code editor](code-editor.md) | Writing scripts inside Oberon: completion, language servers, find/replace |
-| [Models](models.md) | Importing glTF and OBJ models, textures, fitted colliders, hot reload |
+| [Models](models.md) | Importing glTF and OBJ models, the Assets tab, import settings (scale, rotation, pivot), fitted colliders |
+| [Audio](audio.md) | Sound files, Audio Sources, previews, playing sounds from scripts |
 | [Prefabs & attributes](prefabs-and-attributes.md) | Reusable objects and custom per-entity data |
 | [Exporting your game](exporting.md) | Building standalone Windows and Linux games (Ctrl+Shift+B) |
 

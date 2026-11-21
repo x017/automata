@@ -26,6 +26,7 @@ use crate::fields::{self, Choice, Field, Flag};
 use crate::theme::{color, layout};
 use crate::view::{self, Gizmo, GizmoMode, Projector};
 
+pub mod assets_panel;
 pub mod attributes;
 mod code_view;
 pub mod dialogs;
@@ -146,6 +147,8 @@ pub enum BottomTab {
     /// Log output.
     #[default]
     Console,
+    /// The project's models and sounds as thumbnails.
+    Assets,
 }
 
 /// The editor's panel rectangles for a window of a given logical size.
@@ -397,6 +400,14 @@ pub enum Intent {
     },
     /// Refit an entity's box collider to its mesh.
     FitCollider(u64),
+    /// Save a model file's import settings (scale, rotation, pivot) to its
+    /// `.import.ron`; every entity using the file updates.
+    SetImport {
+        /// The model file (absolute).
+        model: PathBuf,
+        /// The new settings.
+        settings: automata_assets::import::ImportSettings,
+    },
     /// Create an entity with an Audio Source playing a sound file. `at` is
     /// the drop point in the scene view (`None`: where the camera looks).
     AddSound {
@@ -570,6 +581,11 @@ enum EditTarget {
     AttrValue(usize, u8),
     /// A Settings text field.
     Setting(settings::SettingText),
+    /// A model's import setting: 0 = scale, 1..=3 = rotation X/Y/Z. The
+    /// file is kept in `Ui::import_edit`.
+    Import(u8),
+    /// The Assets browser's filter.
+    AssetQuery,
 }
 
 #[derive(Debug, Clone)]
@@ -758,6 +774,10 @@ pub struct Ui {
     tab_revealed: Option<usize>,
     /// Dragging a script tab: its index and the press x.
     tab_drag: Option<(usize, f32)>,
+    /// The model file and settings an `EditTarget::Import` field edits.
+    import_edit: Option<(PathBuf, automata_assets::import::ImportSettings)>,
+    /// The Assets tab: model thumbnails and sounds.
+    pub assets: assets_panel::AssetBrowser,
 }
 
 impl Default for Ui {
@@ -781,6 +801,8 @@ impl Ui {
             edit: None,
             menu: None,
             picker: None,
+            import_edit: None,
+            assets: assets_panel::AssetBrowser::default(),
             dialog: None,
             recent: Vec::new(),
             clips: crate::sounds::ClipCache::default(),
@@ -1036,6 +1058,20 @@ impl Ui {
             }
             EditTarget::DialogName => self.submit_dialog(&edit.buffer),
             EditTarget::Setting(which) => self.commit_setting(which, &edit.buffer),
+            EditTarget::AssetQuery => {
+                self.assets.query = edit.buffer.trim().to_string();
+                None
+            }
+            EditTarget::Import(which) => {
+                let (model, mut settings) = self.import_edit.take()?;
+                let value = eval_number(&edit.buffer)?;
+                match which {
+                    0 if value.abs() > 1e-6 => settings.scale = value,
+                    0 => return None,
+                    i => settings.rotation[usize::from(i - 1).min(2)] = value,
+                }
+                Some(Intent::SetImport { model, settings })
+            }
             EditTarget::AttrKey(_) => {
                 let (from, _) = edit.attr?;
                 let to = edit.buffer.trim().to_string();
@@ -1241,7 +1277,7 @@ impl Ui {
             self.doc_tabs(canvas, r);
         }
         if self.panels.show_bottom {
-            self.bottom_dock(canvas, lay.console);
+            self.bottom_dock(canvas, doc, lay.console);
         }
         if self.panels.show_hierarchy {
             self.hierarchy(canvas, doc, lay.hierarchy);
@@ -2614,6 +2650,9 @@ impl Ui {
             y += 16.0;
         }
         y += 4.0;
+        if loaded.is_ok() {
+            y = self.import_rows(canvas, x, y, w, e.id, &file, editing);
+        }
         let bw = (label_w - 6.0) / 2.0;
         let change = Rect::new(x + layout::LABEL_W, y, bw, 22.0);
         if self.row_visible(change) {
@@ -2655,6 +2694,196 @@ impl Ui {
             }
         }
         y + 28.0
+    }
+
+    /// A model file's import settings: scale, rotation and pivot, baked
+    /// into the file's geometry for every entity that uses it.
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    fn import_rows(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        mut y: f32,
+        w: f32,
+        id: u64,
+        file: &Path,
+        editing: bool,
+    ) -> f32 {
+        use automata_assets::import::{read_settings, ImportSettings, Pivot};
+        let settings = read_settings(file);
+        let fx = x + layout::LABEL_W;
+        let fw = w - layout::LABEL_W;
+        if self.row_visible(Rect::new(x, y, w, 18.0)) {
+            canvas.text(x, y + 2.0, layout::SMALL_SIZE, "Import", color::text_dim());
+            if !settings.is_identity() {
+                let reset = Rect::new(x + w - 48.0, y, 48.0, 18.0);
+                let style = if editing {
+                    ButtonStyle::Ghost
+                } else {
+                    ButtonStyle::Disabled
+                };
+                self.tip(reset, "Back to the file as it is");
+                if self.button(canvas, reset, "Reset", style) && editing {
+                    self.out.push(Intent::SetImport {
+                        model: file.to_path_buf(),
+                        settings: ImportSettings::default(),
+                    });
+                }
+            }
+            let hint = Rect::new(x, y, w - 52.0, 18.0);
+            self.tip(
+                hint,
+                "Fixes applied to the model file itself: every entity using it updates",
+            );
+        }
+        y += 22.0;
+        // Scale, with quick unit fixes.
+        if self.row_visible(Rect::new(x, y, w, layout::FIELD_H)) {
+            self.row_label(canvas, x, y, "Scale");
+            let quick = [("×0.01", 0.01), ("×10", 10.0)];
+            let qw = 44.0;
+            let field_w = (fw - (qw + 4.0) * quick.len() as f32).max(40.0);
+            let r = Rect::new(fx, y, field_w, layout::FIELD_H);
+            self.import_field(canvas, r, id, 0, settings.scale, file, settings, editing);
+            for (i, (label, k)) in quick.iter().enumerate() {
+                let b = Rect::new(
+                    fx + field_w + 4.0 + (qw + 4.0) * i as f32,
+                    y,
+                    qw,
+                    layout::FIELD_H,
+                );
+                let style = if editing {
+                    ButtonStyle::Normal
+                } else {
+                    ButtonStyle::Disabled
+                };
+                self.tip(b, "Multiply the scale (centimetres ↔ metres, tiny kits)");
+                if self.button(canvas, b, label, style) && editing {
+                    let mut s = settings;
+                    s.scale *= k;
+                    self.out.push(Intent::SetImport {
+                        model: file.to_path_buf(),
+                        settings: s,
+                    });
+                }
+            }
+        }
+        y += layout::ROW_STEP;
+        // Rotation: X Y Z, and a quarter turn for models facing away.
+        if self.row_visible(Rect::new(x, y, w, layout::FIELD_H)) {
+            self.row_label(canvas, x, y, "Rotation");
+            let turn_w = 44.0;
+            let cw = ((fw - turn_w - 4.0 - 8.0) / 3.0).max(24.0);
+            for i in 0..3u8 {
+                let r = Rect::new(fx + (cw + 4.0) * f32::from(i), y, cw, layout::FIELD_H);
+                let v = settings.rotation[usize::from(i)];
+                self.import_field(canvas, r, id, i + 1, v, file, settings, editing);
+            }
+            let b = Rect::new(fx + fw - turn_w, y, turn_w, layout::FIELD_H);
+            let style = if editing {
+                ButtonStyle::Normal
+            } else {
+                ButtonStyle::Disabled
+            };
+            self.tip(b, "Turn 90° around Y (models facing the wrong way)");
+            if self.button(canvas, b, "+90°", style) && editing {
+                let mut s = settings;
+                s.rotation[1] = (s.rotation[1] + 90.0 + 180.0).rem_euclid(360.0) - 180.0;
+                self.out.push(Intent::SetImport {
+                    model: file.to_path_buf(),
+                    settings: s,
+                });
+            }
+        }
+        y += layout::ROW_STEP;
+        // Pivot: one button per option.
+        if self.row_visible(Rect::new(x, y, w, layout::FIELD_H)) {
+            self.row_label(canvas, x, y, "Pivot");
+            let n = Pivot::ALL.len() as f32;
+            let bw = (fw - 4.0 * (n - 1.0)) / n;
+            for (i, pivot) in Pivot::ALL.into_iter().enumerate() {
+                let b = Rect::new(fx + (bw + 4.0) * i as f32, y, bw, layout::FIELD_H);
+                let style = if !editing {
+                    ButtonStyle::Disabled
+                } else if settings.pivot == pivot {
+                    ButtonStyle::Active
+                } else {
+                    ButtonStyle::Ghost
+                };
+                let label = match pivot {
+                    Pivot::File => "File",
+                    Pivot::BottomCenter => "Bottom",
+                    Pivot::Center => "Centre",
+                };
+                self.tip(b, pivot.label());
+                if self.button(canvas, b, label, style) && editing && settings.pivot != pivot {
+                    let mut s = settings;
+                    s.pivot = pivot;
+                    self.out.push(Intent::SetImport {
+                        model: file.to_path_buf(),
+                        settings: s,
+                    });
+                }
+            }
+        }
+        y + layout::ROW_STEP + 4.0
+    }
+
+    /// One number of a model's import settings; click to type.
+    #[allow(clippy::too_many_arguments)]
+    fn import_field(
+        &mut self,
+        canvas: &mut Canvas,
+        r: Rect,
+        id: u64,
+        which: u8,
+        value: f32,
+        file: &Path,
+        settings: automata_assets::import::ImportSettings,
+        editing: bool,
+    ) {
+        let active = self.is_editing(id, EditTarget::Import(which))
+            && self.import_edit.as_ref().is_some_and(|(f, _)| f == file);
+        let hot = self.hot(r);
+        let bg = if active {
+            color::viewport_bg()
+        } else if hot && editing {
+            color::hover()
+        } else {
+            color::field()
+        };
+        canvas.fill_rounded(r.x, r.y, r.w, r.h, 3.0, bg);
+        if active {
+            canvas.stroke_rounded(r.x, r.y, r.w, r.h, 3.0, color::accent(), 1.0);
+            self.draw_edit_text(canvas, r, r.x + 5.0);
+            self.cursor = CursorHint::Text;
+            return;
+        }
+        canvas.text_clipped(
+            r.x + 5.0,
+            r.y + (r.h - layout::FONT_SIZE) / 2.0 - 1.0,
+            layout::FONT_SIZE,
+            &fields::format_value(value),
+            color::text(),
+            r.w - 8.0,
+        );
+        if hot && editing {
+            self.cursor = CursorHint::Text;
+            if self.p.pressed {
+                if let Some(intent) = self.commit_edit() {
+                    self.out.push(intent);
+                }
+                self.import_edit = Some((file.to_path_buf(), settings));
+                self.edit = Some(TextEdit {
+                    id,
+                    target: EditTarget::Import(which),
+                    buffer: fields::format_value(value),
+                    rect: r,
+                    fresh: true,
+                    attr: None,
+                });
+            }
+        }
     }
 
     /// The Audio Source's clip: file, length and waveform, and buttons to
@@ -3253,7 +3482,7 @@ impl Ui {
     // ----- console & status -----------------------------------------------
 
     /// The bottom dock: the Console.
-    fn bottom_dock(&mut self, canvas: &mut Canvas, rect: Rect) {
+    fn bottom_dock(&mut self, canvas: &mut Canvas, doc: &Document, rect: Rect) {
         canvas.fill_rect(rect.x, rect.y, rect.w, rect.h, color::surface());
         canvas.fill_rect(rect.x, rect.y, rect.w, 1.0, color::border());
         let body = Rect::new(
@@ -3264,6 +3493,7 @@ impl Ui {
         );
         match self.bottom_tab {
             BottomTab::Console => self.console_body(canvas, body),
+            BottomTab::Assets => self.assets_body(canvas, doc, body),
         }
         // Tab strip.
         canvas.fill_rect(
@@ -3294,18 +3524,41 @@ impl Ui {
         } else {
             "Console".to_string()
         };
-        // A single tab today; the underline keeps it reading as a dock title.
-        let label = console_label;
-        let tw = canvas.measure_text(layout::TITLE_SIZE, &label) + 22.0;
-        let r = Rect::new(x, rect.y, tw, layout::TITLEBAR_H);
-        canvas.fill_rect(r.x + 8.0, r.y + r.h - 2.0, r.w - 16.0, 2.0, color::accent());
-        canvas.text(
-            r.x + 11.0,
-            r.y + (r.h - layout::TITLE_SIZE) / 2.0 - 1.0,
-            layout::TITLE_SIZE,
-            &label,
-            color::text(),
-        );
+        let mut x = x;
+        for (tab, label) in [
+            (BottomTab::Console, console_label),
+            (BottomTab::Assets, "Assets".to_string()),
+        ] {
+            let tw = canvas.measure_text(layout::TITLE_SIZE, &label) + 22.0;
+            let r = Rect::new(x, rect.y, tw, layout::TITLEBAR_H);
+            let on = self.bottom_tab == tab;
+            let hot = self.hot(r);
+            if on {
+                canvas.fill_rect(r.x + 8.0, r.y + r.h - 2.0, r.w - 16.0, 2.0, color::accent());
+            }
+            canvas.text(
+                r.x + 11.0,
+                r.y + (r.h - layout::TITLE_SIZE) / 2.0 - 1.0,
+                layout::TITLE_SIZE,
+                &label,
+                if on || hot {
+                    color::text()
+                } else {
+                    color::text_dim()
+                },
+            );
+            if hot {
+                self.cursor = CursorHint::Pointer;
+                if self.p.pressed {
+                    self.bottom_tab = tab;
+                }
+            }
+            x += tw;
+        }
+        if self.bottom_tab == BottomTab::Assets {
+            let strip = Rect::new(x, rect.y, rect.x + rect.w - x, layout::TITLEBAR_H);
+            self.assets_toolbar(canvas, doc, strip);
+        }
         if self.bottom_tab == BottomTab::Console {
             let clear = Rect::new(
                 rect.x + rect.w - 64.0,
@@ -4433,6 +4686,130 @@ mod tests {
             }
         }
         assert!(found.is_some(), "Add Collider button");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_import_section_saves_settings_for_the_file() {
+        use automata_assets::import::{ImportSettings, Pivot};
+        let (root, model) = model_project("import");
+        let mut c = canvas();
+        let mut doc = Document::new();
+        let id = doc.create_model(&model.to_string_lossy(), "Rock", [0.0; 3]);
+        doc.select(Some(id));
+        let mut ui = Ui::new();
+        ui.project_root = root.clone();
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        // Sweep the Inspector's right edge and middle: the quick buttons.
+        let insp = lay().inspector;
+        let mut saved = Vec::new();
+        for x in [insp.x + insp.w - 30.0, insp.x + insp.w * 0.62] {
+            for y in (insp.y as i32..(insp.y + insp.h) as i32).step_by(4) {
+                for intent in click(&mut ui, &mut c, &doc, x, y as f32) {
+                    if let Intent::SetImport { model: m, settings } = intent {
+                        assert_eq!(m, model);
+                        saved.push(settings);
+                    }
+                }
+            }
+        }
+        let turned = ImportSettings {
+            rotation: [0.0, 90.0, 0.0],
+            ..Default::default()
+        };
+        let bigger = ImportSettings {
+            scale: 10.0,
+            ..Default::default()
+        };
+        let bottom = ImportSettings {
+            pivot: Pivot::BottomCenter,
+            ..Default::default()
+        };
+        for want in [turned, bigger, bottom] {
+            assert!(saved.contains(&want), "{want:?} in {saved:?}");
+        }
+        // Typing a value commits the edited field only.
+        ui.import_edit = Some((model.clone(), turned));
+        ui.edit = Some(TextEdit {
+            id,
+            target: EditTarget::Import(0),
+            buffer: "0.5".into(),
+            rect: Rect::default(),
+            fresh: false,
+            attr: None,
+        });
+        let intent = ui.commit_edit();
+        assert_eq!(
+            intent,
+            Some(Intent::SetImport {
+                model: model.clone(),
+                settings: ImportSettings {
+                    scale: 0.5,
+                    ..turned
+                },
+            })
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_assets_tab_shows_thumbnails_and_adds_models() {
+        let (root, model) = model_project("assets");
+        let mut c = canvas();
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        ui.project_root = root.clone();
+        ui.toggle_assets();
+        assert_eq!(ui.bottom_tab, BottomTab::Assets);
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        let console = ui.layout(1600.0, 950.0).console;
+        let tile = (
+            console.x + 10.0 + 52.0,
+            console.y + layout::TITLEBAR_H + 8.0 + 40.0,
+        );
+        let px = (80.0 * c.scale()).round() as u32;
+        assert!(
+            matches!(ui.assets.thumbs.get(&model, px), Some(Some(_))),
+            "the thumbnail was drawn"
+        );
+        // Double-click adds it; dragging drops it where it lands.
+        let press = Pointer {
+            x: tile.0,
+            y: tile.1,
+            down: true,
+            pressed: true,
+            double_click: true,
+            ..Pointer::default()
+        };
+        let out = ui.frame(&mut c, &doc, press, None);
+        assert!(
+            out.contains(&Intent::AddModel {
+                path: model.clone(),
+                at: None
+            }),
+            "{out:?}"
+        );
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        let (vx, vy) = center_of(lay().viewport);
+        let out = drag(&mut ui, &mut c, &doc, tile, (vx, vy - 100.0));
+        assert!(
+            out.contains(&Intent::AddModel {
+                path: model.clone(),
+                at: Some((vx, vy - 100.0)),
+            }),
+            "{out:?}"
+        );
+        // The filter hides what doesn't match; Sounds lists none here.
+        ui.assets.query = "tree".into();
+        ui.assets.selected = None;
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        let out = click(&mut ui, &mut c, &doc, tile.0, tile.1);
+        assert!(ui.assets.selected.is_none(), "{out:?}");
+        ui.assets.query.clear();
+        ui.assets.filter = assets_panel::AssetFilter::Sounds;
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        click(&mut ui, &mut c, &doc, tile.0, tile.1);
+        assert!(ui.assets.selected.is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
 

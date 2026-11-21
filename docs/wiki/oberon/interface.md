@@ -127,6 +127,13 @@ The bottom dock collects `print()` output from your scripts, Oberon
 messages, and Python errors with clickable file and line links. The
 Info / Warnings / Errors chips filter the list.
 
+## Assets
+
+The **Assets** tab, beside the Console (**Window → Assets**), shows every
+model in the project as a thumbnail and every sound as a waveform with its
+length. Drag a tile onto the scene to add it, or double-click it. See
+[Models](models.md#the-assets-tab) and [Audio](audio.md).
+
 ## Play mode
 
 Press **▶** (Ctrl+P). Oberon copies the scene and starts simulating:

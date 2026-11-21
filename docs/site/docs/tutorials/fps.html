@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorial: a first-person shooter · AUTOMATA docs</title>
+<meta name="description" content="Time: 40 minutes · You&#x27;ll need: the first scene and coin collector tutorials, or some time in Oberon">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../../dither.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="first-scene.html">Your first scene</a></li><li><a href="coin-collector.html">Coin collector</a></li><li><a href="third-person-camera.html">Third-person camera</a></li><li><a href="camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="oberon-to-python.html">From Oberon to Python</a></li><li><a href="fps.html" aria-current="page">A first-person shooter</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/models.html">Models</a></li><li><a href="../oberon/audio.html">Audio</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/exporting.html">Exporting your game</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Tutorial: a first-person shooter</h1>
+<p><strong>Time:</strong> 40 minutes · <strong>You'll need:</strong> the <a href="first-scene.html">first scene</a> and
+<a href="coin-collector.html">coin collector</a> tutorials, or some time in Oberon</p>
+<p>You'll build <em>Blaster Arena</em>, a small first-person shooter on floating grass
+platforms, using Kenney's free (CC0) Starter Kit FPS models and sounds. You
+look around with the mouse and walk with WASD. You can double-jump, shoot
+two kinds of blaster, and fight four drones that shoot back.</p>
+<p><img src="../../../assets/oberon/assets.png" alt="Blaster Arena's assets in Oberon" loading="lazy" decoding="async"></p>
+<p>Along the way you'll use:</p>
+<ul><li>the <strong>Assets tab</strong> and per-model <strong>import settings</strong>,</li><li><strong>Audio Sources</strong> and one-shot sounds,</li><li>mouse look with a captured cursor,</li><li><strong>ray casts</strong> for shooting and line of sight,</li><li>a <strong>HUD</strong> drawn from a script,</li><li>headless tests, and exporting to Windows and Linux.</li></ul>
+<p>The finished project is in
+<a href="https://github.com/x017/automata/tree/main/examples/oberon/fps" rel="noopener"><code>examples/oberon/fps/</code></a>. Open it any time to
+compare:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>cargo run -p oberon --release examples/oberon/fps/level.ron</code></pre></div>
+<h2 id="1-the-assets">1. The assets<a class="anchor" href="#1-the-assets" aria-label="Link to this section">#</a></h2>
+<p>Make a project folder and copy in Kenney's files, keeping the folders:</p>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>blaster-arena/
+├── models/              platform.glb, wall-low.glb, enemy-flying.glb, blaster.glb, …
+│   └── Textures/colormap.png
+├── sounds/              blaster.ogg, enemy_hurt.ogg, jump_a.ogg, walking.ogg, …
+└── sprites/             crosshair.png, crosshair-repeater.png, hit.png</code></pre></div>
+<p>You can take them from <code>examples/oberon/fps/</code> or from
+<a href="https://github.com/KenneyNL/Starter-Kit-FPS" rel="noopener">Kenney's Starter Kit FPS</a>. All
+the models share one texture atlas, <code>colormap.png</code>.</p>
+<p>Open Oberon in the folder, then choose <strong>Window → Assets</strong>. The Assets tab
+next to the Console shows every model as a thumbnail. Click <strong>Sounds</strong> to see
+the sound effects as waveforms, and double-click one to hear it.</p>
+<h3 id="fix-the-facing-once">Fix the facing once<a class="anchor" href="#fix-the-facing-once" aria-label="Link to this section">#</a></h3>
+<p>glTF models face +Z, but AUTOMATA's forward is −Z. That's the way a camera
+looks and the way scripts aim. Kenney's blasters and drone point at +Z, so
+held as-is they'd point back at you.</p>
+<p>You could rotate every entity 180°, but scripts set these rotations every
+frame. It's simpler to fix the files themselves:</p>
+<ol><li>Drag <code>blaster.glb</code> from the Assets tab into the scene and select it.</li><li>In the Inspector, find the <strong>Import</strong> block under the Mesh Renderer.</li><li>Press <strong>+90°</strong> next to <strong>Rotation</strong> twice, so it reads <code>0, 180, 0</code>.</li></ol>
+<p>Do the same for <code>blaster-repeater.glb</code> and <code>enemy-flying.glb</code>. Each file now
+has a <code>*.glb.import.ron</code> next to it. Every entity that uses the model is
+turned, in Play, under <code>run_scene</code> and in exported games alike. Delete the
+test blaster afterwards. See <a href="../oberon/models.html#import-settings">Models → Import settings</a>
+for scale and pivot.</p>
+<h2 id="2-the-level">2. The level<a class="anchor" href="#2-the-level" aria-label="Link to this section">#</a></h2>
+<p>Drag platforms and walls from the Assets tab onto the scene. The example uses
+Kenney's layout: five <code>platform-large-grass</code> tiles at different heights,
+four small <code>platform</code>s, two <code>wall-high</code> and two <code>wall-low</code>, plus grass tufts
+and clouds for decoration. Positions are in <code>build_level.py</code> if you'd like to
+match them exactly.</p>
+<p>For each platform and wall, press <strong>Add Collider</strong> in the Mesh Renderer.
+Oberon fits a box to the model and raises it to sit on the model's base.
+Leave out the rigid body: a collider with no rigid body is static scenery
+that never moves.</p>
+<p>Add a <strong>Sun</strong> and an <strong>Environment</strong> from <strong>GameObject</strong>. In the
+<strong>Graphics</strong> tab, set <strong>Background</strong> and <strong>Fog Color</strong> to the same blue-grey,
+<code>(0.36, 0.39, 0.46)</code>, and turn <strong>Fog</strong> on with a density of about <code>0.015</code>, so
+the far clouds fade into the sky.</p>
+<h2 id="3-the-player">3. The player<a class="anchor" href="#3-the-player" aria-label="Link to this section">#</a></h2>
+<p>Create an empty entity named exactly <strong>Player</strong> at <code>(0, 1, 0)</code>. The drones
+look for that name. Give it:</p>
+<div class="table"><table><thead><tr><th>Component</th><th>Settings</th></tr></thead><tbody><tr><td>Rigidbody</td><td>Body Type <strong>Kinematic (position)</strong></td></tr><tr><td>Collider</td><td><strong>Capsule</strong>, Radius <code>0.3</code>, Half Height <code>0.5</code></td></tr><tr><td>Character Controller</td><td>Defaults (the script does the moving)</td></tr><tr><td>Camera</td><td>Field of View <code>80</code></td></tr><tr><td>Audio Source</td><td>Clip <code>sounds/walking.ogg</code>, Volume <code>0.35</code>, <strong>Loop</strong> on, Play On Start off</td></tr><tr><td>Attributes</td><td><code>health</code> (Int) = <code>100</code></td></tr></tbody></table></div>
+<p>Then add the two weapons as plain entities named <strong>Blaster</strong> and <strong>Blaster
+Repeater</strong>, using their models with Scale <code>0.4</code>. Don't give them colliders,
+or your own shots would hit them. The player script carries them around.</p>
+<p>Attach <code>scripts/player.py</code> to the Player (<strong>Add Component → Script…</strong>, then
+type the new name). The rest of this section walks through it. The finished
+file is in the example folder.</p>
+<h3 id="mouse-look">Mouse look<a class="anchor" href="#mouse-look" aria-label="Link to this section">#</a></h3>
+<p><code>start</code> captures the cursor, and <code>update</code> turns the mouse movement into yaw
+(left/right) and pitch (up/down). Esc gives the cursor back, and a click
+captures it again:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># scripts/player.py</span>
+    <span class="tok-c"># Mouse capture: Esc frees the cursor, a click takes it back.</span>
+    clicked_to_capture = <span class="tok-b">False</span>
+    <span class="tok-k">if</span> inp.just_pressed(<span class="tok-s">&quot;escape&quot;</span>):
+        inp.lock_mouse(<span class="tok-b">False</span>)
+    <span class="tok-k">elif</span> <span class="tok-k">not</span> inp.mouse_locked <span class="tok-k">and</span> inp.mouse_just_pressed(<span class="tok-s">&quot;left&quot;</span>):
+        inp.lock_mouse()
+        clicked_to_capture = <span class="tok-b">True</span>
+
+    <span class="tok-c"># Mouse look.</span>
+    dx, dy = inp.mouse_delta
+    s[<span class="tok-s">&quot;yaw&quot;</span>] -= dx * SENSITIVITY
+    s[<span class="tok-s">&quot;pitch&quot;</span>] = <span class="tok-b">max</span>(-<span class="tok-n">1.5</span>, <span class="tok-b">min</span>(<span class="tok-n">1.5</span>, s[<span class="tok-s">&quot;pitch&quot;</span>] - dy * SENSITIVITY))
+    yaw, pitch = s[<span class="tok-s">&quot;yaw&quot;</span>], s[<span class="tok-s">&quot;pitch&quot;</span>]</code></pre></div>
+<p>The camera then rides at eye height and looks along the view direction:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># scripts/player.py</span>
+    cam = entity.camera
+    <span class="tok-k">if</span> cam <span class="tok-k">is</span> <span class="tok-k">not</span> <span class="tok-b">None</span>:
+        cam.position = eye
+        cam.target = <span class="tok-b">tuple</span>(e + f <span class="tok-k">for</span> e, f <span class="tok-k">in</span> <span class="tok-b">zip</span>(eye, forward))</code></pre></div>
+<h3 id="walking-jumping-and-footsteps">Walking, jumping and footsteps<a class="anchor" href="#walking-jumping-and-footsteps" aria-label="Link to this section">#</a></h3>
+<p>WASD (or the arrows) moves relative to where you face. Speed eases in rather
+than snapping, and gravity pulls the controller down unless it's grounded:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># scripts/player.py</span>
+    grounded = ctx.physics.grounded(entity)
+    vy = s[<span class="tok-s">&quot;vy&quot;</span>]
+    <span class="tok-k">if</span> grounded <span class="tok-k">and</span> vy &lt;= <span class="tok-n">0.0</span>:
+        <span class="tok-k">if</span> s[<span class="tok-s">&quot;air&quot;</span>] &gt; <span class="tok-n">0.35</span>:
+            ctx.audio.play(<span class="tok-s">&quot;sounds/land.ogg&quot;</span>, volume=VOLUME)
+        s[<span class="tok-s">&quot;air&quot;</span>] = <span class="tok-n">0.0</span>
+        s[<span class="tok-s">&quot;jumps&quot;</span>] = JUMPS
+        vy = -<span class="tok-n">2.0</span>  <span class="tok-c"># keeps the controller pressed onto slopes</span>
+    <span class="tok-k">else</span>:
+        s[<span class="tok-s">&quot;air&quot;</span>] += dt
+        vy -= GRAVITY * dt
+    <span class="tok-k">if</span> inp.just_pressed(<span class="tok-s">&quot;space&quot;</span>) <span class="tok-k">and</span> s[<span class="tok-s">&quot;jumps&quot;</span>] &gt; <span class="tok-n">0</span>:
+        vy = JUMP
+        s[<span class="tok-s">&quot;jumps&quot;</span>] -= <span class="tok-n">1</span>
+        ctx.audio.play(random.choice(JUMP_SOUNDS), volume=VOLUME)</code></pre></div>
+<p><code>JUMPS = 2</code> gives one jump from the ground and one in the air. Each jump
+plays one of three jump sounds at random, so repeats don't sound mechanical.</p>
+<p>Footsteps use the Player's own Audio Source. It's a loop, so the script
+starts it when you begin walking and stops it when you stop:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># scripts/player.py</span>
+    walking = grounded <span class="tok-k">and</span> math.hypot(vx, vz) &gt; <span class="tok-n">1.0</span>
+    <span class="tok-k">if</span> walking != s[<span class="tok-s">&quot;walking&quot;</span>]:
+        s[<span class="tok-s">&quot;walking&quot;</span>] = walking
+        <span class="tok-k">if</span> walking:
+            entity.audio.play()
+        <span class="tok-k">else</span>:
+            entity.audio.stop()</code></pre></div>
+<h3 id="shooting">Shooting<a class="anchor" href="#shooting" aria-label="Link to this section">#</a></h3>
+<p>A shot is a ray cast from the eye. Whatever it hits first, if that entity
+has a <code>health</code> attribute, loses some. The Blaster fires three slightly
+spread rays (a small shotgun). The Repeater fires one ray, but faster:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># scripts/player.py</span>
+    <span class="tok-k">for</span> _ <span class="tok-k">in</span> <span class="tok-b">range</span>(weapon[<span class="tok-s">&quot;shots&quot;</span>]):
+        jitter = (random.uniform(-spread, spread), random.uniform(-spread, spread))
+        direction = normalized(offset(forward, (right, up), jitter))
+        hit = ctx.physics.raycast(eye, direction, RANGE, ignore=entity)
+        <span class="tok-k">if</span> hit <span class="tok-k">is</span> <span class="tok-b">None</span> <span class="tok-k">or</span> hit.entity <span class="tok-k">is</span> <span class="tok-b">None</span>:
+            <span class="tok-k">continue</span>
+        health = hit.entity.attributes.get(<span class="tok-s">&quot;health&quot;</span>)
+        <span class="tok-k">if</span> health <span class="tok-k">is</span> <span class="tok-k">not</span> <span class="tok-b">None</span> <span class="tok-k">and</span> hit.entity.name != entity.name:
+            hit.entity.attributes[<span class="tok-s">&quot;health&quot;</span>] = health - weapon[<span class="tok-s">&quot;damage&quot;</span>]
+            s[<span class="tok-s">&quot;marker&quot;</span>] = <span class="tok-n">0.15</span></code></pre></div>
+<p><code>ignore=entity</code> keeps the ray from hitting your own capsule. The <code>WEAPONS</code>
+list at the top of the file holds each blaster's cooldown, damage, spread,
+sound and crosshair. Press E to switch between them. Try changing the
+numbers while the game runs; scripts hot-reload when you save.</p>
+<p>The held blaster is just an entity that the script moves in front of the
+camera every frame, offset right, down and forward along the view axes. The
+other blaster is parked far below the level.</p>
+<h3 id="the-hud">The HUD<a class="anchor" href="#the-hud" aria-label="Link to this section">#</a></h3>
+<p><code>ctx.hud</code> draws over the game for one frame, so the script redraws it every
+frame. Positions are screen pixels, and shapes are placed by their centre:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># scripts/player.py</span>
+    hud.image(weapon[<span class="tok-s">&quot;crosshair&quot;</span>], cx, cy, size=(<span class="tok-n">44</span>, <span class="tok-n">44</span>))
+    <span class="tok-k">if</span> s[<span class="tok-s">&quot;marker&quot;</span>] &gt; <span class="tok-n">0.0</span>:
+        hud.image(<span class="tok-s">&quot;sprites/hit.png&quot;</span>, cx, cy, size=(<span class="tok-n">64</span>, <span class="tok-n">64</span>), color=(<span class="tok-n">1.0</span>, <span class="tok-n">1.0</span>, <span class="tok-n">1.0</span>, <span class="tok-n">0.9</span>))
+        s[<span class="tok-s">&quot;marker&quot;</span>] -= dt</code></pre></div>
+<p>The rest of <code>draw_hud</code> adds a health bar at the bottom left, a red flash
+when you're hit, and a pip for each drone still flying at the top right.</p>
+<h2 id="4-the-drones">4. The drones<a class="anchor" href="#4-the-drones" aria-label="Link to this section">#</a></h2>
+<p>Drag four <code>enemy-flying.glb</code> drones into the air around the level and name
+them <strong>Enemy 1</strong> to <strong>Enemy 4</strong>. Give each one:</p>
+<ul><li>a <strong>Ball</strong> collider, radius <code>0.6</code>, offset <code>(0, 0.45, 0)</code>, so your shots
+have something to hit. Use no rigid body, because the script moves it;</li><li>a <code>health</code> (Int) attribute of <code>100</code>;</li><li>the script <code>scripts/enemy.py</code>.</li></ul>
+<p>Each frame a drone bobs, turns to face the player, and checks its health.
+A lower number than last frame means a shot landed:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># scripts/enemy.py</span>
+    health = entity.attributes.get(<span class="tok-s">&quot;health&quot;</span>, <span class="tok-n">100</span>)
+    position = entity.transform.position
+    <span class="tok-k">if</span> health &lt; s[<span class="tok-s">&quot;health&quot;</span>]:
+        <span class="tok-k">if</span> health &lt;= <span class="tok-n">0</span>:
+            ctx.audio.play(<span class="tok-s">&quot;sounds/enemy_destroy.ogg&quot;</span>, volume=VOLUME, position=position)
+            entity.despawn()
+            <span class="tok-k">return</span>
+        ctx.audio.play(<span class="tok-s">&quot;sounds/enemy_hurt.ogg&quot;</span>, volume=VOLUME, position=position)
+    s[<span class="tok-s">&quot;health&quot;</span>] = health</code></pre></div>
+<p>Passing <code>position=</code> makes a one-shot sound fade with distance, so a drone
+blowing up across the map is quieter than one next to you.</p>
+<p>Four times a second, a drone casts its own ray at you. It only fires if
+you're within 6 m and the first thing the ray hits is the Player, so
+ducking behind a wall works:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># scripts/enemy.py</span>
+    direction = <span class="tok-b">tuple</span>(c / distance <span class="tok-k">for</span> c <span class="tok-k">in</span> d)
+    hit = ctx.physics.raycast(center, direction, RANGE, ignore=entity)
+    <span class="tok-k">if</span> hit <span class="tok-k">is</span> <span class="tok-k">not</span> <span class="tok-b">None</span> <span class="tok-k">and</span> hit.entity <span class="tok-k">is</span> <span class="tok-k">not</span> <span class="tok-b">None</span> <span class="tok-k">and</span> hit.entity.name == <span class="tok-s">&quot;Player&quot;</span>:
+        ctx.audio.play(<span class="tok-s">&quot;sounds/enemy_attack.ogg&quot;</span>, volume=VOLUME, position=center)
+        player.attributes[<span class="tok-s">&quot;health&quot;</span>] = player.attributes.get(<span class="tok-s">&quot;health&quot;</span>, <span class="tok-n">100</span>) - DAMAGE</code></pre></div>
+<p>The player script notices its own <code>health</code> dropping, flashes the screen, and
+respawns you at full health when it reaches zero or when you fall off the
+world. The two scripts never call each other; they only share attributes.</p>
+<h2 id="5-play">5. Play<a class="anchor" href="#5-play" aria-label="Link to this section">#</a></h2>
+<p>Press <strong>Play</strong> (Ctrl+P) and click the view to capture the mouse. Clear all
+four drones, and the Console prints <em>All drones down. Nice shooting!</em></p>
+<p>Press Esc to free the mouse, then Stop. Everything goes back to how it was:
+despawned drones return, and health resets.</p>
+<h2 id="6-test-it-headless">6. Test it headless<a class="anchor" href="#6-test-it-headless" aria-label="Link to this section">#</a></h2>
+<p><code>examples/oberon/fps/tests/test_fps.py</code> has two kinds of test. Some run the real
+scene with <code>run_scene(headless=True)</code>: the player lands on the platform,
+drones bob and turn, a close drone shoots, and falling off respawns you.
+Others drive one script with a fake <code>ctx</code> to check shooting, switching
+weapons and jumping without a mouse.</p>
+<p>Gameplay over time needs a paced run, otherwise <code>ctx.time.delta</code> is close to
+zero:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.run_scene(<span class="tok-s">&quot;level.ron&quot;</span>, headless=<span class="tok-b">True</span>, max_frames=<span class="tok-n">90</span>, target_fps=<span class="tok-n">60</span>)</code></pre></div>
+<p>Run them with:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>pytest examples/oberon/fps/tests</code></pre></div>
+<h2 id="7-export-it">7. Export it<a class="anchor" href="#7-export-it" aria-label="Link to this section">#</a></h2>
+<p>The example includes a <code>build.ron</code> that sets the start scene to <code>level.ron</code>
+and leaves out <code>tests/</code> and <code>build_level.py</code>. In Oberon, choose <strong>Build →
+Build Game</strong> (Ctrl+Shift+B), or from a terminal:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>automata-export build examples/oberon/fps --target all</code></pre></div>
+<p>You get <code>build/linux/Blaster Arena/Blaster Arena</code> and
+<code>build/windows/Blaster Arena/Blaster Arena.exe</code>, plus a <code>.tar.gz</code> and a
+<code>.zip</code> to share. The models, their import settings, the sounds and the
+sprites are all included. See <a href="../oberon/exporting.html">Exporting your game</a>.</p>
+<h2 id="where-next">Where next<a class="anchor" href="#where-next" aria-label="Link to this section">#</a></h2>
+<ul><li>Add a third weapon: one more entry in <code>WEAPONS</code> and one more entity.</li><li>Give drones a patrol path: store waypoints in attributes and move <code>home</code>
+towards them.</li><li>Add health pickups: an entity whose script checks its distance to the
+Player, adds to the Player's <code>health</code> attribute, plays a sound and
+despawns.</li></ul>
+<p>Credits: models, sounds and sprites by <a href="https://kenney.nl" rel="noopener">Kenney</a> (CC0).
+The level layout and tuning follow his MIT-licensed Starter Kit FPS. See
+<a href="https://github.com/x017/automata/blob/main/examples/oberon/fps/CREDITS.md" rel="noopener"><code>CREDITS.md</code></a>.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="oberon-to-python.html"><small>Previous</small>From Oberon to Python</a><a class="next" href="../zero-to-hero.html"><small>Next</small>Zero to hero (Python)</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/tutorials/fps.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#1-the-assets">1. The assets</a></li><li class="l3"><a href="#fix-the-facing-once">Fix the facing once</a></li><li class="l2"><a href="#2-the-level">2. The level</a></li><li class="l2"><a href="#3-the-player">3. The player</a></li><li class="l3"><a href="#mouse-look">Mouse look</a></li><li class="l3"><a href="#walking-jumping-and-footsteps">Walking, jumping and footsteps</a></li><li class="l3"><a href="#shooting">Shooting</a></li><li class="l3"><a href="#the-hud">The HUD</a></li><li class="l2"><a href="#4-the-drones">4. The drones</a></li><li class="l2"><a href="#5-play">5. Play</a></li><li class="l2"><a href="#6-test-it-headless">6. Test it headless</a></li><li class="l2"><a href="#7-export-it">7. Export it</a></li><li class="l2"><a href="#where-next">Where next</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

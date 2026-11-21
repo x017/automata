@@ -51,6 +51,7 @@ NAV: list[tuple[str, list[tuple[str, str]]]] = [
         ("wiki/tutorials/camera-rail.md", "Camera rail & intro shot"),
         ("wiki/tutorials/lighting-and-mood.md", "Lighting & mood"),
         ("wiki/tutorials/oberon-to-python.md", "From Oberon to Python"),
+        ("wiki/tutorials/fps.md", "A first-person shooter"),
         ("wiki/zero-to-hero.md", "Zero to hero (Python)"),
     ]),
     ("Oberon", [
@@ -61,6 +62,7 @@ NAV: list[tuple[str, list[tuple[str, str]]]] = [
         ("wiki/oberon/graphics.md", "Graphics"),
         ("wiki/oberon/code-editor.md", "The code editor"),
         ("wiki/oberon/models.md", "Models"),
+        ("wiki/oberon/audio.md", "Audio"),
         ("wiki/oberon/prefabs-and-attributes.md", "Prefabs & attributes"),
         ("wiki/oberon/exporting.md", "Exporting your game"),
         ("wiki/oberon/shortcuts.md", "Keyboard shortcuts"),
