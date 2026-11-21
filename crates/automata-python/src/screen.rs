@@ -60,6 +60,8 @@ pub struct ScreenFrame {
     pub items: Vec<HudItem>,
     /// A cursor-lock change requested this frame.
     pub lock: Option<bool>,
+    /// A graphics quality change requested this frame.
+    pub graphics: Option<automata_renderer::GraphicsQuality>,
 }
 
 /// Shared between the view and the game loop.
@@ -71,6 +73,7 @@ pub type ScreenQueue = Rc<RefCell<ScreenFrame>>;
 pub struct PyScreen {
     size: (u32, u32),
     locked: bool,
+    graphics: automata_renderer::GraphicsQuality,
     root: Option<PathBuf>,
     queue: ScreenQueue,
 }
@@ -80,12 +83,14 @@ impl PyScreen {
     pub(crate) fn new(
         size: (u32, u32),
         locked: bool,
+        graphics: automata_renderer::GraphicsQuality,
         root: Option<PathBuf>,
         queue: ScreenQueue,
     ) -> Self {
         Self {
             size,
             locked,
+            graphics,
             root,
             queue,
         }
@@ -121,6 +126,22 @@ impl PyScreen {
     #[pyo3(signature = (locked=true))]
     fn lock_cursor(&self, locked: bool) {
         self.queue.borrow_mut().lock = Some(locked);
+    }
+
+    /// The graphics quality preset in use: `"low"`, `"medium"`, `"high"`,
+    /// `"ultra"` or `"beautiful"` (reflects `set_graphics` immediately).
+    #[getter]
+    fn graphics(&self) -> &'static str {
+        crate::game::quality_name(self.queue.borrow().graphics.unwrap_or(self.graphics))
+    }
+
+    /// Switches the graphics quality preset; it takes effect from the next
+    /// frame. Accepts the names above (or an `at.GraphicsQuality`); unknown
+    /// names raise `ValueError`. Headless runs record it but draw nothing.
+    fn set_graphics(&self, quality: &str) -> PyResult<()> {
+        let quality = crate::game::parse_quality(quality)?;
+        self.queue.borrow_mut().graphics = Some(quality);
+        Ok(())
     }
 
     /// Draws an image file centred at `(x, y)` this frame. `size` defaults

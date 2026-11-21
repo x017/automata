@@ -195,8 +195,9 @@ glowing through wave crests. It receives shadows.
 
 ![The same scene on Beautiful: refraction, depth absorption, soft cascaded shadows and bloom](../../assets/rendering/water_beautiful.jpg)
 
-The water surface has no collider. Add a physics box under it if things
-should float or stop.
+Water is also physics: dynamic bodies float in it and ride its waves (see
+[Physics → Water](physics.md#water)). The surface isn't a solid collider,
+so give the water a floor if sinking things should stop.
 
 ## Mood recipes
 

@@ -584,6 +584,13 @@ class Physics:
         sid, point, normal, distance = hit
         return Hit(self._host.entities.get(sid), point, normal, distance)
 
+    def water_height(self, x, z):
+        """The height of the water surface at world ``(x, z)``, waves
+        included (what floating bodies ride), or None where there's no
+        water."""
+        h = self._host.backend.water_height(float(x), float(z))
+        return None if h is None else float(h)
+
     def __getattr__(self, name):
         return self._host.backend.extra("physics", name)
 
@@ -768,6 +775,10 @@ class Backend:
 
     def grounded(self, entity):
         return False
+
+    def water_height(self, x, z):
+        """The water's surface height at ``(x, z)``, or None."""
+        return None
 
     def source_playing(self, entity):
         return False

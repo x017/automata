@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 automata-assets = { workspace = true }
+automata-renderer = { workspace = true }
 automata-scene = { workspace = true }
 glam = { workspace = true }
 hecs = { workspace = true }
@@ -20,5 +21,3 @@ tracing = { workspace = true }
 [lints]
 workspace = true
 
-[dev-dependencies]
-automata-renderer = { workspace = true }

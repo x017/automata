@@ -2174,6 +2174,8 @@ impl Ui {
                 y = self.float_row(canvas, x, y, w, e, "Wave Speed", Field::WaterWaveSpeed);
                 y = self.float_row(canvas, x, y, w, e, "Direction", Field::WaterWaveDirection);
                 y = self.float_row(canvas, x, y, w, e, "Foam", Field::WaterFoam);
+                y = self.float_row(canvas, x, y, w, e, "Density", Field::WaterDensity);
+                y = self.float_row(canvas, x, y, w, e, "Drag", Field::WaterDrag);
                 y += 6.0;
             }
         }

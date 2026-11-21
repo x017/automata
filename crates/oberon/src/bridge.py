@@ -356,6 +356,36 @@ def raycast_shapes(shapes, origin, direction, max_distance, ignore_id=None, mesh
 # --------------------------------------------------------------------------
 
 
+def water_surface_height(p, x, z):
+    """The height of a packed water surface (``WaterSurface::pack``) at
+    world ``(x, z)``, or None off its rectangle. Mirrors the Rust sampler."""
+    if x < p[10] or z < p[11] or x > p[12] or z > p[13]:
+        return None
+    level = p[8]
+    if abs(p[0] * x + p[1] * level + p[2] * z + p[3]) > 0.5:
+        return None
+    if abs(p[4] * x + p[5] * level + p[6] * z + p[7]) > 0.5:
+        return None
+    if p[9] == level:
+        return level
+
+    def waves(x, z):
+        ox = oz = h = 0.0
+        for i in range(14, len(p), 6):
+            kx, kz, phase, k, amp, qamp = p[i : i + 6]
+            if amp == 0.0:
+                continue
+            theta = kx * x + kz * z - phase
+            c = math.cos(theta) * qamp / k
+            ox += kx * c
+            oz += kz * c
+            h += amp * math.sin(theta)
+        return ox, oz, h
+
+    ox, oz, _ = waves(x, z)
+    return level + waves(x - ox, z - oz)[2]
+
+
 class BridgeBackend(api.Backend):
     """Answers the shared API's questions from the current frame message."""
 
@@ -364,6 +394,7 @@ class BridgeBackend(api.Backend):
         self.meshes = {}
         self.playing = set()
         self.index = None
+        self.water = []
 
     def set_shapes(self, shapes):
         self.shapes = shapes
@@ -378,6 +409,13 @@ class BridgeBackend(api.Backend):
 
     def source_playing(self, entity):
         return entity.id in self.playing
+
+    def water_height(self, x, z):
+        for surface in self.water:
+            h = water_surface_height(surface, x, z)
+            if h is not None:
+                return h
+        return None
 
     def log(self, level, message):
         send({"op": "log", "level": level, "msg": message})
@@ -425,6 +463,7 @@ class Runner:
             self.backend.meshes[key] = Mesh(verts, indices)
         self.backend.set_shapes(msg.get("cols", []))
         self.backend.playing = set(msg.get("playing", []))
+        self.backend.water = msg.get("water", [])
         started = time.perf_counter()
         out = self.host.frame(
             msg.get("entities", []),

@@ -266,10 +266,17 @@ impl PlaySession {
             .filter(|(_, e)| self.sources.is_playing(*e))
             .filter_map(|&(i, _)| self.doc.entities.get(i).map(|e| e.id))
             .collect();
+        let water = self
+            .physics
+            .water_surfaces()
+            .iter()
+            .map(|w| w.pack().to_vec())
+            .collect();
         FrameInput {
             colliders,
             meshes,
             playing,
+            water,
             ..FrameInput::default()
         }
     }
@@ -454,6 +461,12 @@ impl PlaySession {
             self.despawn(entity);
         }
         self.write_back();
+    }
+
+    /// The clock water waves run on in this session (the physics clock).
+    #[must_use]
+    pub fn water_time(&self) -> f32 {
+        self.physics.water_time()
     }
 
     /// The scene's camera (the first entity with one), as the simulation
@@ -1196,6 +1209,120 @@ mod tests {
         );
         // The slope's normal leans 45° and faces up, toward the ray.
         assert!((float("an") - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-3);
+    }
+
+    /// Water in play mode: a crate floats at the surface, and scripts read
+    /// the surface height through the real bridge.
+    #[test]
+    fn crates_float_and_scripts_read_the_water_height() {
+        use crate::bridge::{BridgeMsg, ScriptBridge};
+        use crate::doc::ComponentKind;
+        use automata_core::AttributeValue as A;
+        let dir = std::env::temp_dir().join(format!("oberon_play_water_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("probe.py"),
+            "def update(entity, ctx):\n\
+             \x20   h = ctx.physics.water_height(1.0, 2.0)\n\
+             \x20   entity.attributes['in'] = h if h is not None else -99.0\n\
+             \x20   entity.attributes['out'] = ctx.physics.water_height(40, 0) is None\n",
+        )
+        .unwrap();
+        let mut doc = Document::starter();
+        doc.path = Some(dir.join("level.ron"));
+        let i = doc.add_entity_named("Sea");
+        let sea = doc.entities[i].id;
+        doc.modify(sea, false, |d| {
+            if let Some(t) = &mut d.transform {
+                t.position = [0.0, 0.5, 0.0];
+            }
+            d.water = Some(automata_renderer::Water {
+                size: [20.0, 20.0],
+                wave_height: 0.0,
+                ..automata_renderer::Water::default()
+            });
+        });
+        let id = doc.create(CreateKind::Cube);
+        doc.rename_entity(id, "Crate");
+        doc.modify(id, false, |d| {
+            if let Some(t) = &mut d.transform {
+                t.position = [3.0, 3.0, 3.0];
+            }
+        });
+        assert!(doc.add_component(id, ComponentKind::RigidBody));
+        assert!(doc.add_component(id, ComponentKind::Collider));
+        let i = doc.add_entity_named("Probe");
+        let probe = doc.entities[i].id;
+        doc.modify(probe, false, |d| {
+            d.script = Some(automata_core::Script {
+                path: "probe.py".into(),
+            });
+        });
+
+        let mut play = PlaySession::start(&doc);
+        for _ in 0..600 {
+            play.update(TIMESTEP);
+        }
+        let y = |play: &PlaySession, name: &str| {
+            let e = play.doc.entities.iter().find(|e| e.name() == name).unwrap();
+            e.data.transform.as_ref().unwrap().position[1]
+        };
+        // Collider density 1 in water of density 2: half under.
+        let crate_y = y(&play, "Crate");
+        assert!(
+            (crate_y - 0.5).abs() < 0.08,
+            "crate should float at the surface, y = {crate_y}"
+        );
+        assert!(
+            play.water_time() > 9.9,
+            "the wave clock is the physics clock"
+        );
+        assert_eq!(play.frame_input().water.len(), 1);
+
+        let python = crate::bridge::default_python();
+        if std::process::Command::new(python)
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        let mut errors = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while bridge.answered < 3 && std::time::Instant::now() < deadline {
+            for msg in bridge.poll() {
+                match msg {
+                    BridgeMsg::Frame(w) => play.apply_frame(&w),
+                    BridgeMsg::Error { msg, traceback, .. } => {
+                        errors.push(format!("{msg}\n{traceback}"));
+                    }
+                    _ => {}
+                }
+            }
+            let input = play.frame_input();
+            let states = play.script_states(|rel| doc.resolve(rel));
+            if bridge.send_frame_with(TIMESTEP, play.elapsed, &[], &states, &input) {
+                play.update(TIMESTEP);
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(errors.is_empty(), "{errors:?}");
+        let probe = play
+            .doc
+            .entities
+            .iter()
+            .find(|e| e.name() == "Probe")
+            .unwrap();
+        match probe.data.attributes.get("in") {
+            Some(A::Float(h)) => assert!((h - 0.5).abs() < 1e-4, "water height {h}"),
+            other => panic!("in: {other:?}"),
+        }
+        assert_eq!(probe.data.attributes.get("out"), Some(&A::Bool(true)));
     }
 
     /// The shipped FPS example, played through the real bridge: the player

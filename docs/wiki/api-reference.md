@@ -142,7 +142,8 @@ Guide: [Rendering & Lights](guides/rendering-and-lights.md#environment).
 ```python
 at.Water(size=(20, 20), deep_color=(0.01, 0.07, 0.11),
          shallow_color=(0.1, 0.42, 0.44), clarity=2.5, wave_height=0.12,
-         wave_length=5.0, wave_speed=1.0, wave_direction=30.0, foam=0.6)
+         wave_length=5.0, wave_speed=1.0, wave_direction=30.0, foam=0.6,
+         density=2.0, drag=1.0)
 at.Water.preset("pond" | "lake" | "ocean" | "sea" | "default")
 ```
 
@@ -152,8 +153,12 @@ metres wide, centred on its `Transform`. Waves are Gerstner waves
 toward `wave_direction` degrees around +Y). Every quality preset draws it;
 `BEAUTIFUL` adds refraction of what's underneath, depth-based absorption
 (`clarity` is how many metres you can see down) and shoreline `foam`.
+It's also a volume of water for physics. Dynamic bodies in it float by
+buoyancy (`density` against their colliders' density, which defaults to
+1.0, so a default box floats half under) and are slowed by `drag`.
 All arguments are readable as properties, and it's saved in scene files.
-Guide: [Rendering & Lights](guides/rendering-and-lights.md#water).
+Guides: [Rendering & Lights](guides/rendering-and-lights.md#water),
+[Physics](guides/physics.md#water).
 
 ### Physics components
 
@@ -255,6 +260,7 @@ ctx.physics.set_gravity((gx, gy, gz))
 ctx.physics.body_count() -> int
 key = ctx.physics.cast_ray(origin, direction, max_distance=1000.0, exclude=None)
 ctx.physics.ray_result(key) -> (entity_id, point, normal, distance) | None
+ctx.physics.water_height(x, z) -> float | None   # surface height, waves included
 ```
 
 `ctx.physics2d`: `apply_impulse(entity, (x, y))`, `grounded(entity)`,
@@ -361,7 +367,7 @@ returns the number of frames run.
 | `time` | `delta`, `elapsed`, `frame` (from 1) |
 | `scene` | Script entities: `["Name"]`, `find`, `by_id`, `in`, iteration |
 | `input` | Keys with the aliases `"shift"`, `"ctrl"`, `"alt"` (either side) and `"left"`/`"right"`/`"up"`/`"down"`; `axis(neg, pos)`; mouse buttons, `mouse_delta`, `lock_mouse` |
-| `physics` | `grounded`, `raycast`; the rest of the engine's physics, which also accepts script entities |
+| `physics` | `grounded`, `raycast`, `water_height(x, z)`; the rest of the engine's physics, which also accepts script entities |
 | `audio`, `hud` | One-shot sounds; HUD images, rectangles and text (`hud.text(text, x, y, size=24, color, align, shadow, outline)`) |
 | `camera` | The first `Camera3D` in the scene as a `ScriptCamera` |
 | `events`, `resources`, `screen`, `raw`, `quit()` | Engine extras (`run_scene` only). `screen.measure_text(text, size)` gives text's pixel size |

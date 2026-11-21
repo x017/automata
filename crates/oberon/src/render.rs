@@ -178,6 +178,7 @@ impl ViewportRenderer {
             Some(camera),
             size,
             Vec::new(),
+            None,
         );
         Some((self.preview_frame.as_slice(), size.0, size.1))
     }
@@ -230,6 +231,7 @@ impl ViewportRenderer {
                     Some(cam.to_camera3d()),
                     (width, height),
                     Vec::new(),
+                    None,
                 );
             }
             None => {
@@ -261,6 +263,7 @@ impl ViewportRenderer {
                 let editor_cam = session.scene_camera().is_none().then(|| cam.to_camera3d());
                 let root = session.doc.base_dir();
                 let hud = self.hud_sprites(renderer, &root, &session.hud);
+                let time = Some(session.water_time());
                 let world = session.scene_mut().world_mut();
                 // Uploads only visuals not yet materialized (first frame).
                 automata_scene::materialize_visuals(world, renderer);
@@ -272,6 +275,7 @@ impl ViewportRenderer {
                     editor_cam,
                     (width, height),
                     hud,
+                    time,
                 );
             }
             None => {
@@ -300,6 +304,7 @@ impl ViewportRenderer {
             Some(cam.to_camera3d()),
             (width.max(1), height.max(1)),
             Vec::new(),
+            None,
         );
         self.meshes
     }
@@ -317,6 +322,7 @@ impl ViewportRenderer {
         let editor_cam = session.scene_camera().is_none().then(|| cam.to_camera3d());
         let root = session.doc.base_dir();
         let hud = self.hud_sprites(renderer, &root, &session.hud);
+        let time = Some(session.water_time());
         let world = session.scene_mut().world_mut();
         automata_scene::materialize_visuals(world, renderer);
         self.meshes = Self::draw_scene(
@@ -326,6 +332,7 @@ impl ViewportRenderer {
             editor_cam,
             (width.max(1), height.max(1)),
             hud,
+            time,
         );
         self.meshes
     }
@@ -348,8 +355,9 @@ impl ViewportRenderer {
         camera: Option<automata_renderer::Camera3D>,
         size: (u32, u32),
         overlay: Vec<Sprite>,
+        time: Option<f32>,
     ) -> usize {
-        let meshes = Self::draw_scene(renderer, target, world, camera, size, overlay);
+        let meshes = Self::draw_scene(renderer, target, world, camera, size, overlay, time);
         if let Some((texture, _)) = target.as_ref() {
             renderer.read_texture_rgba_into(texture, size, frame);
         }
@@ -365,6 +373,7 @@ impl ViewportRenderer {
         camera: Option<automata_renderer::Camera3D>,
         size: (u32, u32),
         overlay: Vec<Sprite>,
+        time: Option<f32>,
     ) -> usize {
         // Reuse the render target across frames (recreate on resize).
         if target.as_ref().map(|(_, s)| *s) != Some(size) {
@@ -376,6 +385,11 @@ impl ViewportRenderer {
         let mut draw = DrawList::new();
         draw.set_clear_color(wgpu_color(0.012, 0.012, 0.012, 1.0));
         automata_scene::record_draw_list(world, &mut draw);
+        // Play mode runs the waves on the physics clock, so what floats
+        // rides exactly the waves that are drawn.
+        if let Some(time) = time {
+            draw.set_time(time);
+        }
         // The editor's orbit camera overrides any scene camera so the
         // viewport is freely navigable regardless of scene contents.
         if let Some(camera) = camera {

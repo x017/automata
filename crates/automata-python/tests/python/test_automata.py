@@ -1049,6 +1049,84 @@ def test_water_component_and_presets():
         assert game.run(lambda ctx: None, max_frames=2) == 2
 
 
+def test_water_floats_bodies_and_reports_its_height():
+    water = at.Water(size=(20.0, 20.0), wave_height=0.0, density=2.0, drag=1.5)
+    assert water.density == pytest.approx(2.0)
+    assert water.drag == pytest.approx(1.5)
+    assert at.Water().density == pytest.approx(2.0)
+    game = at.Game(headless=True, fixed_delta=1 / 60)
+    game.load_scene(
+        at.Scene()
+        .add(at.Entity("pool").add(at.Transform(position=(0.0, 1.0, 0.0))).add(water))
+        .add(
+            at.Entity("crate")
+            .add(at.Transform(position=(0.0, 4.0, 0.0)))
+            .add(at.RigidBody.dynamic())
+            .add(at.Collider3D.cuboid(1.0, 1.0, 1.0))
+        )
+        .add(
+            at.Entity("rock")
+            .add(at.Transform(position=(3.0, 1.0, 0.0)))
+            .add(at.RigidBody.dynamic())
+            .add(at.Collider3D.ball(0.3).density(8.0))
+        )
+    )
+    heights = []
+    ys = []
+
+    def update(ctx):
+        heights.append((ctx.physics.water_height(2.0, 3.0), ctx.physics.water_height(30.0, 0.0)))
+        ys.append((ctx.scene["crate"].transform.position[1], ctx.scene["rock"].transform.position[1]))
+
+    game.run(update, max_frames=600)
+    # Collider density 1 in water of density 2: half under, centre at y = 1.
+    crate_y, rock_y = ys[-1]
+    assert crate_y == pytest.approx(1.0, abs=0.08)
+    assert rock_y < -5.0
+    inside, outside = heights[-1]
+    assert inside == pytest.approx(1.0, abs=1e-4)
+    assert outside is None
+
+
+def test_graphics_quality_switches_at_runtime():
+    game = at.Game(headless=True, graphics="high", fixed_delta=1 / 60)
+    game.load_scene(at.Scene())
+    seen = []
+
+    def update(ctx):
+        seen.append(ctx.screen.graphics)
+        if len(seen) == 1:
+            ctx.screen.set_graphics(at.GraphicsQuality.BEAUTIFUL)
+        if len(seen) == 3:
+            with pytest.raises(ValueError):
+                ctx.screen.set_graphics("shiny")
+
+    game.run(update, max_frames=3)
+    assert seen == ["high", "beautiful", "beautiful"]
+
+
+def test_scene_scripts_read_the_water_height(tmp_path):
+    (tmp_path / "probe.py").write_text(
+        "def update(entity, ctx):\n"
+        "    entity.attributes['h'] = ctx.physics.water_height(1, 1)\n"
+        "    entity.attributes['dry'] = ctx.physics.water_height(99, 0) is None\n"
+    )
+    scene = at.Scene()
+    scene.add(at.Entity("sea").add(at.Transform(position=(0, -0.5, 0))).add(at.Water(wave_height=0)))
+    probe = at.Entity("probe").add(at.Transform())
+    probe.script = "probe.py"
+    scene.add(probe)
+    (tmp_path / "level.ron").write_text(scene.to_ron())
+    seen = {}
+
+    def after(ctx):
+        seen.update(ctx.scene["probe"].attributes)
+
+    at.run_scene(str(tmp_path / "level.ron"), headless=True, max_frames=3, update=after)
+    assert seen["h"] == pytest.approx(-0.5, abs=1e-4)
+    assert seen["dry"] is True
+
+
 def test_scene_ron_round_trip_staged():
     scene = _kitchen_sink_scene()
     text = scene.to_ron()

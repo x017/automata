@@ -241,6 +241,9 @@ class _EngineBackend(api.Backend):
     def raycast(self, origin: Any, direction: Any, max_distance: float, ignore_id: Any) -> Any:
         return self.ctx.physics.raycast(origin, direction, max_distance, ignore_id)
 
+    def water_height(self, x: float, z: float) -> Any:
+        return self.ctx.physics.water_height(x, z)
+
     def grounded(self, entity: Any) -> bool:
         try:
             return bool(self.ctx.physics.grounded(_unwrap(entity)))

@@ -18,8 +18,11 @@ const LDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// The most bloom mips (half resolution down).
 const MAX_BLOOM_LEVELS: u32 = 6;
 
-/// How strongly the (thresholded) bloom adds onto the image.
-const BLOOM: f32 = 0.35;
+/// How strongly the (thresholded) bloom adds onto the image. The upsample
+/// chain sums every mip level, so this is divided by the level count:
+/// a large bright area gets the same glow at any resolution, instead of
+/// one level's worth per level.
+const BLOOM: f32 = 1.2;
 
 /// The post chain uniform (`PostUniform` in post.wgsl).
 #[repr(C)]
@@ -365,9 +368,10 @@ impl Post {
             let h = (t.size.1 / 2).max(1) >> level;
             (w.max(1) as f32, h.max(1) as f32)
         };
+        let strength = BLOOM / t.bloom_levels.max(1) as f32;
         let uniform = |texel: (f32, f32)| PostUniform {
             texel: [1.0 / texel.0, 1.0 / texel.1, 0.0, 0.0],
-            params: [0.0, exposure, tonemap, BLOOM],
+            params: [0.0, exposure, tonemap, strength],
             output: [0.0; 4],
         };
         // Down: the scene into mip 0, each mip into the next.

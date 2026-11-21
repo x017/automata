@@ -155,6 +155,9 @@ pub struct FrameInput {
     pub meshes: Vec<(u64, Arc<MeshTris>)>,
     /// Entities whose Audio Source is playing.
     pub playing: Vec<u64>,
+    /// Water surfaces at the last physics step, packed by
+    /// [`automata_renderer::WaterSurface::pack`] (for `water_height`).
+    pub water: Vec<Vec<f32>>,
 }
 
 /// What a script asked of an entity's Audio Source.
@@ -701,6 +704,12 @@ fn frame_input_json(msg: &mut Json, input: &FrameInput) {
         msg.set(
             "cols",
             Json::Arr(input.colliders.iter().map(collider_json).collect()),
+        );
+    }
+    if !input.water.is_empty() {
+        msg.set(
+            "water",
+            Json::Arr(input.water.iter().map(|w| Json::floats(w)).collect()),
         );
     }
     if !input.playing.is_empty() {

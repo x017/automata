@@ -51,8 +51,10 @@ fn karis(c: vec3<f32>) -> f32 {
 
 // Bloom's soft-knee threshold: what's above THRESHOLD glows, fading in
 // over KNEE below it.
-const THRESHOLD: f32 = 0.9;
-const KNEE: f32 = 0.45;
+// Above display white, so sunlit surfaces and bright skies stay crisp and
+// only real highlights (sun glints, hot spots) glow.
+const THRESHOLD: f32 = 1.1;
+const KNEE: f32 = 0.4;
 
 fn prefilter(c: vec3<f32>) -> vec3<f32> {
     let bright = max(c.r, max(c.g, c.b));

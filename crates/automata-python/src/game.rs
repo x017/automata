@@ -98,19 +98,7 @@ impl PyGame {
             config.clear_color = automata_renderer::Color { r, g, b, a };
         }
         if let Some(quality) = graphics {
-            config.graphics_quality = match quality {
-                "low" => automata_renderer::GraphicsQuality::Low,
-                "medium" => automata_renderer::GraphicsQuality::Medium,
-                "high" => automata_renderer::GraphicsQuality::High,
-                "ultra" => automata_renderer::GraphicsQuality::Ultra,
-                "beautiful" => automata_renderer::GraphicsQuality::Beautiful,
-                other => {
-                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "unknown graphics quality {other:?}; expected \"low\", \
-                         \"medium\", \"high\", \"ultra\", or \"beautiful\""
-                    )));
-                }
-            };
+            config.graphics_quality = parse_quality(quality)?;
         }
         Ok(Self {
             app: Application::new(config),
@@ -289,6 +277,7 @@ fn run_python_frame(
     let screen = crate::screen::PyScreen::new(
         size,
         ctx.world_state().cursor_locked(),
+        ctx.world_state().graphics_quality(),
         root.clone(),
         Rc::clone(extras.screen),
     );
@@ -339,6 +328,9 @@ fn run_python_frame(
     if let Some(locked) = frame.lock {
         ctx.world_state_mut().set_cursor_locked(locked);
     }
+    if let Some(quality) = frame.graphics {
+        ctx.world_state_mut().set_graphics_quality(quality);
+    }
     if !frame.items.is_empty() {
         let sprites = ctx
             .renderer()
@@ -352,6 +344,31 @@ fn run_python_frame(
     if let Err(err) = call_result {
         tracing::error!(error = %err, "python update callback raised");
         *update_error = Some(err);
+    }
+}
+
+/// Parses a graphics quality name (`"low"` … `"beautiful"`).
+pub(crate) fn parse_quality(name: &str) -> PyResult<automata_renderer::GraphicsQuality> {
+    automata_renderer::GraphicsQuality::ALL
+        .into_iter()
+        .find(|q| quality_name(*q) == name)
+        .ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "unknown graphics quality {name:?}; expected \"low\", \
+                 \"medium\", \"high\", \"ultra\", or \"beautiful\""
+            ))
+        })
+}
+
+/// The Python name of a graphics quality (`"high"`).
+pub(crate) fn quality_name(quality: automata_renderer::GraphicsQuality) -> &'static str {
+    use automata_renderer::GraphicsQuality as Q;
+    match quality {
+        Q::Low => "low",
+        Q::Medium => "medium",
+        Q::High => "high",
+        Q::Ultra => "ultra",
+        Q::Beautiful => "beautiful",
     }
 }
 

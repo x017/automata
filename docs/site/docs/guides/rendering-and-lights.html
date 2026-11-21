@@ -144,8 +144,9 @@ with depth (<code>clarity</code> is how many metres you can see down), and draws
 <div class="table"><table><thead><tr><th>Preset</th><th>Look</th></tr></thead><tbody><tr><td><code>&quot;pond&quot;</code> / <code>&quot;lake&quot;</code></td><td>Low, short waves and clear water</td></tr><tr><td><code>&quot;ocean&quot;</code> / <code>&quot;sea&quot;</code></td><td>200 m wide, tall long waves, deep blue</td></tr><tr><td><code>&quot;default&quot;</code></td><td>20 m, gentle waves</td></tr></tbody></table></div>
 <p><img src="../../../assets/rendering/water_high.jpg" alt="Water on High: blended over the scene, waves, sky reflection, sun glint and shadows" loading="lazy" decoding="async"></p>
 <p><img src="../../../assets/rendering/water_beautiful.jpg" alt="The same scene on Beautiful: refraction, depth absorption, soft cascaded shadows and bloom" loading="lazy" decoding="async"></p>
-<p>The water surface has no collider. Add a physics box under it if things
-should float or stop.</p>
+<p>Water is also physics: dynamic bodies float in it and ride its waves (see
+<a href="physics.html#water">Physics → Water</a>). The surface isn't a solid collider,
+so give the water a floor if sinking things should stop.</p>
 <h2 id="mood-recipes">Mood recipes<a class="anchor" href="#mood-recipes" aria-label="Link to this section">#</a></h2>
 <p>Without an Environment, these recipes use the plain look. Add a preset on
 top to get fog and tone mapping too.</p>

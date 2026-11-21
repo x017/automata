@@ -40,6 +40,13 @@ pub struct Water {
     pub wave_direction: f32,
     /// Shoreline foam amount, 0..=1 (Beautiful only).
     pub foam: f32,
+    /// Density of the water for buoyancy, in the same units as collider
+    /// density. Bodies less dense than this float; denser ones sink. The
+    /// default 2.0 floats default bodies (density 1) half under.
+    pub density: f32,
+    /// How quickly the water slows bodies moving through it (fraction of
+    /// velocity lost per second when fully submerged).
+    pub drag: f32,
 }
 
 impl Default for Water {
@@ -54,6 +61,8 @@ impl Default for Water {
             wave_speed: 1.0,
             wave_direction: 30.0,
             foam: 0.6,
+            density: 2.0,
+            drag: 1.0,
         }
     }
 }
@@ -124,53 +133,280 @@ pub(crate) struct WaterUniform {
     pub wave_amp: [[f32; 4]; WAVES],
 }
 
+/// Per-wave constants for one draw (see [`WaterUniform`]): wave vectors
+/// and phases, and amplitudes with the vertex grid's level of detail.
+fn wave_constants(w: &Water, model: Mat4, time: f32) -> ([[f32; 4]; WAVES], [[f32; 4]; WAVES]) {
+    let size = glam::Vec2::from(w.size).max(glam::Vec2::splat(0.01));
+    let (scale, _, _) = model.to_scale_rotation_translation();
+    let cell = (size.x * scale.x).max(size.y * scale.z) / GRID_CELLS as f32;
+    // The grid can't represent waves shorter than ~4 cells: fade them
+    // out of the displacement (the per-pixel normal keeps them).
+    let min_length = cell * 4.0;
+    let height = w.wave_height.max(0.0);
+    let t = time * w.wave_speed;
+    let mut wave_k = [[0.0; 4]; WAVES];
+    let mut wave_amp = [[0.0; 4]; WAVES];
+    for i in 0..WAVES {
+        let wavelength = (w.wave_length.max(0.05) * WAVE_LENGTH[i]).max(0.05);
+        let lod = smoothstep(min_length, min_length * 2.0, wavelength);
+        let angle = w.wave_direction.to_radians() + WAVE_ANGLE[i];
+        let k = std::f32::consts::TAU / wavelength;
+        let omega = (9.81 * k).sqrt();
+        // Wrap the phase so large times keep f32 precision.
+        let phase = (omega * t).rem_euclid(std::f32::consts::TAU);
+        wave_k[i] = [angle.cos() * k, angle.sin() * k, phase, k];
+        // Steepness: sharp crests without loops.
+        let steep = |amp: f32| {
+            if amp > 0.0 {
+                (0.7 / (k * amp * 4.0)).min(1.0) * amp
+            } else {
+                0.0
+            }
+        };
+        let full = height * WAVE_AMP[i];
+        let grid = full * lod;
+        wave_amp[i] = [grid, steep(grid), full, steep(full)];
+    }
+    (wave_k, wave_amp)
+}
+
 impl WaterUniform {
     pub fn new(draw: &WaterDraw, refraction: bool, time: f32) -> Self {
         let w = &draw.water;
         let size = glam::Vec2::from(w.size).max(glam::Vec2::splat(0.01));
         // The unit grid scaled to the surface's size, then the entity.
         let model = draw.model * Mat4::from_scale(glam::Vec3::new(size.x, 1.0, size.y));
-        let (scale, _, _) = draw.model.to_scale_rotation_translation();
-        let cell = (size.x * scale.x).max(size.y * scale.z) / GRID_CELLS as f32;
-        // The grid can't represent waves shorter than ~4 cells: fade them
-        // out of the displacement (the per-pixel normal keeps them).
-        let min_length = cell * 4.0;
-        let height = w.wave_height.max(0.0);
-        let t = time * w.wave_speed;
-        let mut wave_k = [[0.0; 4]; WAVES];
-        let mut wave_amp = [[0.0; 4]; WAVES];
-        for i in 0..WAVES {
-            let wavelength = (w.wave_length.max(0.05) * WAVE_LENGTH[i]).max(0.05);
-            let lod = smoothstep(min_length, min_length * 2.0, wavelength);
-            let angle = w.wave_direction.to_radians() + WAVE_ANGLE[i];
-            let k = std::f32::consts::TAU / wavelength;
-            let omega = (9.81 * k).sqrt();
-            // Wrap the phase so large times keep f32 precision.
-            let phase = (omega * t).rem_euclid(std::f32::consts::TAU);
-            wave_k[i] = [angle.cos() * k, angle.sin() * k, phase, k];
-            // Steepness: sharp crests without loops.
-            let steep = |amp: f32| {
-                if amp > 0.0 {
-                    (0.7 / (k * amp * 4.0)).min(1.0) * amp
-                } else {
-                    0.0
-                }
-            };
-            let full = height * WAVE_AMP[i];
-            let grid = full * lod;
-            wave_amp[i] = [grid, steep(grid), full, steep(full)];
-        }
+        let (wave_k, wave_amp) = wave_constants(w, draw.model, time);
         let [dr, dg, db] = w.deep_color;
         let [sr, sg, sb] = w.shallow_color;
         Self {
             model: model.to_cols_array(),
             deep: [dr, dg, db, w.clarity.max(0.01)],
             shallow: [sr, sg, sb, w.foam.clamp(0.0, 1.0)],
-            params: [height, f32::from(u8::from(refraction)), time, 0.0],
+            params: [
+                w.wave_height.max(0.0),
+                f32::from(u8::from(refraction)),
+                time,
+                0.0,
+            ],
             wave_k,
             wave_amp,
         }
     }
+}
+
+/// A water surface at one moment, for the CPU (physics, scripts): the same
+/// Gerstner waves the GPU draws, so floating things ride the visible swell.
+///
+/// Built from a [`Water`], its entity's world transform and the time the
+/// frame is drawn at; cheap to build (a few dozen flops) and to sample.
+#[derive(Debug, Clone, Copy)]
+pub struct WaterSurface {
+    /// World → the surface's unit square (`|x|, |z| <= 0.5` inside).
+    to_unit: Mat4,
+    /// World height of the water at rest.
+    level: f32,
+    /// Highest a crest can reach above `level`.
+    amplitude: f32,
+    /// World XZ bounds of the rectangle (min, max), for quick rejection.
+    bounds: [glam::Vec2; 2],
+    /// Per wave: direction × k (xy), phase (z), k (w).
+    wave_k: [[f32; 4]; WAVES],
+    /// Per wave: amplitude and steepness × amplitude, as drawn by the grid.
+    wave_amp: [[f32; 2]; WAVES],
+    /// The same waves as lanes, for sampling all four at once: direction
+    /// × k (x, z), phase, amplitude, and horizontal pull (x, z).
+    lanes: WaveLanes,
+    /// Buoyancy density (see [`Water::density`]).
+    pub density: f32,
+    /// Drag (see [`Water::drag`]).
+    pub drag: f32,
+}
+
+/// [`WaterSurface`]'s waves, one per SIMD lane.
+#[derive(Debug, Clone, Copy)]
+struct WaveLanes {
+    kx: glam::Vec4,
+    kz: glam::Vec4,
+    phase: glam::Vec4,
+    amp: glam::Vec4,
+    pull_x: glam::Vec4,
+    pull_z: glam::Vec4,
+}
+
+impl WaveLanes {
+    fn new(wave_k: &[[f32; 4]; WAVES], wave_amp: &[[f32; 2]; WAVES]) -> Self {
+        let lane = |f: &dyn Fn(usize) -> f32| glam::Vec4::new(f(0), f(1), f(2), f(3));
+        let pull = |i: usize| {
+            if wave_k[i][3] > 0.0 {
+                wave_amp[i][1] / wave_k[i][3]
+            } else {
+                0.0
+            }
+        };
+        Self {
+            kx: lane(&|i| wave_k[i][0]),
+            kz: lane(&|i| wave_k[i][1]),
+            phase: lane(&|i| wave_k[i][2]),
+            amp: lane(&|i| wave_amp[i][0]),
+            pull_x: lane(&|i| wave_k[i][0] * pull(i)),
+            pull_z: lane(&|i| wave_k[i][1] * pull(i)),
+        }
+    }
+}
+
+impl WaterSurface {
+    /// The surface of `water` on an entity at `model` (its world
+    /// transform), at `time` seconds.
+    #[must_use]
+    pub fn new(water: &Water, model: Mat4, time: f32) -> Self {
+        let size = glam::Vec2::from(water.size).max(glam::Vec2::splat(0.01));
+        let unit = model * Mat4::from_scale(glam::Vec3::new(size.x, 1.0, size.y));
+        let (wave_k, amps) = wave_constants(water, model, time);
+        let wave_amp = amps.map(|a| [a[0], a[1]]);
+        let amplitude = wave_amp.iter().map(|a| a[0]).sum();
+        let corners = [(-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5), (0.5, 0.5)]
+            .map(|(x, z)| unit.transform_point3(glam::Vec3::new(x, 0.0, z)));
+        let mut min = glam::Vec2::splat(f32::MAX);
+        let mut max = glam::Vec2::splat(f32::MIN);
+        for c in corners {
+            min = min.min(glam::Vec2::new(c.x, c.z));
+            max = max.max(glam::Vec2::new(c.x, c.z));
+        }
+        Self {
+            to_unit: unit.inverse(),
+            level: model.w_axis.y,
+            amplitude,
+            bounds: [min, max],
+            wave_k,
+            wave_amp,
+            lanes: WaveLanes::new(&wave_k, &wave_amp),
+            density: water.density.max(0.0),
+            drag: water.drag.max(0.0),
+        }
+    }
+
+    /// The world height of the water at rest.
+    #[must_use]
+    pub fn level(&self) -> f32 {
+        self.level
+    }
+
+    /// The highest any crest reaches (world height).
+    #[must_use]
+    pub fn max_height(&self) -> f32 {
+        self.level + self.amplitude
+    }
+
+    /// The rectangle's world XZ bounds, `(min, max)`.
+    #[must_use]
+    pub fn bounds(&self) -> (glam::Vec2, glam::Vec2) {
+        (self.bounds[0], self.bounds[1])
+    }
+
+    /// Whether the world point `(x, z)` is over the water's rectangle.
+    #[inline]
+    #[must_use]
+    pub fn contains(&self, x: f32, z: f32) -> bool {
+        if x < self.bounds[0].x
+            || z < self.bounds[0].y
+            || x > self.bounds[1].x
+            || z > self.bounds[1].y
+        {
+            return false;
+        }
+        let p = self
+            .to_unit
+            .transform_point3(glam::Vec3::new(x, self.level, z));
+        p.x.abs() <= 0.5 && p.z.abs() <= 0.5
+    }
+
+    /// Horizontal displacement and height of the waves at rest point `p`
+    /// (all four waves at once).
+    fn displace(&self, p: glam::Vec2) -> (glam::Vec2, f32) {
+        let w = &self.lanes;
+        let (s, c) = sin_cos4(w.kx * p.x + w.kz * p.y - w.phase);
+        (
+            glam::Vec2::new(w.pull_x.dot(c), w.pull_z.dot(c)),
+            w.amp.dot(s),
+        )
+    }
+
+    /// The water's surface height at world `(x, z)`, or `None` outside its
+    /// rectangle.
+    ///
+    /// Gerstner waves move water sideways as well as up, so the surface
+    /// above `(x, z)` comes from a nearby rest point; one fixed-point step
+    /// finds it (within millimetres for steep waves).
+    #[inline]
+    #[must_use]
+    pub fn height_at(&self, x: f32, z: f32) -> Option<f32> {
+        self.contains(x, z).then(|| self.height_unchecked(x, z))
+    }
+
+    /// Length of [`pack`](Self::pack)'s array.
+    pub const PACKED_LEN: usize = 14 + 6 * WAVES;
+
+    /// The surface as plain numbers, for a script runner in another
+    /// process to sample (Oberon's bridge): the world→unit rows that give
+    /// unit x and z (8), level, max crest height, bounds min x, min z,
+    /// max x, max z, then per wave `kx, kz, phase, k, amplitude, q·amp`.
+    /// Height at `(x, z)`: `offset = Σ (kx, kz)·qa·cos(kx·x + kz·z − phase)/k`,
+    /// then `level + Σ amp·sin(...)` at `(x, z) − offset`.
+    #[must_use]
+    pub fn pack(&self) -> [f32; Self::PACKED_LEN] {
+        let mut out = [0.0; Self::PACKED_LEN];
+        let rows = self.to_unit.transpose();
+        out[0..4].copy_from_slice(&rows.x_axis.to_array());
+        out[4..8].copy_from_slice(&rows.z_axis.to_array());
+        out[8] = self.level;
+        out[9] = self.max_height();
+        out[10..12].copy_from_slice(&self.bounds[0].to_array());
+        out[12..14].copy_from_slice(&self.bounds[1].to_array());
+        for (i, (k, a)) in self.wave_k.iter().zip(&self.wave_amp).enumerate() {
+            let w = 14 + 6 * i;
+            out[w..w + 4].copy_from_slice(k);
+            out[w + 4..w + 6].copy_from_slice(a);
+        }
+        out
+    }
+
+    /// [`height_at`](Self::height_at) without the rectangle test.
+    #[inline]
+    #[must_use]
+    pub fn height_unchecked(&self, x: f32, z: f32) -> f32 {
+        if self.amplitude == 0.0 {
+            return self.level;
+        }
+        let p = glam::Vec2::new(x, z);
+        let (offset, _) = self.displace(p);
+        let (_, height) = self.displace(p - offset);
+        self.level + height
+    }
+}
+
+/// `sin_cos` of four angles to about 1e-5, without branches or libm (the
+/// CPU water sampler's hot loop): reduce to ±π, evaluate the half angle's
+/// Taylor series (±π/2), then double it.
+#[inline]
+fn sin_cos4(x: glam::Vec4) -> (glam::Vec4, glam::Vec4) {
+    use std::f32::consts::{FRAC_1_PI, TAU};
+    // Round to whole turns by adding and removing 1.5·2²³ (two adds; a
+    // vector `round` is four libm calls without SSE4.1). Exact while
+    // |turns| < 2²², i.e. wave phases below ~26 million radians.
+    const MAGIC: f32 = 12_582_912.0;
+    let turns = (x * (0.5 * FRAC_1_PI) + MAGIC) - MAGIC;
+    let h = (x - turns * TAU) * 0.5;
+    let h2 = h * h;
+    let s = h
+        * (1.0
+            + h2 * (-1.0 / 6.0
+                + h2 * (1.0 / 120.0 + h2 * (-1.0 / 5040.0 + h2 * (1.0 / 362_880.0)))));
+    let c = 1.0
+        + h2 * (-0.5
+            + h2 * (1.0 / 24.0
+                + h2 * (-1.0 / 720.0 + h2 * (1.0 / 40320.0 - h2 * (1.0 / 3_628_800.0)))));
+    (2.0 * s * c, c * c - s * s)
 }
 
 fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
@@ -358,9 +594,129 @@ mod tests {
     }
 
     #[test]
+    fn cpu_surface_matches_the_drawn_waves() {
+        let water = Water {
+            size: [40.0, 40.0],
+            wave_height: 0.5,
+            wave_length: 8.0,
+            ..Water::default()
+        };
+        let model = Mat4::from_translation(glam::Vec3::new(3.0, 1.5, -2.0));
+        let t = 2.25;
+        let surface = WaterSurface::new(&water, model, t);
+        let u = WaterUniform::new(&WaterDraw { water, model }, false, t);
+        // The GPU displaces each rest point by the waves; the CPU height at
+        // the displaced point must match the displaced height.
+        for (x, z) in [(0.0, 0.0), (5.0, -3.0), (-7.5, 9.0), (12.0, 4.0)] {
+            let mut offset = glam::Vec3::ZERO;
+            for i in 0..WAVES {
+                let [kx, kz, phase, k] = u.wave_k[i];
+                let [amp, qamp, _, _] = u.wave_amp[i];
+                let theta = kx * x + kz * z - phase;
+                offset += glam::Vec3::new(
+                    qamp * kx / k * theta.cos(),
+                    amp * theta.sin(),
+                    qamp * kz / k * theta.cos(),
+                );
+            }
+            let (wx, wz) = (x + offset.x, z + offset.z);
+            let h = surface.height_at(wx, wz).expect("inside");
+            assert!(
+                (h - (1.5 + offset.y)).abs() < 0.02,
+                "at ({x}, {z}): {h} vs {}",
+                1.5 + offset.y
+            );
+        }
+        // Crests reach at most the wave height (less where the grid fades
+        // the shortest wave out).
+        assert!(surface.max_height() > 1.5 + 0.4 && surface.max_height() <= 2.0 + 1e-4);
+    }
+
+    #[test]
+    fn cpu_surface_respects_the_rectangle_and_rotation() {
+        let water = Water {
+            size: [10.0, 2.0],
+            wave_height: 0.0,
+            ..Water::default()
+        };
+        let model = Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let s = WaterSurface::new(&water, model, 0.0);
+        // Rotated 90°: the long side now runs along Z.
+        assert_eq!(s.height_at(0.0, 4.5), Some(0.0));
+        assert_eq!(s.height_at(4.5, 0.0), None);
+        let (min, max) = s.bounds();
+        assert!((min.x + 1.0).abs() < 1e-4 && (max.y - 5.0).abs() < 1e-4);
+    }
+
+    #[test]
     fn partial_scene_data_falls_back_to_defaults() {
         let w: Water = ron::from_str("(wave_height: 0.5)").unwrap();
         assert_eq!(w.wave_height, 0.5);
         assert_eq!(w.size, Water::default().size);
+    }
+
+    /// The packed form evaluates to the same heights (it's what Oberon's
+    /// script runner samples; `bridge.py` mirrors this loop).
+    #[test]
+    fn packed_surface_evaluates_like_the_surface() {
+        let water = Water {
+            size: [30.0, 12.0],
+            wave_height: 0.8,
+            wave_length: 7.0,
+            ..Water::default()
+        };
+        let model = Mat4::from_rotation_translation(
+            glam::Quat::from_rotation_y(0.6),
+            glam::Vec3::new(3.0, -1.0, 2.0),
+        );
+        let surface = WaterSurface::new(&water, model, 4.2);
+        let p = surface.pack();
+        let height = |x: f32, z: f32| -> Option<f32> {
+            let ux = p[0] * x + p[1] * p[8] + p[2] * z + p[3];
+            let uz = p[4] * x + p[5] * p[8] + p[6] * z + p[7];
+            if ux.abs() > 0.5 || uz.abs() > 0.5 {
+                return None;
+            }
+            let waves = |x: f32, z: f32| {
+                let (mut ox, mut oz, mut h) = (0.0, 0.0, 0.0);
+                for w in p[14..].chunks(6) {
+                    let (s, c) = (w[0] * x + w[1] * z - w[2]).sin_cos();
+                    ox += w[0] * w[5] * c / w[3];
+                    oz += w[1] * w[5] * c / w[3];
+                    h += w[4] * s;
+                }
+                (ox, oz, h)
+            };
+            let (ox, oz, _) = waves(x, z);
+            Some(p[8] + waves(x - ox, z - oz).2)
+        };
+        for &(x, z) in &[(3.0, 2.0), (8.0, 1.0), (-4.0, 5.0), (40.0, 0.0), (3.0, 9.0)] {
+            match (surface.height_at(x, z), height(x, z)) {
+                (Some(a), Some(b)) => assert!((a - b).abs() < 1e-4, "{a} vs {b} at {x},{z}"),
+                (None, None) => {}
+                other => panic!("inside/outside disagree at {x},{z}: {other:?}"),
+            }
+        }
+        assert!((p[9] - surface.max_height()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sin_cos4_matches_libm() {
+        let mut x = -300.0_f32;
+        while x < 300.0 {
+            let v = glam::Vec4::new(x, x + 0.4, -x * 0.7, x * 1.3);
+            let (s, c) = super::sin_cos4(v);
+            for i in 0..4 {
+                let (rs, rc) = v[i].sin_cos();
+                assert!(
+                    (s[i] - rs).abs() < 4e-5 && (c[i] - rc).abs() < 4e-5,
+                    "{}: {} {} vs {rs} {rc}",
+                    v[i],
+                    s[i],
+                    c[i]
+                );
+            }
+            x += 0.0137;
+        }
     }
 }

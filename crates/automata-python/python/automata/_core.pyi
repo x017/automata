@@ -183,6 +183,10 @@ class Water:
     wave_speed: float
     wave_direction: float
     foam: float
+    density: float
+    """Buoyancy against colliders' density (2.0; colliders default to 1.0)."""
+    drag: float
+    """How much the water slows what moves and spins in it (1.0)."""
     def __init__(
         self,
         size: Optional[tuple[float, float]] = None,
@@ -194,6 +198,8 @@ class Water:
         wave_speed: Optional[float] = None,
         wave_direction: Optional[float] = None,
         foam: Optional[float] = None,
+        density: Optional[float] = None,
+        drag: Optional[float] = None,
     ) -> None: ...
     @staticmethod
     def preset(name: str) -> Water:
@@ -566,6 +572,9 @@ class Screen:
     @property
     def cursor_locked(self) -> bool: ...
     def lock_cursor(self, locked: bool = True) -> None: ...
+    @property
+    def graphics(self) -> str: ...
+    def set_graphics(self, quality: str) -> None: ...
     def image(
         self,
         path: str,
@@ -616,6 +625,9 @@ class Physics:
     def ray_result(
         self, key: int
     ) -> Optional[tuple[int, tuple[float, float, float], tuple[float, float, float], float]]: ...
+    def water_height(self, x: float, z: float) -> Optional[float]:
+        """The water surface height at world (x, z), waves included, or None."""
+        ...
     def apply_impulse(
         self, entity: int | EntityView, impulse: tuple[float, float, float]
     ) -> None: ...

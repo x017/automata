@@ -71,10 +71,59 @@ ctx.physics.body_count()
 
 key = ctx.physics.cast_ray(origin, direction, max_distance=100.0, exclude=player)
 hit = ctx.physics.ray_result(key)   # (entity_id, point, normal, distance) or None
+ctx.physics.water_height(x, z)      # water surface height there, or None
 ```
 
 `ctx.physics2d` mirrors the essentials for the 2D world (`apply_impulse`,
 `grounded`, `body_count`).
+
+## Water
+
+Every entity with a [`Water`](rendering-and-lights.md#water) component is
+also a volume of water. Dynamic bodies in it get two things each step:
+
+- **Buoyancy**: an upward push of `water density × gravity × submerged
+  volume`, applied where the body is under, so a body settles at the depth
+  its density gives and tilts with the waves. A body floats when its
+  collider `density` is below the water's, with that fraction under.
+- **Drag**: it loses speed and spin in proportion to how much of it is
+  under (`drag`, default 1.0; 0 turns it off).
+
+```python
+scene.add(at.Entity("sea").add(at.Transform()).add(
+    at.Water(size=(80, 80), wave_height=0.4, wave_length=20.0)))  # density=2.0
+scene.add(at.Entity("crate")
+    .add(at.Transform(position=(0, 2, 0)))
+    .add(at.MeshRenderer.cube(size=1.0))
+    .add(at.RigidBody.dynamic())
+    .add(at.Collider3D.cuboid(1, 1, 1)))              # density 1.0: half under
+scene.add(at.Entity("anchor")
+    .add(at.Transform(position=(3, 2, 0)))
+    .add(at.MeshRenderer.cube(size=0.5))
+    .add(at.RigidBody.dynamic())
+    .add(at.Collider3D.cuboid(0.5, 0.5, 0.5).density(6.0)))  # sinks, slowly
+```
+
+Bodies ride exactly the waves that are drawn: physics samples the same
+Gerstner waves on the CPU, on the same clock. A long wave over a large
+surface moves the geometry. Waves shorter than about four of the surface's
+128 grid cells only ripple the shading, so they don't move bodies either.
+In Oberon, set **Density** and **Drag** in the Water section of the
+Inspector.
+
+It's built to be cheap:
+
+- Without water it costs nothing.
+- Sleeping bodies are skipped, and bodies that settle on calm water fall
+  asleep.
+- Awake bodies away from the water cost a couple of comparisons.
+- A body in the water is sampled at 1 point if small, or 8 if not (so long
+  hulls pitch and roll). About 0.25 µs per floating body per step on waves,
+  measured on one core.
+
+The surface isn't solid: give the water a floor if sinking things should
+stop. The [Lagoon example](../../../examples/oberon/lagoon/README.md)
+floats a boat, crates and buoys.
 
 ## The character controller
 

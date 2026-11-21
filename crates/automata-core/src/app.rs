@@ -59,6 +59,8 @@ pub struct WorldState {
     physics_accumulator: f32,
     audio: SharedAudio,
     cursor_locked: bool,
+    graphics_quality: automata_renderer::GraphicsQuality,
+    graphics_changed: bool,
 }
 
 impl WorldState {
@@ -72,6 +74,29 @@ impl WorldState {
     /// Locks (hides and captures) or releases the cursor.
     pub fn set_cursor_locked(&mut self, locked: bool) {
         self.cursor_locked = locked;
+    }
+
+    /// The graphics quality preset in use (starts as
+    /// [`EngineConfig::graphics_quality`]).
+    #[must_use]
+    pub fn graphics_quality(&self) -> automata_renderer::GraphicsQuality {
+        self.graphics_quality
+    }
+
+    /// Switches the graphics quality preset at runtime. The windowed
+    /// runtime applies it before the next frame renders (rebuilding the
+    /// shadow maps and pipelines that change); headless runs only record it.
+    pub fn set_graphics_quality(&mut self, quality: automata_renderer::GraphicsQuality) {
+        if quality != self.graphics_quality {
+            self.graphics_quality = quality;
+            self.graphics_changed = true;
+        }
+    }
+
+    /// Returns the quality set since the last call, if it changed (for the
+    /// runtime that owns the renderer).
+    pub(crate) fn take_graphics_change(&mut self) -> Option<automata_renderer::GraphicsQuality> {
+        std::mem::take(&mut self.graphics_changed).then_some(self.graphics_quality)
     }
 
     /// The active scene.
@@ -389,12 +414,16 @@ impl Application {
     pub fn new(config: EngineConfig) -> Self {
         logging::init(&config.log_filter);
         info!(title = %config.title, version = %config.version, "automata initialized");
+        let world = WorldState {
+            graphics_quality: config.graphics_quality,
+            ..WorldState::default()
+        };
         Self {
             config,
             state: AppState::Created,
             time: Time::default(),
             quit_requested: false,
-            world: WorldState::default(),
+            world,
         }
     }
 
@@ -534,6 +563,7 @@ impl Application {
             // Record the scene into the throwaway draw list: headless frames
             // exercise the same scene-to-renderer bridge as windowed ones.
             automata_scene::record_draw_list(self.world.scene.world(), &mut draw);
+            draw.set_time(self.world.physics3d.water_time());
             input.end_frame();
 
             if let Some(fps) = self.config.target_fps {
@@ -595,6 +625,27 @@ mod tests {
         let result = app.run(|_| {});
         assert!(matches!(result, Err(Error::InvalidState { .. })));
         assert_eq!(app.state(), AppState::Shutdown);
+    }
+
+    #[test]
+    fn graphics_quality_starts_from_the_config_and_reports_changes_once() {
+        use automata_renderer::GraphicsQuality;
+        let app = Application::new(EngineConfig {
+            graphics_quality: GraphicsQuality::Low,
+            ..EngineConfig::default()
+        });
+        let mut world = app.world;
+        assert_eq!(world.graphics_quality(), GraphicsQuality::Low);
+        assert_eq!(world.take_graphics_change(), None);
+        world.set_graphics_quality(GraphicsQuality::Low); // unchanged: no-op
+        assert_eq!(world.take_graphics_change(), None);
+        world.set_graphics_quality(GraphicsQuality::Beautiful);
+        assert_eq!(world.graphics_quality(), GraphicsQuality::Beautiful);
+        assert_eq!(
+            world.take_graphics_change(),
+            Some(GraphicsQuality::Beautiful)
+        );
+        assert_eq!(world.take_graphics_change(), None);
     }
 
     #[test]

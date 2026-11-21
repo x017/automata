@@ -125,7 +125,8 @@ Guide: <a href="guides/rendering-and-lights.html#environment">Rendering &amp; Li
 <h3 id="water">Water<a class="anchor" href="#water" aria-label="Link to this section">#</a></h3>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Water(size=(<span class="tok-n">20</span>, <span class="tok-n">20</span>), deep_color=(<span class="tok-n">0.01</span>, <span class="tok-n">0.07</span>, <span class="tok-n">0.11</span>),
          shallow_color=(<span class="tok-n">0.1</span>, <span class="tok-n">0.42</span>, <span class="tok-n">0.44</span>), clarity=<span class="tok-n">2.5</span>, wave_height=<span class="tok-n">0.12</span>,
-         wave_length=<span class="tok-n">5.0</span>, wave_speed=<span class="tok-n">1.0</span>, wave_direction=<span class="tok-n">30.0</span>, foam=<span class="tok-n">0.6</span>)
+         wave_length=<span class="tok-n">5.0</span>, wave_speed=<span class="tok-n">1.0</span>, wave_direction=<span class="tok-n">30.0</span>, foam=<span class="tok-n">0.6</span>,
+         density=<span class="tok-n">2.0</span>, drag=<span class="tok-n">1.0</span>)
 at.Water.preset(<span class="tok-s">&quot;pond&quot;</span> | <span class="tok-s">&quot;lake&quot;</span> | <span class="tok-s">&quot;ocean&quot;</span> | <span class="tok-s">&quot;sea&quot;</span> | <span class="tok-s">&quot;default&quot;</span>)</code></pre></div>
 <p>A rectangle of animated water on the entity's local XZ plane, <code>size</code>
 metres wide, centred on its <code>Transform</code>. Waves are Gerstner waves
@@ -133,8 +134,12 @@ metres wide, centred on its <code>Transform</code>. Waves are Gerstner waves
 toward <code>wave_direction</code> degrees around +Y). Every quality preset draws it;
 <code>BEAUTIFUL</code> adds refraction of what's underneath, depth-based absorption
 (<code>clarity</code> is how many metres you can see down) and shoreline <code>foam</code>.
+It's also a volume of water for physics. Dynamic bodies in it float by
+buoyancy (<code>density</code> against their colliders' density, which defaults to
+1.0, so a default box floats half under) and are slowed by <code>drag</code>.
 All arguments are readable as properties, and it's saved in scene files.
-Guide: <a href="guides/rendering-and-lights.html#water">Rendering &amp; Lights</a>.</p>
+Guides: <a href="guides/rendering-and-lights.html#water">Rendering &amp; Lights</a>,
+<a href="guides/physics.html#water">Physics</a>.</p>
 <h3 id="physics-components">Physics components<a class="anchor" href="#physics-components" aria-label="Link to this section">#</a></h3>
 <div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.RigidBody(body_type=&quot;dynamic&quot;, *, gravity_scale=1.0,
              linear_damping=0.0, angular_damping=0.0, enabled=True)
@@ -203,7 +208,8 @@ ctx.physics.gravity() -&gt; Vec3
 ctx.physics.set_gravity((gx, gy, gz))
 ctx.physics.body_count() -&gt; int
 key = ctx.physics.cast_ray(origin, direction, max_distance=1000.0, exclude=None)
-ctx.physics.ray_result(key) -&gt; (entity_id, point, normal, distance) | None</code></pre></div>
+ctx.physics.ray_result(key) -&gt; (entity_id, point, normal, distance) | None
+ctx.physics.water_height(x, z) -&gt; float | None   # surface height, waves included</code></pre></div>
 <p><code>ctx.physics2d</code>: <code>apply_impulse(entity, (x, y))</code>, <code>grounded(entity)</code>,
 <code>body_count()</code>. Entities are <code>EntityView</code>s or integer ids.</p>
 <h3 id="audio-ctxaudio">Audio (ctx.audio)<a class="anchor" href="#audio-ctxaudio" aria-label="Link to this section">#</a></h3>
@@ -262,7 +268,7 @@ at.AxisBinding.gamepad_axis(axis, scale=1.0)</code></pre></div>
 <code>start(entity, ctx)</code>, <code>update(entity, ctx)</code>, <code>stop(entity, ctx)</code>. It
 returns the number of frames run.</p>
 <div class="table"><table><thead><tr><th><code>entity</code></th><th></th></tr></thead><tbody><tr><td><code>name</code>, <code>id</code>, <code>state</code> (dict), <code>grounded</code>, <code>script</code></td><td></td></tr><tr><td><code>transform</code></td><td><code>position</code>, <code>rotation_euler</code> (radians), <code>scale</code>; <code>translate(d)</code>, <code>rotate(d)</code>. Read, or assign</td></tr><tr><td><code>character_velocity</code></td><td>Set to move a character</td></tr><tr><td><code>attributes</code></td><td>Dict-like, saved in the scene</td></tr><tr><td><code>camera</code></td><td><code>ScriptCamera</code> or <code>None</code></td></tr><tr><td><code>audio</code></td><td><code>play()</code>, <code>stop()</code>, <code>playing</code>, <code>source</code></td></tr><tr><td><code>camera_3d</code></td><td>The camera as a <code>Camera3D</code> (get/set)</td></tr><tr><td><code>view</code></td><td>The engine's <code>EntityView</code> for this frame</td></tr><tr><td><code>despawn()</code></td><td>At the end of the frame</td></tr></tbody></table></div>
-<div class="table"><table><thead><tr><th><code>ctx</code></th><th></th></tr></thead><tbody><tr><td><code>time</code></td><td><code>delta</code>, <code>elapsed</code>, <code>frame</code> (from 1)</td></tr><tr><td><code>scene</code></td><td>Script entities: <code>[&quot;Name&quot;]</code>, <code>find</code>, <code>by_id</code>, <code>in</code>, iteration</td></tr><tr><td><code>input</code></td><td>Keys with the aliases <code>&quot;shift&quot;</code>, <code>&quot;ctrl&quot;</code>, <code>&quot;alt&quot;</code> (either side) and <code>&quot;left&quot;</code>/<code>&quot;right&quot;</code>/<code>&quot;up&quot;</code>/<code>&quot;down&quot;</code>; <code>axis(neg, pos)</code>; mouse buttons, <code>mouse_delta</code>, <code>lock_mouse</code></td></tr><tr><td><code>physics</code></td><td><code>grounded</code>, <code>raycast</code>; the rest of the engine's physics, which also accepts script entities</td></tr><tr><td><code>audio</code>, <code>hud</code></td><td>One-shot sounds; HUD images, rectangles and text (<code>hud.text(text, x, y, size=24, color, align, shadow, outline)</code>)</td></tr><tr><td><code>camera</code></td><td>The first <code>Camera3D</code> in the scene as a <code>ScriptCamera</code></td></tr><tr><td><code>events</code>, <code>resources</code>, <code>screen</code>, <code>raw</code>, <code>quit()</code></td><td>Engine extras (<code>run_scene</code> only). <code>screen.measure_text(text, size)</code> gives text's pixel size</td></tr><tr><td><code>log(...)</code>, <code>warn(...)</code></td><td></td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th><code>ctx</code></th><th></th></tr></thead><tbody><tr><td><code>time</code></td><td><code>delta</code>, <code>elapsed</code>, <code>frame</code> (from 1)</td></tr><tr><td><code>scene</code></td><td>Script entities: <code>[&quot;Name&quot;]</code>, <code>find</code>, <code>by_id</code>, <code>in</code>, iteration</td></tr><tr><td><code>input</code></td><td>Keys with the aliases <code>&quot;shift&quot;</code>, <code>&quot;ctrl&quot;</code>, <code>&quot;alt&quot;</code> (either side) and <code>&quot;left&quot;</code>/<code>&quot;right&quot;</code>/<code>&quot;up&quot;</code>/<code>&quot;down&quot;</code>; <code>axis(neg, pos)</code>; mouse buttons, <code>mouse_delta</code>, <code>lock_mouse</code></td></tr><tr><td><code>physics</code></td><td><code>grounded</code>, <code>raycast</code>, <code>water_height(x, z)</code>; the rest of the engine's physics, which also accepts script entities</td></tr><tr><td><code>audio</code>, <code>hud</code></td><td>One-shot sounds; HUD images, rectangles and text (<code>hud.text(text, x, y, size=24, color, align, shadow, outline)</code>)</td></tr><tr><td><code>camera</code></td><td>The first <code>Camera3D</code> in the scene as a <code>ScriptCamera</code></td></tr><tr><td><code>events</code>, <code>resources</code>, <code>screen</code>, <code>raw</code>, <code>quit()</code></td><td>Engine extras (<code>run_scene</code> only). <code>screen.measure_text(text, size)</code> gives text's pixel size</td></tr><tr><td><code>log(...)</code>, <code>warn(...)</code></td><td></td></tr></tbody></table></div>
 <p>Reads see every write made earlier in the frame; writes apply after all
 scripts have run. That's the same model as Oberon's Play mode, from the same
 module (<code>automata.script_api</code>).</p>

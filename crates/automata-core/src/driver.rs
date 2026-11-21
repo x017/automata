@@ -135,6 +135,12 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
         ));
         self.input.end_frame();
         self.apply_cursor_lock();
+        if let Some(quality) = self.world.take_graphics_change() {
+            if let Some(renderer) = &mut self.renderer {
+                info!(?quality, "graphics quality changed");
+                renderer.set_quality(quality);
+            }
+        }
 
         // Built-in scene systems (transform propagation) and the
         // scene-to-renderer bridge run after the game update. Plain-data
@@ -146,6 +152,9 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
         }
         automata_scene::animate(self.world.scene_mut().world_mut(), delta.as_secs_f32());
         automata_scene::record_draw_list(self.world.scene().world(), &mut self.draw);
+        // Waves run on the physics clock, so floating bodies ride exactly
+        // the waves that are drawn.
+        self.draw.set_time(self.world.physics3d_ref().water_time());
 
         if *self.quit_requested {
             event_loop.exit();
@@ -234,7 +243,7 @@ impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
                 window.clone(),
                 (size.width, size.height),
                 self.window_config.vsync,
-                self.config.graphics_quality,
+                self.world.graphics_quality(),
             ))?;
             Ok((window, renderer))
         })();

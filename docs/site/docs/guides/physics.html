@@ -83,9 +83,44 @@ ctx.physics.gravity() / ctx.physics.set_gravity((<span class="tok-n">0</span>, -
 ctx.physics.body_count()
 
 key = ctx.physics.cast_ray(origin, direction, max_distance=<span class="tok-n">100.0</span>, exclude=player)
-hit = ctx.physics.ray_result(key)   <span class="tok-c"># (entity_id, point, normal, distance) or None</span></code></pre></div>
+hit = ctx.physics.ray_result(key)   <span class="tok-c"># (entity_id, point, normal, distance) or None</span>
+ctx.physics.water_height(x, z)      <span class="tok-c"># water surface height there, or None</span></code></pre></div>
 <p><code>ctx.physics2d</code> mirrors the essentials for the 2D world (<code>apply_impulse</code>,
 <code>grounded</code>, <code>body_count</code>).</p>
+<h2 id="water">Water<a class="anchor" href="#water" aria-label="Link to this section">#</a></h2>
+<p>Every entity with a <a href="rendering-and-lights.html#water"><code>Water</code></a> component is
+also a volume of water. Dynamic bodies in it get two things each step:</p>
+<ul><li><strong>Buoyancy</strong>: an upward push of `water density × gravity × submerged
+volume`, applied where the body is under, so a body settles at the depth
+its density gives and tilts with the waves. A body floats when its
+collider <code>density</code> is below the water's, with that fraction under.</li><li><strong>Drag</strong>: it loses speed and spin in proportion to how much of it is
+under (<code>drag</code>, default 1.0; 0 turns it off).</li></ul>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>scene.add(at.Entity(<span class="tok-s">&quot;sea&quot;</span>).add(at.Transform()).add(
+    at.Water(size=(<span class="tok-n">80</span>, <span class="tok-n">80</span>), wave_height=<span class="tok-n">0.4</span>, wave_length=<span class="tok-n">20.0</span>)))  <span class="tok-c"># density=2.0</span>
+scene.add(at.Entity(<span class="tok-s">&quot;crate&quot;</span>)
+    .add(at.Transform(position=(<span class="tok-n">0</span>, <span class="tok-n">2</span>, <span class="tok-n">0</span>)))
+    .add(at.MeshRenderer.cube(size=<span class="tok-n">1.0</span>))
+    .add(at.RigidBody.dynamic())
+    .add(at.Collider3D.cuboid(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>)))              <span class="tok-c"># density 1.0: half under</span>
+scene.add(at.Entity(<span class="tok-s">&quot;anchor&quot;</span>)
+    .add(at.Transform(position=(<span class="tok-n">3</span>, <span class="tok-n">2</span>, <span class="tok-n">0</span>)))
+    .add(at.MeshRenderer.cube(size=<span class="tok-n">0.5</span>))
+    .add(at.RigidBody.dynamic())
+    .add(at.Collider3D.cuboid(<span class="tok-n">0.5</span>, <span class="tok-n">0.5</span>, <span class="tok-n">0.5</span>).density(<span class="tok-n">6.0</span>)))  <span class="tok-c"># sinks, slowly</span></code></pre></div>
+<p>Bodies ride exactly the waves that are drawn: physics samples the same
+Gerstner waves on the CPU, on the same clock. A long wave over a large
+surface moves the geometry. Waves shorter than about four of the surface's
+128 grid cells only ripple the shading, so they don't move bodies either.
+In Oberon, set <strong>Density</strong> and <strong>Drag</strong> in the Water section of the
+Inspector.</p>
+<p>It's built to be cheap:</p>
+<ul><li>Without water it costs nothing.</li><li>Sleeping bodies are skipped, and bodies that settle on calm water fall
+asleep.</li><li>Awake bodies away from the water cost a couple of comparisons.</li><li>A body in the water is sampled at 1 point if small, or 8 if not (so long
+hulls pitch and roll). About 0.25 µs per floating body per step on waves,
+measured on one core.</li></ul>
+<p>The surface isn't solid: give the water a floor if sinking things should
+stop. The <a href="https://github.com/x017/automata/blob/main/examples/oberon/lagoon/README.md" rel="noopener">Lagoon example</a>
+floats a boat, crates and buoys.</p>
 <h2 id="the-character-controller">The character controller<a class="anchor" href="#the-character-controller" aria-label="Link to this section">#</a></h2>
 <p>The platformer recipe — tight movement that still collides and climbs
 slopes:</p>
@@ -122,7 +157,7 @@ try <code>friction(0.2)</code> on the wall or clamp velocity yourself.</li></ul>
     <footer class="pager"><a class="prev" href="input.html"><small>Previous</small>Input</a><a class="next" href="events-and-resources.html"><small>Next</small>Events &amp; resources</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/physics.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#bodies">Bodies</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l3"><a href="#colliders-from-models">Colliders from models</a></li><li class="l2"><a href="#the-per-frame-toolbox">The per-frame toolbox</a></li><li class="l2"><a href="#the-character-controller">The character controller</a></li><li class="l2"><a href="#common-pitfalls">Common pitfalls</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#bodies">Bodies</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l3"><a href="#colliders-from-models">Colliders from models</a></li><li class="l2"><a href="#the-per-frame-toolbox">The per-frame toolbox</a></li><li class="l2"><a href="#water">Water</a></li><li class="l2"><a href="#the-character-controller">The character controller</a></li><li class="l2"><a href="#common-pitfalls">Common pitfalls</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

@@ -173,6 +173,7 @@ pub struct PyPhysics {
     velocities: Rc<HashMap<u64, (f32, f32, f32)>>,
     grounded: Rc<HashSet<u64>>,
     colliders: Rc<automata_physics::ColliderSnapshot>,
+    water: Rc<Vec<automata_renderer::WaterSurface>>,
     queue: PhysicsQueue,
 }
 
@@ -211,6 +212,7 @@ impl PyPhysics {
             velocities: Rc::new(velocities),
             grounded: Rc::new(grounded),
             colliders: Rc::new(world.collider_snapshot()),
+            water: Rc::new(world.water_surfaces().to_vec()),
             queue,
         }
     }
@@ -251,6 +253,12 @@ impl PyPhysics {
                     h.distance,
                 )
             }))
+    }
+
+    /// The height of the water surface at world `(x, z)`, waves included
+    /// (what floating bodies ride), or `None` where there's no water.
+    fn water_height(&self, x: f32, z: f32) -> Option<f32> {
+        self.water.iter().find_map(|s| s.height_at(x, z))
     }
 
     /// Queue a raycast; returns a result key. The hit is readable **next

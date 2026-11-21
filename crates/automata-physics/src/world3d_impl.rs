@@ -19,6 +19,9 @@ use r3::pipeline::{
 use rapier3d as r3;
 use tracing::trace;
 
+#[path = "water.rs"]
+mod water;
+
 use crate::components::{
     BodyType, CharacterController, CharacterVelocity, Collider3D, RigidBody, Shape3D,
 };
@@ -57,6 +60,10 @@ pub struct PhysicsWorld3D {
     /// Built mesh / convex-hull shapes, shared by every collider that uses
     /// the same model at the same scale.
     model_shapes: HashMap<ModelShapeKey, r3::geometry::SharedShape>,
+    /// Simulated time (sum of steps): the clock the water's waves run on.
+    sim_time: f64,
+    /// The scene's water surfaces at `sim_time` (see `water.rs`).
+    water: Vec<automata_renderer::WaterSurface>,
 }
 
 /// What a built model shape depends on: the loaded model (by identity, so
@@ -114,6 +121,8 @@ impl PhysicsWorld3D {
             grounded: HashMap::new(),
             last_dt: 1.0 / 60.0,
             model_shapes: HashMap::new(),
+            sim_time: 0.0,
+            water: Vec::new(),
         }
     }
 
@@ -541,6 +550,11 @@ impl PhysicsWorld3D {
         let (tear_send, _tear_recv) = std::sync::mpsc::channel();
         let events = ChannelEventCollector::new(collision_send, force_send, tear_send);
 
+        // Water: buoyancy and drag as impulses, before integration.
+        self.collect_water(scene);
+        self.apply_water(dt);
+        self.sim_time += f64::from(dt);
+
         self.pipeline.step(
             Vector::new(self.gravity.x, self.gravity.y, self.gravity.z),
             &params,
@@ -618,6 +632,17 @@ impl PhysicsWorld3D {
                 transform.rotation = Quat::from_xyzw(rot.x, rot.y, rot.z, rot.w);
             }
         }
+    }
+
+    /// Whether `entity`'s body is asleep: at rest, skipped by the solver
+    /// (and by water) until something touches or pushes it. False for
+    /// entities without a body.
+    #[must_use]
+    pub fn is_sleeping(&self, entity: Entity) -> bool {
+        self.entity_bodies
+            .get(&entity)
+            .and_then(|h| self.bodies.get(*h))
+            .is_some_and(r3::dynamics::RigidBody::is_sleeping)
     }
 
     /// Current linear velocity of an entity's body (zero if none).

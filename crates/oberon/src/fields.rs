@@ -62,6 +62,10 @@ pub enum Field {
     WaterWaveDirection,
     /// Shoreline foam amount.
     WaterFoam,
+    /// Water density for buoyancy (colliders default to 1).
+    WaterDensity,
+    /// How much the water slows bodies in it.
+    WaterDrag,
     /// Environment fog density per unit.
     EnvFogDensity,
     /// Distance where the fog starts.
@@ -176,6 +180,8 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::WaterWaveSpeed => data.water?.wave_speed,
         F::WaterWaveDirection => data.water?.wave_direction,
         F::WaterFoam => data.water?.foam,
+        F::WaterDensity => data.water?.density,
+        F::WaterDrag => data.water?.drag,
         F::CameraPosition(i) => data.camera_3d?.position.to_array()[axis(i)],
         F::CameraTarget(i) => data.camera_3d?.target.to_array()[axis(i)],
         F::CameraFov => data.camera_3d?.fov_y_degrees,
@@ -230,6 +236,7 @@ pub fn range(field: Field) -> (f32, f32) {
         F::WaterClarity => (0.05, 100.0),
         F::WaterWaveHeight | F::WaterWaveSpeed => (0.0, 20.0),
         F::WaterWaveLength => (0.1, 1_000.0),
+        F::WaterDensity | F::WaterDrag => (0.0, 1_000.0),
         F::WaterWaveDirection | F::LightAzimuth => (-180.0, 180.0),
         F::LightElevation => (-89.0, 89.0),
         F::EnvExposure => (0.0, 16.0),
@@ -364,6 +371,8 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
         | F::WaterWaveLength
         | F::WaterWaveSpeed
         | F::WaterWaveDirection
+        | F::WaterDensity
+        | F::WaterDrag
         | F::WaterFoam => match &mut data.water {
             Some(water) => match field {
                 F::WaterSize(i) => water.size[usize::from(i.min(1))] = v,
@@ -374,6 +383,8 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
                 F::WaterWaveLength => water.wave_length = v,
                 F::WaterWaveSpeed => water.wave_speed = v,
                 F::WaterWaveDirection => water.wave_direction = v,
+                F::WaterDensity => water.density = v,
+                F::WaterDrag => water.drag = v,
                 _ => water.foam = v,
             },
             None => return false,

@@ -445,6 +445,8 @@ impl PyWater {
         wave_speed=None,
         wave_direction=None,
         foam=None,
+        density=None,
+        drag=None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -457,6 +459,8 @@ impl PyWater {
         wave_speed: Option<f32>,
         wave_direction: Option<f32>,
         foam: Option<f32>,
+        density: Option<f32>,
+        drag: Option<f32>,
     ) -> Self {
         let d = Water::default();
         let rgb = |c: (f32, f32, f32)| [c.0, c.1, c.2];
@@ -471,6 +475,8 @@ impl PyWater {
                 wave_speed: wave_speed.unwrap_or(d.wave_speed),
                 wave_direction: wave_direction.unwrap_or(d.wave_direction),
                 foam: foam.unwrap_or(d.foam),
+                density: density.unwrap_or(d.density),
+                drag: drag.unwrap_or(d.drag),
             },
         }
     }
@@ -545,6 +551,21 @@ impl PyWater {
     #[getter]
     fn foam(&self) -> f32 {
         self.inner.foam
+    }
+
+    /// Buoyancy: the water's density, against colliders' ``density``
+    /// (default ``2.0``; colliders default to ``1.0``, so they float half
+    /// under). Lighter than this floats, with that fraction under the
+    /// surface; denser sinks, slowed by the water.
+    #[getter]
+    fn density(&self) -> f32 {
+        self.inner.density
+    }
+
+    /// How much the water slows what moves and spins in it.
+    #[getter]
+    fn drag(&self) -> f32 {
+        self.inner.drag
     }
 
     fn __repr__(&self) -> String {
