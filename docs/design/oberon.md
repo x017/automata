@@ -21,7 +21,7 @@ separate app that drives the engine.
 │    ▾ player│                                │  Collider3D    │
 │            │                                │                │
 ├────────────┴────────────────────────────────┴────────────────┤
-│  Console / Project                                           │
+│  Console              (Files sits under the Hierarchy)       │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -274,7 +274,7 @@ frame, exactly like gameplay writes.
 | **Viewport** | live offscreen render; editor camera; click-to-select; drag-to-move | image widget + canvas overlay |
 | **Inspector** | selected entity's components as typed editors (vec3 fields, color swatch, enum dropdowns, checkboxes) | property-inspector component |
 | **Console** | engine logs + Python stdout/stderr from play mode | `LogBuffer` |
-| **Project** (later) | scene files, scripts, assets in the project folder | `file_browser` |
+| **Files** | project folder as a tree under the Hierarchy (shipped; native, not nexa) | `file_browser` |
 
 Layout is a nexa `dockspace` — dockable, rearrangeable panels come free
 with the toolkit. Data flows from the engine side: hierarchy from

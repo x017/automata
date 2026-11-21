@@ -1,19 +1,29 @@
-//! The Project panel: a file browser over the project directory.
+//! The Files panel: the project directory as a tree, at the bottom of the
+//! left sidebar under the Hierarchy.
 //!
-//! Double-click opens: scenes load, scripts open in the code editor,
-//! prefabs are instantiated, folders are entered. Right-click offers the
-//! same plus creation of scripts and folders.
+//! Click a folder to expand or collapse it. Double-click a file to open it:
+//! scenes load, scripts open in the code editor, prefabs are instantiated.
+//! Right-click offers the same plus creation of scripts and folders in that
+//! folder. The open scene and the active script are highlighted.
 
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use super::menus::{Action, DialogKind, MenuItem, UiAction};
-use super::{CursorHint, Intent, PlayState, Rect, Ui};
+use super::{ButtonStyle, CursorHint, Icon, Intent, PlayState, Rect, Ui};
 use crate::canvas::Canvas;
 use crate::doc::Document;
 use crate::theme::{color, layout};
 
-/// One file or folder in the listing.
+/// Row height in the tree.
+const ROW_H: f32 = 22.0;
+/// Indent per folder level.
+const INDENT: f32 = 14.0;
+/// How long a folder listing is trusted before it's re-read.
+const RELIST: Duration = Duration::from_secs(1);
+
+/// One file or folder in a listing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Item {
     name: String,
@@ -21,13 +31,20 @@ struct Item {
     dir: bool,
 }
 
-/// Project panel state.
+/// One visible row of the tree.
+#[derive(Debug, Clone)]
+struct Row {
+    item: Item,
+    depth: usize,
+}
+
+/// Files panel state.
 #[derive(Debug, Default)]
 pub struct ProjectState {
-    /// The folder shown (inside the project root); `None` = the root.
-    dir: Option<PathBuf>,
-    items: Vec<Item>,
-    listed: Option<(PathBuf, Instant)>,
+    /// Expanded folders.
+    expanded: BTreeSet<PathBuf>,
+    /// Cached listings: folder → (items, when read).
+    listings: HashMap<PathBuf, (Vec<Item>, Instant)>,
     scroll: f32,
     selected: Option<PathBuf>,
 }
@@ -102,221 +119,303 @@ fn list(dir: &Path) -> Vec<Item> {
     items
 }
 
-impl Ui {
-    /// The folder the Project panel shows.
-    pub(super) fn project_dir(&self) -> PathBuf {
-        self.project
-            .dir
-            .clone()
-            .unwrap_or_else(|| self.project_root.clone())
+/// Same file, comparing canonical paths when both exist.
+fn same_file(a: &Path, b: &Path) -> bool {
+    a == b
+        || matches!(
+            (std::fs::canonicalize(a), std::fs::canonicalize(b)),
+            (Ok(x), Ok(y)) if x == y
+        )
+}
+
+impl ProjectState {
+    /// The listing of `dir`, re-read when older than [`RELIST`].
+    fn listing(&mut self, dir: &Path) -> Vec<Item> {
+        let fresh = self
+            .listings
+            .get(dir)
+            .is_some_and(|(_, t)| t.elapsed() < RELIST);
+        if !fresh {
+            self.listings
+                .insert(dir.to_path_buf(), (list(dir), Instant::now()));
+        }
+        self.listings[dir].0.clone()
     }
 
-    /// Draws the Project tab body.
+    /// The visible rows: a depth-first walk through expanded folders.
+    fn rows(&mut self, root: &Path) -> Vec<Row> {
+        fn walk(state: &mut ProjectState, dir: &Path, depth: usize, out: &mut Vec<Row>) {
+            for item in state.listing(dir) {
+                let open = item.dir && state.expanded.contains(&item.path);
+                let path = item.path.clone();
+                out.push(Row { item, depth });
+                if open && depth < 32 {
+                    walk(state, &path, depth + 1, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(self, root, 0, &mut out);
+        out
+    }
+
+    /// Forgets cached listings so the next frame re-reads the disk.
+    fn invalidate(&mut self) {
+        self.listings.clear();
+    }
+}
+
+impl Ui {
+    /// The folder new files go into: the selected folder, the selected
+    /// file's folder, or the project root.
+    pub(super) fn project_dir(&self) -> PathBuf {
+        match &self.project.selected {
+            Some(p) if p.is_dir() => p.clone(),
+            Some(p) => p
+                .parent()
+                .filter(|d| d.starts_with(&self.project_root))
+                .map_or_else(|| self.project_root.clone(), Path::to_path_buf),
+            None => self.project_root.clone(),
+        }
+    }
+
+    /// Expands every folder from the project root down to `path` and
+    /// selects it, so it's visible in the Files panel.
+    pub fn reveal_in_files(&mut self, path: &Path) {
+        let Ok(rel) = path.strip_prefix(&self.project_root) else {
+            return;
+        };
+        let mut acc = self.project_root.clone();
+        let parts: Vec<_> = rel.components().collect();
+        for part in parts.iter().take(parts.len().saturating_sub(1)) {
+            acc.push(part);
+            self.project.expanded.insert(acc.clone());
+        }
+        self.project.selected = Some(path.to_path_buf());
+        self.panels.show_files = true;
+    }
+
+    /// Draws the Files panel.
     #[allow(clippy::too_many_lines)]
-    pub(super) fn project_body(&mut self, canvas: &mut Canvas, doc: &Document, rect: Rect) {
-        let dir = self.project_dir();
-        let stale = self
-            .project
-            .listed
-            .as_ref()
-            .is_none_or(|(d, t)| *d != dir || t.elapsed() > Duration::from_secs(1));
-        if stale {
-            self.project.items = list(&dir);
-            self.project.listed = Some((dir.clone(), Instant::now()));
+    pub(super) fn files_panel(&mut self, canvas: &mut Canvas, doc: &Document, rect: Rect) {
+        canvas.fill_rect(rect.x, rect.y, rect.w, rect.h, color::surface());
+        canvas.fill_rect(rect.x + rect.w - 1.0, rect.y, 1.0, rect.h, color::border());
+        if self.panels.show_hierarchy {
+            canvas.fill_rect(rect.x, rect.y, rect.w, 1.0, color::border());
         }
-        let editing = self.play == PlayState::Editing;
-
-        // Breadcrumb bar.
-        let bar_h = 26.0;
-        canvas.fill_rect(rect.x, rect.y, rect.w, bar_h, color::background());
-        let mut x = rect.x + 8.0;
         let root = self.project_root.clone();
-        let rel = dir
-            .strip_prefix(&root)
-            .map(Path::to_path_buf)
-            .unwrap_or_default();
-        let mut crumbs = vec![(
-            root.file_name().map_or_else(
-                || "Project".to_string(),
-                |n| n.to_string_lossy().into_owned(),
-            ),
-            root.clone(),
-        )];
-        let mut acc = root.clone();
-        for part in rel.components() {
-            acc = acc.join(part);
-            crumbs.push((part.as_os_str().to_string_lossy().into_owned(), acc.clone()));
-        }
-        let mut go = None;
-        for (i, (name, path)) in crumbs.iter().enumerate() {
-            if i > 0 {
-                canvas.text(x, rect.y + 6.0, layout::SMALL_SIZE, "›", color::text_dim());
-                x += 12.0;
-            }
-            let tw = canvas.measure_text(layout::SMALL_SIZE, name) + 8.0;
-            let r = Rect::new(x - 4.0, rect.y + 3.0, tw, bar_h - 6.0);
-            if self.hot(r) {
-                canvas.fill_rounded(r.x, r.y, r.w, r.h, 3.0, color::hover());
-                self.cursor = CursorHint::Pointer;
-                if self.p.pressed {
-                    go = Some(path.clone());
-                }
-            }
-            canvas.text(
-                x,
-                rect.y + 6.0,
-                layout::SMALL_SIZE,
-                name,
-                color::accent_soft(),
-            );
-            x += tw;
-        }
-        // Toolbar buttons (right).
-        let mut bx = rect.x + rect.w - 8.0;
-        for (label, action) in [("New Folder", 0), ("New Script", 1)] {
-            let bw = canvas.measure_text(layout::SMALL_SIZE, label) + 16.0;
-            bx -= bw + 4.0;
-            let r = Rect::new(bx, rect.y + 3.0, bw, bar_h - 6.0);
-            if self.button(canvas, r, label, super::ButtonStyle::Normal) {
-                match action {
-                    0 => self.out.push(Intent::NewFolder(
-                        dir.join(unique_child(&dir, "New Folder")),
-                    )),
-                    _ => self.open_dialog(DialogKind::NewScript, doc),
-                }
-            }
-        }
+        let editing = self.play == PlayState::Editing;
+        let open_scene = doc.path.clone();
+        let open_script = self
+            .code
+            .active
+            .and_then(|i| self.code.tabs.get(i))
+            .map(|t| t.path.clone());
 
-        // Listing (grid of tiles).
-        let body = Rect::new(rect.x, rect.y + bar_h, rect.w, (rect.h - bar_h).max(0.0));
-        let tile_w = 112.0;
-        let tile_h = 74.0;
-        let cols = ((body.w - 8.0) / tile_w).floor().max(1.0) as usize;
-        let rows = self.project.items.len().div_ceil(cols);
-        let content_h = rows as f32 * tile_h + 8.0;
-        if self.hot(body) && self.p.scroll != 0.0 {
-            self.project.scroll -= self.p.scroll * 40.0;
+        let top = rect.y + layout::TITLEBAR_H;
+        let list = Rect::new(rect.x, top, rect.w, (rect.h - layout::TITLEBAR_H).max(0.0));
+        let rows = self.project.rows(&root);
+        let content_h = rows.len() as f32 * ROW_H + 8.0;
+        if self.hot(list) && self.p.scroll != 0.0 {
+            self.project.scroll -= self.p.scroll * ROW_H * 2.0;
         }
         self.project.scroll = self
             .project
             .scroll
-            .clamp(0.0, (content_h - body.h).max(0.0));
-        let prev = canvas.set_clip(Some((body.x, body.y, body.w, body.h)));
+            .clamp(0.0, (content_h - list.h).max(0.0));
+
+        let prev = canvas.set_clip(Some((list.x, list.y, list.w, list.h)));
         let saved_clip = self.clip;
-        self.clip = (body.y, body.y + body.h);
-        let mut clicked_item = false;
-        let items = self.project.items.clone();
-        for (i, item) in items.iter().enumerate() {
-            let (c, r) = (i % cols, i / cols);
-            let t = Rect::new(
-                body.x + 6.0 + c as f32 * tile_w,
-                body.y + 6.0 - self.project.scroll + r as f32 * tile_h,
-                tile_w - 8.0,
-                tile_h - 6.0,
-            );
-            if t.y + t.h < body.y || t.y > body.y + body.h {
+        self.clip = (list.y, list.y + list.h);
+        let mut clicked_row = false;
+        let mut toggle = None;
+        let mut y = top + 4.0 - self.project.scroll;
+        for row in &rows {
+            let r = Rect::new(rect.x + 4.0, y, rect.w - 9.0, ROW_H);
+            y += ROW_H;
+            if !self.row_visible(r) {
                 continue;
             }
-            let selected = self.project.selected.as_ref() == Some(&item.path);
-            let hot = self.hot(t);
-            if selected {
-                canvas.fill_rounded(t.x, t.y, t.w, t.h, 5.0, color::select());
-            } else if hot {
-                canvas.fill_rounded(t.x, t.y, t.w, t.h, 5.0, color::hover());
-            }
+            let item = &row.item;
             let kind = asset_kind(&item.path, item.dir);
-            draw_asset_icon(canvas, kind, t.x + t.w / 2.0, t.y + 22.0);
-            let tw = canvas
-                .measure_text(layout::SMALL_SIZE, &item.name)
-                .min(t.w - 8.0);
+            let selected = self.project.selected.as_ref() == Some(&item.path);
+            let open = !item.dir
+                && [&open_scene, &open_script]
+                    .into_iter()
+                    .flatten()
+                    .any(|p| same_file(p, &item.path));
+            let hot = self.hot(r);
+            if selected {
+                canvas.fill_rounded(r.x, r.y, r.w, r.h, 3.0, color::select());
+            } else if hot {
+                canvas.fill_rounded(r.x, r.y, r.w, r.h, 3.0, color::hover());
+            }
+            // Indent guides keep deep trees readable.
+            for d in 0..row.depth {
+                let gx = r.x + 10.0 + d as f32 * INDENT;
+                canvas.fill_rect(gx, r.y, 1.0, r.h, color::border());
+            }
+            let x = r.x + 4.0 + row.depth as f32 * INDENT;
+            if item.dir {
+                draw_chevron(
+                    canvas,
+                    x + 6.0,
+                    r.y + r.h / 2.0,
+                    self.project.expanded.contains(&item.path),
+                );
+            }
+            draw_tree_icon(canvas, kind, x + 21.0, r.y + r.h / 2.0);
+            let tx = x + 32.0;
             canvas.text_clipped(
-                t.x + (t.w - tw) / 2.0,
-                t.y + t.h - 20.0,
-                layout::SMALL_SIZE,
+                tx,
+                r.y + (r.h - layout::FONT_SIZE) / 2.0 - 1.0,
+                layout::FONT_SIZE,
                 &item.name,
-                color::text(),
-                t.w - 8.0,
+                if selected || open {
+                    color::text()
+                } else {
+                    color::text_dim()
+                },
+                (r.x + r.w - tx - 14.0).max(0.0),
             );
+            if open {
+                canvas.fill_circle(r.x + r.w - 8.0, r.y + r.h / 2.0, 2.5, color::accent());
+            }
             if hot {
                 self.cursor = CursorHint::Pointer;
                 if self.p.pressed {
-                    clicked_item = true;
+                    clicked_row = true;
                     self.project.selected = Some(item.path.clone());
-                    if self.p.double_click {
-                        if item.dir {
-                            go = Some(item.path.clone());
-                        } else if let Some(intent) = open_intent(&item.path, false) {
+                    if item.dir {
+                        toggle = Some(item.path.clone());
+                    } else if self.p.double_click {
+                        if let Some(intent) = open_intent(&item.path, false) {
                             self.out.push(intent);
                         }
                     }
                 }
                 if self.p.right_pressed {
-                    clicked_item = true;
+                    clicked_row = true;
                     self.project.selected = Some(item.path.clone());
-                    let mut menu = Vec::new();
-                    match kind {
-                        AssetKind::Scene => {
-                            menu.push(item_menu("Open Scene", open_intent(&item.path, false)));
-                        }
-                        AssetKind::Prefab => {
-                            menu.push(item_menu("Instantiate", open_intent(&item.path, false)));
-                        }
-                        AssetKind::Script => {
-                            menu.push(item_menu("Edit Script", open_intent(&item.path, false)));
-                            if let Some(i) = doc.selected_index() {
-                                menu.push(MenuItem {
-                                    label: format!("Attach to {}", doc.entities[i].name()),
-                                    shortcut: "",
-                                    action: Some(Action::Intent(Intent::AttachScript {
-                                        id: doc.entities[i].id,
-                                        path: item.path.clone(),
-                                    })),
-                                    enabled: editing,
-                                });
-                            }
-                        }
-                        AssetKind::Folder | AssetKind::Other => {}
-                    }
-                    if !menu.is_empty() {
-                        menu.push(MenuItem {
-                            label: "-".into(),
-                            shortcut: "",
-                            action: None,
-                            enabled: false,
-                        });
-                    }
-                    menu.extend(self.project_create_items());
+                    let menu = self.file_menu(doc, item, kind, editing);
                     self.open_menu(self.p.x, self.p.y, menu);
                 }
             }
         }
-        if items.is_empty() {
+        if rows.is_empty() {
             canvas.text(
-                body.x + 12.0,
-                body.y + 12.0,
+                rect.x + layout::PAD,
+                top + 10.0,
                 layout::SMALL_SIZE,
-                "Empty folder",
+                "No files yet. Right-click to add a script.",
                 color::text_dim(),
             );
         }
-        if !clicked_item && self.hot(body) {
+        if !clicked_row && self.hot(list) {
             if self.p.pressed {
                 self.project.selected = None;
             }
             if self.p.right_pressed {
+                self.project.selected = None;
                 let menu = self.project_create_items();
                 self.open_menu(self.p.x, self.p.y, menu);
             }
         }
         self.clip = saved_clip;
         canvas.restore_clip(prev);
-        if let Some(path) = go {
-            self.project.dir = (path != self.project_root).then_some(path);
-            self.project.scroll = 0.0;
-            self.project.listed = None;
+        if let Some(path) = toggle {
+            if !self.project.expanded.remove(&path) {
+                self.project.expanded.insert(path);
+            }
         }
+
+        // Title bar: "Files", the project folder, and quick actions.
+        self.panel_title(canvas, rect, "Files");
+        let title_w = canvas.measure_text(layout::TITLE_SIZE, "Files");
+        let name = root.file_name().map_or_else(
+            || root.to_string_lossy().into_owned(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        let bw = layout::TITLEBAR_H - 8.0;
+        let name_x = rect.x + layout::PAD + title_w + 8.0;
+        canvas.text_clipped(
+            name_x,
+            rect.y + (layout::TITLEBAR_H - layout::TITLE_SIZE) / 2.0 - 1.0,
+            layout::TITLE_SIZE,
+            &name,
+            color::text_faint(),
+            (rect.x + rect.w - name_x - 2.0 * bw - 16.0).max(0.0),
+        );
+        let add = Rect::new(rect.x + rect.w - layout::TITLEBAR_H, rect.y + 4.0, bw, bw);
+        self.tip(add, "New script or folder");
+        if self.icon_button(canvas, add, Icon::Plus, ButtonStyle::Ghost) {
+            let items = self.project_create_items();
+            self.open_menu(add.x, add.y + add.h + 2.0, items);
+        }
+        let collapse = Rect::new(add.x - bw - 2.0, add.y, bw, bw);
+        self.tip(collapse, "Collapse all folders");
+        let any_open = !self.project.expanded.is_empty();
+        let style = if any_open {
+            ButtonStyle::Ghost
+        } else {
+            ButtonStyle::Disabled
+        };
+        if self.button(canvas, collapse, "", style) {
+            self.project.expanded.clear();
+            self.project.scroll = 0.0;
+        }
+        draw_collapse_icon(
+            canvas,
+            collapse.x + collapse.w / 2.0,
+            collapse.y + collapse.h / 2.0,
+            if !any_open {
+                color::text_faint()
+            } else if self.hot(collapse) {
+                color::text()
+            } else {
+                color::text_dim()
+            },
+        );
     }
 
+    /// The right-click menu for one file or folder.
+    fn file_menu(
+        &self,
+        doc: &Document,
+        item: &Item,
+        kind: AssetKind,
+        editing: bool,
+    ) -> Vec<MenuItem> {
+        let mut menu = Vec::new();
+        match kind {
+            AssetKind::Scene => menu.push(item_menu("Open Scene", open_intent(&item.path, false))),
+            AssetKind::Prefab => {
+                menu.push(item_menu("Instantiate", open_intent(&item.path, false)));
+            }
+            AssetKind::Script => {
+                menu.push(item_menu("Edit Script", open_intent(&item.path, false)));
+                if let Some(i) = doc.selected_index() {
+                    menu.push(MenuItem {
+                        label: format!("Attach to {}", doc.entities[i].name()),
+                        shortcut: "",
+                        action: Some(Action::Intent(Intent::AttachScript {
+                            id: doc.entities[i].id,
+                            path: item.path.clone(),
+                        })),
+                        enabled: editing,
+                    });
+                }
+            }
+            AssetKind::Folder | AssetKind::Other => {}
+        }
+        if !menu.is_empty() {
+            menu.push(MenuItem::separator());
+        }
+        menu.extend(self.project_create_items());
+        menu
+    }
+
+    /// "New Script…" and "New Folder" in [`Ui::project_dir`].
     fn project_create_items(&self) -> Vec<MenuItem> {
         let dir = self.project_dir();
         vec![
@@ -335,6 +434,15 @@ impl Ui {
                 enabled: true,
             },
         ]
+    }
+
+    /// Called after the app handles an intent that changes files on disk:
+    /// re-reads listings and reveals what was created.
+    pub fn files_changed(&mut self, created: Option<&Path>) {
+        self.project.invalidate();
+        if let Some(path) = created {
+            self.reveal_in_files(path);
+        }
     }
 }
 
@@ -359,55 +467,88 @@ pub fn unique_child(dir: &Path, base: &str) -> String {
         .unwrap_or_else(|| base.to_string())
 }
 
-/// Draws a 28px icon for an asset kind centered at `(cx, cy)`.
-pub fn draw_asset_icon(canvas: &mut Canvas, kind: AssetKind, cx: f32, cy: f32) {
+/// A small disclosure triangle: pointing right (closed) or down (open).
+fn draw_chevron(canvas: &mut Canvas, cx: f32, cy: f32, open: bool) {
+    let c = color::text_dim();
+    if open {
+        canvas.fill_polygon(
+            &[(cx - 3.5, cy - 2.0), (cx + 3.5, cy - 2.0), (cx, cy + 2.5)],
+            c,
+        );
+    } else {
+        canvas.fill_polygon(
+            &[(cx - 2.0, cy - 3.5), (cx + 2.5, cy), (cx - 2.0, cy + 3.5)],
+            c,
+        );
+    }
+}
+
+/// "Collapse all": two chevrons pointing at a bar.
+fn draw_collapse_icon(canvas: &mut Canvas, cx: f32, cy: f32, c: tiny_skia::Color) {
+    canvas.polyline(
+        &[(cx - 4.0, cy - 6.0), (cx, cy - 2.5), (cx + 4.0, cy - 6.0)],
+        c,
+        1.3,
+    );
+    canvas.polyline(
+        &[(cx - 4.0, cy + 6.0), (cx, cy + 2.5), (cx + 4.0, cy + 6.0)],
+        c,
+        1.3,
+    );
+    canvas.fill_rect(cx - 5.0, cy - 0.5, 10.0, 1.2, c);
+}
+
+/// A 14 px icon for an asset kind, centred on `(cx, cy)`. Hue only where it
+/// carries meaning: scripts green (Python), scenes and prefabs paper white.
+pub fn draw_tree_icon(canvas: &mut Canvas, kind: AssetKind, cx: f32, cy: f32) {
     match kind {
-        AssetKind::Folder => {
-            let c = color::warn();
-            canvas.fill_rounded(cx - 16.0, cy - 10.0, 14.0, 6.0, 2.0, c);
-            canvas.fill_rounded(cx - 16.0, cy - 7.0, 32.0, 21.0, 3.0, c);
-        }
+        AssetKind::Folder => super::draw_small_file_icon(canvas, cx, cy, true),
         AssetKind::Scene => {
-            let c = color::accent();
+            let c = color::accent_soft();
             canvas.fill_polygon(
                 &[
-                    (cx, cy - 14.0),
-                    (cx + 14.0, cy),
-                    (cx, cy + 14.0),
-                    (cx - 14.0, cy),
+                    (cx, cy - 6.0),
+                    (cx + 6.0, cy),
+                    (cx, cy + 6.0),
+                    (cx - 6.0, cy),
                 ],
                 c,
             );
             canvas.fill_polygon(
                 &[
-                    (cx, cy - 7.0),
-                    (cx + 7.0, cy),
-                    (cx, cy + 7.0),
-                    (cx - 7.0, cy),
+                    (cx, cy - 2.5),
+                    (cx + 2.5, cy),
+                    (cx, cy + 2.5),
+                    (cx - 2.5, cy),
                 ],
                 color::surface(),
             );
         }
         AssetKind::Prefab => {
-            let c = color::accent_soft();
-            canvas.fill_rounded(cx - 12.0, cy - 12.0, 24.0, 24.0, 4.0, c);
-            canvas.fill_rounded(cx - 6.0, cy - 6.0, 12.0, 12.0, 2.0, color::surface());
+            canvas.stroke_rounded(
+                cx - 5.5,
+                cy - 5.5,
+                11.0,
+                11.0,
+                2.0,
+                color::accent_soft(),
+                1.3,
+            );
+            canvas.fill_rounded(cx - 2.0, cy - 2.0, 4.0, 4.0, 1.0, color::accent_soft());
         }
         AssetKind::Script => {
-            canvas.fill_rounded(cx - 12.0, cy - 15.0, 24.0, 30.0, 3.0, color::raised());
-            canvas.stroke_rounded(cx - 12.0, cy - 15.0, 24.0, 30.0, 3.0, color::axis_y(), 1.5);
-            canvas.text(cx - 8.0, cy - 7.0, 11.0, "py", color::axis_y());
+            canvas.stroke_rounded(cx - 5.0, cy - 6.5, 10.0, 13.0, 2.0, color::axis_y(), 1.2);
+            canvas.fill_rect(cx - 2.5, cy - 2.5, 5.0, 1.2, color::axis_y());
+            canvas.fill_rect(cx - 2.5, cy + 0.5, 3.5, 1.2, color::axis_y());
         }
-        AssetKind::Other => {
-            canvas.fill_rounded(cx - 11.0, cy - 14.0, 22.0, 28.0, 3.0, color::raised());
-            canvas.stroke_rounded(cx - 11.0, cy - 14.0, 22.0, 28.0, 3.0, color::border(), 1.0);
-        }
+        AssetKind::Other => super::draw_small_file_icon(canvas, cx, cy, false),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::Pointer;
 
     #[test]
     fn assets_open_with_the_right_action() {
@@ -430,5 +571,178 @@ mod tests {
             Some(Intent::InstantiatePrefab(_))
         ));
         assert!(open_intent(Path::new("readme.md"), false).is_none());
+    }
+
+    /// A throwaway project: `level.ron`, `scripts/coin.py`, `scripts/ai/`.
+    fn project(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("oberon-files-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("scripts/ai")).unwrap();
+        std::fs::write(root.join("level.ron"), "()").unwrap();
+        std::fs::write(root.join("scripts/coin.py"), "").unwrap();
+        std::fs::write(root.join(".hidden"), "").unwrap();
+        root
+    }
+
+    fn press(
+        ui: &mut Ui,
+        c: &mut Canvas,
+        doc: &Document,
+        x: f32,
+        y: f32,
+        double: bool,
+    ) -> Vec<Intent> {
+        let mut out = ui.frame(
+            c,
+            doc,
+            Pointer {
+                x,
+                y,
+                down: true,
+                pressed: true,
+                double_click: double,
+                ..Pointer::default()
+            },
+            None,
+        );
+        out.extend(ui.frame(
+            c,
+            doc,
+            Pointer {
+                x,
+                y,
+                ..Pointer::default()
+            },
+            None,
+        ));
+        out
+    }
+
+    /// The centre of visible tree row `i` in a 1600×950 window.
+    fn row_center(i: usize) -> (f32, f32) {
+        let files = super::super::Layout::compute(1600.0, 950.0).files;
+        (
+            files.x + 60.0,
+            files.y + layout::TITLEBAR_H + 4.0 + (i as f32 + 0.5) * ROW_H,
+        )
+    }
+
+    #[test]
+    fn the_files_panel_sits_under_the_hierarchy() {
+        let lay = super::super::Layout::compute(1600.0, 950.0);
+        assert_eq!(lay.files.x, lay.hierarchy.x);
+        assert_eq!(lay.files.w, lay.hierarchy.w);
+        assert!((lay.files.y - (lay.hierarchy.y + lay.hierarchy.h)).abs() < 0.5);
+        assert!((lay.files.y + lay.files.h - lay.status.y).abs() < 0.5);
+        assert!((lay.files.h - layout::FILES_H).abs() < 0.5);
+
+        // Hiding the hierarchy gives Files the whole sidebar, and back.
+        let mut panels = super::super::PanelSizes {
+            show_hierarchy: false,
+            ..Default::default()
+        };
+        let lay = super::super::Layout::with_panels(1600.0, 950.0, &panels);
+        assert_eq!(lay.hierarchy.h, 0.0);
+        assert!((lay.files.y - lay.menubar.h).abs() < 0.5);
+        panels.show_hierarchy = true;
+        panels.show_files = false;
+        let lay = super::super::Layout::with_panels(1600.0, 950.0, &panels);
+        assert_eq!(lay.files.h, 0.0);
+        assert!((lay.hierarchy.y + lay.hierarchy.h - lay.status.y).abs() < 0.5);
+        panels.show_hierarchy = false;
+        let lay = super::super::Layout::with_panels(1600.0, 950.0, &panels);
+        assert_eq!(lay.viewport.x, 0.0, "both hidden: no sidebar");
+    }
+
+    #[test]
+    fn folders_expand_in_place_and_files_open_on_double_click() {
+        let root = project("tree");
+        let mut c = Canvas::new(1600, 950);
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        ui.project_root.clone_from(&root);
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        // Folders first, dotfiles hidden: [scripts/, level.ron].
+        let names: Vec<String> = ui
+            .project
+            .rows(&root)
+            .into_iter()
+            .map(|r| r.item.name)
+            .collect();
+        assert_eq!(names, ["scripts", "level.ron"]);
+
+        let (x, y) = row_center(0);
+        press(&mut ui, &mut c, &doc, x, y, false);
+        let rows = ui.project.rows(&root);
+        let names: Vec<(&str, usize)> = rows
+            .iter()
+            .map(|r| (r.item.name.as_str(), r.depth))
+            .collect();
+        assert_eq!(
+            names,
+            [("scripts", 0), ("ai", 1), ("coin.py", 1), ("level.ron", 0)]
+        );
+
+        // New files go into the selected folder.
+        assert_eq!(ui.project_dir(), root.join("scripts"));
+
+        let (x, y) = row_center(2);
+        let out = press(&mut ui, &mut c, &doc, x, y, true);
+        assert!(
+            out.iter()
+                .any(|i| matches!(i, Intent::OpenScript(p) if p.ends_with("scripts/coin.py"))),
+            "{out:?}"
+        );
+        let (x, y) = row_center(3);
+        let out = press(&mut ui, &mut c, &doc, x, y, true);
+        assert!(out
+            .iter()
+            .any(|i| matches!(i, Intent::Open(p) if p.ends_with("level.ron"))));
+
+        // Clicking the folder again collapses it.
+        let (x, y) = row_center(0);
+        press(&mut ui, &mut c, &doc, x, y, false);
+        assert_eq!(ui.project.rows(&root).len(), 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn revealing_a_new_file_expands_its_folders() {
+        let root = project("reveal");
+        let mut ui = Ui::new();
+        ui.project_root.clone_from(&root);
+        ui.panels.show_files = false;
+        let created = root.join("scripts/ai/brain.py");
+        std::fs::write(&created, "").unwrap();
+        ui.files_changed(Some(&created));
+        assert!(ui.panels.show_files);
+        let rows = ui.project.rows(&root);
+        assert!(rows.iter().any(|r| r.item.path == created && r.depth == 2));
+        assert_eq!(ui.project.selected.as_deref(), Some(created.as_path()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dragging_the_divider_resizes_files_against_the_hierarchy() {
+        let mut c = Canvas::new(1600, 950);
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        let files = super::super::Layout::compute(1600.0, 950.0).files;
+        let (x, y) = (files.x + 100.0, files.y);
+        let at = |y: f32, down: bool, pressed: bool| Pointer {
+            x,
+            y,
+            down,
+            pressed,
+            ..Pointer::default()
+        };
+        ui.frame(&mut c, &doc, at(y, true, true), None);
+        ui.frame(&mut c, &doc, at(y - 100.0, true, false), None);
+        ui.frame(&mut c, &doc, at(y - 100.0, false, false), None);
+        assert!(
+            (ui.panels.files_h - (files.h + 100.0)).abs() < 1.0,
+            "{}",
+            ui.panels.files_h
+        );
     }
 }

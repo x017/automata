@@ -6,9 +6,10 @@
 │              │                                │                      │
 │  Sun         │      (3D viewport / editor)    │  name, components,   │
 │  Ground      │                                │  attributes          │
-│  Player      │                                │                      │
-│  Main Camera ├────────────────────────────────┤                      │
-│              │ Console  Project               │                      │
+│  Main Camera │                                │                      │
+├ Files ───────┤                                │                      │
+│ ▾ scripts    ├────────────────────────────────┤                      │
+│     coin.py  │ Console                        │                      │
 └ status bar ──────────────────────────────────────────── shortcut hints ┘
 ```
 
@@ -37,6 +38,27 @@ component: cube, sun, camera, horizon (Environment), or empty.
   Camera, Environment, Physics Cube, Player.
 - Right-click an entity for Rename, Duplicate, Copy/Paste, Delete, Frame,
   Save as Prefab, and Attach/Edit Script.
+
+## Files
+
+The bottom of the left sidebar is a file tree of your project: the folder
+your scene is saved in. Drag the divider between Hierarchy and Files to
+share the space, or hide either one from the **Window** menu.
+
+- Click a folder to expand or collapse it. The **collapse** button in the
+  panel's title bar folds everything back up.
+- Double-click a `.py` file to open it in the code editor, a `.ron` file
+  to open it as a scene, or a `.prefab` to place it in the scene.
+- The open scene and the script you're editing are shown in bright text
+  with a dot.
+- Right-click a file for Open, Edit Script, **Attach to** the selected
+  entity, or Instantiate. Right-click anywhere for **New Script…** and
+  **New Folder**. New files go in the selected folder, and the tree opens
+  to show them.
+- **+** in the title bar does the same as right-clicking empty space.
+
+Hidden files and `__pycache__`, `target`, and `node_modules` folders are
+left out.
 
 ## Scene view
 
@@ -95,14 +117,11 @@ Full guide: [Graphics](graphics.md).
 
 ![The Graphics tab](../../assets/oberon/graphics.png)
 
-## Console and Project
+## Console
 
-- **Console** collects `print()` output from your scripts, Oberon
-  messages, and Python errors with clickable file and line links. The
-  Info / Warnings / Errors chips filter the list.
-- **Project** shows the files next to your scene. Double-click a `.py`
-  file to open it in the code editor, or a `.ron` file to open it as a
-  scene.
+The bottom dock collects `print()` output from your scripts, Oberon
+messages, and Python errors with clickable file and line links. The
+Info / Warnings / Errors chips filter the list.
 
 ## Play mode
 

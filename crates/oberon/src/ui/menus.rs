@@ -20,11 +20,13 @@ pub const BAR: [&str; 6] = ["File", "Edit", "GameObject", "Component", "Window",
 /// A dockable panel that the Window menu can show or hide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Panel {
-    /// Entity list (left).
+    /// Entity list (left sidebar, top).
     Hierarchy,
+    /// Project file tree (left sidebar, bottom).
+    Files,
     /// Property editor (right).
     Inspector,
-    /// Console / Project dock (bottom).
+    /// Console dock (bottom).
     Bottom,
 }
 
@@ -74,8 +76,8 @@ pub enum UiAction {
     PickColor(u64, super::picker::ColorTarget),
     /// Show the Console tab in the bottom dock.
     ShowConsole,
-    /// Show the Project tab in the bottom dock.
-    ShowProject,
+    /// Show the Files panel in the left sidebar.
+    ShowFiles,
     /// Open the Settings dialog.
     Settings,
     /// Open the command palette.
@@ -127,7 +129,7 @@ impl MenuItem {
         Self::new(label, shortcut, Action::Ui(a), enabled)
     }
 
-    fn separator() -> Self {
+    pub(super) fn separator() -> Self {
         Self {
             label: "-".into(),
             shortcut: "",
@@ -362,20 +364,23 @@ impl Ui {
                         true,
                     ),
                     MenuItem::ui(
+                        check(self.panels.show_files, "Files"),
+                        "",
+                        UiAction::TogglePanel(Panel::Files),
+                        true,
+                    ),
+                    MenuItem::ui(
                         check(self.panels.show_inspector, "Inspector"),
                         "",
                         UiAction::TogglePanel(Panel::Inspector),
                         true,
                     ),
                     MenuItem::ui(
-                        check(self.panels.show_bottom, "Console / Project"),
+                        check(self.panels.show_bottom, "Console"),
                         "",
                         UiAction::TogglePanel(Panel::Bottom),
                         true,
                     ),
-                    MenuItem::separator(),
-                    MenuItem::ui("Console", "", UiAction::ShowConsole, true),
-                    MenuItem::ui("Project", "", UiAction::ShowProject, true),
                     MenuItem::separator(),
                     MenuItem::ui("Reset Layout", "", UiAction::ResetLayout, true),
                 ]
@@ -537,6 +542,7 @@ impl Ui {
                 let p = &mut self.panels;
                 match panel {
                     Panel::Hierarchy => p.show_hierarchy = !p.show_hierarchy,
+                    Panel::Files => p.show_files = !p.show_files,
                     Panel::Inspector => p.show_inspector = !p.show_inspector,
                     Panel::Bottom => p.show_bottom = !p.show_bottom,
                 }
@@ -548,10 +554,7 @@ impl Ui {
                 self.panels.show_bottom = true;
                 self.bottom_tab = super::BottomTab::Console;
             }
-            UiAction::ShowProject => {
-                self.panels.show_bottom = true;
-                self.bottom_tab = super::BottomTab::Project;
-            }
+            UiAction::ShowFiles => self.panels.show_files = true,
             UiAction::Settings => self.open_settings(),
             UiAction::CommandPalette => self.open_palette(doc),
         }

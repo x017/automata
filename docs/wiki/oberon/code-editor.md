@@ -8,7 +8,7 @@ leaving the scene. Scripts open as tabs next to the **Scene** tab. Press
 
 ## Open a script
 
-- Double-click a `.py` file in **Project**.
+- Double-click a `.py` file in **Files** (left sidebar).
 - **File → New Script…** / **Open Script…**.
 - Right-click an entity → **Edit Script**.
 - Click a **file:line** link in the Console.

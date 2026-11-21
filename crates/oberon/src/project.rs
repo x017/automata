@@ -28,6 +28,8 @@ pub struct Prefs {
     pub inspector_w: f32,
     /// Bottom dock height.
     pub bottom_h: f32,
+    /// Files panel height (bottom of the left sidebar).
+    pub files_h: f32,
     /// Python interpreter for play-mode scripts (default: `python3`).
     pub python: Option<String>,
     /// Language server command line for the code editor (default: auto).
@@ -54,6 +56,7 @@ impl Default for Prefs {
             hierarchy_w: panels.hierarchy_w,
             inspector_w: panels.inspector_w,
             bottom_h: panels.bottom_h,
+            files_h: panels.files_h,
             python: None,
             language_server: None,
             autosave_secs: 60,
@@ -125,6 +128,7 @@ impl Prefs {
         panels.hierarchy_w = self.hierarchy_w;
         panels.inspector_w = self.inspector_w;
         panels.bottom_h = self.bottom_h;
+        panels.files_h = self.files_h;
     }
 
     /// Records the current panel sizes.
@@ -132,6 +136,7 @@ impl Prefs {
         self.hierarchy_w = panels.hierarchy_w;
         self.inspector_w = panels.inspector_w;
         self.bottom_h = panels.bottom_h;
+        self.files_h = panels.files_h;
     }
 }
 

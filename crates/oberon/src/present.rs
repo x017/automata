@@ -448,20 +448,26 @@ impl EditorApp {
             }
             Intent::Open(path) => self.open_scene(&path),
             Intent::SaveAs(path) => {
-                self.doc.path = Some(path);
+                self.doc.path = Some(path.clone());
                 self.save();
+                self.ui.files_changed(Some(&path));
             }
-            Intent::SavePrefab { id, path } => self.save_prefab(id, &path),
+            Intent::SavePrefab { id, path } => {
+                self.save_prefab(id, &path);
+                self.ui.files_changed(Some(&path));
+            }
             Intent::InstantiatePrefab(path) => self.instantiate_prefab(&path),
             Intent::OpenScript(path) => self.open_script(&path, None),
             Intent::OpenScriptAt { path, line } => self.open_script(&path, Some(line)),
             Intent::NewScript(path) => {
                 if self.ensure_script(&path) {
+                    self.ui.files_changed(Some(&path));
                     self.open_script(&path, None);
                 }
             }
             Intent::AttachScript { id, path } => {
                 if self.ensure_script(&path) {
+                    self.ui.files_changed(None);
                     let rel = self.doc.relative(&path);
                     self.doc.modify(id, false, |d| {
                         d.script = Some(automata_core::Script { path: rel.clone() });
@@ -476,9 +482,11 @@ impl EditorApp {
                 }
             }
             Intent::NewFolder(path) => match std::fs::create_dir_all(&path) {
-                Ok(()) => self
-                    .ui
-                    .log(LogLevel::Info, format!("Created folder {}", path.display())),
+                Ok(()) => {
+                    self.ui.files_changed(Some(&path));
+                    self.ui
+                        .log(LogLevel::Info, format!("Created folder {}", path.display()));
+                }
                 Err(e) => self
                     .ui
                     .log(LogLevel::Error, format!("New folder failed: {e}")),

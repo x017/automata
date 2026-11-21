@@ -66,6 +66,8 @@ pub mod layout {
     pub const INSPECTOR_W: f32 = 340.0;
     /// Height of the console panel.
     pub const CONSOLE_H: f32 = 150.0;
+    /// Default height of the Files panel under the hierarchy.
+    pub const FILES_H: f32 = 340.0;
     /// Height of the status bar.
     pub const STATUS_H: f32 = 24.0;
     /// Panel title-bar height.

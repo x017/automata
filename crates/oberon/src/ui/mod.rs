@@ -2,7 +2,8 @@
 //! into a [`Canvas`] each frame.
 //!
 //! Layout: toolbar (file / undo / transform tools / play controls) on top,
-//! **Hierarchy** left, **Scene view** center with the **Console** under it,
+//! **Hierarchy** left with the **Files** tree under it, **Scene view** center
+//! with the **Console** under it,
 //! **Inspector** right, status bar at the foot.
 //!
 //! The UI never mutates the document. Widgets are drawn and hit-tested
@@ -104,14 +105,18 @@ impl Rect {
 /// Window menu).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PanelSizes {
-    /// Hierarchy width.
+    /// Left sidebar width (Hierarchy and Files).
     pub hierarchy_w: f32,
     /// Inspector width.
     pub inspector_w: f32,
     /// Bottom dock height.
     pub bottom_h: f32,
+    /// Height of the Files panel at the bottom of the left sidebar.
+    pub files_h: f32,
     /// Hierarchy visible.
     pub show_hierarchy: bool,
+    /// Files panel visible.
+    pub show_files: bool,
     /// Inspector visible.
     pub show_inspector: bool,
     /// Bottom dock visible.
@@ -124,7 +129,9 @@ impl Default for PanelSizes {
             hierarchy_w: layout::HIERARCHY_W,
             inspector_w: layout::INSPECTOR_W,
             bottom_h: layout::CONSOLE_H + 40.0,
+            files_h: layout::FILES_H,
             show_hierarchy: true,
+            show_files: true,
             show_inspector: true,
             show_bottom: true,
         }
@@ -137,8 +144,6 @@ pub enum BottomTab {
     /// Log output.
     #[default]
     Console,
-    /// File browser.
-    Project,
 }
 
 /// The editor's panel rectangles for a window of a given logical size.
@@ -148,13 +153,15 @@ pub struct Layout {
     pub menubar: Rect,
     /// Tool bar (under the menu bar).
     pub toolbar: Rect,
-    /// Left hierarchy panel.
+    /// Left sidebar, top: the entity hierarchy.
     pub hierarchy: Rect,
+    /// Left sidebar, bottom: the project file tree.
+    pub files: Rect,
     /// Right inspector panel.
     pub inspector: Rect,
     /// Center scene view (or code editor).
     pub viewport: Rect,
-    /// Bottom dock (Console / Project) under the center area.
+    /// Bottom dock (Console) under the center area.
     pub console: Rect,
     /// Bottom status bar.
     pub status: Rect,
@@ -173,7 +180,7 @@ impl Layout {
         let top = MENUBAR_H + layout::TOOLBAR_H;
         let body_y = top;
         let body_h = (h - top - layout::STATUS_H).max(1.0);
-        let hier_w = if panels.show_hierarchy {
+        let hier_w = if panels.show_hierarchy || panels.show_files {
             panels.hierarchy_w.clamp(140.0, (w * 0.4).max(140.0))
         } else {
             0.0
@@ -190,16 +197,37 @@ impl Layout {
             0.0
         };
         let view_h = (body_h - console_h).max(1.0);
+        // The left sidebar stacks Hierarchy over Files; either fills it alone.
+        let files_h = match (panels.show_hierarchy, panels.show_files) {
+            (true, true) => clamp_files_h(panels.files_h, body_h),
+            (false, true) => body_h,
+            _ => 0.0,
+        };
+        let hier_h = if panels.show_hierarchy {
+            body_h - files_h
+        } else {
+            0.0
+        };
         Self {
             menubar: Rect::new(0.0, 0.0, w, MENUBAR_H),
             toolbar: Rect::new(0.0, MENUBAR_H, w, layout::TOOLBAR_H),
-            hierarchy: Rect::new(0.0, body_y, hier_w, body_h),
+            hierarchy: Rect::new(0.0, body_y, hier_w, hier_h),
+            files: Rect::new(0.0, body_y + hier_h, hier_w, files_h),
             inspector: Rect::new(w - insp_w, body_y, insp_w, body_h),
             viewport: Rect::new(hier_w, body_y, center_w, view_h),
             console: Rect::new(hier_w, body_y + view_h, center_w, console_h),
             status: Rect::new(0.0, h - layout::STATUS_H, w, layout::STATUS_H),
         }
     }
+}
+
+/// The Files panel height for a left sidebar `body_h` tall: at least 90 px,
+/// leaving the Hierarchy at least 120 px.
+fn clamp_files_h(files_h: f32, body_h: f32) -> f32 {
+    files_h.clamp(
+        90.0_f32.min(body_h * 0.5),
+        (body_h - 120.0).max(90.0_f32.min(body_h * 0.5)),
+    )
 }
 
 /// An action the UI requests the app to perform on the document.
@@ -539,6 +567,7 @@ enum Drag {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Splitter {
     Hierarchy,
+    Files,
     Inspector,
     Bottom,
 }
@@ -588,7 +617,7 @@ pub struct Ui {
     dialog: Option<Dialog>,
     /// Recently opened scenes (most recent first), set by the app.
     pub recent: Vec<PathBuf>,
-    /// The project directory (file dialogs and the Project panel), set by
+    /// The project directory (file dialogs and the Files panel), set by
     /// the app.
     pub project_root: PathBuf,
     /// Panel sizes and visibility.
@@ -617,7 +646,7 @@ pub struct Ui {
     console_scroll: f32,
     /// Console levels hidden by the filter buttons.
     console_hidden: HashSet<LogLevel>,
-    /// Project panel state.
+    /// Files panel state.
     project: project_panel::ProjectState,
     collapsed: HashSet<&'static str>,
     inspector_scroll: f32,
@@ -1117,10 +1146,13 @@ impl Ui {
             self.doc_tabs(canvas, r);
         }
         if self.panels.show_bottom {
-            self.bottom_dock(canvas, doc, lay.console);
+            self.bottom_dock(canvas, lay.console);
         }
         if self.panels.show_hierarchy {
             self.hierarchy(canvas, doc, lay.hierarchy);
+        }
+        if self.panels.show_files {
+            self.files_panel(canvas, doc, lay.files);
         }
         if self.panels.show_inspector {
             self.inspector(canvas, doc, lay.inspector);
@@ -1152,12 +1184,14 @@ impl Ui {
     /// Splitter hit areas for the current layout.
     fn splitter_rects(&self, lay: &Layout) -> Vec<(Splitter, Rect)> {
         let mut v = Vec::new();
-        if self.panels.show_hierarchy {
+        if self.panels.show_hierarchy || self.panels.show_files {
             let r = lay.hierarchy;
-            v.push((
-                Splitter::Hierarchy,
-                Rect::new(r.x + r.w - 3.0, r.y, 6.0, r.h),
-            ));
+            let h = lay.hierarchy.h + lay.files.h;
+            v.push((Splitter::Hierarchy, Rect::new(r.x + r.w - 3.0, r.y, 6.0, h)));
+        }
+        if self.panels.show_hierarchy && self.panels.show_files {
+            let r = lay.files;
+            v.push((Splitter::Files, Rect::new(r.x, r.y - 3.0, r.w - 3.0, 6.0)));
         }
         if self.panels.show_inspector {
             let r = lay.inspector;
@@ -1183,9 +1217,13 @@ impl Ui {
                     Splitter::Bottom => {
                         self.panels.bottom_h = (lay.status.y - p.y).clamp(80.0, h * 0.7);
                     }
+                    Splitter::Files => {
+                        let body_h = lay.hierarchy.h + lay.files.h;
+                        self.panels.files_h = clamp_files_h(lay.status.y - p.y, body_h);
+                    }
                 }
                 self.cursor = match which {
-                    Splitter::Bottom => CursorHint::ResizeV,
+                    Splitter::Bottom | Splitter::Files => CursorHint::ResizeV,
                     _ => CursorHint::ResizeH,
                 };
                 self.mask_pointer();
@@ -1200,7 +1238,7 @@ impl Ui {
         for (which, r) in self.splitter_rects(lay) {
             if r.contains(self.p.x, self.p.y) {
                 self.cursor = match which {
-                    Splitter::Bottom => CursorHint::ResizeV,
+                    Splitter::Bottom | Splitter::Files => CursorHint::ResizeV,
                     _ => CursorHint::ResizeH,
                 };
                 if self.p.pressed {
@@ -2745,8 +2783,8 @@ impl Ui {
 
     // ----- console & status -----------------------------------------------
 
-    /// The bottom dock: Console and Project tabs.
-    fn bottom_dock(&mut self, canvas: &mut Canvas, doc: &Document, rect: Rect) {
+    /// The bottom dock: the Console.
+    fn bottom_dock(&mut self, canvas: &mut Canvas, rect: Rect) {
         canvas.fill_rect(rect.x, rect.y, rect.w, rect.h, color::surface());
         canvas.fill_rect(rect.x, rect.y, rect.w, 1.0, color::border());
         let body = Rect::new(
@@ -2757,7 +2795,6 @@ impl Ui {
         );
         match self.bottom_tab {
             BottomTab::Console => self.console_body(canvas, body),
-            BottomTab::Project => self.project_body(canvas, doc, body),
         }
         // Tab strip.
         canvas.fill_rect(
@@ -2774,7 +2811,7 @@ impl Ui {
             1.0,
             color::border(),
         );
-        let mut x = rect.x + 6.0;
+        let x = rect.x + 6.0;
         let errors = self
             .console
             .iter()
@@ -2788,35 +2825,18 @@ impl Ui {
         } else {
             "Console".to_string()
         };
-        for (tab, label) in [
-            (BottomTab::Console, console_label),
-            (BottomTab::Project, "Project".to_string()),
-        ] {
-            let tw = canvas.measure_text(layout::TITLE_SIZE, &label) + 22.0;
-            let r = Rect::new(x, rect.y, tw, layout::TITLEBAR_H);
-            let active = self.bottom_tab == tab;
-            if active {
-                canvas.fill_rect(r.x + 8.0, r.y + r.h - 2.0, r.w - 16.0, 2.0, color::accent());
-            }
-            canvas.text(
-                r.x + 11.0,
-                r.y + (r.h - layout::TITLE_SIZE) / 2.0 - 1.0,
-                layout::TITLE_SIZE,
-                &label,
-                if active {
-                    color::text()
-                } else {
-                    color::text_dim()
-                },
-            );
-            if self.hot(r) {
-                self.cursor = CursorHint::Pointer;
-                if self.p.pressed {
-                    self.bottom_tab = tab;
-                }
-            }
-            x += tw + 2.0;
-        }
+        // A single tab today; the underline keeps it reading as a dock title.
+        let label = console_label;
+        let tw = canvas.measure_text(layout::TITLE_SIZE, &label) + 22.0;
+        let r = Rect::new(x, rect.y, tw, layout::TITLEBAR_H);
+        canvas.fill_rect(r.x + 8.0, r.y + r.h - 2.0, r.w - 16.0, 2.0, color::accent());
+        canvas.text(
+            r.x + 11.0,
+            r.y + (r.h - layout::TITLE_SIZE) / 2.0 - 1.0,
+            layout::TITLE_SIZE,
+            &label,
+            color::text(),
+        );
         if self.bottom_tab == BottomTab::Console {
             let clear = Rect::new(
                 rect.x + rect.w - 64.0,

@@ -33,6 +33,9 @@ fn main() {
         doc.select(Some(cube.id));
     }
     let mut ui = Ui::new();
+    if doc.path.is_some() {
+        ui.project_root = doc.base_dir();
+    }
 
     // Render the viewport frame on an offscreen GPU renderer when one is
     // available; otherwise use the software wireframe fallback.
@@ -61,7 +64,17 @@ fn main() {
         }
         "menu" => ui.open_bar_menu(0, &doc),
         "dialog" => ui.open_dialog_kind(oberon::ui::DialogKind::SaveSceneAs, &doc),
-        "project" => ui.bottom_tab = oberon::ui::BottomTab::Project,
+        "project" | "files" => {
+            // Reveal a script so the Files tree shows a couple of open folders.
+            let root = ui.project_root.clone();
+            if let Some(script) = ["scripts/coin.py", "scripts/player.py"]
+                .iter()
+                .map(|s| root.join(s))
+                .find(|p| p.is_file())
+            {
+                ui.reveal_in_files(&script);
+            }
+        }
         "code" | "code-complete" => {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../examples/python/oop_platformer.py");

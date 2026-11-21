@@ -38,9 +38,10 @@
 │              │                                │                      │
 │  Sun         │      (3D viewport / editor)    │  name, components,   │
 │  Ground      │                                │  attributes          │
-│  Player      │                                │                      │
-│  Main Camera ├────────────────────────────────┤                      │
-│              │ Console  Project               │                      │
+│  Main Camera │                                │                      │
+├ Files ───────┤                                │                      │
+│ ▾ scripts    ├────────────────────────────────┤                      │
+│     coin.py  │ Console                        │                      │
 └ status bar ──────────────────────────────────────────── shortcut hints ┘</code></pre></div>
 <p>All panel borders can be dragged. <strong>Window → Reset Layout</strong> restores the
 default sizes.</p>
@@ -57,6 +58,19 @@ component: cube, sun, camera, horizon (Environment), or empty.</p>
 view.</li><li><strong>+</strong> opens the Create menu: Empty, Cube, Plane, Directional Light,
 Camera, Environment, Physics Cube, Player.</li><li>Right-click an entity for Rename, Duplicate, Copy/Paste, Delete, Frame,
 Save as Prefab, and Attach/Edit Script.</li></ul>
+<h2 id="files">Files<a class="anchor" href="#files" aria-label="Link to this section">#</a></h2>
+<p>The bottom of the left sidebar is a file tree of your project: the folder
+your scene is saved in. Drag the divider between Hierarchy and Files to
+share the space, or hide either one from the <strong>Window</strong> menu.</p>
+<ul><li>Click a folder to expand or collapse it. The <strong>collapse</strong> button in the
+panel's title bar folds everything back up.</li><li>Double-click a <code>.py</code> file to open it in the code editor, a <code>.ron</code> file
+to open it as a scene, or a <code>.prefab</code> to place it in the scene.</li><li>The open scene and the script you're editing are shown in bright text
+with a dot.</li><li>Right-click a file for Open, Edit Script, <strong>Attach to</strong> the selected
+entity, or Instantiate. Right-click anywhere for <strong>New Script…</strong> and
+<strong>New Folder</strong>. New files go in the selected folder, and the tree opens
+to show them.</li><li><strong>+</strong> in the title bar does the same as right-clicking empty space.</li></ul>
+<p>Hidden files and <code>__pycache__</code>, <code>target</code>, and <code>node_modules</code> folders are
+left out.</p>
 <h2 id="scene-view">Scene view<a class="anchor" href="#scene-view" aria-label="Link to this section">#</a></h2>
 <p>This is the 3D viewport, rendered by the engine's own wgpu renderer.</p>
 <div class="table"><table><thead><tr><th>To</th><th>Do</th></tr></thead><tbody><tr><td>Select</td><td>Click an object</td></tr><tr><td>Orbit</td><td>Drag empty space, right-drag, or Alt+drag</td></tr><tr><td>Pan</td><td>Middle-drag</td></tr><tr><td>Zoom</td><td>Mouse wheel</td></tr><tr><td>Frame selection</td><td>F, or double-click in the hierarchy</td></tr><tr><td>Context menu</td><td>Right-click without dragging</td></tr></tbody></table></div>
@@ -84,12 +98,10 @@ the scene looks:</p>
 <ul><li>renderer quality and live frame time</li><li>the sun angle</li><li>environment presets, tone mapping, and fog</li><li>the scene camera</li><li>one-click test scenes</li></ul>
 <p>Full guide: <a href="graphics.html">Graphics</a>.</p>
 <p><img src="../../../assets/oberon/graphics.png" alt="The Graphics tab" loading="lazy" decoding="async"></p>
-<h2 id="console-and-project">Console and Project<a class="anchor" href="#console-and-project" aria-label="Link to this section">#</a></h2>
-<ul><li><strong>Console</strong> collects <code>print()</code> output from your scripts, Oberon
+<h2 id="console">Console<a class="anchor" href="#console" aria-label="Link to this section">#</a></h2>
+<p>The bottom dock collects <code>print()</code> output from your scripts, Oberon
 messages, and Python errors with clickable file and line links. The
-Info / Warnings / Errors chips filter the list.</li><li><strong>Project</strong> shows the files next to your scene. Double-click a <code>.py</code>
-file to open it in the code editor, or a <code>.ron</code> file to open it as a
-scene.</li></ul>
+Info / Warnings / Errors chips filter the list.</p>
 <h2 id="play-mode">Play mode<a class="anchor" href="#play-mode" aria-label="Link to this section">#</a></h2>
 <p>Press <strong>▶</strong> (Ctrl+P). Oberon copies the scene and starts simulating:</p>
 <ul><li><strong>Physics.</strong> Rigidbodies fall and collide. The <strong>Player</strong> (Character
@@ -108,7 +120,7 @@ off in <strong>Settings → Appearance</strong>.</p>
     <footer class="pager"><a class="prev" href="index.html"><small>Previous</small>Introduction</a><a class="next" href="scripting.html"><small>Next</small>Scripting</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/interface.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#top-bar">Top bar</a></li><li class="l2"><a href="#hierarchy">Hierarchy</a></li><li class="l2"><a href="#scene-view">Scene view</a></li><li class="l2"><a href="#inspector">Inspector</a></li><li class="l2"><a href="#graphics">Graphics</a></li><li class="l2"><a href="#console-and-project">Console and Project</a></li><li class="l2"><a href="#play-mode">Play mode</a></li><li class="l2"><a href="#status-bar">Status bar</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#top-bar">Top bar</a></li><li class="l2"><a href="#hierarchy">Hierarchy</a></li><li class="l2"><a href="#files">Files</a></li><li class="l2"><a href="#scene-view">Scene view</a></li><li class="l2"><a href="#inspector">Inspector</a></li><li class="l2"><a href="#graphics">Graphics</a></li><li class="l2"><a href="#console">Console</a></li><li class="l2"><a href="#play-mode">Play mode</a></li><li class="l2"><a href="#status-bar">Status bar</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

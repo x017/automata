@@ -90,7 +90,8 @@ Play falls back to the editor view following the player.
 folder for it). The title bar shows the name, and the unsaved-changes dot
 disappears.
 
-The file is plain text you can read. Open it from **Project**, or in any
+The file is plain text you can read. It now shows up in **Files** at the
+bottom of the left sidebar. Open it there, or in any
 editor:
 
 ```ron

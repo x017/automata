@@ -51,7 +51,7 @@ separate app that drives the engine.</p>
 │    ▾ player│                                │  Collider3D    │
 │            │                                │                │
 ├────────────┴────────────────────────────────┴────────────────┤
-│  Console / Project                                           │
+│  Console              (Files sits under the Hierarchy)       │
 └──────────────────────────────────────────────────────────────┘</code></pre></div>
 <h2 id="1-what-oberon-is--and-is-not">1. What Oberon is — and is not<a class="anchor" href="#1-what-oberon-is--and-is-not" aria-label="Link to this section">#</a></h2>
 <div class="table"><table><thead><tr><th>Is</th><th>Is not</th></tr></thead><tbody><tr><td>A Python desktop app built with <strong>nexa-ui</strong></td><td>An in-game debug overlay</td></tr><tr><td>A scene authoring + inspection tool, and a Python IDE (§3.2.1)</td><td>A replacement for a general-purpose editor</td></tr><tr><td>A client of the <strong>public engine API</strong></td><td>A fork or privileged build of the engine</td></tr><tr><td>The place you <em>arrange</em> a game</td><td>The place you <em>program</em> a game</td></tr></tbody></table></div>
@@ -223,7 +223,7 @@ this milestone is what retires that caveat.)</li></ul>
 <p>Same buffered-write semantics as transforms: edits apply after the current
 frame, exactly like gameplay writes.</p>
 <h2 id="5-panels">5. Panels<a class="anchor" href="#5-panels" aria-label="Link to this section">#</a></h2>
-<div class="table"><table><thead><tr><th>Panel</th><th>Contents</th><th>nexa building block</th></tr></thead><tbody><tr><td><strong>Hierarchy</strong></td><td>entity tree (name, visibility glyph), add/remove/rename</td><td><code>tree_table</code></td></tr><tr><td><strong>Viewport</strong></td><td>live offscreen render; editor camera; click-to-select; drag-to-move</td><td>image widget + canvas overlay</td></tr><tr><td><strong>Inspector</strong></td><td>selected entity's components as typed editors (vec3 fields, color swatch, enum dropdowns, checkboxes)</td><td>property-inspector component</td></tr><tr><td><strong>Console</strong></td><td>engine logs + Python stdout/stderr from play mode</td><td><code>LogBuffer</code></td></tr><tr><td><strong>Project</strong> (later)</td><td>scene files, scripts, assets in the project folder</td><td><code>file_browser</code></td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Panel</th><th>Contents</th><th>nexa building block</th></tr></thead><tbody><tr><td><strong>Hierarchy</strong></td><td>entity tree (name, visibility glyph), add/remove/rename</td><td><code>tree_table</code></td></tr><tr><td><strong>Viewport</strong></td><td>live offscreen render; editor camera; click-to-select; drag-to-move</td><td>image widget + canvas overlay</td></tr><tr><td><strong>Inspector</strong></td><td>selected entity's components as typed editors (vec3 fields, color swatch, enum dropdowns, checkboxes)</td><td>property-inspector component</td></tr><tr><td><strong>Console</strong></td><td>engine logs + Python stdout/stderr from play mode</td><td><code>LogBuffer</code></td></tr><tr><td><strong>Files</strong></td><td>project folder as a tree under the Hierarchy (shipped; native, not nexa)</td><td><code>file_browser</code></td></tr></tbody></table></div>
 <p>Layout is a nexa <code>dockspace</code> — dockable, rearrangeable panels come free
 with the toolkit. Data flows from the engine side: hierarchy from
 <code>ctx.scene.names()</code> / <code>EntityView</code> walks, inspector from the component
