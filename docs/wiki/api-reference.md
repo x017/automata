@@ -147,6 +147,8 @@ body.body_type
 at.Collider3D.cuboid(x, y, z)      # FULL sizes
 at.Collider3D.ball(radius)
 at.Collider3D.capsule(half_height, radius)
+at.Collider3D.mesh(model)          # a model's triangles (static scenery)
+at.Collider3D.convex_hull(model)   # a model's convex hull (moving bodies)
 # modifiers chain: .sensor(bool) .density(d) .friction(f) .restitution(r)
 #                  .offset(x, y, z)   shape centre relative to the entity
 

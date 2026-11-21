@@ -18,11 +18,12 @@
 //! after the previous reply arrived and applies replies as they come, so a
 //! slow script lowers the script tick rate instead of freezing the editor.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use automata_core::AttributeValue;
@@ -113,6 +114,27 @@ pub enum ColliderShape {
         /// Radius.
         radius: f32,
     },
+    /// Triangles (a mesh collider or a convex hull), shared by key: the
+    /// geometry itself travels once per session in [`FrameInput::meshes`].
+    Mesh {
+        /// Document entity id.
+        id: u64,
+        /// World position of the triangles' origin.
+        center: [f32; 3],
+        /// World rotation quaternion.
+        rotation: [f32; 4],
+        /// Key of the geometry in [`FrameInput::meshes`].
+        mesh: u64,
+    },
+}
+
+/// Collision triangles in a collider's local space.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeshTris {
+    /// Vertex positions.
+    pub vertices: Vec<[f32; 3]>,
+    /// Triangles as vertex indices.
+    pub triangles: Vec<[u32; 3]>,
 }
 
 /// Everything besides entities that a frame tells scripts.
@@ -128,6 +150,9 @@ pub struct FrameInput {
     pub screen: [u32; 2],
     /// Solid colliders, for raycasts.
     pub colliders: Vec<ColliderShape>,
+    /// The triangles behind every [`ColliderShape::Mesh`] key in
+    /// `colliders`. The bridge sends each key's geometry only once.
+    pub meshes: Vec<(u64, Arc<MeshTris>)>,
     /// Entities whose Audio Source is playing.
     pub playing: Vec<u64>,
 }
@@ -280,6 +305,8 @@ pub struct ScriptBridge {
     in_flight: Option<Instant>,
     frame: u64,
     exited: bool,
+    /// Mesh keys whose triangles the runner already has.
+    sent_meshes: HashSet<u64>,
     /// Frames answered (for the status readout).
     pub answered: u64,
 }
@@ -345,6 +372,7 @@ impl ScriptBridge {
             in_flight: None,
             frame: 0,
             exited: false,
+            sent_meshes: HashSet::new(),
             answered: 0,
         })
     }
@@ -421,6 +449,15 @@ impl ScriptBridge {
             ),
         ]);
         frame_input_json(&mut msg, input);
+        let new_meshes: Vec<Json> = input
+            .meshes
+            .iter()
+            .filter(|(key, _)| self.sent_meshes.insert(*key))
+            .map(|(key, tris)| mesh_json(*key, tris))
+            .collect();
+        if !new_meshes.is_empty() {
+            msg.set("meshes", Json::Arr(new_meshes));
+        }
         if self.send(&msg) {
             self.in_flight = Some(Instant::now());
             true
@@ -572,8 +609,36 @@ fn collider_json(c: &ColliderShape) -> Json {
                     .map(f),
             );
         }
+        ColliderShape::Mesh {
+            id,
+            center,
+            rotation,
+            mesh,
+        } => {
+            out.push(Json::Int(id as i64));
+            out.push(Json::from("mesh"));
+            out.extend(center.into_iter().chain(rotation).map(f));
+            out.push(Json::Int(mesh as i64));
+        }
     }
     Json::Arr(out)
+}
+
+/// One mesh's geometry for the runner: `[key, [x, y, z, ...], [i, j, k, ...]]`.
+#[allow(clippy::cast_possible_wrap)]
+fn mesh_json(key: u64, tris: &MeshTris) -> Json {
+    let verts: Vec<f32> = tris.vertices.iter().flatten().copied().collect();
+    Json::Arr(vec![
+        Json::Int(key as i64),
+        Json::floats(&verts),
+        Json::Arr(
+            tris.triangles
+                .iter()
+                .flatten()
+                .map(|&i| Json::Int(i64::from(i)))
+                .collect(),
+        ),
+    ])
 }
 
 #[allow(clippy::cast_possible_wrap)]

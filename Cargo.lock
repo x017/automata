@@ -209,6 +209,7 @@ version = "0.1.0"
 dependencies = [
  "automata-assets",
  "automata-core",
+ "automata-physics",
  "crc32fast",
  "flate2",
  "ron",
@@ -227,6 +228,8 @@ dependencies = [
 name = "automata-physics"
 version = "0.1.0"
 dependencies = [
+ "automata-assets",
+ "automata-renderer",
  "automata-scene",
  "glam 0.33.12",
  "hecs",

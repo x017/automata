@@ -197,7 +197,7 @@ ctx.scene.spawn(crate, position=(0, 5, 0))                         # at runtime
 | `ctx.physics` (3D) | `cast_ray(origin, dir, max_distance, exclude)` → result key (read next frame via `ray_result(key)`), `apply_impulse` / `apply_force` / `set_velocity(entity, vec)`, `velocity(entity)`, `grounded(entity)`, `gravity()` / `set_gravity(vec)`, `body_count()` |
 | `ctx.physics2d` | `apply_impulse(entity, vec2)`, `grounded(entity)`, `body_count()` |
 | `RigidBody` | `RigidBody.dynamic() / .fixed() / .kinematic_velocity() / .kinematic_position()`, or `RigidBody(type, gravity_scale=…, linear_damping=…)` |
-| `Collider3D` / `Collider2D` | `.ball(r)`, `.cuboid(x, y[, z])`, `.capsule(half_height, r)`, chainable `.sensor()/.density()/.friction()/.restitution()` |
+| `Collider3D` / `Collider2D` | `.ball(r)`, `.cuboid(x, y[, z])`, `.capsule(half_height, r)`, 3D only: `.mesh(model)`, `.convex_hull(model)`, chainable `.sensor()/.density()/.friction()/.restitution()` |
 | `CharacterController` | `CharacterController(mode=…, max_slope_climb_angle=…, autostep=…, snap_to_ground=…)` — kinematic body mover |
 | `CharacterVelocity` | `CharacterVelocity((vx, vy, vz))` — set `.velocity` each frame to drive the controller |
 | `automata.Error` | Engine failures; exceptions raised by `update` propagate unchanged |

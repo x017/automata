@@ -2160,6 +2160,7 @@ impl Ui {
             y = ny;
             if open {
                 y = self.choice_row(canvas, x, y, w, e, "Shape", Choice::ColliderShape);
+                y = self.collider_model_rows(canvas, x, y, w, e);
                 y = self.vec3_row(canvas, x, y, w, e, "Size", Field::ColliderExtents);
                 y = self.float_row(canvas, x, y, w, e, "Radius", Field::ColliderRadius);
                 y = self.float_row(canvas, x, y, w, e, "Half Height", Field::ColliderHalfHeight);
@@ -2586,6 +2587,64 @@ impl Ui {
         y + layout::ROW_STEP
     }
 
+    /// A Mesh / Convex Hull collider's model (read-only: Fit Collider or
+    /// a mesh swap updates it) and anything wrong with the collider.
+    fn collider_model_rows(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        mut y: f32,
+        w: f32,
+        e: &EntityEntry,
+    ) -> f32 {
+        let Some(c) = &e.data.collider_3d else {
+            return y;
+        };
+        if let Some(model) = c.shape.model() {
+            if self.row_visible(Rect::new(x, y, w, layout::FIELD_H)) {
+                self.row_label(canvas, x, y, "Model");
+                let r = Rect::new(x + layout::LABEL_W, y, w - layout::LABEL_W, layout::FIELD_H);
+                canvas.fill_rounded(r.x, r.y, r.w, r.h, 3.0, color::field());
+                canvas.stroke_rounded(r.x, r.y, r.w, r.h, 3.0, color::border(), 1.0);
+                let tint = if automata_assets::load(model).is_ok() {
+                    color::text()
+                } else {
+                    color::danger()
+                };
+                canvas.text_clipped(
+                    r.x + 6.0,
+                    r.y + 3.0,
+                    layout::FONT_SIZE,
+                    model,
+                    tint,
+                    r.w - 12.0,
+                );
+                self.tip(
+                    r,
+                    "The shape is built from this model at the entity's scale",
+                );
+            }
+            y += layout::ROW_STEP;
+        }
+        let body = e.data.rigid_body.as_ref().map(|b| b.body_type);
+        if let Some(problem) = automata_physics::collider_problem(&c.shape, body) {
+            for chunk in wrap_words(canvas, problem, w - layout::LABEL_W) {
+                if self.row_visible(Rect::new(x, y, w, 16.0)) {
+                    canvas.text(
+                        x + layout::LABEL_W,
+                        y,
+                        layout::SMALL_SIZE,
+                        &chunk,
+                        color::danger(),
+                    );
+                }
+                y += 16.0;
+            }
+            y += 4.0;
+        }
+        y
+    }
+
     /// The Mesh section's model rows (file, summary, actions) when the mesh
     /// is a model file. Returns the y after them.
     fn model_rows(
@@ -2680,9 +2739,10 @@ impl Ui {
             self.tip(
                 fit,
                 if has_collider {
-                    "Resize the box collider to the model's bounds"
+                    "Refit the collider to the model (a Mesh or Convex Hull takes the new model)"
                 } else {
-                    "Add a box collider sized to the model"
+                    "Add a collider: a box if the model is boxy, else its triangles (static) \
+                     or convex hull (moving)"
                 },
             );
             if self.button(canvas, fit, label, style) && ok {

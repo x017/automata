@@ -32,7 +32,7 @@ game.load_scene(scene)   # replaces the current scene wholesale
 | `Camera3D(position, target, fov)` / `Camera2D(center, half_height)` | The frame's eye (first entity wins) |
 | `DirectionalLight(direction, color, ambient, shadows)` | The frame's sun (first entity wins) |
 | `RigidBody.dynamic()/.fixed()/.kinematic_velocity()/.kinematic_position()` | How physics moves it |
-| `Collider3D.cuboid(x,y,z)` / `.ball(r)` / `.capsule(h,r)` | Its 3D collision shape |
+| `Collider3D.cuboid(x,y,z)` / `.ball(r)` / `.capsule(h,r)` / `.mesh(model)` / `.convex_hull(model)` | Its 3D collision shape |
 | `Collider2D.cuboid(x,y)` / `.ball(r)` / `.capsule(h,r)` | Its 2D collision shape |
 | `CharacterController(...)` | Kinematic character solver (slopes, steps, snap) |
 | `CharacterVelocity(velocity)` | The per-frame drive input for that solver |

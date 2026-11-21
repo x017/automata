@@ -1,5 +1,6 @@
 """Type stubs for the native automata._core extension module."""
 
+import os
 from typing import Any, Callable, Iterator, Optional, Union
 
 #: A custom attribute value: bool, int, float, str, a Vec3 or an RGBA color.
@@ -636,6 +637,13 @@ class Collider3D:
     def cuboid(cls, x: float, y: float, z: float) -> Collider3D: ...
     @classmethod
     def capsule(cls, half_height: float, radius: float) -> Collider3D: ...
+    @classmethod
+    def mesh(cls, model: Union[str, os.PathLike[str]]) -> Collider3D:
+        """A model's exact triangles, at the entity's scale (static scenery;
+        a dynamic body plays it as its convex hull)."""
+    @classmethod
+    def convex_hull(cls, model: Union[str, os.PathLike[str]]) -> Collider3D:
+        """The convex hull of a model's vertices, at the entity's scale."""
     def sensor(self, sensor: bool) -> Collider3D: ...
     def density(self, density: float) -> Collider3D: ...
     def friction(self, friction: float) -> Collider3D: ...

@@ -23,6 +23,7 @@ use crate::components::{
     BodyType, CharacterController, CharacterVelocity, Collider3D, RigidBody, Shape3D,
 };
 use crate::events::{ContactForce, PhysicsEvent};
+use crate::model_shape::build_model_shape;
 use crate::world::{
     entity_to_user_data, user_data_to_entity, CharacterMove, PhysicsTick, RayFilter, RayHit,
 };
@@ -53,6 +54,18 @@ pub struct PhysicsWorld3D {
     controllers: HashMap<Entity, KinematicCharacterController>,
     grounded: HashMap<Entity, bool>,
     last_dt: f32,
+    /// Built mesh / convex-hull shapes, shared by every collider that uses
+    /// the same model at the same scale.
+    model_shapes: HashMap<ModelShapeKey, r3::geometry::SharedShape>,
+}
+
+/// What a built model shape depends on: the loaded model (by identity, so
+/// a reloaded file builds afresh), hull or triangles, and the scale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ModelShapeKey {
+    model: usize,
+    hull: bool,
+    scale: [u32; 3],
 }
 
 impl std::fmt::Debug for PhysicsWorld3D {
@@ -100,6 +113,7 @@ impl PhysicsWorld3D {
             controllers: HashMap::new(),
             grounded: HashMap::new(),
             last_dt: 1.0 / 60.0,
+            model_shapes: HashMap::new(),
         }
     }
 
@@ -180,7 +194,7 @@ impl PhysicsWorld3D {
             self.entity_bodies.insert(entity, handle);
             self.body_entities.insert(handle, entity);
             self.static_colliders.insert(entity, t);
-            self.attach_collider(entity, handle, &collider);
+            self.attach_collider(entity, handle, &collider, t.scale, false);
             trace!(?entity, "physics: spawned static collider");
         }
 
@@ -209,9 +223,56 @@ impl PhysicsWorld3D {
             trace!(?entity, "physics: spawned 3D body");
 
             if let Some(c) = collider {
-                self.attach_collider(entity, handle, &c);
+                let scale = transform.map_or(Vec3::ONE, |t| t.scale);
+                let moving = body.body_type == BodyType::Dynamic;
+                self.attach_collider(entity, handle, &c, scale, moving);
             }
         }
+    }
+
+    /// Builds (or reuses) the shape for a mesh or convex-hull collider.
+    /// `moving` (a dynamic body) turns a triangle mesh into its hull: a
+    /// triangle soup has no volume, so the body would get no mass or
+    /// inertia. Kinematic bodies keep their triangles (moving platforms).
+    fn model_shape(
+        &mut self,
+        shape: &Shape3D,
+        scale: Vec3,
+        moving: bool,
+    ) -> Option<r3::geometry::SharedShape> {
+        let (path, hull) = match shape {
+            Shape3D::Mesh { model } => (model, moving),
+            Shape3D::ConvexHull { model } => (model, true),
+            _ => return None,
+        };
+        if moving && matches!(shape, Shape3D::Mesh { .. }) {
+            tracing::warn!(
+                "mesh collider '{path}' is on a dynamic body; using its convex hull \
+                 (mesh colliders are for static and kinematic bodies)"
+            );
+        }
+        let model = match automata_assets::load(path) {
+            Ok(model) => model,
+            Err(e) => {
+                tracing::warn!("collider: {e}");
+                return None;
+            }
+        };
+        let key = ModelShapeKey {
+            model: std::sync::Arc::as_ptr(&model) as usize,
+            hull,
+            scale: scale.to_array().map(f32::to_bits),
+        };
+        if let Some(shape) = self.model_shapes.get(&key) {
+            return Some(shape.clone());
+        }
+        let built = build_model_shape(&model, scale, hull);
+        if built.is_none() {
+            tracing::warn!("collider: '{path}' has no usable triangles");
+        }
+        let built = built?;
+        self.model_shapes.insert(key, built.clone());
+        Some(built)
     }
 
     fn attach_collider(
@@ -219,28 +280,37 @@ impl PhysicsWorld3D {
         entity: Entity,
         body: r3::dynamics::RigidBodyHandle,
         collider: &Collider3D,
+        scale: Vec3,
+        moving: bool,
     ) {
-        let mut builder = match collider.shape {
-            Shape3D::Ball { radius } => ColliderBuilder::ball(radius),
+        let builder = match &collider.shape {
+            Shape3D::Ball { radius } => ColliderBuilder::ball(*radius),
             Shape3D::Cuboid { extents } => {
                 ColliderBuilder::cuboid(extents.x / 2.0, extents.y / 2.0, extents.z / 2.0)
             }
             Shape3D::Capsule {
                 half_height,
                 radius,
-            } => ColliderBuilder::capsule_y(half_height, radius),
-        }
-        .density(collider.density)
-        .friction(collider.friction)
-        .restitution(collider.restitution)
-        .sensor(collider.sensor)
-        .translation(Vector::new(
-            collider.offset[0],
-            collider.offset[1],
-            collider.offset[2],
-        ))
-        .active_events(ActiveEvents::COLLISION_EVENTS)
-        .user_data(entity_to_user_data(entity));
+            } => ColliderBuilder::capsule_y(*half_height, *radius),
+            shape @ (Shape3D::Mesh { .. } | Shape3D::ConvexHull { .. }) => {
+                let Some(built) = self.model_shape(shape, scale, moving) else {
+                    return;
+                };
+                ColliderBuilder::new(built)
+            }
+        };
+        let mut builder = builder
+            .density(collider.density)
+            .friction(collider.friction)
+            .restitution(collider.restitution)
+            .sensor(collider.sensor)
+            .translation(Vector::new(
+                collider.offset[0],
+                collider.offset[1],
+                collider.offset[2],
+            ))
+            .active_events(ActiveEvents::COLLISION_EVENTS)
+            .user_data(entity_to_user_data(entity));
 
         if !collider.enabled {
             builder = builder.enabled(false);
@@ -683,6 +753,11 @@ impl PhysicsWorld3D {
                 half_height,
                 radius,
             } => r3::geometry::SharedShape::capsule_y(half_height, radius),
+            // Sweeping a triangle soup is ill-defined; sweep its hull.
+            Shape3D::Mesh { model } | Shape3D::ConvexHull { model } => {
+                let model = automata_assets::load(&model).ok()?;
+                build_model_shape(&model, Vec3::ONE, true)?
+            }
         };
         let pos = Pose::from_translation(Vector::new(origin.x, origin.y, origin.z));
         let vel = Vector::new(direction.x, direction.y, direction.z);
@@ -783,6 +858,24 @@ pub enum WorldShape {
         /// Radius.
         radius: f32,
     },
+    /// Triangles (a mesh collider, or a convex hull's faces), in the
+    /// collider's local space; fetch them once per `mesh` key with
+    /// [`ColliderSnapshot::mesh_triangles`].
+    Mesh {
+        /// World-space origin of the triangles.
+        center: Vec3,
+        /// World rotation.
+        rotation: Quat,
+        /// Identifies the shared geometry: colliders built from the same
+        /// model at the same scale share a key.
+        mesh: u64,
+    },
+}
+
+/// The key of a shape's shared geometry (its allocation address, stable
+/// for as long as any collider holds the shape).
+fn shape_key(shape: &r3::geometry::SharedShape) -> u64 {
+    std::sync::Arc::as_ptr(&shape.0).cast::<u8>() as usize as u64
 }
 
 impl ColliderSnapshot {
@@ -823,8 +916,24 @@ impl ColliderSnapshot {
         best
     }
 
+    /// The triangles behind a [`WorldShape::Mesh`] key, in the collider's
+    /// local space: `(vertices, triangles)`.
+    #[must_use]
+    pub fn mesh_triangles(&self, mesh: u64) -> Option<(Vec<Vec3>, Vec<[u32; 3]>)> {
+        let shape = &self
+            .colliders
+            .iter()
+            .find(|c| shape_key(&c.shape) == mesh)?
+            .shape;
+        if let Some(t) = shape.as_trimesh() {
+            Some((t.vertices().to_vec(), t.indices().to_vec()))
+        } else {
+            Some(shape.as_convex_polyhedron()?.to_trimesh())
+        }
+    }
+
     /// Every collider as `(entity, world shape, sensor)`. Shapes other
-    /// than boxes, balls and capsules are skipped.
+    /// than boxes, balls, capsules, meshes and convex hulls are skipped.
     #[must_use]
     pub fn shapes(&self) -> Vec<(Entity, WorldShape, bool)> {
         self.colliders
@@ -843,14 +952,22 @@ impl ColliderSnapshot {
                         center,
                         radius: b.radius,
                     }
-                } else {
-                    let cap = c.shape.as_capsule()?;
+                } else if let Some(cap) = c.shape.as_capsule() {
                     WorldShape::Capsule {
                         center,
                         rotation,
                         half_height: cap.half_height(),
                         radius: cap.radius,
                     }
+                } else if c.shape.as_trimesh().is_some() || c.shape.as_convex_polyhedron().is_some()
+                {
+                    WorldShape::Mesh {
+                        center,
+                        rotation,
+                        mesh: shape_key(&c.shape),
+                    }
+                } else {
+                    return None;
                 };
                 Some((c.entity, shape, c.sensor))
             })

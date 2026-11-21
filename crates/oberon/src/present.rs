@@ -625,8 +625,8 @@ impl EditorApp {
             Intent::SetModel { id, path } => {
                 if let Some(rel) = self.import_model(&path) {
                     if self.doc.set_model(id, &rel) {
-                        // A collider sized for the old mesh would be wrong.
-                        self.doc.fit_collider(id);
+                        // A collider made for the old mesh would be wrong.
+                        self.doc.fit_collider_to_new_mesh(id);
                         self.ui.log(LogLevel::Info, format!("Mesh set to {rel}"));
                     }
                 }

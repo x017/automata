@@ -159,7 +159,7 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::BodyAngularDamping => data.rigid_body.as_ref()?.angular_damping,
         F::ColliderRadius => match data.collider_3d.as_ref()?.shape {
             Shape3D::Ball { radius } | Shape3D::Capsule { radius, .. } => radius,
-            Shape3D::Cuboid { .. } => return None,
+            _ => return None,
         },
         F::ColliderExtents(i) => match data.collider_3d.as_ref()?.shape {
             Shape3D::Cuboid { extents } => extents.to_array()[axis(i)],
@@ -458,11 +458,7 @@ pub fn choice_label(data: &EntityData, choice: Choice) -> Option<&'static str> {
             BodyType::KinematicVelocity => "Kinematic (velocity)",
             BodyType::KinematicPosition => "Kinematic (position)",
         },
-        Choice::ColliderShape => match data.collider_3d.as_ref()?.shape {
-            Shape3D::Cuboid { .. } => "Box",
-            Shape3D::Ball { .. } => "Sphere",
-            Shape3D::Capsule { .. } => "Capsule",
-        },
+        Choice::ColliderShape => data.collider_3d.as_ref()?.shape.label(),
         Choice::Tonemapping => data.environment?.tonemapping.label(),
     })
 }
@@ -502,23 +498,53 @@ pub fn cycle(data: &mut EntityData, choice: Choice) -> bool {
             }
             None => return false,
         },
-        Choice::ColliderShape => match &mut data.collider_3d {
-            Some(c) => {
-                c.shape = match c.shape {
-                    Shape3D::Cuboid { extents } => Shape3D::Ball {
+        Choice::ColliderShape => {
+            // Mesh and Convex Hull are offered when there's a model to take
+            // the shape from: the entity's own, or the one already in use.
+            let model = data
+                .collider_3d
+                .as_ref()
+                .and_then(|c| c.shape.model().map(str::to_string))
+                .or_else(|| match data.mesh_visual.as_ref().map(|m| &m.primitive) {
+                    Some(PrimitiveData::Model { path }) => Some(path.clone()),
+                    _ => None,
+                });
+            let fitted_box = crate::doc::fitted_box(data);
+            let Some(c) = &mut data.collider_3d else {
+                return false;
+            };
+            let to_box = |c: &mut automata_physics::Collider3D| {
+                c.shape = fitted_box.shape.clone();
+                c.offset = fitted_box.offset;
+            };
+            match (&c.shape, model) {
+                (Shape3D::Cuboid { extents }, _) => {
+                    c.shape = Shape3D::Ball {
                         radius: extents.max_element() * 0.5,
-                    },
-                    Shape3D::Ball { radius } => Shape3D::Capsule {
+                    };
+                }
+                (&Shape3D::Ball { radius }, _) => {
+                    c.shape = Shape3D::Capsule {
                         half_height: radius,
                         radius,
-                    },
-                    Shape3D::Capsule { radius, .. } => Shape3D::Cuboid {
+                    };
+                }
+                (Shape3D::Capsule { .. }, Some(model)) => {
+                    c.shape = Shape3D::Mesh { model };
+                    c.offset = [0.0; 3];
+                }
+                (&Shape3D::Capsule { radius, .. }, None) => {
+                    c.shape = Shape3D::Cuboid {
                         extents: glam::Vec3::splat(radius * 2.0),
-                    },
-                };
+                    };
+                }
+                (Shape3D::Mesh { .. }, Some(model)) => {
+                    c.shape = Shape3D::ConvexHull { model };
+                    c.offset = [0.0; 3];
+                }
+                (Shape3D::Mesh { .. } | Shape3D::ConvexHull { .. }, _) => to_box(c),
             }
-            None => return false,
-        },
+        }
         Choice::Tonemapping => match &mut data.environment {
             Some(env) => {
                 let all = automata_renderer::Tonemapping::ALL;

@@ -141,12 +141,74 @@ def _ray_capsule(o, d, hh, r):
     return best
 
 
-def raycast_shapes(shapes, origin, direction, max_distance, ignore_id=None):
+class Mesh:
+    """Collision triangles in a collider's local space, plus their bounds."""
+
+    def __init__(self, flat_vertices, flat_indices):
+        v = flat_vertices
+        self.vertices = [(v[i], v[i + 1], v[i + 2]) for i in range(0, len(v) - 2, 3)]
+        n = len(self.vertices)
+        self.triangles = [
+            tuple(flat_indices[i : i + 3])
+            for i in range(0, len(flat_indices) - 2, 3)
+            if all(0 <= j < n for j in flat_indices[i : i + 3])
+        ]
+        if self.vertices:
+            lo = [min(p[k] for p in self.vertices) for k in range(3)]
+            hi = [max(p[k] for p in self.vertices) for k in range(3)]
+        else:
+            lo = hi = [0.0, 0.0, 0.0]
+        self.center = tuple((a + b) * 0.5 for a, b in zip(lo, hi))
+        self.half = tuple((b - a) * 0.5 + 1e-4 for a, b in zip(lo, hi))
+
+
+def _ray_mesh(o, d, mesh):
+    """Closest triangle hit (both faces) in mesh space: (t, normal) or None."""
+    if mesh is None:
+        return None
+    c = mesh.center
+    if _ray_box((o[0] - c[0], o[1] - c[1], o[2] - c[2]), d, mesh.half) is None:
+        return None
+    best = None
+    verts = mesh.vertices
+    for i, j, k in mesh.triangles:
+        a, b, cc = verts[i], verts[j], verts[k]
+        e1 = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+        e2 = (cc[0] - a[0], cc[1] - a[1], cc[2] - a[2])
+        # Moller-Trumbore.
+        p = (d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0])
+        det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2]
+        if abs(det) < 1e-12:
+            continue
+        inv = 1.0 / det
+        s = (o[0] - a[0], o[1] - a[1], o[2] - a[2])
+        u = (s[0] * p[0] + s[1] * p[1] + s[2] * p[2]) * inv
+        if u < 0.0 or u > 1.0:
+            continue
+        q = (s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0])
+        v = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) * inv
+        if v < 0.0 or u + v > 1.0:
+            continue
+        t = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv
+        if t < 0.0 or (best is not None and t >= best[0]):
+            continue
+        n = (e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0])
+        length = math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) or 1.0
+        n = (n[0] / length, n[1] / length, n[2] / length)
+        if n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0:  # face the ray
+            n = (-n[0], -n[1], -n[2])
+        best = (t, n)
+    return best
+
+
+def raycast_shapes(shapes, origin, direction, max_distance, ignore_id=None, meshes=None):
     """The closest hit among collider shapes: ``(id, point, normal, t)``.
 
     Shapes are ``[id, "box", cx, cy, cz, qx, qy, qz, qw, hx, hy, hz]``,
-    ``[id, "ball", cx, cy, cz, r]`` or
-    ``[id, "capsule", cx, cy, cz, qx, qy, qz, qw, half_height, r]``.
+    ``[id, "ball", cx, cy, cz, r]``,
+    ``[id, "capsule", cx, cy, cz, qx, qy, qz, qw, half_height, r]`` or
+    ``[id, "mesh", cx, cy, cz, qx, qy, qz, qw, key]``, where ``key`` names
+    a :class:`Mesh` in ``meshes``.
     """
     o = tuple(float(v) for v in origin)[:3]
     d = tuple(float(v) for v in direction)[:3]
@@ -167,7 +229,12 @@ def raycast_shapes(shapes, origin, direction, max_distance, ignore_id=None):
             qi = _qinv(q)
             lo = _qrot(qi, (o[0] - c[0], o[1] - c[1], o[2] - c[2]))
             ld = _qrot(qi, d)
-            hit = _ray_box(lo, ld, (s[9], s[10], s[11])) if kind == "box" else _ray_capsule(lo, ld, s[9], s[10])
+            if kind == "box":
+                hit = _ray_box(lo, ld, (s[9], s[10], s[11]))
+            elif kind == "mesh":
+                hit = _ray_mesh(lo, ld, (meshes or {}).get(s[9]))
+            else:
+                hit = _ray_capsule(lo, ld, s[9], s[10])
             if hit:
                 hit = (hit[0], _qrot(q, hit[1]))
         if hit is None or hit[0] > max_distance:
@@ -189,10 +256,11 @@ class BridgeBackend(api.Backend):
 
     def __init__(self):
         self.shapes = []
+        self.meshes = {}
         self.playing = set()
 
     def raycast(self, origin, direction, max_distance, ignore_id):
-        return raycast_shapes(self.shapes, origin, direction, max_distance, ignore_id)
+        return raycast_shapes(self.shapes, origin, direction, max_distance, ignore_id, self.meshes)
 
     def source_playing(self, entity):
         return entity.id in self.playing
@@ -239,6 +307,9 @@ class Runner:
             mouse.get("locked", False),
         )
         self.backend.shapes = msg.get("cols", [])
+        # Mesh geometry arrives once per session, keyed for "mesh" shapes.
+        for key, verts, indices in msg.get("meshes", []):
+            self.backend.meshes[key] = Mesh(verts, indices)
         self.backend.playing = set(msg.get("playing", []))
         out = self.host.frame(
             msg.get("entities", []),

@@ -80,7 +80,8 @@ the project are copied in:
 - Or right-click a model in the Files panel and choose **Use on
   <entity>**.
 
-If the entity has a box collider, it's resized to the new model.
+If the entity has a collider, it's refitted to the new model (see
+[Colliders](#colliders)).
 
 ## The Inspector
 
@@ -92,7 +93,7 @@ With a model selected, the **Mesh Renderer** section shows:
 | **File** | The model's path relative to the scene. It turns red if the file is missing or can't be read. Double-click it to show the file in the Files panel. |
 | *summary* | Parts (one per material), triangle count, size in metres, and whether it's textured. If loading failed, this line shows the error instead. |
 | **Change…** | Pick a different model. |
-| **Add Collider / Fit Collider** | Adds a box collider sized to the model, or refits the existing one. |
+| **Add Collider / Fit Collider** | Adds a collider shaped for the model, or refits the existing one. |
 | **Tint** | Multiplies every material's colour. Leave it white to see the model as authored. |
 
 ## Import settings
@@ -130,15 +131,32 @@ import settings, so press **Fit Collider** after changing them.
 
 ## Colliders
 
-Physics doesn't use the mesh itself. A model gets a **box collider fitted to
-its bounds**, which is fast and works for crates, trees, rocks and most
-props. Models are rarely centred on their origin (a tree's origin is at its
-roots), so the collider also gets an **offset** that centres the box on the
-mesh.
+**Add Collider** picks a shape from the model:
 
-The fitted box includes the entity's scale. After you scale a model, press
-**Fit Collider** again. For a character or a round object, change **Shape**
-to Capsule or Ball and adjust the size.
+| The model | Shape |
+|---|---|
+| Fills at least 90% of its bounding box (crates, slabs) | **Box**, fitted to the bounds |
+| Anything else, with no rigid body or a static one | **Mesh**: the model's own triangles |
+| Anything else, on a dynamic or kinematic body | **Convex Hull**: shrink-wrapped around the model |
+
+The collider section's **Shape** menu shows the choice; pick another to
+override it. Mesh and Convex Hull appear in the menu when the entity shows a
+model, and a **Model** row shows which file the shape comes from. Shapes
+built from a model follow the entity's scale and the model's import
+settings by themselves.
+
+A box doesn't scale with the entity. Models are rarely centred on their
+origin (a tree's origin is at its roots), so a fitted box also gets an
+**offset** that centres it on the mesh. After you scale a model, press
+**Fit Collider** to resize the box. Fit keeps the shape you picked. Swapping
+the model picks the shape again, since the old one was chosen for the old
+model.
+
+A Mesh collider on a **Dynamic** body shows an error. A triangle mesh has
+no inside, so it can't give the body mass, and it plays as its convex hull.
+Pick Convex Hull, or make the body Static or Kinematic. **Build Game**
+refuses to export a scene with that mistake. For a character or a round
+object, use Capsule or Sphere and adjust the size.
 
 ## Editing a model while Oberon is open
 
@@ -160,6 +178,15 @@ mesh_visual: Some((
 collider_3d: Some((
     shape: Cuboid(extents: (1.5, 2.4, 1.5)),
     offset: (0.0, 1.2, 0.0),
+    // …
+)),
+```
+
+A Mesh or Convex Hull collider stores the model path, not the triangles:
+
+```ron
+collider_3d: Some((
+    shape: Mesh(model: "models/platform.glb"),
     // …
 )),
 ```

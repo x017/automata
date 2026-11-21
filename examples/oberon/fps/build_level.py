@@ -24,11 +24,11 @@ import automata as at
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# Model sizes (from the files' bounds): width, height, depth. Every model
-# stands on its origin, so colliders are raised by half their height.
+# Wall sizes (from the files' bounds): width, height, depth. Every model
+# stands on its origin, so box colliders are raised by half their height.
+# Platforms collide with their own triangles (mesh colliders), so their
+# bevelled edges are exact.
 SIZES = {
-    "platform-large-grass": (5.2, 0.5, 5.2),
-    "platform": (2.2, 0.5, 2.2),
     "wall-high": (1.5, 1.7, 0.7),
     "wall-low": (2.2, 0.8, 0.7),
 }
@@ -126,12 +126,16 @@ def build():
     counts = {}
     for name, position, degrees in LEVEL:
         counts[name] = counts.get(name, 0) + 1
-        w, h, d = SIZES[name]
+        if name in SIZES:
+            w, h, d = SIZES[name]
+            collider = at.Collider3D.cuboid(w, h, d).offset(0.0, h / 2, 0.0)
+        else:
+            collider = at.Collider3D.mesh(f"models/{name}.glb")
         scene.add(
             at.Entity(f"{name.replace('-', ' ').title()} {counts[name]}")
             .add(at.Transform(position=position, rotation_euler=yaw(degrees)))
             .add(model(name))
-            .add(at.Collider3D.cuboid(w, h, d).offset(0.0, h / 2, 0.0))
+            .add(collider)
         )
     for i, (name, position, degrees) in enumerate(GRASS, start=1):
         scene.add(

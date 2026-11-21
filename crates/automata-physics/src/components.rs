@@ -166,7 +166,12 @@ pub enum Shape2D {
 }
 
 /// A 3D collision shape (used by [`Collider3D`]).
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+///
+/// [`Mesh`](Self::Mesh) and [`ConvexHull`](Self::ConvexHull) keep a model
+/// path, not triangles: the shape is built from the model (with its import
+/// settings) when the collider spawns, scaled by the entity's
+/// [`Transform`](automata_scene::Transform).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Shape3D {
     /// Sphere with the given radius.
     Ball {
@@ -185,6 +190,44 @@ pub enum Shape3D {
         /// Radius of the caps and cylinder.
         radius: f32,
     },
+    /// A model's exact triangles. For static scenery only (no
+    /// [`RigidBody`], or a static one): rays and characters hit the real
+    /// surface. A moving body with a mesh collider falls back to its convex
+    /// hull, since a triangle soup has no volume to give it mass.
+    Mesh {
+        /// Model file, relative to the asset root (like a mesh renderer's).
+        model: String,
+    },
+    /// The smallest convex shape around a model's vertices: the shape to
+    /// give moving bodies that a box or capsule fits badly.
+    ConvexHull {
+        /// Model file, relative to the asset root.
+        model: String,
+    },
+}
+
+impl Shape3D {
+    /// The shape's display name ("Box", "Sphere", "Capsule", "Mesh",
+    /// "Convex Hull").
+    #[must_use]
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Ball { .. } => "Sphere",
+            Self::Cuboid { .. } => "Box",
+            Self::Capsule { .. } => "Capsule",
+            Self::Mesh { .. } => "Mesh",
+            Self::ConvexHull { .. } => "Convex Hull",
+        }
+    }
+
+    /// The model a mesh or convex-hull shape is built from.
+    #[must_use]
+    pub fn model(&self) -> Option<&str> {
+        match self {
+            Self::Mesh { model } | Self::ConvexHull { model } => Some(model),
+            _ => None,
+        }
+    }
 }
 
 /// Component: a collider shape. Generic over [`Shape2D`]/[`Shape3D`]; use the
@@ -332,6 +375,23 @@ impl Collider3D {
         Self::new(Shape3D::Capsule {
             half_height,
             radius,
+        })
+    }
+
+    /// A collider made of a model's triangles (static scenery only; see
+    /// [`Shape3D::Mesh`]).
+    #[must_use]
+    pub fn mesh(model: &str) -> Self {
+        Self::new(Shape3D::Mesh {
+            model: model.replace('\\', "/"),
+        })
+    }
+
+    /// A collider shaped like the convex hull of a model's vertices.
+    #[must_use]
+    pub fn convex_hull(model: &str) -> Self {
+        Self::new(Shape3D::ConvexHull {
+            model: model.replace('\\', "/"),
         })
     }
 }

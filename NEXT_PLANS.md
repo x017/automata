@@ -270,7 +270,23 @@ events, root motion, and a visual animation state machine in Oberon.
 
 ---
 
-## 5. Mesh colliders 🟢 decided (not started)
+## 5. Mesh colliders ✅ done
+
+**Shipped:** `Shape3D::Mesh` / `Shape3D::ConvexHull` (model path in the
+scene; built at spawn with import settings and entity scale, shared per
+model and scale), the box-fill rule (`automata_physics::box_fill`, Box at
+≥ 90%), Inspector dropdown + Model row + error, export check,
+`Collider3D.mesh` / `.convex_hull` in Python, mesh raycasts in Oberon Play
+(triangles cross the bridge once per session), and Mesh platforms in the
+FPS example. Details as built:
+
+- A Mesh on a Dynamic body plays as its convex hull (with a warning);
+  kinematic bodies keep their triangles, which suits moving platforms.
+- **Fit Collider** keeps the shape you picked; swapping the model picks
+  again.
+- Shape casts sweep a model shape's convex hull.
+
+The original decision:
 
 **Decision: triangle meshes and convex hulls, chosen automatically.** Rapier
 supports both natively.

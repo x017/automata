@@ -22,6 +22,8 @@ linear_damping=0.0, angular_damping=0.0, enabled=True)`.
 at.Collider3D.cuboid(x, y, z)   # FULL sizes — match Transform.scale exactly
 at.Collider3D.ball(radius)
 at.Collider3D.capsule(half_height, radius)
+at.Collider3D.mesh("models/platform.glb")         # the model's own triangles
+at.Collider3D.convex_hull("models/crate.glb")     # shrink-wrapped around it
 
 at.Collider2D.cuboid(x, y)
 at.Collider2D.ball(radius)
@@ -35,6 +37,23 @@ blocking movement — pickups, triggers).
 > **Collider sizes are full sizes.** `Transform(scale=(40, 1, 40))` pairs
 > with `Collider3D.cuboid(40, 1, 40)`. Get this wrong and things float or
 > sink by exactly half.
+
+### Colliders from models
+
+`mesh` and `convex_hull` take a model file (relative to the scene, like
+`MeshRenderer.model`) and build the shape from it when the scene starts,
+after the model's import settings and at the entity's scale. The scene
+stores only the path.
+
+- **Mesh** is exact: rays and characters hit the real triangles, so
+  ramps, arches and bevelled platforms behave as they look. Use it for
+  static scenery (no rigid body, or a static or kinematic one). A triangle
+  mesh has no inside, so it can't give a dynamic body mass: on a dynamic
+  body it plays as its convex hull, and Oberon and **Build Game** flag it.
+- **Convex hull** wraps the model like shrink-film: no dents or holes. Use
+  it for dynamic bodies a box or capsule fits badly.
+- Boxes, balls and capsules are still the cheapest. Prefer them when they
+  fit.
 
 > **2D and 3D are separate worlds.** A `Collider2D` never touches a
 > `Collider3D`. Pick one per game; per entity, use the matching family.

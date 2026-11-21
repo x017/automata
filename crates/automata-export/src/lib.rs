@@ -353,6 +353,17 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
                                 let who = entity.name.as_deref().unwrap_or("an entity");
                                 check_sound(project, base, who, &source.clip, &mut out);
                             }
+                            if let Some(collider) = &entity.collider_3d {
+                                let who = entity.name.as_deref().unwrap_or("an entity");
+                                let body = entity.rigid_body.as_ref().map(|b| b.body_type);
+                                if let Some(problem) =
+                                    automata_physics::collider_problem(&collider.shape, body)
+                                {
+                                    out.push(Message::error(format!("{who}: {problem}")));
+                                } else if let Some(model) = collider.shape.model() {
+                                    check_model(project, base, who, model, &mut out);
+                                }
+                            }
                         }
                     }
                 },
@@ -1172,6 +1183,57 @@ mod tests {
         assert!(has(Level::Error, "Ghost: model models/ghost.glb not found"));
         assert!(has(Level::Error, "is outside the project folder"));
         let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn validation_checks_collider_models_and_body_types() {
+        use automata_core::scene_file::{EntityData, SceneFile};
+        use automata_physics::{Collider3D, RigidBody};
+        let dir = project("colliders");
+        std::fs::create_dir_all(dir.join("models")).unwrap();
+        std::fs::write(
+            dir.join("models/rock.obj"),
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        )
+        .unwrap();
+        let entity = |name: &str, collider: Collider3D, body: Option<RigidBody>| EntityData {
+            name: Some(name.into()),
+            collider_3d: Some(collider),
+            rigid_body: body,
+            ..Default::default()
+        };
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                entity("Ground", Collider3D::mesh("models/rock.obj"), None),
+                entity(
+                    "Boulder",
+                    Collider3D::convex_hull("models/rock.obj"),
+                    Some(RigidBody::dynamic()),
+                ),
+                entity(
+                    "Heavy",
+                    Collider3D::mesh("models/rock.obj"),
+                    Some(RigidBody::dynamic()),
+                ),
+                entity("Lost", Collider3D::mesh("models/lost.glb"), None),
+            ],
+        };
+        std::fs::write(dir.join("c.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("c.ron".into()),
+            ..BuildConfig::default()
+        };
+        let problems = validate(&dir, &cfg);
+        let named = |who: &str| problems.iter().filter(|m| m.text.starts_with(who)).count();
+        assert_eq!(named("Ground"), 0, "{problems:?}");
+        assert_eq!(named("Boulder"), 0, "{problems:?}");
+        assert!(problems
+            .iter()
+            .any(|m| m.level == Level::Error && m.text.starts_with("Heavy: A Mesh collider")));
+        assert!(problems
+            .iter()
+            .any(|m| m.level == Level::Error && m.text == "Lost: model models/lost.glb not found"));
     }
 
     /// The FPS example exports cleanly: its scripts, models (with import

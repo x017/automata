@@ -47,6 +47,8 @@ linear_damping=0.0, angular_damping=0.0, enabled=True)`.</p>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Collider3D.cuboid(x, y, z)   <span class="tok-c"># FULL sizes — match Transform.scale exactly</span>
 at.Collider3D.ball(radius)
 at.Collider3D.capsule(half_height, radius)
+at.Collider3D.mesh(<span class="tok-s">&quot;models/platform.glb&quot;</span>)         <span class="tok-c"># the model&#x27;s own triangles</span>
+at.Collider3D.convex_hull(<span class="tok-s">&quot;models/crate.glb&quot;</span>)     <span class="tok-c"># shrink-wrapped around it</span>
 
 at.Collider2D.cuboid(x, y)
 at.Collider2D.ball(radius)
@@ -57,6 +59,18 @@ blocking movement — pickups, triggers).</p>
 <aside class="note"><p><strong>Collider sizes are full sizes.</strong> <code>Transform(scale=(40, 1, 40))</code> pairs
 with <code>Collider3D.cuboid(40, 1, 40)</code>. Get this wrong and things float or
 sink by exactly half.</p></aside>
+<h3 id="colliders-from-models">Colliders from models<a class="anchor" href="#colliders-from-models" aria-label="Link to this section">#</a></h3>
+<p><code>mesh</code> and <code>convex_hull</code> take a model file (relative to the scene, like
+<code>MeshRenderer.model</code>) and build the shape from it when the scene starts,
+after the model's import settings and at the entity's scale. The scene
+stores only the path.</p>
+<ul><li><strong>Mesh</strong> is exact: rays and characters hit the real triangles, so
+ramps, arches and bevelled platforms behave as they look. Use it for
+static scenery (no rigid body, or a static or kinematic one). A triangle
+mesh has no inside, so it can't give a dynamic body mass: on a dynamic
+body it plays as its convex hull, and Oberon and <strong>Build Game</strong> flag it.</li><li><strong>Convex hull</strong> wraps the model like shrink-film: no dents or holes. Use
+it for dynamic bodies a box or capsule fits badly.</li><li>Boxes, balls and capsules are still the cheapest. Prefer them when they
+fit.</li></ul>
 <aside class="note"><p><strong>2D and 3D are separate worlds.</strong> A <code>Collider2D</code> never touches a
 <code>Collider3D</code>. Pick one per game; per entity, use the matching family.</p></aside>
 <h2 id="the-per-frame-toolbox">The per-frame toolbox<a class="anchor" href="#the-per-frame-toolbox" aria-label="Link to this section">#</a></h2>
@@ -108,7 +122,7 @@ try <code>friction(0.2)</code> on the wall or clamp velocity yourself.</li></ul>
     <footer class="pager"><a class="prev" href="input.html"><small>Previous</small>Input</a><a class="next" href="events-and-resources.html"><small>Next</small>Events &amp; resources</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/physics.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#bodies">Bodies</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#the-per-frame-toolbox">The per-frame toolbox</a></li><li class="l2"><a href="#the-character-controller">The character controller</a></li><li class="l2"><a href="#common-pitfalls">Common pitfalls</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#bodies">Bodies</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l3"><a href="#colliders-from-models">Colliders from models</a></li><li class="l2"><a href="#the-per-frame-toolbox">The per-frame toolbox</a></li><li class="l2"><a href="#the-character-controller">The character controller</a></li><li class="l2"><a href="#common-pitfalls">Common pitfalls</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

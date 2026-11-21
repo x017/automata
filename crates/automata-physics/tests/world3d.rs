@@ -448,3 +448,99 @@ fn a_collider_without_a_body_is_static_scenery_that_scripts_can_move() {
     step_n(&mut physics, &mut scene, 1);
     assert_eq!(physics.body_count(), before - 1);
 }
+
+/// Writes a closed ramp (a wedge rising along +X: `y = x` over a 1 m
+/// footprint) as an OBJ file and returns its absolute path.
+fn ramp_obj(tag: &str) -> String {
+    let dir = std::env::temp_dir().join(format!("automata-physics-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("ramp.obj");
+    std::fs::write(
+        &file,
+        "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 0 1\nv 1 0 1\nv 1 1 1\n\
+         f 1 3 2\nf 4 5 6\nf 1 2 5\nf 1 5 4\nf 2 3 6\nf 2 6 5\nf 1 4 6\nf 1 6 3\n",
+    )
+    .unwrap();
+    file.to_string_lossy().into_owned()
+}
+
+#[test]
+fn mesh_colliders_hit_the_real_triangles_at_the_entity_scale() {
+    let path = ramp_obj("mesh");
+    let mut scene = SceneWorld::new();
+    let ramp = scene.spawn((
+        Transform::from_position(Vec3::ZERO).with_scale(Vec3::splat(2.0)),
+        Collider3D::mesh(&path),
+    ));
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 1);
+    assert_eq!(physics.collider_count(), 1);
+
+    // Scaled ×2 the slope is y = x over 0..2: straight down at x = 0.5
+    // lands on the slope at y = 0.5, not on the bounding box top (y = 2).
+    let all = RayFilter::everything();
+    let hit = physics
+        .cast_ray(Vec3::new(0.5, 10.0, 1.0), -Vec3::Y, 20.0, &all)
+        .unwrap();
+    assert_eq!(hit.entity, ramp);
+    assert!((hit.point.y - 0.5).abs() < 1e-3, "{:?}", hit.point);
+    // Snapshots (what scripts query) agree, and list the mesh's triangles.
+    let snap = physics.collider_snapshot();
+    let again = snap
+        .cast_ray(Vec3::new(1.5, 10.0, 1.0), -Vec3::Y, 20.0, &all)
+        .unwrap();
+    assert!((again.point.y - 1.5).abs() < 1e-3, "{:?}", again.point);
+    let shapes = snap.shapes();
+    let WorldShape::Mesh { mesh, .. } = shapes[0].1 else {
+        panic!("expected a mesh, got {:?}", shapes[0].1);
+    };
+    let (verts, tris) = snap.mesh_triangles(mesh).unwrap();
+    assert_eq!(tris.len(), 8);
+    assert!(verts.iter().any(|v| (v.x - 2.0).abs() < 1e-5));
+}
+
+#[test]
+fn convex_hulls_give_dynamic_bodies_mass_and_meshes_fall_back_to_them() {
+    let path = ramp_obj("hull");
+    let mut scene = SceneWorld::new();
+    let _floor = scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        Collider3D::cuboid(20.0, 1.0, 20.0),
+    ));
+    let hull = scene.spawn((
+        Transform::from_position(Vec3::new(-3.0, 3.0, 0.0)),
+        RigidBody::dynamic(),
+        Collider3D::convex_hull(&path),
+    ));
+    // A mesh on a dynamic body plays as its hull instead of a massless
+    // triangle soup that would sink through the floor.
+    let mesh = scene.spawn((
+        Transform::from_position(Vec3::new(3.0, 3.0, 0.0)),
+        RigidBody::dynamic(),
+        Collider3D::mesh(&path),
+    ));
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 180);
+    for entity in [hull, mesh] {
+        let y = position(&scene, entity).y;
+        // Floor top at 0.5; the ramp's base sits on it.
+        assert!((0.3..0.8).contains(&y), "should rest on the floor, y = {y}");
+    }
+    let shapes = physics.collider_snapshot().shapes();
+    assert!(shapes
+        .iter()
+        .filter(|(e, _, _)| *e == hull || *e == mesh)
+        .all(|(_, s, _)| matches!(s, WorldShape::Mesh { .. })));
+}
+
+#[test]
+fn a_missing_model_spawns_no_collider() {
+    let mut scene = SceneWorld::new();
+    scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        Collider3D::mesh("/definitely/not/here.glb"),
+    ));
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 1);
+    assert_eq!(physics.collider_count(), 0);
+}

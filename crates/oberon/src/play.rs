@@ -24,7 +24,7 @@ use automata_scene::{Entity, Name, Scene, Transform};
 use glam::Vec3;
 
 use crate::bridge::{
-    AudioWrite, ColliderShape, EntityState, EntityWrite, FrameInput, FrameReply, HudItem,
+    AudioWrite, ColliderShape, EntityState, EntityWrite, FrameInput, FrameReply, HudItem, MeshTris,
 };
 use crate::doc::Document;
 
@@ -94,6 +94,9 @@ pub struct PlaySession {
     pub hud: Vec<HudItem>,
     /// A cursor lock request from a script, taken by the app.
     pub lock_request: Option<bool>,
+    /// Collision triangles of mesh / convex-hull colliders by shape key,
+    /// read out of the physics world once (scripts raycast against them).
+    mesh_tris: std::cell::RefCell<HashMap<u64, std::sync::Arc<MeshTris>>>,
 }
 
 impl PlaySession {
@@ -102,7 +105,19 @@ impl PlaySession {
     pub fn start(doc: &Document) -> Self {
         let display = doc.play_copy();
         let mut scene = Scene::new();
-        display.to_scene_file().apply_to_world(scene.world_mut());
+        let mut file = display.to_scene_file();
+        // Mesh / hull colliders load their model by path: pin it to the
+        // document's folder so it doesn't hang on the global asset root.
+        for entity in &mut file.entities {
+            if let Some(
+                automata_physics::Shape3D::Mesh { model }
+                | automata_physics::Shape3D::ConvexHull { model },
+            ) = entity.collider_3d.as_mut().map(|c| &mut c.shape)
+            {
+                *model = doc.resolve(model).to_string_lossy().into_owned();
+            }
+        }
+        file.apply_to_world(scene.world_mut());
 
         // Map document entries to ECS entities by name (the scene file keeps
         // names; duplicates are matched in order of appearance).
@@ -160,6 +175,7 @@ impl PlaySession {
             audio_commands: Vec::new(),
             hud: Vec::new(),
             lock_request: None,
+            mesh_tris: std::cell::RefCell::default(),
         }
     }
 
@@ -177,9 +193,10 @@ impl PlaySession {
     #[must_use]
     pub fn frame_input(&self) -> FrameInput {
         let to4 = |q: glam::Quat| [q.x, q.y, q.z, q.w];
-        let colliders = self
-            .physics
-            .collider_snapshot()
+        let snapshot = self.physics.collider_snapshot();
+        let mut meshes: Vec<(u64, std::sync::Arc<MeshTris>)> = Vec::new();
+        let mut cache = self.mesh_tris.borrow_mut();
+        let colliders = snapshot
             .shapes()
             .into_iter()
             .filter(|(_, _, sensor)| !*sensor)
@@ -213,9 +230,36 @@ impl PlaySession {
                         half_height,
                         radius,
                     },
+                    WorldShape::Mesh {
+                        center,
+                        rotation,
+                        mesh,
+                    } => {
+                        let tris = match cache.entry(mesh) {
+                            std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
+                            std::collections::hash_map::Entry::Vacant(e) => {
+                                let (vertices, triangles) = snapshot.mesh_triangles(mesh)?;
+                                let tris = MeshTris {
+                                    vertices: vertices.iter().map(glam::Vec3::to_array).collect(),
+                                    triangles,
+                                };
+                                e.insert(std::sync::Arc::new(tris)).clone()
+                            }
+                        };
+                        if !meshes.iter().any(|(k, _)| *k == mesh) {
+                            meshes.push((mesh, tris));
+                        }
+                        ColliderShape::Mesh {
+                            id,
+                            center: center.to_array(),
+                            rotation: to4(rotation),
+                            mesh,
+                        }
+                    }
                 })
             })
             .collect();
+        drop(cache);
         let playing = self
             .map
             .iter()
@@ -224,6 +268,7 @@ impl PlaySession {
             .collect();
         FrameInput {
             colliders,
+            meshes,
             playing,
             ..FrameInput::default()
         }
@@ -1049,6 +1094,108 @@ mod tests {
             Some(A::Text("none".into())),
             "nothing left to hit"
         );
+    }
+
+    /// Scripts in Oberon Play raycast against mesh colliders' real
+    /// triangles (sent once over the bridge), at the entity's scale
+    /// (skipped without python3).
+    #[test]
+    fn scripts_raycast_against_mesh_colliders() {
+        use crate::bridge::{BridgeMsg, ScriptBridge};
+        use crate::doc::ComponentKind;
+        use automata_core::AttributeValue as A;
+        let python = crate::bridge::default_python();
+        if std::process::Command::new(python)
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let ramp = crate::doc::tests::ramp_model("play");
+        let dir = std::env::temp_dir().join(format!("oberon_play_mesh_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("probe.py"),
+            "def update(entity, ctx):\n\
+             \x20   for name, x in (('a', 0.5), ('b', 1.5), ('c', 10.5)):\n\
+             \x20       hit = ctx.physics.raycast((x, 10, 1), (0, -1, 0), 50)\n\
+             \x20       entity.attributes[name] = hit.point[1] if hit else -1.0\n\
+             \x20       entity.attributes[name + 'n'] = hit.normal[1] if hit else 0.0\n",
+        )
+        .unwrap();
+        let mut doc = Document::starter();
+        doc.path = Some(dir.join("level.ron"));
+        // Two ramps sharing one model and scale: one mesh crosses the bridge.
+        for (name, x) in [("Ramp", 0.0), ("Ramp 2", 10.0)] {
+            let id = doc.create(CreateKind::Cube);
+            doc.rename_entity(id, name);
+            assert!(doc.set_model(id, &ramp));
+            doc.modify(id, false, |d| {
+                if let Some(t) = &mut d.transform {
+                    t.position = [x, 0.0, 0.0];
+                    t.scale = [2.0; 3];
+                }
+            });
+            assert!(doc.add_component(id, ComponentKind::Collider));
+        }
+        let i = doc.add_entity_named("Probe");
+        let probe = doc.entities[i].id;
+        doc.modify(probe, false, |d| {
+            d.script = Some(automata_core::Script {
+                path: "probe.py".into(),
+            });
+        });
+
+        let mut play = PlaySession::start(&doc);
+        play.update(TIMESTEP);
+        let input = play.frame_input();
+        assert_eq!(input.meshes.len(), 1, "both ramps share one mesh");
+        assert_eq!(input.meshes[0].1.triangles.len(), 8);
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        let mut errors = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while bridge.answered < 4 && std::time::Instant::now() < deadline {
+            for msg in bridge.poll() {
+                match msg {
+                    BridgeMsg::Frame(w) => play.apply_frame(&w),
+                    BridgeMsg::Error { msg, traceback, .. } => {
+                        errors.push(format!("{msg}\n{traceback}"));
+                    }
+                    _ => {}
+                }
+            }
+            let input = play.frame_input();
+            let states = play.script_states(|rel| doc.resolve(rel));
+            if bridge.send_frame_with(TIMESTEP, play.elapsed, &[], &states, &input) {
+                play.update(TIMESTEP);
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(errors.is_empty(), "{errors:?}");
+        let probe = play
+            .doc
+            .entities
+            .iter()
+            .find(|e| e.name() == "Probe")
+            .unwrap();
+        let float = |k: &str| match probe.data.attributes.get(k) {
+            Some(A::Float(v)) => *v,
+            other => panic!("{k}: {other:?} in {:?}", probe.data.attributes),
+        };
+        // The slope is y = x over 0..2 (scale 2): not the box top at 2.
+        assert!((float("a") - 0.5).abs() < 1e-3, "{}", float("a"));
+        assert!((float("b") - 1.5).abs() < 1e-3, "{}", float("b"));
+        assert!(
+            (float("c") - 0.5).abs() < 1e-3,
+            "second ramp: {}",
+            float("c")
+        );
+        // The slope's normal leans 45° and faces up, toward the ray.
+        assert!((float("an") - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-3);
     }
 
     /// The shipped FPS example, played through the real bridge: the player

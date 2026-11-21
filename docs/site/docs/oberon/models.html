@@ -77,10 +77,11 @@ model, so the model's internal references keep working.</li><li>A model that's a
 <ul><li>Select the entity and drag a model from the Files panel onto the
 <strong>Inspector</strong>.</li><li>Or open the Mesh Renderer's <strong>Primitive</strong> menu and choose <strong>Model…</strong>.</li><li>Or right-click a model in the Files panel and choose <strong>Use on
 &lt;entity&gt;</strong>.</li></ul>
-<p>If the entity has a box collider, it's resized to the new model.</p>
+<p>If the entity has a collider, it's refitted to the new model (see
+<a href="#colliders">Colliders</a>).</p>
 <h2 id="the-inspector">The Inspector<a class="anchor" href="#the-inspector" aria-label="Link to this section">#</a></h2>
 <p>With a model selected, the <strong>Mesh Renderer</strong> section shows:</p>
-<div class="table"><table><thead><tr><th>Row</th><th>What it does</th></tr></thead><tbody><tr><td><strong>Primitive</strong></td><td><code>Model</code>. Switch to Cube or Quad to go back to a primitive.</td></tr><tr><td><strong>File</strong></td><td>The model's path relative to the scene. It turns red if the file is missing or can't be read. Double-click it to show the file in the Files panel.</td></tr><tr><td><em>summary</em></td><td>Parts (one per material), triangle count, size in metres, and whether it's textured. If loading failed, this line shows the error instead.</td></tr><tr><td><strong>Change…</strong></td><td>Pick a different model.</td></tr><tr><td><strong>Add Collider / Fit Collider</strong></td><td>Adds a box collider sized to the model, or refits the existing one.</td></tr><tr><td><strong>Tint</strong></td><td>Multiplies every material's colour. Leave it white to see the model as authored.</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Row</th><th>What it does</th></tr></thead><tbody><tr><td><strong>Primitive</strong></td><td><code>Model</code>. Switch to Cube or Quad to go back to a primitive.</td></tr><tr><td><strong>File</strong></td><td>The model's path relative to the scene. It turns red if the file is missing or can't be read. Double-click it to show the file in the Files panel.</td></tr><tr><td><em>summary</em></td><td>Parts (one per material), triangle count, size in metres, and whether it's textured. If loading failed, this line shows the error instead.</td></tr><tr><td><strong>Change…</strong></td><td>Pick a different model.</td></tr><tr><td><strong>Add Collider / Fit Collider</strong></td><td>Adds a collider shaped for the model, or refits the existing one.</td></tr><tr><td><strong>Tint</strong></td><td>Multiplies every material's colour. Leave it white to see the model as authored.</td></tr></tbody></table></div>
 <h2 id="import-settings">Import settings<a class="anchor" href="#import-settings" aria-label="Link to this section">#</a></h2>
 <p>Models from different tools and stores rarely agree on size, facing or
 origin. Instead of fixing every entity that uses a model, fix the model
@@ -102,14 +103,24 @@ as it is. The settings apply wherever the model is used: in Play, under
 as the file describes it. Fitted colliders use the model's size after the
 import settings, so press <strong>Fit Collider</strong> after changing them.</p>
 <h2 id="colliders">Colliders<a class="anchor" href="#colliders" aria-label="Link to this section">#</a></h2>
-<p>Physics doesn't use the mesh itself. A model gets a <strong>box collider fitted to
-its bounds</strong>, which is fast and works for crates, trees, rocks and most
-props. Models are rarely centred on their origin (a tree's origin is at its
-roots), so the collider also gets an <strong>offset</strong> that centres the box on the
-mesh.</p>
-<p>The fitted box includes the entity's scale. After you scale a model, press
-<strong>Fit Collider</strong> again. For a character or a round object, change <strong>Shape</strong>
-to Capsule or Ball and adjust the size.</p>
+<p><strong>Add Collider</strong> picks a shape from the model:</p>
+<div class="table"><table><thead><tr><th>The model</th><th>Shape</th></tr></thead><tbody><tr><td>Fills at least 90% of its bounding box (crates, slabs)</td><td><strong>Box</strong>, fitted to the bounds</td></tr><tr><td>Anything else, with no rigid body or a static one</td><td><strong>Mesh</strong>: the model's own triangles</td></tr><tr><td>Anything else, on a dynamic or kinematic body</td><td><strong>Convex Hull</strong>: shrink-wrapped around the model</td></tr></tbody></table></div>
+<p>The collider section's <strong>Shape</strong> menu shows the choice; pick another to
+override it. Mesh and Convex Hull appear in the menu when the entity shows a
+model, and a <strong>Model</strong> row shows which file the shape comes from. Shapes
+built from a model follow the entity's scale and the model's import
+settings by themselves.</p>
+<p>A box doesn't scale with the entity. Models are rarely centred on their
+origin (a tree's origin is at its roots), so a fitted box also gets an
+<strong>offset</strong> that centres it on the mesh. After you scale a model, press
+<strong>Fit Collider</strong> to resize the box. Fit keeps the shape you picked. Swapping
+the model picks the shape again, since the old one was chosen for the old
+model.</p>
+<p>A Mesh collider on a <strong>Dynamic</strong> body shows an error. A triangle mesh has
+no inside, so it can't give the body mass, and it plays as its convex hull.
+Pick Convex Hull, or make the body Static or Kinematic. <strong>Build Game</strong>
+refuses to export a scene with that mistake. For a character or a round
+object, use Capsule or Sphere and adjust the size.</p>
 <h2 id="editing-a-model-while-oberon-is-open">Editing a model while Oberon is open<a class="anchor" href="#editing-a-model-while-oberon-is-open" aria-label="Link to this section">#</a></h2>
 <p>Oberon watches model files. Re-export from Blender and the scene view
 updates within half a second, with no reload. The Console says <em>Model files
@@ -125,6 +136,11 @@ changed on disk; reloaded</em>. Texture and <code>.mtl</code> changes are picked
 collider_3d: <span class="tok-k">Some</span>((
     shape: <span class="tok-t">Cuboid</span>(extents: (<span class="tok-n">1.5</span>, <span class="tok-n">2.4</span>, <span class="tok-n">1.5</span>)),
     offset: (<span class="tok-n">0.0</span>, <span class="tok-n">1.2</span>, <span class="tok-n">0.0</span>),
+    <span class="tok-c">// …</span>
+)),</code></pre></div>
+<p>A Mesh or Convex Hull collider stores the model path, not the triangles:</p>
+<div class="codeblock" data-lang="ron"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>collider_3d: <span class="tok-k">Some</span>((
+    shape: <span class="tok-t">Mesh</span>(model: <span class="tok-s">&quot;models/platform.glb&quot;</span>),
     <span class="tok-c">// …</span>
 )),</code></pre></div>
 <p>Paths always use <code>/</code>, so scenes move between Windows and Linux unchanged.

@@ -78,7 +78,12 @@ four small <code>platform</code>s, two <code>wall-high</code> and two <code>wall
 and clouds for decoration. Positions are in <code>build_level.py</code> if you'd like to
 match them exactly.</p>
 <p>For each platform and wall, press <strong>Add Collider</strong> in the Mesh Renderer.
-Oberon fits a box to the model and raises it to sit on the model's base.
+Oberon looks at each model. <code>platform-large-grass</code> is nearly a slab, so it
+gets a box raised to sit on the model's base. The small platforms and the
+walls have bevels and notches, so they get a <strong>Mesh</strong> collider made of
+their own triangles. Either works for static scenery. The example sets
+every platform's <strong>Shape</strong> to <strong>Mesh</strong>, so the bevelled edges are exact,
+and gives the walls boxes.
 Leave out the rigid body: a collider with no rigid body is static scenery
 that never moves.</p>
 <p>Add a <strong>Sun</strong> and an <strong>Environment</strong> from <strong>GameObject</strong>. In the

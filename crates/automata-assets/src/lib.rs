@@ -197,6 +197,32 @@ impl Model {
         self.max - self.min
     }
 
+    /// Every part's geometry merged into one triangle soup (model space,
+    /// vertices scaled by `scale`), for building collision shapes.
+    /// Triangles that point at missing vertices are skipped.
+    #[must_use]
+    pub fn triangles(&self, scale: Vec3) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+        let total: usize = self.parts.iter().map(|p| p.mesh.vertices.len()).sum();
+        let mut points = Vec::with_capacity(total);
+        let mut tris = Vec::new();
+        for part in &self.parts {
+            let base = u32::try_from(points.len()).unwrap_or(u32::MAX);
+            let count = part.mesh.vertices.len();
+            points.extend(
+                part.mesh
+                    .vertices
+                    .iter()
+                    .map(|v| Vec3::from(v.position) * scale),
+            );
+            for t in part.mesh.indices.chunks_exact(3) {
+                if t.iter().all(|&i| (i as usize) < count) {
+                    tris.push([base + t[0], base + t[1], base + t[2]]);
+                }
+            }
+        }
+        (points, tris)
+    }
+
     /// Total triangles over all parts.
     #[must_use]
     pub fn triangle_count(&self) -> usize {

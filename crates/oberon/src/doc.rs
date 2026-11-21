@@ -86,12 +86,33 @@ pub fn mesh_bounds(data: &EntityData) -> Option<(glam::Vec3, glam::Vec3)> {
 /// scale, so the collider carries the world size and offset). Entities
 /// without a mesh get a 1 m cube.
 #[must_use]
-pub fn fitted_collider(data: &EntityData) -> automata_physics::Collider3D {
+pub fn fitted_box(data: &EntityData) -> automata_physics::Collider3D {
     let (center, size) = mesh_bounds(data).unwrap_or((glam::Vec3::ZERO, glam::Vec3::ONE));
     let scale = glam::Vec3::from(data.transform.map_or([1.0; 3], |t| t.scale));
     let ext = (size * scale.abs()).max(glam::Vec3::splat(0.01));
     let offset = center * scale;
     automata_physics::Collider3D::cuboid(ext.x, ext.y, ext.z).offset(offset.to_array())
+}
+
+/// The model file an entity shows, if its mesh is one.
+#[must_use]
+pub fn model_path(data: &EntityData) -> Option<&str> {
+    match &data.mesh_visual.as_ref()?.primitive {
+        PrimitiveData::Model { path } => Some(path),
+        _ => None,
+    }
+}
+
+/// The collider Add Collider gives an entity: a box fitted to its mesh,
+/// unless it shows a model that a box fits badly. Then static scenery gets
+/// the model's triangles (Mesh) and moving bodies its Convex Hull (see
+/// [`automata_physics::auto_model_shape`]).
+#[must_use]
+pub fn fitted_collider(data: &EntityData) -> automata_physics::Collider3D {
+    let body = data.rigid_body.as_ref().map(|b| b.body_type);
+    model_path(data)
+        .and_then(|path| automata_physics::auto_model_shape(path, body))
+        .map_or_else(|| fitted_box(data), automata_physics::Collider3D::new)
 }
 
 /// The kinds of entity the Create menu can spawn.
@@ -881,17 +902,52 @@ impl Document {
         })
     }
 
-    /// Refits entity `id`'s box collider to its mesh, keeping the collider's
-    /// material settings. Returns true when it has a collider.
+    /// Refits entity `id`'s collider to its mesh, keeping the collider's
+    /// material settings and its kind: a box is refitted to the bounds, a
+    /// Mesh or Convex Hull takes the entity's current model, and a sphere
+    /// or capsule is replaced by the automatic choice (see
+    /// [`fitted_collider`]). Returns true when it changed anything.
     pub fn fit_collider(&mut self, id: u64) -> bool {
+        self.refit_collider(id, false)
+    }
+
+    /// [`fit_collider`](Self::fit_collider) after the entity's mesh was
+    /// swapped: a box was chosen for the old mesh, so it's chosen afresh.
+    pub fn fit_collider_to_new_mesh(&mut self, id: u64) -> bool {
+        self.refit_collider(id, true)
+    }
+
+    fn refit_collider(&mut self, id: u64, rechoose_box: bool) -> bool {
+        use automata_physics::Shape3D;
         let has = self
             .index_of(id)
             .is_some_and(|i| self.entities[i].data.collider_3d.is_some());
         has && self.modify(id, false, |d| {
-            let fitted = fitted_collider(d);
+            let model = model_path(d).map(str::to_string);
+            let keep_box = !rechoose_box
+                && matches!(
+                    d.collider_3d.as_ref().map(|c| &c.shape),
+                    Some(Shape3D::Cuboid { .. })
+                );
+            let fitted = if keep_box {
+                fitted_box(d)
+            } else {
+                fitted_collider(d)
+            };
             if let Some(c) = &mut d.collider_3d {
-                c.shape = fitted.shape;
-                c.offset = fitted.offset;
+                match (&mut c.shape, model) {
+                    (
+                        Shape3D::Mesh { model: current } | Shape3D::ConvexHull { model: current },
+                        Some(model),
+                    ) => {
+                        *current = model;
+                        c.offset = [0.0; 3];
+                    }
+                    _ => {
+                        c.shape = fitted.shape;
+                        c.offset = fitted.offset;
+                    }
+                }
             }
         })
     }
@@ -1349,7 +1405,107 @@ impl Document {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    /// A closed ramp (a wedge rising along +X, `y = x` over a 1 m
+    /// footprint: half its bounding box), written to a temp file. Returns
+    /// its absolute path.
+    pub(crate) fn ramp_model(tag: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("oberon-ramp-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ramp.obj");
+        std::fs::write(
+            &path,
+            "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 0 1\nv 1 0 1\nv 1 1 1\n\
+             f 1 3 2\nf 4 5 6\nf 1 2 5\nf 1 5 4\nf 2 3 6\nf 2 6 5\nf 1 4 6\nf 1 6 3\n",
+        )
+        .unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn models_a_box_fits_badly_get_mesh_or_hull_colliders() {
+        use crate::fields::{choice_label, choice_options, set_choice, Choice};
+        use automata_physics::{BodyType, RigidBody, Shape3D};
+        let path = ramp_model("auto");
+        let mut doc = Document::new();
+        let id = doc.create(CreateKind::Cube);
+        assert!(doc.set_model(id, &path));
+        let data = |doc: &Document| doc.entities[doc.index_of(id).unwrap()].data.clone();
+
+        // Static scenery: the ramp's own triangles.
+        assert!(doc.add_component(id, ComponentKind::Collider));
+        let c = data(&doc).collider_3d.unwrap();
+        assert_eq!(
+            c.shape,
+            Shape3D::Mesh {
+                model: path.clone()
+            }
+        );
+        assert_eq!(c.offset, [0.0; 3]);
+        assert_eq!(
+            choice_label(&data(&doc), Choice::ColliderShape),
+            Some("Mesh")
+        );
+
+        // A dynamic body moves, so it gets the convex hull; the Inspector
+        // flags a mesh left on it.
+        doc.modify(id, false, |d| d.rigid_body = Some(RigidBody::dynamic()));
+        let shape = data(&doc).collider_3d.unwrap().shape;
+        assert!(automata_physics::collider_problem(&shape, Some(BodyType::Dynamic)).is_some());
+        doc.modify(id, false, |d| d.collider_3d = None);
+        assert!(doc.add_component(id, ComponentKind::Collider));
+        assert_eq!(
+            data(&doc).collider_3d.unwrap().shape,
+            Shape3D::ConvexHull {
+                model: path.clone()
+            }
+        );
+
+        // Fit keeps the kind; the dropdown offers every shape and Box
+        // comes back fitted to the bounds.
+        // (Refitting to the same model changes nothing.)
+        assert!(!doc.fit_collider(id));
+        assert_eq!(
+            choice_label(&data(&doc), Choice::ColliderShape),
+            Some("Convex Hull")
+        );
+        assert_eq!(
+            choice_options(&data(&doc), Choice::ColliderShape),
+            ["Convex Hull", "Box", "Sphere", "Capsule", "Mesh"]
+        );
+        let mut d = data(&doc);
+        assert!(set_choice(&mut d, Choice::ColliderShape, "Box"));
+        let c = d.collider_3d.unwrap();
+        let Shape3D::Cuboid { extents } = c.shape else {
+            panic!("box expected: {c:?}");
+        };
+        assert!((extents - glam::Vec3::ONE).length() < 1e-5, "{extents}");
+        assert!((glam::Vec3::from(c.offset) - glam::Vec3::splat(0.5)).length() < 1e-5);
+        // A box picked by hand survives Fit; swapping the mesh re-chooses.
+        doc.modify(id, false, |dd| dd.collider_3d = Some(c.clone()));
+        assert!(!doc.fit_collider(id));
+        assert!(matches!(
+            data(&doc).collider_3d.unwrap().shape,
+            Shape3D::Cuboid { .. }
+        ));
+        assert!(doc.fit_collider_to_new_mesh(id));
+        assert_eq!(
+            data(&doc).collider_3d.unwrap().shape,
+            Shape3D::ConvexHull {
+                model: path.clone()
+            }
+        );
+
+        // A plain cube boxes well and never offers model shapes.
+        let cube = doc.create(CreateKind::Cube);
+        assert!(doc.add_component(cube, ComponentKind::Collider));
+        let cube_data = doc.entities[doc.index_of(cube).unwrap()].data.clone();
+        assert_eq!(
+            choice_options(&cube_data, Choice::ColliderShape),
+            ["Box", "Sphere", "Capsule"]
+        );
+    }
+
     /// A triangle model spanning x 0..1, y 1..3 (not centred on its
     /// origin), written to a temp file. Returns its absolute path.
     fn offset_model(tag: &str) -> String {

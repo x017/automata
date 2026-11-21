@@ -158,6 +158,27 @@ impl PyCollider3D {
         }
     }
 
+    /// A collider made of a model's exact triangles, built at the entity's
+    /// scale. For static scenery (no body, or a static or kinematic one);
+    /// on a dynamic body it plays as its convex hull.
+    #[classmethod]
+    #[allow(clippy::needless_pass_by_value)] // pyo3 extracts owned paths
+    fn mesh(_cls: &Bound<'_, PyType>, model: std::path::PathBuf) -> Self {
+        Self {
+            inner: automata_physics::Collider3D::mesh(&model.to_string_lossy()),
+        }
+    }
+
+    /// A collider shaped like the convex hull of a model's vertices, built
+    /// at the entity's scale: the shape for moving bodies a box fits badly.
+    #[classmethod]
+    #[allow(clippy::needless_pass_by_value)] // pyo3 extracts owned paths
+    fn convex_hull(_cls: &Bound<'_, PyType>, model: std::path::PathBuf) -> Self {
+        Self {
+            inner: automata_physics::Collider3D::convex_hull(&model.to_string_lossy()),
+        }
+    }
+
     /// A sensor detects overlaps without producing contact response.
     fn sensor(&self, sensor: bool) -> Self {
         Self {

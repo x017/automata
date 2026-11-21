@@ -38,15 +38,14 @@
                 color: (1.0, 1.0, 1.0, 1.0),
             )),
             collider_3d: Some((
-                shape: Cuboid(
-                    extents: (5.2, 0.5, 5.2),
+                shape: Mesh(
+                    model: "models/platform-large-grass.glb",
                 ),
                 density: 1.0,
                 friction: 0.5,
                 restitution: 0.0,
                 sensor: false,
                 enabled: true,
-                offset: (0.0, 0.25, 0.0),
             )),
         ),
         (
@@ -63,15 +62,14 @@
                 color: (1.0, 1.0, 1.0, 1.0),
             )),
             collider_3d: Some((
-                shape: Cuboid(
-                    extents: (5.2, 0.5, 5.2),
+                shape: Mesh(
+                    model: "models/platform-large-grass.glb",
                 ),
                 density: 1.0,
                 friction: 0.5,
                 restitution: 0.0,
                 sensor: false,
                 enabled: true,
-                offset: (0.0, 0.25, 0.0),
             )),
         ),
         (
@@ -88,15 +86,14 @@
                 color: (1.0, 1.0, 1.0, 1.0),
             )),
             collider_3d: Some((
-                shape: Cuboid(
-                    extents: (5.2, 0.5, 5.2),
+                shape: Mesh(
+                    model: "models/platform-large-grass.glb",
                 ),
                 density: 1.0,
                 friction: 0.5,
                 restitution: 0.0,
                 sensor: false,
                 enabled: true,
-                offset: (0.0, 0.25, 0.0),
             )),
         ),
         (
@@ -113,15 +110,14 @@
                 color: (1.0, 1.0, 1.0, 1.0),
             )),
             collider_3d: Some((
-                shape: Cuboid(
-                    extents: (5.2, 0.5, 5.2),
+                shape: Mesh(
+                    model: "models/platform-large-grass.glb",
                 ),
                 density: 1.0,
                 friction: 0.5,
                 restitution: 0.0,
                 sensor: false,
                 enabled: true,
-                offset: (0.0, 0.25, 0.0),
             )),
         ),
         (
@@ -138,15 +134,14 @@
                 color: (1.0, 1.0, 1.0, 1.0),
             )),
             collider_3d: Some((
-                shape: Cuboid(
-                    extents: (5.2, 0.5, 5.2),
+                shape: Mesh(
+                    model: "models/platform-large-grass.glb",
                 ),
                 density: 1.0,
                 friction: 0.5,
                 restitution: 0.0,
                 sensor: false,
                 enabled: true,
-                offset: (0.0, 0.25, 0.0),
             )),
         ),
         (
@@ -163,15 +158,14 @@
                 color: (1.0, 1.0, 1.0, 1.0),
             )),
             collider_3d: Some((
-                shape: Cuboid(
-                    extents: (2.2, 0.5, 2.2),
+                shape: Mesh(
+                    model: "models/platform.glb",
                 ),
                 density: 1.0,
                 friction: 0.5,
                 restitution: 0.0,
                 sensor: false,
                 enabled: true,
-                offset: (0.0, 0.25, 0.0),
             )),
         ),
         (
@@ -188,15 +182,14 @@
                 color: (1.0, 1.0, 1.0, 1.0),
             )),
             collider_3d: Some((
-                shape: Cuboid(
-                    extents: (2.2, 0.5, 2.2),
+                shape: Mesh(
+                    model: "models/platform.glb",
                 ),
                 density: 1.0,
                 friction: 0.5,
                 restitution: 0.0,
                 sensor: false,
                 enabled: true,
-                offset: (0.0, 0.25, 0.0),
             )),
         ),
         (
@@ -213,15 +206,14 @@
                 color: (1.0, 1.0, 1.0, 1.0),
             )),
             collider_3d: Some((
-                shape: Cuboid(
-                    extents: (2.2, 0.5, 2.2),
+                shape: Mesh(
+                    model: "models/platform.glb",
                 ),
                 density: 1.0,
                 friction: 0.5,
                 restitution: 0.0,
                 sensor: false,
                 enabled: true,
-                offset: (0.0, 0.25, 0.0),
             )),
         ),
         (
@@ -238,15 +230,14 @@
                 color: (1.0, 1.0, 1.0, 1.0),
             )),
             collider_3d: Some((
-                shape: Cuboid(
-                    extents: (2.2, 0.5, 2.2),
+                shape: Mesh(
+                    model: "models/platform.glb",
                 ),
                 density: 1.0,
                 friction: 0.5,
                 restitution: 0.0,
                 sensor: false,
                 enabled: true,
-                offset: (0.0, 0.25, 0.0),
             )),
         ),
         (

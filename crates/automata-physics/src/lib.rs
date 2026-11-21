@@ -48,6 +48,7 @@
 
 pub mod components;
 pub mod events;
+pub mod model_shape;
 pub mod world;
 pub mod world2d_impl;
 pub mod world3d_impl;
@@ -57,6 +58,7 @@ pub use components::{
     Collider3D, RigidBody, Shape2D, Shape3D,
 };
 pub use events::{ContactForce, PhysicsEvent};
+pub use model_shape::{auto_model_shape, box_fill, collider_problem};
 pub use world::{CharacterMove, PhysicsTick, RayFilter, RayHit};
 pub use world2d_impl::PhysicsWorld2D;
 pub use world3d_impl::{ColliderSnapshot, PhysicsWorld3D, WorldShape};
