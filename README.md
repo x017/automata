@@ -12,6 +12,8 @@
 
 The full project specification — vision, architecture, roadmap, and
 acceptance criteria — lives in [`build.md`](build.md).
+Upcoming work and the decisions behind it are in
+[`NEXT_PLANS.md`](NEXT_PLANS.md).
 
 ## Status
 
