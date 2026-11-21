@@ -7,6 +7,7 @@ use tracing::warn;
 use wgpu::util::DeviceExt;
 
 use crate::camera;
+use crate::composite::Compositor;
 use crate::draw::{DrawList, MeshDraw, Sprite};
 use crate::error::Result;
 use crate::light::LightUniform;
@@ -73,6 +74,8 @@ pub struct Renderer {
     /// Depth buffer for offscreen targets whose size differs from the
     /// surface's, cached by size.
     offscreen_depth: Option<((u32, u32), wgpu::Texture)>,
+    /// Overlay-over-scene compositing for CPU-drawn UIs.
+    compositor: Compositor,
 }
 
 impl Renderer {
@@ -104,6 +107,7 @@ impl Renderer {
         );
         let depth_texture = Some(create_depth_texture(device, size));
         let shadow_pipeline = pipeline::create_shadow_pipelines(device, &shared);
+        let compositor = Compositor::new(device);
         let (shadow_texture, shadow_sampler) =
             create_shadow_resources(device, quality.shadow_map_size());
 
@@ -123,6 +127,7 @@ impl Renderer {
             blit_scratch: Vec::new(),
             offscreen_pipelines: None,
             offscreen_depth: None,
+            compositor,
         })
     }
 
@@ -161,6 +166,7 @@ impl Renderer {
         );
         let depth_texture = Some(create_depth_texture(device, size));
         let shadow_pipeline = pipeline::create_shadow_pipelines(device, &shared);
+        let compositor = Compositor::new(device);
         let (shadow_texture, shadow_sampler) =
             create_shadow_resources(device, quality.shadow_map_size());
 
@@ -180,6 +186,7 @@ impl Renderer {
             blit_scratch: Vec::new(),
             offscreen_pipelines: None,
             offscreen_depth: None,
+            compositor,
         })
     }
 
@@ -473,7 +480,10 @@ impl Renderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: OFFSCREEN_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            // TEXTURE_BINDING: `present_composited` samples it directly.
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         })
     }
@@ -580,6 +590,82 @@ impl Renderer {
         // without a poll every frame's ~(w*h*4)-byte staging buffer stays
         // alive forever — hundreds of MB per second at 60 FPS.
         let _ = self.ctx.device().poll(wgpu::PollType::Poll);
+    }
+
+    /// Presents a CPU-drawn frame: `overlay` (premultiplied RGBA8, the
+    /// window's `size`) with `scene` (a render target from
+    /// [`Self::create_render_target`], drawn with [`Self::render_offscreen`])
+    /// showing through its transparent pixels, top-left corner at `origin`
+    /// in window pixels.
+    ///
+    /// This is how an editor puts a live 3D view inside its UI without
+    /// reading the view back to the CPU; with `scene: None` it is a plain
+    /// upload like [`Self::blit_rgba_to_surface`].
+    pub fn present_composited(
+        &mut self,
+        overlay: &[u8],
+        size: (u32, u32),
+        scene: Option<(&wgpu::Texture, (i32, i32))>,
+    ) {
+        let (width, height) = (size.0.max(1), size.1.max(1));
+        if overlay.len() != (width * height * 4) as usize {
+            warn!(
+                expected = width * height * 4,
+                got = overlay.len(),
+                "present_composited: overlay size mismatch; frame skipped"
+            );
+            return;
+        }
+        if self.ctx.size() != (width, height) {
+            self.resize(width, height);
+        }
+        let Some(texture) = self.ctx.acquire_frame().ok().flatten() else {
+            return; // occluded / outdated — skip this frame
+        };
+        if (texture.texture.width(), texture.texture.height()) != (width, height) {
+            drop(texture);
+            return;
+        }
+        let view = texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        self.compositor.composite(
+            self.ctx.device(),
+            self.ctx.queue(),
+            &view,
+            self.ctx.format(),
+            (width, height),
+            overlay,
+            scene,
+        );
+        drop(view);
+        self.ctx.present(texture);
+        let _ = self.ctx.device().poll(wgpu::PollType::Poll);
+    }
+
+    /// [`Self::present_composited`] into a render target instead of the
+    /// window (tests and tools).
+    pub fn composite_offscreen(
+        &mut self,
+        overlay: &[u8],
+        target: &wgpu::Texture,
+        scene: Option<(&wgpu::Texture, (i32, i32))>,
+    ) {
+        let size = (target.width(), target.height());
+        if overlay.len() != (size.0 * size.1 * 4) as usize {
+            warn!("composite_offscreen: overlay size mismatch");
+            return;
+        }
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        self.compositor.composite(
+            self.ctx.device(),
+            self.ctx.queue(),
+            &view,
+            target.format(),
+            size,
+            overlay,
+            scene,
+        );
     }
 
     /// Builds a camera bind group from a view-projection matrix and the
@@ -778,7 +864,9 @@ impl Renderer {
         match target {
             FrameTarget::Surface(texture) => self.ctx.present(texture),
             FrameTarget::Offscreen { .. } => {
-                let _ = self.ctx.device().poll(wgpu::PollType::wait_indefinitely());
+                // No wait: reads (`read_texture_rgba`) wait for their own
+                // copy, and a GPU-composited view never needs the CPU to.
+                let _ = self.ctx.device().poll(wgpu::PollType::Poll);
             }
         }
     }
@@ -1303,6 +1391,40 @@ mod tests {
         );
         let moved = glam::Mat4::from_translation(glam::Vec3::new(3.0, 0.0, 0.0));
         assert!(!lit(&mut renderer, moved), "the joint moved the cube away");
+    }
+
+    #[test]
+    fn offscreen_composite_shows_the_scene_through_the_overlay() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping composite test");
+            return;
+        };
+        // An 8x8 red scene.
+        let scene = renderer.create_render_target((8, 8));
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::RED);
+        renderer.render_offscreen(&draw, &scene);
+        // A 16x16 overlay: transparent, with an opaque blue first column
+        // and a half-transparent premultiplied white pixel at (5, 5).
+        let mut overlay = vec![0_u8; 16 * 16 * 4];
+        for y in 0..16 {
+            overlay[y * 64..y * 64 + 4].copy_from_slice(&[0, 0, 255, 255]);
+        }
+        let half = (5 * 16 + 5) * 4;
+        overlay[half..half + 4].copy_from_slice(&[128, 128, 128, 128]);
+        let target = renderer.create_render_target((16, 16));
+        renderer.composite_offscreen(&overlay, &target, Some((&scene, (4, 4))));
+        let pixels = read_pixels(&renderer, &target, (16, 16));
+        let at = |x: usize, y: usize| {
+            let i = (y * 16 + x) * 4;
+            [pixels[i], pixels[i + 1], pixels[i + 2]]
+        };
+        let near = |a: [u8; 3], b: [u8; 3]| a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 3);
+        assert!(near(at(0, 8), [0, 0, 255]), "overlay: {:?}", at(0, 8));
+        assert!(near(at(8, 8), [255, 0, 0]), "scene: {:?}", at(8, 8));
+        assert!(near(at(14, 1), [0, 0, 0]), "uncovered: {:?}", at(14, 1));
+        // Half white over red: (128 + 255 / 2, 128, 128) in sRGB bytes.
+        assert!(near(at(5, 5), [255, 128, 128]), "blend: {:?}", at(5, 5));
     }
 
     async fn offscreen() -> Option<Renderer> {

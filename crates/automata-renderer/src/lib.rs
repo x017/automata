@@ -10,6 +10,7 @@
 //! that simple consumers do not need a direct `wgpu` dependency.
 
 mod camera;
+mod composite;
 mod context;
 mod draw;
 mod environment;

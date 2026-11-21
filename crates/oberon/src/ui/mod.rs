@@ -702,6 +702,11 @@ pub struct Ui {
     /// The scene view's rectangle in the last frame (maps drop points to
     /// the ground).
     last_viewport: Rect,
+    /// Set by [`Ui::frame_composited`]: the size (physical pixels) of a
+    /// scene view the GPU draws, so the UI leaves a hole for it.
+    composited_view: Option<(u32, u32)>,
+    /// Where that hole's top-left corner landed this frame (physical).
+    composited_origin: Option<(i32, i32)>,
     /// Panel sizes and visibility.
     pub panels: PanelSizes,
     /// Active bottom-dock tab.
@@ -810,6 +815,8 @@ impl Ui {
             file_drag: None,
             os_file_hover: false,
             last_viewport: Rect::default(),
+            composited_view: None,
+            composited_origin: None,
             build_status: None,
             build_last: None,
             build_cfg: None,
@@ -1180,6 +1187,25 @@ impl Ui {
     pub fn paste_intent(&self) -> Option<Intent> {
         (!self.entity_clipboard.is_empty())
             .then(|| Intent::PasteEntities(self.entity_clipboard.clone()))
+    }
+
+    /// [`Self::frame`] for a scene view the GPU composites
+    /// ([`automata_renderer::Renderer::present_composited`]): the view's
+    /// `size` (physical pixels) is left transparent. Returns the edits and
+    /// where the view's top-left corner landed (physical pixels), or `None`
+    /// when the scene view isn't showing.
+    pub fn frame_composited(
+        &mut self,
+        canvas: &mut Canvas,
+        doc: &Document,
+        pointer: Pointer,
+        size: (u32, u32),
+    ) -> (Vec<Intent>, Option<(i32, i32)>) {
+        self.composited_view = Some(size);
+        self.composited_origin = None;
+        let intents = self.frame(canvas, doc, pointer, None);
+        self.composited_view = None;
+        (intents, self.composited_origin.take())
     }
 
     /// Draws the whole editor for this frame and returns the requested edits.
@@ -3245,12 +3271,18 @@ impl Ui {
         frame: Option<(&[u8], u32, u32)>,
     ) {
         canvas.fill_rect(rect.x, rect.y, rect.w, rect.h, color::viewport_bg());
-        if let Some((rgba, fw, fh)) = frame {
+        let image = frame.map(|(_, fw, fh)| (fw, fh)).or(self.composited_view);
+        if let Some((fw, fh)) = image {
             let s = canvas.scale();
             let (lw, lh) = (fw as f32 / s, fh as f32 / s);
             let dx = rect.x + ((rect.w - lw) / 2.0).max(0.0);
             let dy = rect.y + ((rect.h - lh) / 2.0).max(0.0);
-            canvas.blit_rgba(dx, dy, fw, fh, rgba);
+            match frame {
+                Some((rgba, ..)) => canvas.blit_rgba(dx, dy, fw, fh, rgba),
+                // The GPU shows the scene through a transparent hole; the
+                // overlays below draw over it as usual.
+                None => self.composited_origin = Some(canvas.clear_physical(dx, dy, fw, fh)),
+            }
         }
 
         let proj = Projector::new(&self.camera, rect);

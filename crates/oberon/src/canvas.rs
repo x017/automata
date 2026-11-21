@@ -366,6 +366,16 @@ impl Canvas {
         if width == 0 || height == 0 || rgba.len() < len {
             return;
         }
+        let (px, py) = (
+            (x * self.scale).round() as i32,
+            (y * self.scale).round() as i32,
+        );
+        // Opaque images (rendered views, most thumbnails) replace what's
+        // under them: copy rows instead of blending pixel by pixel.
+        if rgba[..len].chunks_exact(4).all(|p| p[3] == 255) {
+            self.write_rect(px, py, width, height, Some(&rgba[..len]));
+            return;
+        }
         // tiny-skia pixmaps are premultiplied; premultiply into a reused
         // scratch buffer (opaque pixels pass through unchanged).
         let mut premul = std::mem::take(&mut self.blit_scratch);
@@ -387,16 +397,55 @@ impl Canvas {
             return;
         };
         let paint = PixmapPaint::default();
-        self.pixmap.draw_pixmap(
-            (x * self.scale).round() as i32,
-            (y * self.scale).round() as i32,
-            src.as_ref(),
-            &paint,
-            Transform::identity(),
-            None,
-        );
+        self.pixmap
+            .draw_pixmap(px, py, src.as_ref(), &paint, Transform::identity(), None);
         // Recover the allocation for the next frame.
         self.blit_scratch = src.take();
+    }
+
+    /// Makes a rectangle fully transparent, `width`×`height` **physical**
+    /// pixels with its top-left corner at logical `(x, y)` (where a
+    /// GPU-composited view shows through). Returns that corner in physical
+    /// pixels.
+    pub fn clear_physical(&mut self, x: f32, y: f32, width: u32, height: u32) -> (i32, i32) {
+        let (px, py) = (
+            (x * self.scale).round() as i32,
+            (y * self.scale).round() as i32,
+        );
+        self.write_rect(px, py, width, height, None);
+        (px, py)
+    }
+
+    /// Overwrites a physical-pixel rectangle (clipped to the canvas) with
+    /// rows of `src` (`width`×`height` RGBA8, opaque), or zeros.
+    fn write_rect(&mut self, px: i32, py: i32, width: u32, height: u32, src: Option<&[u8]>) {
+        let (cw, ch) = (
+            i64::from(self.pixmap.width()),
+            i64::from(self.pixmap.height()),
+        );
+        let (px, py) = (i64::from(px), i64::from(py));
+        let x0 = px.max(0);
+        let x1 = (px + i64::from(width)).min(cw);
+        let y0 = py.max(0);
+        let y1 = (py + i64::from(height)).min(ch);
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let idx = |v: i64| v as usize;
+        let stride = idx(cw) * 4;
+        let data = self.pixmap.data_mut();
+        for y in y0..y1 {
+            let row = idx(y) * stride;
+            let dst = &mut data[row + idx(x0) * 4..row + idx(x1) * 4];
+            match src {
+                Some(src) => {
+                    let start = (idx(y - py) * width as usize + idx(x0 - px)) * 4;
+                    dst.copy_from_slice(&src[start..start + dst.len()]);
+                }
+                None => dst.fill(0),
+            }
+        }
     }
 
     /// The raw premultiplied RGBA pixels (for the window upload).
@@ -452,9 +501,32 @@ mod tests {
     }
 
     #[test]
+    fn opaque_blits_copy_and_clears_punch_holes() {
+        let mut c = Canvas::new(8, 8);
+        c.set_scale(2.0);
+        // An opaque 4x4 image at logical (1, 1) = physical (2, 2), with a
+        // part hanging off nothing; plus clipping at the far edge.
+        let img: Vec<u8> = (0..16).flat_map(|i| [i as u8, 7, 9, 255]).collect();
+        c.blit_rgba(1.0, 1.0, 4, 4, &img);
+        let px = |c: &Canvas, x: usize, y: usize| {
+            let i = (y * 8 + x) * 4;
+            c.pixels()[i..i + 4].to_vec()
+        };
+        assert_eq!(px(&c, 2, 2), [0, 7, 9, 255]);
+        assert_eq!(px(&c, 5, 5), [15, 7, 9, 255]);
+        assert_eq!(px(&c, 1, 1)[3], 0, "untouched");
+        c.blit_rgba(3.0, 3.0, 4, 4, &img); // physical (6, 6): clipped
+        assert_eq!(px(&c, 7, 7), [5, 7, 9, 255]);
+        assert_eq!(c.clear_physical(1.0, 1.0, 2, 2), (2, 2));
+        assert_eq!(px(&c, 3, 3), [0, 0, 0, 0]);
+        assert_eq!(px(&c, 4, 4), [10, 7, 9, 255]);
+    }
+
+    #[test]
     fn blit_reuses_its_scratch_buffer() {
         let mut c = Canvas::new(8, 8);
-        let img = vec![255u8; 4 * 4 * 4];
+        // Translucent, so the premultiplying path runs.
+        let img = vec![200u8; 4 * 4 * 4];
         c.blit_rgba(0.0, 0.0, 4, 4, &img);
         c.blit_rgba(0.0, 0.0, 4, 4, &img);
         assert!(c.blit_scratch.capacity() >= img.len());

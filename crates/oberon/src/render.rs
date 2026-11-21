@@ -281,6 +281,62 @@ impl ViewportRenderer {
         (self.frame.as_slice(), width, height)
     }
 
+    /// Renders the document into the view's GPU texture without reading
+    /// it back; [`Renderer::present_composited`] then shows it inside the
+    /// UI ([`Self::scene_texture`]). Returns the number of meshes drawn.
+    pub fn render_gpu(
+        &mut self,
+        renderer: &mut Renderer,
+        doc: &Document,
+        cam: ViewCamera,
+        width: u32,
+        height: u32,
+    ) -> usize {
+        self.sync(renderer, doc);
+        self.meshes = Self::draw_scene(
+            renderer,
+            &mut self.target,
+            self.scene.world(),
+            Some(cam.to_camera3d()),
+            (width.max(1), height.max(1)),
+            Vec::new(),
+        );
+        self.meshes
+    }
+
+    /// [`Self::render_play`] into the view's GPU texture, without reading
+    /// it back (see [`Self::render_gpu`]).
+    pub fn render_play_gpu(
+        &mut self,
+        renderer: &mut Renderer,
+        session: &mut PlaySession,
+        cam: ViewCamera,
+        width: u32,
+        height: u32,
+    ) -> usize {
+        let editor_cam = session.scene_camera().is_none().then(|| cam.to_camera3d());
+        let root = session.doc.base_dir();
+        let hud = self.hud_sprites(renderer, &root, &session.hud);
+        let world = session.scene_mut().world_mut();
+        automata_scene::materialize_visuals(world, renderer);
+        self.meshes = Self::draw_scene(
+            renderer,
+            &mut self.target,
+            world,
+            editor_cam,
+            (width.max(1), height.max(1)),
+            hud,
+        );
+        self.meshes
+    }
+
+    /// The texture the last [`Self::render_gpu`] / [`Self::render_play_gpu`]
+    /// drew into.
+    #[must_use]
+    pub fn scene_texture(&self) -> Option<&RenderTarget> {
+        self.target.as_ref().map(|(t, _)| t)
+    }
+
     /// Records `world`, renders it offscreen and reads the pixels back.
     /// `camera` overrides the scene's own camera when given. Returns the
     /// number of meshes drawn.
@@ -288,6 +344,23 @@ impl ViewportRenderer {
         renderer: &mut Renderer,
         target: &mut Option<(RenderTarget, (u32, u32))>,
         frame: &mut Vec<u8>,
+        world: &SceneWorld,
+        camera: Option<automata_renderer::Camera3D>,
+        size: (u32, u32),
+        overlay: Vec<Sprite>,
+    ) -> usize {
+        let meshes = Self::draw_scene(renderer, target, world, camera, size, overlay);
+        if let Some((texture, _)) = target.as_ref() {
+            renderer.read_texture_rgba_into(texture, size, frame);
+        }
+        meshes
+    }
+
+    /// Records `world` and renders it into `target` (created or resized to
+    /// `size`). Returns the number of meshes drawn.
+    fn draw_scene(
+        renderer: &mut Renderer,
+        target: &mut Option<(RenderTarget, (u32, u32))>,
         world: &SceneWorld,
         camera: Option<automata_renderer::Camera3D>,
         size: (u32, u32),
@@ -313,7 +386,6 @@ impl ViewportRenderer {
             draw.sprite(sprite);
         }
         renderer.render_offscreen(&draw, texture);
-        renderer.read_texture_rgba_into(texture, size, frame);
         draw.mesh_count()
     }
 }

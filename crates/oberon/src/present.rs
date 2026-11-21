@@ -1829,7 +1829,9 @@ impl EditorApp {
         let scale = window.scale_factor() as f32 * self.ui.prefs.ui_scale.clamp(0.5, 3.0);
         let pointer = self.pointer(scale);
 
-        let intents = {
+        // `composited`: where the GPU should show the scene view this frame
+        // (physical top-left corner), when it renders without a readback.
+        let (intents, composited) = {
             let Self {
                 doc,
                 ui,
@@ -1857,14 +1859,23 @@ impl EditorApp {
             match play {
                 // A script tab covers the scene view: skip the 3D render.
                 Some(session) if !ui.scene_visible() => {
-                    ui.frame(canvas, &session.doc, pointer, None)
+                    (ui.frame(canvas, &session.doc, pointer, None), None)
                 }
-                None if !ui.scene_visible() => ui.frame(canvas, doc, pointer, None),
-                Some(session) => {
-                    let (frame, fw, fh) =
-                        viewport.render_play(renderer.as_mut(), session, cam, vw, vh);
-                    ui.frame(canvas, &session.doc, pointer, Some((frame, fw, fh)))
-                }
+                None if !ui.scene_visible() => (ui.frame(canvas, doc, pointer, None), None),
+                Some(session) => match renderer.as_mut() {
+                    // The GPU path: the scene stays on the GPU and is
+                    // composited under the UI at present time.
+                    Some(r) => {
+                        viewport.render_play_gpu(r, session, cam, vw, vh);
+                        ui.frame_composited(canvas, &session.doc, pointer, (vw, vh))
+                    }
+                    None => {
+                        let (frame, fw, fh) = viewport.render_play(None, session, cam, vw, vh);
+                        let intents =
+                            ui.frame(canvas, &session.doc, pointer, Some((frame, fw, fh)));
+                        (intents, None)
+                    }
+                },
                 None => {
                     // The selected camera's preview first (same world).
                     let preview = ui.camera_preview_request(doc, lw, lh, s);
@@ -1876,8 +1887,16 @@ impl EditorApp {
                         }
                         _ => ui.set_camera_preview(None),
                     }
-                    let (frame, fw, fh) = viewport.render(renderer.as_mut(), doc, cam, vw, vh);
-                    ui.frame(canvas, doc, pointer, Some((frame, fw, fh)))
+                    match renderer.as_mut() {
+                        Some(r) => {
+                            viewport.render_gpu(r, doc, cam, vw, vh);
+                            ui.frame_composited(canvas, doc, pointer, (vw, vh))
+                        }
+                        None => {
+                            let (frame, fw, fh) = viewport.render(None, doc, cam, vw, vh);
+                            (ui.frame(canvas, doc, pointer, Some((frame, fw, fh))), None)
+                        }
+                    }
                 }
             }
         };
@@ -1900,7 +1919,9 @@ impl EditorApp {
         }
 
         if let (Some(renderer), Some(canvas)) = (&mut self.renderer, &self.canvas) {
-            renderer.blit_rgba_to_surface(canvas.pixels(), canvas.size());
+            let scene =
+                composited.and_then(|origin| Some((self.viewport.scene_texture()?, origin)));
+            renderer.present_composited(canvas.pixels(), canvas.size(), scene);
         }
         self.update_window_chrome(&window);
         self.autosave();
