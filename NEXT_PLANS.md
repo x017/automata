@@ -86,13 +86,40 @@ discussion before starting.
 
 ---
 
-## 2. One scripting API instead of two 🟡 next to discuss
+## 2. One scripting API instead of two 🟢 decided (not started)
 
-Oberon's bridge (`crates/oberon/src/bridge.py`, standard library only) and
-`run_scene` (`automata/scripting.py`) each implement `entity` / `ctx`
-separately. Every new feature has to be written twice and kept in sync.
-Options: one shared implementation, or one conformance test suite run
-against both.
+Today Oberon's bridge (`crates/oberon/src/bridge.py`, ~860 lines, standard
+library only) and `run_scene` (`automata/scripting.py`, ~570 lines) each
+implement `entity` / `ctx` separately. They also **behave differently**:
+- Oberon applies script writes after all scripts run; `run_scene` applies
+  them immediately.
+- Some helpers (`transform.translate`, `input.axis`) exist on one side only.
+
+### Decisions
+
+| Question | Decision |
+|---|---|
+| Approach | **One shared API layer + a shared test suite.** `entity` / `ctx` are written once, in a standard-library-only Python module, on top of a small backend interface. |
+| Backends | **Bridge backend** (Oberon's JSON frames) and **engine backend** (the Rust extension under `run_scene`). Both are thin: read/write transform and attributes, ray cast, sounds, HUD, input, despawn. |
+| When writes become visible | **Deferred (Oberon's model) everywhere.** Scripts read the start of the frame plus their own writes; all writes apply after every script has run. Results don't depend on script order. |
+| Play without the Automata package | **Keep zero-setup.** Oberon embeds the shared module, so Play works with any `python3`. No install step, and no version mismatch between Oberon and an installed package. |
+
+### Plan
+
+1. Move the user-facing API into a shared module (e.g.
+   `automata/script_api.py`). Oberon `include_str!`s it next to
+   `bridge.py` and writes both into `.oberon/`.
+2. Reduce `bridge.py` and `scripting.py` to their backends plus
+   loading, hot reload and error handling.
+3. Switch `run_scene` to deferred writes, and document the frame model once
+   for both (Scripting page).
+4. **Conformance suite:** small script scenarios (move, ray cast, sound,
+   despawn, HUD, write timing, attributes, hot reload) run through both
+   runners in CI with the same expected results.
+5. Keep the existing coin_run and FPS tests green throughout; they act as
+   the end-to-end check.
+6. Make the formerly "Oberon only" helpers available everywhere and remove
+   those notes from the docs.
 
 ## 3. Text in the in-game HUD ⚪
 
