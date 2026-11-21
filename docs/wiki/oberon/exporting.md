@@ -69,9 +69,24 @@ template** (the game launcher plus a private Python with the engine
 installed), then adds your project. That's why a build takes seconds, and
 why you can export for Windows from Linux and the other way round.
 
-Templates are downloaded once per engine version. Use **Build ▸ Download
-Export Templates** or the **Download** buttons on the Build page. The
-Build page shows each template's state:
+Templates are downloaded once per engine version. **Build** fetches a
+missing template by itself, or you can use **Build ▸ Download Export
+Templates** or the **Download** buttons on the Build page. The Linux
+template is about 75 MB and the Windows one about 25 MB.
+
+While the repository is private, the plain download link needs you to be
+signed in. Oberon and `automata-export` try these in order:
+
+1. the public release link;
+2. the GitHub CLI, if you've signed in with `gh auth login`;
+3. a token in `GH_TOKEN` or `GITHUB_TOKEN` (it needs read access to the
+   repository).
+
+If none of them works and you run Oberon from a source checkout
+(`cargo run -p oberon`), Build compiles `automata-player` with cargo and
+uses it as a **Development** template for your own platform.
+
+The Build page shows each template's state:
 
 - **Ready**: the game ships its own Python. This is what you give to
   players.
@@ -79,7 +94,8 @@ Build page shows each template's state:
   `automata` installed. Oberon sets one up automatically when you run a
   source checkout and no template is installed yet. It's fine for testing
   on your own machine, but don't ship it.
-- **Not installed**: download it before building for that platform.
+- **Not installed**: Build downloads it the first time you build for
+  that platform.
 
 Templates live in `~/.local/share/automata/templates/<version>/` on Linux
 and `%APPDATA%\automata\templates\<version>\` on Windows. You can choose

@@ -59,6 +59,23 @@ impl BuildJob {
         std::thread::Builder::new()
             .name("oberon-export".into())
             .spawn(move || {
+                // Check the project before fetching any template, so a
+                // broken project never triggers a download.
+                let problems = automata_export::validate(&project, &cfg);
+                let errors: Vec<String> = problems
+                    .iter()
+                    .filter(|m| m.level == Level::Error)
+                    .map(|m| m.text.clone())
+                    .collect();
+                if !errors.is_empty() {
+                    for m in problems {
+                        let _ = tx.send(BuildEvent::Log(m.level, m.text));
+                    }
+                    for target in list {
+                        let _ = tx.send(BuildEvent::Finished(target, Err(errors.join("; "))));
+                    }
+                    return;
+                }
                 for target in list {
                     let send = |e: BuildEvent| {
                         let _ = tx.send(e);
@@ -69,7 +86,7 @@ impl BuildJob {
                         send(BuildEvent::Finished(
                             target,
                             Err(format!(
-                                "no {} export template installed — Build ▸ Download Export Templates",
+                                "no {} export template: the download failed (see above). Sign in with `gh auth login` or set GH_TOKEN, then use Build ▸ Download Export Templates",
                                 target.label()
                             )),
                         ));
@@ -174,16 +191,39 @@ fn template_for(target: Target, log: &mut dyn FnMut(Level, String)) -> Option<Pa
     if let Some(dir) = automata_export::find_template(target) {
         return Some(dir);
     }
+    // 1. Download the standalone template (bundled Python).
+    log(
+        Level::Info,
+        format!(
+            "No {} export template installed: downloading it (one time, about 25-75 MB)…",
+            target.label()
+        ),
+    );
+    match automata_export::download_template(target) {
+        Ok(dir) => {
+            log(
+                Level::Info,
+                format!(
+                    "Installed the {} template: {}",
+                    target.label(),
+                    dir.display()
+                ),
+            );
+            return Some(dir);
+        }
+        Err(e) => log(Level::Warning, e),
+    }
+    // 2. A development template from this machine's player (host only).
     if Target::host() != Some(target) {
         return None;
     }
-    let player = sibling_player(target)?;
+    let player = sibling_player(target).or_else(|| build_player_from_source(target, log))?;
     match automata_export::install_dev_template(&player, target) {
         Ok(dir) => {
             log(
                 Level::Warning,
                 format!(
-                    "Using a development template from {} — the build needs Python with automata installed. Download the export templates for a standalone game.",
+                    "Using a development template from {}: the game runs with the Python on PATH (automata installed). Download the export templates for a standalone game.",
                     player.display()
                 ),
             );
@@ -194,6 +234,61 @@ fn template_for(target: Target, log: &mut dyn FnMut(Level, String)) -> Option<Pa
             None
         }
     }
+}
+
+/// When Oberon runs from a cargo checkout (`cargo run -p oberon`), builds
+/// `automata-player` into the same target folder so it lands beside the
+/// Oberon executable.
+fn build_player_from_source(target: Target, log: &mut dyn FnMut(Level, String)) -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let profile_dir = exe.parent()?;
+    let target_dir = profile_dir.parent()?;
+    let workspace = source_checkout(&exe)?;
+    let release = profile_dir.file_name().is_some_and(|n| n != "debug");
+    log(
+        Level::Info,
+        format!(
+            "Building automata-player from source in {}…",
+            workspace.display()
+        ),
+    );
+    let mut cmd = std::process::Command::new("cargo");
+    cmd.current_dir(&workspace)
+        .args(["build", "-p", "automata-player", "--target-dir"])
+        .arg(target_dir);
+    if release {
+        cmd.arg("--release");
+    }
+    match cmd.output() {
+        Ok(out) if out.status.success() => sibling_player(target),
+        Ok(out) => {
+            let err = String::from_utf8_lossy(&out.stderr);
+            let tail: Vec<&str> = err.lines().rev().take(6).collect();
+            log(
+                Level::Warning,
+                format!(
+                    "cargo build -p automata-player failed:\n{}",
+                    tail.into_iter().rev().collect::<Vec<_>>().join("\n")
+                ),
+            );
+            None
+        }
+        Err(e) => {
+            log(Level::Warning, format!("could not run cargo: {e}"));
+            None
+        }
+    }
+}
+
+/// The automata workspace above `exe` (`…/target/release/oberon`), if
+/// Oberon was built from source.
+fn source_checkout(exe: &Path) -> Option<PathBuf> {
+    exe.ancestors()
+        .skip(1)
+        .find(|d| {
+            d.join("Cargo.toml").is_file() && d.join("crates/automata-player/Cargo.toml").is_file()
+        })
+        .map(Path::to_path_buf)
 }
 
 /// `automata-player` beside the running executable, if built.
@@ -267,6 +362,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn detects_a_source_checkout_above_the_executable() {
+        let root = std::env::temp_dir().join(format!("oberon-checkout-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("crates/automata-player")).unwrap();
+        std::fs::create_dir_all(root.join("target/release")).unwrap();
+        std::fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
+        std::fs::write(root.join("crates/automata-player/Cargo.toml"), "").unwrap();
+        let exe = root.join("target/release/oberon");
+        assert_eq!(source_checkout(&exe), Some(root.clone()));
+        assert_eq!(source_checkout(Path::new("/usr/bin/oberon")), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn config_starts_in_the_open_scene() {
         let dir = std::env::temp_dir().join("oberon-build-config");
         let _ = std::fs::remove_dir_all(&dir);
@@ -306,7 +414,7 @@ mod tests {
         }
         assert_eq!(job.failed.len(), 2);
         assert_eq!(job.succeeded, Vec::new());
-        assert!(logs > 0 || job.failed.iter().all(|(_, m)| m.contains("template")));
+        assert!(logs > 0, "validation problems are logged");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

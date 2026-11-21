@@ -30,6 +30,10 @@ use serde::{Deserialize, Serialize};
 /// The engine version templates must match.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The repository that publishes the templates (`owner/name`).
+pub const TEMPLATE_REPO: &str = "x017/automata";
+/// The release tag holding the templates.
+pub const TEMPLATE_TAG: &str = "export-templates";
 /// Where CI publishes templates (`<base>/automata-template-<target>.tar.gz`).
 pub const TEMPLATE_URL: &str =
     "https://github.com/x017/automata/releases/download/export-templates";
@@ -423,20 +427,134 @@ pub fn install_template(archive_path: &Path, target: Target) -> Result<PathBuf, 
 ///
 /// When the download or install fails.
 pub fn download_template(target: Target) -> Result<PathBuf, String> {
-    let url = format!("{TEMPLATE_URL}/{}", target.template_archive());
-    let tmp = std::env::temp_dir().join(target.template_archive());
-    let status = std::process::Command::new("curl")
-        .args(["-fsSL", "--retry", "2", "-o"])
-        .arg(&tmp)
-        .arg(&url)
-        .status()
-        .map_err(|e| format!("could not run curl: {e}"))?;
-    if !status.success() {
-        return Err(format!("download failed: {url}"));
-    }
-    let dir = install_template(&tmp, target);
+    let name = target.template_archive();
+    let tmp = std::env::temp_dir().join(&name);
     let _ = std::fs::remove_file(&tmp);
+    let mut tried = Vec::new();
+    // 1. The public release URL.
+    let url = format!("{TEMPLATE_URL}/{name}");
+    if curl(&["-fsSL", "--retry", "2", "-o"], &tmp, &url) {
+        return install_downloaded(&tmp, target);
+    }
+    tried.push(format!(
+        "{url} (not reachable without signing in: the repository may be private)"
+    ));
+    // 2. The GitHub CLI, signed in (`gh auth login`): works for private repos.
+    let gh = std::process::Command::new("gh")
+        .args([
+            "release",
+            "download",
+            TEMPLATE_TAG,
+            "--repo",
+            TEMPLATE_REPO,
+            "--clobber",
+        ])
+        .args(["--pattern", &name, "--output"])
+        .arg(&tmp)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output();
+    match gh {
+        Ok(out) if out.status.success() && tmp.is_file() => {
+            return install_downloaded(&tmp, target);
+        }
+        Ok(out) => {
+            let err = String::from_utf8_lossy(&out.stderr);
+            let first = err.lines().next().unwrap_or("failed").trim();
+            let short: String = first.chars().take(160).collect();
+            tried.push(format!("gh release download: {short}"));
+        }
+        Err(_) => tried.push("gh (GitHub CLI) is not installed".into()),
+    }
+    // 3. A token in GH_TOKEN / GITHUB_TOKEN, through the GitHub API.
+    let token = std::env::var("GH_TOKEN")
+        .or_else(|_| std::env::var("GITHUB_TOKEN"))
+        .ok()
+        .filter(|t| !t.trim().is_empty());
+    if let Some(token) = token {
+        match download_with_token(&token, &name, &tmp) {
+            Ok(()) => return install_downloaded(&tmp, target),
+            Err(e) => tried.push(format!("GitHub API with GH_TOKEN: {e}")),
+        }
+    } else {
+        tried.push("no GH_TOKEN / GITHUB_TOKEN set".into());
+    }
+    Err(format!(
+        "could not download {name}. Tried:\n  - {}\nSign in with `gh auth login` (or set GH_TOKEN), or install a template file with `automata-export templates install <file>`.",
+        tried.join("\n  - ")
+    ))
+}
+
+fn install_downloaded(tmp: &Path, target: Target) -> Result<PathBuf, String> {
+    let dir = install_template(tmp, target);
+    let _ = std::fs::remove_file(tmp);
     dir
+}
+
+/// Runs curl with `args`, `-o <out>` style output and `url`; true on success.
+fn curl(args: &[&str], out: &Path, url: &str) -> bool {
+    std::process::Command::new("curl")
+        .args(args)
+        .arg(out)
+        .arg(url)
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Fetches a release asset through the API (private repositories).
+fn download_with_token(token: &str, name: &str, out: &Path) -> Result<(), String> {
+    let api = format!("https://api.github.com/repos/{TEMPLATE_REPO}/releases/tags/{TEMPLATE_TAG}");
+    let auth = format!("Authorization: Bearer {token}");
+    let json = std::process::Command::new("curl")
+        .args([
+            "-fsSL",
+            "-H",
+            &auth,
+            "-H",
+            "Accept: application/vnd.github+json",
+            &api,
+        ])
+        .output()
+        .map_err(|e| format!("could not run curl: {e}"))?;
+    if !json.status.success() {
+        return Err("the release isn't visible with this token".into());
+    }
+    let asset = asset_api_url(&String::from_utf8_lossy(&json.stdout), name)
+        .ok_or_else(|| format!("the release has no {name}"))?;
+    let ok = std::process::Command::new("curl")
+        .args([
+            "-fsSL",
+            "--retry",
+            "2",
+            "-H",
+            &auth,
+            "-H",
+            "Accept: application/octet-stream",
+            "-o",
+        ])
+        .arg(out)
+        .arg(&asset)
+        .status()
+        .is_ok_and(|s| s.success());
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("downloading {asset} failed"))
+    }
+}
+
+/// The API URL of the asset called `name` in a release's JSON. Each asset
+/// object starts with its `"url"`; the uploader's own `"url"` comes after
+/// the asset's `"name"`, so splitting on `"url"` keeps them apart.
+fn asset_api_url(json: &str, name: &str) -> Option<String> {
+    let quoted = format!("\"{name}\"");
+    json.split("\"url\"").find_map(|chunk| {
+        let rest = chunk.trim_start().strip_prefix(':')?.trim_start();
+        let rest = rest.strip_prefix('"')?;
+        let url = &rest[..rest.find('"')?];
+        (url.contains("/releases/assets/") && chunk.contains(&quoted)).then(|| url.to_string())
+    })
 }
 
 /// Packs a template folder (player + optional `runtime/`) into an archive.
@@ -759,6 +877,26 @@ fn make_executable(_path: &Path) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_the_asset_api_url_in_release_json() {
+        let json = r#"{"url":"https://api.github.com/repos/x/y/releases/1","assets":[
+          {"url": "https://api.github.com/repos/x/y/releases/assets/11", "id":11,
+           "name": "automata-template-windows-x86_64.tar.gz",
+           "uploader": {"url": "https://api.github.com/users/bot"}},
+          {"url":"https://api.github.com/repos/x/y/releases/assets/22","id":22,
+           "name":"automata-template-linux-x86_64.tar.gz",
+           "uploader":{"url":"https://api.github.com/users/bot"}}]}"#;
+        assert_eq!(
+            asset_api_url(json, "automata-template-linux-x86_64.tar.gz").as_deref(),
+            Some("https://api.github.com/repos/x/y/releases/assets/22")
+        );
+        assert_eq!(
+            asset_api_url(json, "automata-template-windows-x86_64.tar.gz").as_deref(),
+            Some("https://api.github.com/repos/x/y/releases/assets/11")
+        );
+        assert_eq!(asset_api_url(json, "missing.tar.gz"), None);
+    }
 
     #[test]
     fn verbatim_windows_paths_are_made_plain() {

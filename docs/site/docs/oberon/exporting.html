@@ -77,14 +77,24 @@ means a folder:</p>
 template</strong> (the game launcher plus a private Python with the engine
 installed), then adds your project. That's why a build takes seconds, and
 why you can export for Windows from Linux and the other way round.</p>
-<p>Templates are downloaded once per engine version. Use <strong>Build ▸ Download
-Export Templates</strong> or the <strong>Download</strong> buttons on the Build page. The
-Build page shows each template's state:</p>
+<p>Templates are downloaded once per engine version. <strong>Build</strong> fetches a
+missing template by itself, or you can use <strong>Build ▸ Download Export
+Templates</strong> or the <strong>Download</strong> buttons on the Build page. The Linux
+template is about 75 MB and the Windows one about 25 MB.</p>
+<p>While the repository is private, the plain download link needs you to be
+signed in. Oberon and <code>automata-export</code> try these in order:</p>
+<ol><li>the public release link;</li><li>the GitHub CLI, if you've signed in with <code>gh auth login</code>;</li><li>a token in <code>GH_TOKEN</code> or <code>GITHUB_TOKEN</code> (it needs read access to the
+repository).</li></ol>
+<p>If none of them works and you run Oberon from a source checkout
+(<code>cargo run -p oberon</code>), Build compiles <code>automata-player</code> with cargo and
+uses it as a <strong>Development</strong> template for your own platform.</p>
+<p>The Build page shows each template's state:</p>
 <ul><li><strong>Ready</strong>: the game ships its own Python. This is what you give to
 players.</li><li><strong>Development</strong>: the game uses the Python on <code>PATH</code>, which must have
 <code>automata</code> installed. Oberon sets one up automatically when you run a
 source checkout and no template is installed yet. It's fine for testing
-on your own machine, but don't ship it.</li><li><strong>Not installed</strong>: download it before building for that platform.</li></ul>
+on your own machine, but don't ship it.</li><li><strong>Not installed</strong>: Build downloads it the first time you build for
+that platform.</li></ul>
 <p>Templates live in <code>~/.local/share/automata/templates/&lt;version&gt;/</code> on Linux
 and <code>%APPDATA%\automata\templates\&lt;version&gt;\</code> on Windows. You can choose
 another folder by setting <code>AUTOMATA_TEMPLATES</code>.</p>
