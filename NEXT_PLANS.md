@@ -121,30 +121,170 @@ implement `entity` / `ctx` separately. They also **behave differently**:
 6. Make the formerly "Oberon only" helpers available everywhere and remove
    those notes from the docs.
 
-## 3. Text in the in-game HUD ⚪
+## 3. Game UI system 🟢 decided (not started)
 
-`ctx.hud` draws images and rectangles but not text. The FPS shows a health
-bar because it can't write "100%". Small effort, big payoff: scores,
-timers, labels, menus.
+**Decision: a full game-UI system**: text, widgets, custom fonts, layout and
+focus, and a UI editor in Oberon. It's large, so it ships in phases; the
+first phase is small and comes early (see *Order* below).
 
-## 4. Skeletal animation ⚪
+Building blocks already in place: `ab_glyph` (font rasterizing) is a
+workspace dependency, Oberon bundles the Geist font, and `ctx.hud` already
+draws images and rectangles in both Oberon (tiny-skia compositing) and the
+engine (wgpu sprites).
 
-glTF models already load, but skins and animations are ignored. This is
-the biggest gap for real 3D games, since most downloaded characters are
-animated.
+### Phases
 
-## 5. Static mesh colliders ⚪
+1. **Text** (quick win): `ctx.hud.text("100%", x, y, size=24,
+   color=…, align="left" | "center" | "right")` with the built-in font,
+   optional shadow/outline. Works in Oberon Play, `run_scene` and exports.
+   The engine draws from a glyph atlas texture; Oberon draws through its
+   canvas. The FPS gets its "100%" health label.
+2. **Widgets** (immediate mode, drawn from scripts each frame):
+   `if ctx.ui.button("Play", x, y, w, h): …`, labels, progress bars,
+   panels, images, toggles, sliders. Hover/pressed states. Clicks on UI are
+   consumed, so pressing a button doesn't also fire the blaster. Mouse and
+   touch (Android).
+3. **Custom fonts:** `.ttf` / `.otf` from the project folder
+   (`font="fonts/Pixel.ttf"`). They appear in the Assets tab, and export
+   checks for missing fonts.
+4. **Layout and focus:**
+   - anchors (top-left, centre, bottom-right…) and sizes relative to the
+     screen, so the UI fits any resolution, with UI scale for high-DPI and
+     phones;
+   - rows, columns and stacks;
+   - keyboard / gamepad focus navigation;
+   - screens (main menu, pause menu, HUD) that can be shown and hidden.
+5. **UI editor in Oberon:** compose screens visually into UI documents
+   (e.g. `hud.ui.ron`) on a canvas view with anchors, styles and a theme.
+   Scripts bind to them by name:
+   `ctx.ui.screen("hud").set("health", 50)`,
+   `ctx.ui.screen("menu").clicked("play")`.
 
-Only box, ball and capsule colliders exist. Uneven level geometry (such as
-Kenney's platforms) has to be approximated with boxes. A triangle-mesh
-collider for static scenery would fix that.
+### Design notes and open questions
 
-## 6. Performance baseline ⚪
+- **Immediate-mode API for scripts** (phases 1–4) fits the deferred frame
+  model and both runner backends. **UI documents** (phase 5) are retained
+  data that the same renderer draws.
+- Theming: one default style matching AUTOMATA's look, overridable per
+  document.
+- Text features to settle: wrapping, rich text (colour spans), right-to-left
+  text (probably out of scope at first).
 
-The per-frame JSON bridge and per-entity Python calls have no measured
-limit. Add a benchmark scene (100 / 1,000 / 5,000 scripted entities) for
-Oberon Play, `run_scene` and exported builds, publish the numbers, and
-track them in CI.
+---
+
+## 4. Skeletal animation 🟢 decided (not started)
+
+**Decision: everything**: clips, crossfades, Inspector preview, animation
+events, root motion, and a visual animation state machine in Oberon.
+
+### Phases
+
+1. **Import and skinning:**
+   - Read glTF skins (joints, inverse bind matrices) and animation channels
+     (translation / rotation / scale; linear, step and cubic-spline
+     interpolation).
+   - GPU skinning in the renderer: four joint weights per vertex, a joint
+     matrix buffer per skinned entity.
+   - Shadows and the Oberon viewport use the posed mesh.
+2. **Playback:**
+   - An Animation component: default clip, speed, play on start.
+   - Script API: `entity.animation.play("run", loop=True, fade=0.2,
+     speed=1.0)`, `.stop()`, `.playing`, `.time`.
+   - Crossfading between clips.
+   - In the Inspector: the clip list and a preview scrubber, so animations
+     play in the editor without pressing Play.
+3. **Events and root motion:**
+   - Per-clip events stored in the model's import settings
+     (`.import.ron`), e.g. `("run", 0.3, "footstep")`, delivered to
+     scripts as an `on_animation_event(entity, ctx, name)` callback.
+   - Optional root motion: the root bone's movement drives the Character
+     Controller instead of sliding the feet.
+4. **State machine:**
+   - An animation graph asset (e.g. `player.anim.ron`) holding:
+     - states (clip, speed, loop) and 1D blend spaces (idle / walk / run
+       by speed);
+     - transitions with conditions on parameters (`speed > 0.1`, triggers
+       like `jump`) and fade times.
+   - Scripts only set parameters: `entity.animation.set("speed", v)`,
+     `entity.animation.trigger("jump")`.
+   - **Oberon graph editor:** a node canvas for states and transitions,
+     with the active state highlighted live during Play.
+
+### Notes and open questions
+
+- Needs the shared scripting API (#2) first: the animation API goes into
+  the shared layer once.
+- Oberon's bridge protocol needs animation parameters and state in the
+  per-frame messages.
+- Example and test assets: a CC0 animated character (Kenney has some).
+- Later: attachment points ("hold the blaster in the right hand bone"),
+  2D blend spaces, additive layers, IK.
+
+---
+
+## 5. Mesh colliders 🟢 decided (not started)
+
+**Decision: triangle meshes and convex hulls, chosen automatically.** Rapier
+supports both natively.
+
+- **Shapes:**
+  - **Mesh** (triangle mesh): for scenery that never moves (no rigid body,
+    or Fixed). Exact; ray casts hit the real triangles.
+  - **Convex Hull:** works for moving objects (Dynamic / Kinematic).
+- **Automatic choice on Add Collider / Fit Collider:**
+  - model nearly fills its bounding box → **Box** (cheapest);
+  - otherwise, static → **Mesh**;
+  - otherwise, moving → **Convex Hull**.
+
+  The Inspector shows the chosen shape, with a dropdown to override it.
+- **Source data:** the scene stores a reference to the model, not the
+  triangles. Colliders are built from the model after its import settings,
+  and **the entity's scale is applied**. That also fixes "physics ignores
+  scale" for these shapes.
+- **Python:** `at.Collider3D.mesh("models/platform.glb")`,
+  `at.Collider3D.convex_hull("models/crate.glb")`.
+- **Validation:** a Mesh collider on a Dynamic body is an error in the
+  Inspector and in export checks.
+- **FPS example:** switch the platforms from approximate boxes to mesh
+  colliders.
+
+---
+
+## 6. Performance baseline 🟢 decided (not started)
+
+**Decision: run on demand and publish the numbers in the docs** (no CI
+tracking or failures).
+
+- `examples/bench/`: a generated scene with **100 / 1,000 / 5,000**
+  scripted entities. Each script moves its entity, reads an attribute and
+  casts a ray; some scenes have physics bodies.
+- Measured in **Oberon Play** (headless harness), **`run_scene`** and an
+  **exported build**: average and 95th-percentile frame time, split into
+  script time and engine time.
+- `python examples/bench/run.py` prints a Markdown table.
+- **Docs:** a *Performance* guide with the table, the machine and date, and
+  practical limits ("keep scripted entities under N for 60 FPS"). Rerun
+  before releases.
+- Suggestion: take one quick measurement **before** the shared-API
+  refactor (#2), so we know the refactor didn't slow things down.
+
+---
+
+## Order
+
+Agreed: **quick wins first.**
+
+1. **Shared scripting API** (#2). Everything else touches the script API.
+2. **HUD text** (#3, phase 1).
+3. **Mesh colliders** (#5).
+4. **Performance baseline** (#6).
+5. **Skeletal animation** (#4, phases 1–4).
+6. **Game UI**, the rest (#3, phases 2–5).
+7. **Android** (#1), then the web.
+
+Placing UI phases 2–5 after animation is a proposal, since you chose
+the full UI system after picking this order. Swap them if menus and buttons
+matter sooner.
 
 ## Process note
 
