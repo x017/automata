@@ -16,12 +16,15 @@ struct PostUniform {
     texel: vec4<f32>,  // xy: 1 / source size
     params: vec4<f32>, // x: unused, y: exposure, z: tone mapping, w: bloom
     output: vec4<f32>, // x: encode sRGB in the shader (the target doesn't)
+    sun: vec4<f32>,    // xy: sun position (uv), z: lens flare strength, w: disk radius (uv)
+    sun_color: vec4<f32>, // rgb: sunlight, a: aspect ratio
 };
 
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var src_sampler: sampler;
 @group(0) @binding(2) var<uniform> post: PostUniform;
 @group(0) @binding(3) var extra: texture_2d<f32>; // resolve: the bloom
+@group(0) @binding(4) var extra2: texture_2d<f32>; // resolve: sun visibility (1x1)
 
 struct FullscreenOut {
     @builtin(position) position: vec4<f32>,
@@ -113,11 +116,95 @@ fn to_srgb(c: vec3<f32>) -> vec3<f32> {
     return select(hi, lo, c <= vec3<f32>(0.0031308));
 }
 
+// --- Lens flare ---------------------------------------------------------------
+// A 1x1 pass measures how much of the sun's disk is still blazing in the
+// HDR image (the sky draws it ~40x brighter than anything lit): taps over
+// the disk, each counting by how bright it is, so geometry blocks the
+// flare and passing clouds dim it. The resolve then adds glare, a
+// starburst, ghosts mirrored through the screen center and a faint halo
+// ring, all scaled by that visibility.
+
+@fragment
+fn fs_sun_visibility(in: FullscreenOut) -> @location(0) vec4<f32> {
+    let center = post.sun.xy;
+    let r = post.sun.w * vec2<f32>(1.0 / post.sun_color.a, 1.0) * 0.8;
+    var sum = 0.0;
+    for (var y = -2; y <= 2; y = y + 1) {
+        for (var x = -2; x <= 2; x = x + 1) {
+            let o = vec2<f32>(f32(x), f32(y)) * 0.5;
+            let uv = center + o * r;
+            let inside = uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0;
+            let l = luma(textureSampleLevel(src, src_sampler, uv, 0.0).rgb);
+            sum = sum + select(0.0, clamp((l - 4.0) / 12.0, 0.0, 1.0), inside);
+        }
+    }
+    return vec4<f32>(vec3<f32>(sum / 25.0), 1.0);
+}
+
+// A soft disc of radius `r` (aspect-corrected distance `d`).
+fn ghost(d: f32, r: f32) -> f32 {
+    let x = clamp(1.0 - d / r, 0.0, 1.0);
+    return x * x * (3.0 - 2.0 * x);
+}
+
+fn lens_flare(uv: vec2<f32>) -> vec3<f32> {
+    let strength = post.sun.z;
+    if strength <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let vis = textureSampleLevel(extra2, src_sampler, vec2<f32>(0.5), 0.0).r;
+    if vis <= 0.001 {
+        return vec3<f32>(0.0);
+    }
+    let aspect = vec2<f32>(post.sun_color.a, 1.0);
+    let sun = post.sun.xy;
+    let to = (uv - sun) * aspect;
+    let dist = length(to);
+    let tint = post.sun_color.rgb;
+    // Glare: a wide soft glow and a hot core around the sun.
+    var c = tint * (exp(-dist * 6.0) * 0.35 + exp(-dist * 28.0) * 1.2);
+    // Starburst: six thin streaks.
+    let angle = atan2(to.y, to.x);
+    let streak = pow(abs(cos(angle * 3.0)), 60.0) + pow(abs(cos(angle * 3.0 + 1.5708)), 90.0) * 0.5;
+    c = c + tint * streak * exp(-dist * 7.0) * 0.6;
+    // Ghosts along the line from the sun through the screen center.
+    let axis = (vec2<f32>(0.5) - sun);
+    let ghosts = array<vec4<f32>, 5>(
+        // x: position along the axis, y: radius, zw: unused (tint below)
+        vec4<f32>(0.55, 0.035, 0.0, 0.0),
+        vec4<f32>(1.15, 0.07, 0.0, 0.0),
+        vec4<f32>(1.45, 0.02, 0.0, 0.0),
+        vec4<f32>(1.9, 0.11, 0.0, 0.0),
+        vec4<f32>(2.35, 0.05, 0.0, 0.0),
+    );
+    let tints = array<vec3<f32>, 5>(
+        vec3<f32>(0.9, 0.6, 0.3),
+        vec3<f32>(0.3, 0.6, 1.0),
+        vec3<f32>(1.0, 0.9, 0.5),
+        vec3<f32>(0.4, 1.0, 0.6),
+        vec3<f32>(0.9, 0.4, 0.8),
+    );
+    for (var k = 0; k < 5; k = k + 1) {
+        let p = sun + axis * ghosts[k].x;
+        let d = length((uv - p) * aspect);
+        c = c + tints[k] * tint * ghost(d, ghosts[k].y) * 0.15;
+    }
+    // A faint rainbow halo ring around the sun.
+    let ring = dist - 0.42;
+    let halo = exp(-ring * ring * 900.0);
+    let rainbow = vec3<f32>(
+        exp(-(ring - 0.012) * (ring - 0.012) * 2500.0),
+        exp(-ring * ring * 2500.0),
+        exp(-(ring + 0.012) * (ring + 0.012) * 2500.0));
+    c = c + tint * (halo * 0.03 + rainbow * 0.03);
+    return c * vis * strength;
+}
+
 @fragment
 fn fs_resolve(in: FullscreenOut) -> @location(0) vec4<f32> {
     let hdr = textureSampleLevel(src, src_sampler, in.uv, 0.0);
     let bloom = textureSampleLevel(extra, src_sampler, in.uv, 0.0).rgb;
-    let color = hdr.rgb + bloom * post.params.w;
+    let color = hdr.rgb + bloom * post.params.w + lens_flare(in.uv);
     let lit = tonemap_with(color, post.params.y, post.params.z);
     let mapped = clamp(mix(color, lit, hdr.a), vec3<f32>(0.0), vec3<f32>(1.0));
     // Stored with gamma 2 (sqrt / square: an exact, cheap inverse pair that

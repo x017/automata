@@ -32,7 +32,8 @@ scene tuned here looks the same in Play and under `at.run_scene`.
 
 Water is a component. Use **Create → Water** (it starts as a calm pond)
 or select an entity and use **Add Component → Water** in the Inspector.
-It has fields for size, colors, clarity, waves and foam.
+It has fields for size, colors, clarity, waves and foam. Tick **Endless**
+on a sea to carry it, calm, past its edges to the horizon.
 See [Rendering & Lights](../guides/rendering-and-lights.md#water).
 
 ## Sun
@@ -42,6 +43,7 @@ one, **Add Directional Light** creates it.
 
 | Field | Meaning |
 |---|---|
+| Time of Day | Moves the sun along a simple day arc in one drag: 6 = sunrise, 12 = highest (65°), 18 = sunset. Sets Azimuth and Elevation together |
 | Azimuth | Compass direction the light comes **from**, in degrees. 0 = from +Z (behind the default view), 90 = from +X |
 | Elevation | Height of the sun above the horizon. 90 = straight down (noon), 5–15 = long sunset shadows |
 | Color | Sunlight tint |
@@ -54,8 +56,8 @@ fields.
 
 ## Environment
 
-The **Environment** component sets the look of the whole scene: ambient
-colour, background, exposure, tone mapping, and fog. The first entity
+The **Environment** component sets the look of the whole scene: the sky
+and sun, ambient colour, exposure, tone mapping, and fog. The first entity
 that has one wins. A scene without one uses the neutral default look: white
 ambient, a near-black background, no fog, and no tone mapping. Click
 **Customize Environment** to create an Environment entity and start
@@ -66,14 +68,20 @@ tuning.
 | Preset | Look | Tone mapping |
 |---|---|---|
 | Neutral | Plain lighting, no fog: the default | None |
-| Daylight | Blue sky ambient, warm ground bounce, light haze | ACES |
-| Dusk | Violet sky, dark red ground, dense warm fog | AgX |
-| Night | Cold dark ambient, black fog close to the camera | ACES |
+| Daylight | Blue sky with sun and clouds, warm ground bounce, light haze | ACES |
+| Dusk | Violet sky with a big warm sun, dark red ground, dense warm fog | AgX |
+| Night | Near-black sky with a small dim disk, cold ambient, black fog | ACES |
 
 | Field | Meaning |
 |---|---|
 | Sky / Ground | Ambient light from above and from below. Surfaces facing up take the sky colour; surfaces facing down take the ground colour; the rest blend between them. This hemisphere ambient makes flat-coloured scenes look grounded |
-| Background | The colour behind everything |
+| Sky & Sun | Draw a sky dome instead of a flat colour: a gradient from Horizon to Zenith, the sun disk where the Directional Light shines from, a halo around it, and drifting clouds. Water and fog pick up the same sky |
+| Background / Horizon | With the sky off, the flat colour behind everything. With it on, the sky colour at the horizon (also the far fog's colour) |
+| Zenith | Sky colour straight up |
+| Sun Size | Diameter of the sun disk in degrees (the real sun is about 0.5; 2 reads well in games) |
+| Sun Glow | Brightness of the halo around the sun. Low suns glow warmer on their own |
+| Clouds | Cloud cover, 0 = clear, 1 = overcast |
+| Lens Flare | Strength of the glare, starburst and ghosts when you look toward the sun. Beautiful quality only; scenery and clouds in front of the sun hide it |
 | Tone Mapping | How bright values are squeezed into the screen's range. **None**: values above 1 clip. **Reinhard**: soft and flat. **ACES**: filmic contrast and saturation. **AgX**: filmic, keeps bright colours from turning neon |
 | Exposure | Brightness multiplier applied before tone mapping. Raise it with ACES or AgX, which darken mid-tones |
 | Fog | Exponential distance fog |
@@ -81,9 +89,10 @@ tuning.
 | Fog Density | How quickly fog thickens per metre. 0.01 is light haze, 0.05 is thick |
 | Fog Start | Distance from the camera with no fog at all |
 
-> Fog is applied before tone mapping and the background after it. With
-> ACES or AgX on, the far fog can look slightly different from the
-> background. If the horizon shows a seam, nudge Fog Color.
+> With the sky off, fog is applied before tone mapping and the
+> background after it, so with ACES or AgX the far fog can look slightly
+> different from the background. If the horizon shows a seam, nudge Fog
+> Color, or turn on **Sky & Sun**, which fades fog into the sky itself.
 
 ## Camera
 

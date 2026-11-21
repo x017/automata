@@ -50,6 +50,7 @@ def environment(preset, **changes):
     fields = (
         "sky_color", "ground_color", "background", "exposure", "tonemapping",
         "fog", "fog_color", "fog_density", "fog_start",
+        "sky", "zenith_color", "sun_size", "sun_glow", "clouds", "lens_flare",
     )
     return at.Environment(**{**{f: getattr(base, f) for f in fields}, **changes})
 

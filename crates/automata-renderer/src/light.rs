@@ -112,6 +112,9 @@ pub(crate) struct LightUniform {
     pub camera_forward: [f32; 4],
     pub background: [f32; 4],
     pub screen: [f32; 4],
+    pub inv_view_proj: [f32; 16],
+    pub sky_zenith: [f32; 4],
+    pub sky_sun: [f32; 4],
 }
 
 impl LightUniform {
@@ -147,6 +150,10 @@ impl LightUniform {
             bias[i] = texel[i] / shadows.depth_range[i].max(1e-3);
         }
         let cam = frame.camera;
+        let inv_view_proj = cam.view_proj(frame.viewport).inverse().to_cols_array();
+        let [zr, zg, zb] = env.zenith_color;
+        // The disk's edge as the cosine of its angular radius.
+        let sun_cos = (env.sun_size.clamp(0.05, 20.0) * 0.5).to_radians().cos();
         let forward = (cam.target - cam.position)
             .try_normalize()
             .unwrap_or(Vec3::NEG_Z);
@@ -174,6 +181,14 @@ impl LightUniform {
                 frame.viewport.1.max(1) as f32,
                 cam.near,
                 cam.far,
+            ],
+            inv_view_proj,
+            sky_zenith: [zr, zg, zb, f32::from(u8::from(env.sky))],
+            sky_sun: [
+                sun_cos,
+                env.sun_glow.max(0.0),
+                env.clouds.clamp(0.0, 1.0),
+                env.lens_flare.max(0.0),
             ],
         }
     }

@@ -280,6 +280,7 @@ impl Ui {
             }
             return y + 44.0;
         };
+        y = self.float_row(canvas, x, y, w, sun, "Time of Day", Field::LightTimeOfDay);
         y = self.float_row(canvas, x, y, w, sun, "Azimuth", Field::LightAzimuth);
         y = self.float_row(canvas, x, y, w, sun, "Elevation", Field::LightElevation);
         y = self.color_row(canvas, x, y, w, sun, "Color", ColorTarget::Light);
@@ -361,15 +362,7 @@ impl Ui {
         y += layout::ROW_STEP;
         y = self.color_row(canvas, x, y, w, env, "Sky", ColorTarget::EnvSky);
         y = self.color_row(canvas, x, y, w, env, "Ground", ColorTarget::EnvGround);
-        y = self.color_row(
-            canvas,
-            x,
-            y,
-            w,
-            env,
-            "Background",
-            ColorTarget::EnvBackground,
-        );
+        y = self.sky_rows(canvas, x, y, w, env);
         y = self.choice_row(canvas, x, y, w, env, "Tone Mapping", Choice::Tonemapping);
         y = self.float_row(canvas, x, y, w, env, "Exposure", Field::EnvExposure);
         y = self.flag_row(canvas, x, y, w, env, "Fog", Flag::EnvFog);
@@ -380,6 +373,36 @@ impl Ui {
         }
         y = self.source_note(canvas, x, y, w, env);
         y + 8.0
+    }
+
+    /// The background, or with the sky dome on, the sky: horizon and
+    /// zenith colors, the sun's size and glow, clouds and lens flare.
+    pub(super) fn sky_rows(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        y: f32,
+        w: f32,
+        env: &EntityEntry,
+    ) -> f32 {
+        let mut y = self.flag_row(canvas, x, y, w, env, "Sky & Sun", Flag::EnvSkyDome);
+        if !env.data.environment.is_some_and(|e| e.sky) {
+            return self.color_row(
+                canvas,
+                x,
+                y,
+                w,
+                env,
+                "Background",
+                ColorTarget::EnvBackground,
+            );
+        }
+        y = self.color_row(canvas, x, y, w, env, "Horizon", ColorTarget::EnvBackground);
+        y = self.color_row(canvas, x, y, w, env, "Zenith", ColorTarget::EnvZenith);
+        y = self.float_row(canvas, x, y, w, env, "Sun Size", Field::EnvSunSize);
+        y = self.float_row(canvas, x, y, w, env, "Sun Glow", Field::EnvSunGlow);
+        y = self.float_row(canvas, x, y, w, env, "Clouds", Field::EnvClouds);
+        self.float_row(canvas, x, y, w, env, "Lens Flare", Field::EnvLensFlare)
     }
 
     /// The scene camera: what Play renders through, plus view tools.

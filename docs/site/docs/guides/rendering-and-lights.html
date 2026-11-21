@@ -96,11 +96,27 @@ regions keep the ambient term.</li></ul>
             fog_color=(<span class="tok-n">0.55</span>, <span class="tok-n">0.68</span>, <span class="tok-n">0.85</span>),    <span class="tok-c"># match the background</span>
             fog_density=<span class="tok-n">0.012</span>,               <span class="tok-c"># per metre; 0.05 is thick</span>
             fog_start=<span class="tok-n">10.0</span>,                  <span class="tok-c"># metres of clear air first</span>
+            sky=<span class="tok-b">True</span>,                        <span class="tok-c"># a sky dome with a sun and clouds</span>
+            zenith_color=(<span class="tok-n">0.16</span>, <span class="tok-n">0.34</span>, <span class="tok-n">0.78</span>), <span class="tok-c"># sky colour straight up</span>
+            sun_size=<span class="tok-n">2.0</span>,                    <span class="tok-c"># sun disk diameter, degrees</span>
+            sun_glow=<span class="tok-n">1.0</span>,                    <span class="tok-c"># halo around the sun</span>
+            clouds=<span class="tok-n">0.35</span>,                     <span class="tok-c"># 0 clear .. 1 overcast</span>
+            lens_flare=<span class="tok-n">1.0</span>,                  <span class="tok-c"># Beautiful only</span>
         )
     )
 )</code></pre></div>
-<div class="table"><table><thead><tr><th>Preset</th><th>Look</th></tr></thead><tbody><tr><td><code>&quot;neutral&quot;</code></td><td>The default: white ambient, no fog, no tone mapping</td></tr><tr><td><code>&quot;daylight&quot;</code></td><td>Blue sky, warm bounce, light haze, ACES</td></tr><tr><td><code>&quot;dusk&quot;</code></td><td>Violet sky, dark red ground, dense warm fog, AgX</td></tr><tr><td><code>&quot;night&quot;</code></td><td>Cold dark ambient, black fog close to the camera, ACES</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Preset</th><th>Look</th></tr></thead><tbody><tr><td><code>&quot;neutral&quot;</code></td><td>The default: white ambient, no fog, no tone mapping</td></tr><tr><td><code>&quot;daylight&quot;</code></td><td>Blue sky dome with sun and clouds, warm bounce, light haze, ACES</td></tr><tr><td><code>&quot;dusk&quot;</code></td><td>Violet sky with a big warm sun, dark red ground, dense warm fog, AgX</td></tr><tr><td><code>&quot;night&quot;</code></td><td>Near-black sky, cold dark ambient, black fog close to the camera, ACES</td></tr></tbody></table></div>
 <p>How it combines with the sun:</p>
+<ul><li><p><strong>The sky</strong> (<code>sky=True</code>) replaces the flat background with a dome: a
+gradient from <code>background</code> at the horizon to <code>zenith_color</code> overhead,
+the sun's disk exactly where the <code>DirectionalLight</code> shines from, a halo
+that turns warm as the sun gets low, and two layers of drifting clouds.
+Water reflects it and distant fog fades into it, so the horizon has no
+seam. Move the sun (or drag <strong>Time of Day</strong> in Oberon) and the sky
+follows.</p></li><li><p><strong>Lens flare</strong> (<code>BEAUTIFUL</code> only): looking toward the sun adds glare,
+a starburst, a row of coloured ghosts and a faint halo ring. It fades
+out when the sun leaves the screen, and anything in front of the sun,
+scenery or clouds, hides it.</p></li></ul>
 <ul><li>Ambient is <code>DirectionalLight.ambient × mix(ground, sky)</code>, picked by how
 much a surface faces up. Keep the sky and ground colours near 1.0 in
 brightness and control strength with <code>ambient</code>.</li><li><strong>Fog</strong> fades lit colour toward <code>fog_color</code> as
@@ -122,7 +138,7 @@ same setting as the renderer grows.</p>
 sharp up close and still reach the horizon. Edges get a soft penumbra.</li><li><strong>Physically based light</strong> (GGX specular) and fog that glows toward the
 sun.</li><li><strong>HDR with bloom</strong>: bright highlights (sun glints on water, white
 surfaces in full sun) bleed softly. Then the tone mapper runs, and FXAA
-smooths the edges.</li><li><strong>Refractive water</strong> (see below).</li></ul>
+smooths the edges.</li><li><strong>Refractive water</strong> (see below).</li><li><strong>Lens flare</strong> when the camera looks toward the sun (with <code>sky=True</code>).</li></ul>
 <p>It's built to stay cheap. Each pixel filters only one shadow cascade (with
 dithering where cascades meet), bloom is a small dual-filter chain at half
 resolution and below, and nothing on the other presets got slower. It
@@ -141,9 +157,12 @@ glowing through wave crests. It receives shadows.</p>
 <ul><li>On every preset below <code>BEAUTIFUL</code> it's alpha-blended over the scene.</li><li>On <code>BEAUTIFUL</code> it refracts what's underneath. It fades to <code>deep_color</code>
 with depth (<code>clarity</code> is how many metres you can see down), and draws
 <code>foam</code> where it meets the shore or objects.</li></ul>
-<div class="table"><table><thead><tr><th>Preset</th><th>Look</th></tr></thead><tbody><tr><td><code>&quot;pond&quot;</code> / <code>&quot;lake&quot;</code></td><td>Low, short waves and clear water</td></tr><tr><td><code>&quot;ocean&quot;</code> / <code>&quot;sea&quot;</code></td><td>200 m wide, tall long waves, deep blue</td></tr><tr><td><code>&quot;default&quot;</code></td><td>20 m, gentle waves</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Preset</th><th>Look</th></tr></thead><tbody><tr><td><code>&quot;pond&quot;</code> / <code>&quot;lake&quot;</code></td><td>Low, short waves and clear water</td></tr><tr><td><code>&quot;ocean&quot;</code> / <code>&quot;sea&quot;</code></td><td>200 m wide, tall long waves, deep blue, endless</td></tr><tr><td><code>&quot;default&quot;</code></td><td>20 m, gentle waves</td></tr></tbody></table></div>
 <p><img src="../../../assets/rendering/water_high.jpg" alt="Water on High: blended over the scene, waves, sky reflection, sun glint and shadows" loading="lazy" decoding="async"></p>
 <p><img src="../../../assets/rendering/water_beautiful.jpg" alt="The same scene on Beautiful: refraction, depth absorption, soft cascaded shadows and bloom" loading="lazy" decoding="async"></p>
+<p><code>endless=True</code> carries the surface past its <code>size</code>, flat and calm, all
+the way to the horizon, so a sea doesn't end in a visible edge. Waves,
+foam and buoyancy stay within <code>size</code>; put the action there.</p>
 <p>Water is also physics: dynamic bodies float in it and ride its waves (see
 <a href="physics.html#water">Physics → Water</a>). The surface isn't a solid collider,
 so give the water a floor if sinking things should stop.</p>

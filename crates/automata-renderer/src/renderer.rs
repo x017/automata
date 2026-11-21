@@ -38,6 +38,12 @@ enum FrameTarget {
     },
 }
 
+/// Whether the frame draws the sky dome: a 3D frame whose environment
+/// asks for one.
+fn draws_sky(draw: &DrawList) -> bool {
+    draw.camera_3d.is_some() && draw.environment.is_some_and(|e| e.sky)
+}
+
 /// Per-frame GPU resources derived from a draw list.
 struct PreparedFrame {
     camera_2d_bind: wgpu::BindGroup,
@@ -50,7 +56,7 @@ struct PreparedFrame {
     mesh_spheres: Vec<Sphere>,
     render_shadows: bool,
     /// One bind group per water draw.
-    water_binds: Vec<wgpu::BindGroup>,
+    water_binds: Vec<(wgpu::BindGroup, u32)>,
 }
 
 /// A complete renderer: GPU context, pipelines, and resource factories.
@@ -82,6 +88,8 @@ pub struct Renderer {
     water_mesh: Option<Mesh>,
     /// Water pipelines by target format and refraction (Beautiful).
     water_pipelines: Vec<(wgpu::TextureFormat, bool, wgpu::RenderPipeline)>,
+    /// Sky dome pipelines per color format (built on first use).
+    sky_pipelines: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
     /// Mesh pipelines targeting the HDR scene (Beautiful), built lazily.
     hdr_mesh_pipeline: Option<pipeline::PipelinePair>,
     /// Bloom, tone mapping and FXAA (Beautiful).
@@ -192,6 +200,7 @@ impl Renderer {
             quality,
             water_mesh: None,
             water_pipelines: Vec::new(),
+            sky_pipelines: Vec::new(),
             hdr_mesh_pipeline: None,
             post,
             scene_placeholder,
@@ -885,6 +894,17 @@ impl Renderer {
                 ));
             }
         }
+        if draws_sky(draw) {
+            let (sky_format, depth) = if beautiful {
+                (pipeline::HDR_FORMAT, pipeline::HDR_DEPTH_FORMAT)
+            } else {
+                (format, DEPTH_FORMAT)
+            };
+            if !self.sky_pipelines.iter().any(|(f, _)| *f == sky_format) {
+                let p = pipeline::create_sky_pipeline(device, &self.shared, sky_format, depth);
+                self.sky_pipelines.push((sky_format, p));
+            }
+        }
         if !draw.waters.is_empty() {
             let (water_format, depth) = if beautiful {
                 (pipeline::HDR_FORMAT, pipeline::HDR_DEPTH_FORMAT)
@@ -906,6 +926,27 @@ impl Renderer {
                 self.water_pipelines.push((water_format, beautiful, p));
             }
         }
+    }
+
+    /// Draws the sky dome behind what's already in the pass, if the frame
+    /// has one.
+    fn record_sky(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        draw: &DrawList,
+        prepared: &PreparedFrame,
+        format: wgpu::TextureFormat,
+    ) {
+        if !draws_sky(draw) {
+            return;
+        }
+        let Some((_, pipeline)) = self.sky_pipelines.iter().find(|(f, _)| *f == format) else {
+            return;
+        };
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
+        pass.set_bind_group(3, &prepared.light_bind, &[]);
+        pass.draw(0..3, 0..1);
     }
 
     fn water_pipeline(
@@ -959,6 +1000,9 @@ impl Renderer {
             ..wgpu::RenderPassDescriptor::default()
         });
         Self::record_meshes(&mut pass, draw, prepared, mesh_pipeline);
+        if depth_view.is_some() {
+            self.record_sky(&mut pass, draw, prepared, format);
+        }
         if let Some(water) = self.water_pipeline(format, false) {
             self.record_waters(&mut pass, prepared, water, &self.scene_placeholder);
         }
@@ -1023,6 +1067,7 @@ impl Renderer {
                 ..wgpu::RenderPassDescriptor::default()
             });
             Self::record_meshes(&mut pass, draw, prepared, mesh_pipeline);
+            self.record_sky(&mut pass, draw, prepared, pipeline::HDR_FORMAT);
         }
 
         if let Some(water) = water {
@@ -1090,11 +1135,23 @@ impl Renderer {
         }
 
         let env = draw.environment.unwrap_or_default();
+        let flare = draw.camera_3d.filter(|_| draws_sky(draw)).and_then(|cam| {
+            let sun = draw.sun.unwrap_or_default();
+            crate::post::SunFlare::new(
+                &cam,
+                targets.size,
+                sun.normalized_direction(),
+                env.sun_size,
+                env.lens_flare,
+                sun.color,
+            )
+        });
         self.post.record_bloom_and_resolve(
             device,
             encoder,
             env.exposure.max(0.0),
             beautiful_tonemap(draw.environment),
+            flare,
         );
 
         // Final: FXAA into the target, then sprites on top.
@@ -1180,9 +1237,9 @@ impl Renderer {
         pass.set_bind_group(3, &prepared.light_bind, &[]);
         pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
         pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        for bind in &prepared.water_binds {
+        for (bind, indices) in &prepared.water_binds {
             pass.set_bind_group(1, bind, &[]);
-            pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+            pass.draw_indexed(0..(*indices).min(mesh.index_count), 0, 0..1);
         }
     }
 
@@ -1215,6 +1272,53 @@ impl Renderer {
             let end = start + run.index_count;
             pass.draw_indexed(start..end, 0, 0..1);
         }
+    }
+
+    /// Each water surface's uniform/ripple bind group and how many indices
+    /// to draw (endless ones include the horizon skirt).
+    fn water_bind_groups(
+        &self,
+        draw: &DrawList,
+        beautiful: bool,
+        time: f32,
+    ) -> Vec<(wgpu::BindGroup, u32)> {
+        draw.waters
+            .iter()
+            .map(|w| {
+                let uniform = WaterUniform::new(w, beautiful, time);
+                let device = self.ctx.device();
+                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("water"),
+                    contents: bytemuck::bytes_of(&uniform),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+                let ripples = &self.water_ripples.inner;
+                let indices = if w.water.endless {
+                    u32::MAX
+                } else {
+                    crate::water::grid_index_count()
+                };
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("water"),
+                    layout: &self.shared.water_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&ripples.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&ripples.sampler),
+                        },
+                    ],
+                });
+                (bind, indices)
+            })
+            .collect()
     }
 
     /// Builds the frame's GPU resources from the draw list: camera, model,
@@ -1288,38 +1392,7 @@ impl Renderer {
             beautiful,
         };
         let light_bind = self.light_bind_group(&sun, &env, &shadows, render_shadows, &frame);
-        let water_binds = draw
-            .waters
-            .iter()
-            .map(|w| {
-                let uniform = WaterUniform::new(w, beautiful, time);
-                let device = self.ctx.device();
-                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("water"),
-                    contents: bytemuck::bytes_of(&uniform),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
-                let ripples = &self.water_ripples.inner;
-                device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("water"),
-                    layout: &self.shared.water_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(&ripples.view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::Sampler(&ripples.sampler),
-                        },
-                    ],
-                })
-            })
-            .collect();
+        let water_binds = self.water_bind_groups(draw, beautiful, time);
 
         PreparedFrame {
             camera_2d_bind,
@@ -2284,6 +2357,61 @@ mod tests {
         draw.water(water, glam::Mat4::IDENTITY);
         renderer.render_offscreen(&draw, &target);
         center_pixel(&read_pixels(renderer, &target, size), size)
+    }
+
+    /// A frame of empty sky through a camera looking along `look`, the
+    /// sun shining toward -look (so it sits dead center when `look`
+    /// points at it).
+    fn sky_frame(renderer: &mut Renderer, look: glam::Vec3, sun_toward: glam::Vec3) -> Vec<u8> {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_time(1.0);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 1.0, 0.0),
+            glam::Vec3::new(0.0, 1.0, 0.0) + look,
+        ));
+        draw.set_sun(crate::Sun::new(-sun_toward));
+        draw.set_environment(crate::Environment {
+            clouds: 0.0,
+            ..crate::Environment::daylight()
+        });
+        renderer.render_offscreen(&draw, &target);
+        read_pixels(renderer, &target, size)
+    }
+
+    #[test]
+    fn offscreen_sky_draws_a_sun_and_a_blue_dome_on_every_preset() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping sky test");
+            return;
+        };
+        let size = renderer.size();
+        let toward_sun = glam::Vec3::new(0.0, 0.5, -1.0).normalize();
+        for quality in [
+            GraphicsQuality::Low,
+            GraphicsQuality::High,
+            GraphicsQuality::Beautiful,
+        ] {
+            renderer.set_quality(quality);
+            // Looking at the sun: a white-hot center.
+            let at_sun = sky_frame(&mut renderer, toward_sun, toward_sun);
+            let [r, g, b, _] = center_pixel(&at_sun, size);
+            assert!(
+                r > 240 && g > 235 && b > 220,
+                "{quality:?}: sun {:?}",
+                [r, g, b]
+            );
+            // Looking up, away from it: blue sky, not the black clear color.
+            let up = sky_frame(
+                &mut renderer,
+                glam::Vec3::new(0.0, 1.0, 0.3).normalize(),
+                toward_sun,
+            );
+            let [r, g, b, _] = center_pixel(&up, size);
+            assert!(b > 120 && b > r + 30, "{quality:?}: sky {:?}", [r, g, b]);
+        }
     }
 
     #[test]

@@ -31,6 +31,58 @@ struct PostUniform {
     texel: [f32; 4],
     params: [f32; 4],
     output: [f32; 4],
+    /// xy: the sun's screen position (uv), z: lens flare strength (0 =
+    /// none), w: the sun disk's radius (uv height).
+    sun: [f32; 4],
+    /// rgb: sunlight color, a: aspect ratio (width / height).
+    sun_color: [f32; 4],
+}
+
+/// Where the sun is on screen, for the lens flare.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SunFlare {
+    /// Screen position, uv (0..1, y down); may lie off screen.
+    pub uv: [f32; 2],
+    /// The disk's radius as a fraction of the screen height.
+    pub radius: f32,
+    /// Flare strength.
+    pub strength: f32,
+    /// Sunlight color.
+    pub color: [f32; 3],
+}
+
+impl SunFlare {
+    /// Projects the sun (light traveling along `direction`) through
+    /// `camera`; `None` when it's behind the camera.
+    pub fn new(
+        camera: &crate::Camera3D,
+        viewport: (u32, u32),
+        direction: glam::Vec3,
+        sun_size_degrees: f32,
+        strength: f32,
+        color: [f32; 3],
+    ) -> Option<Self> {
+        let clip = camera.view_proj(viewport) * (-direction.normalize_or_zero()).extend(0.0);
+        if clip.w <= 1e-4 || strength <= 0.0 {
+            return None;
+        }
+        let ndc = clip.truncate() / clip.w;
+        let half_fov = (camera.fov_y_degrees * 0.5).to_radians().tan().max(1e-4);
+        let radius = (sun_size_degrees * 0.5).to_radians().tan() / half_fov * 0.5;
+        Some(Self {
+            uv: [ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5],
+            radius,
+            strength,
+            color,
+        })
+    }
+
+    /// How much the flare shows by screen position: full on screen,
+    /// fading out just past the edges.
+    fn on_screen(&self) -> f32 {
+        let edge = |v: f32| (1.0 - ((v - 0.5).abs() - 0.5).max(0.0) / 0.15).clamp(0.0, 1.0);
+        edge(self.uv[0]) * edge(self.uv[1])
+    }
 }
 
 /// Size-dependent textures, rebuilt when the viewport size changes.
@@ -46,6 +98,8 @@ pub(crate) struct PostTargets {
     bloom: wgpu::Texture,
     bloom_levels: u32,
     ldr: wgpu::Texture,
+    /// 1x1: how much of the sun disk is unblocked this frame.
+    sun_visibility: wgpu::Texture,
 }
 
 impl PostTargets {
@@ -115,6 +169,13 @@ impl PostTargets {
                 (w, h),
                 1,
             ),
+            sun_visibility: texture(
+                "sun visibility",
+                HDR_FORMAT,
+                U::RENDER_ATTACHMENT | U::TEXTURE_BINDING,
+                (1, 1),
+                1,
+            ),
         }
     }
 
@@ -148,6 +209,7 @@ pub(crate) struct Post {
     downsample: wgpu::RenderPipeline,
     upsample: wgpu::RenderPipeline,
     resolve: wgpu::RenderPipeline,
+    sun_visibility: wgpu::RenderPipeline,
     /// FXAA pipelines per target format.
     fxaa: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
     sampler: wgpu::Sampler,
@@ -190,6 +252,7 @@ impl Post {
                     count: None,
                 },
                 texture_entry(3),
+                texture_entry(4),
             ],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -240,6 +303,15 @@ impl Post {
             None,
             None,
         );
+        let sun_visibility = fullscreen_pipeline(
+            device,
+            &layout,
+            &shader,
+            "fs_sun_visibility",
+            HDR_FORMAT,
+            None,
+            None,
+        );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("post"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -271,6 +343,7 @@ impl Post {
             downsample,
             upsample,
             resolve,
+            sun_visibility,
             fxaa: Vec::new(),
             sampler,
             placeholder,
@@ -317,6 +390,7 @@ impl Post {
         src: &wgpu::TextureView,
         uniform: PostUniform,
         extra: Option<&wgpu::TextureView>,
+        extra2: Option<&wgpu::TextureView>,
     ) -> wgpu::BindGroup {
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("post"),
@@ -345,18 +419,27 @@ impl Post {
                         extra.unwrap_or(&self.placeholder),
                     ),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(
+                        extra2.unwrap_or(&self.placeholder),
+                    ),
+                },
             ],
         })
     }
 
     /// Bloom (down then up the mip chain) and the HDR → LDR resolve with
-    /// `exposure` and tone mapping curve `tonemap` (the shader's index).
+    /// `exposure` and tone mapping curve `tonemap` (the shader's index),
+    /// plus the sun's lens flare if there is one.
+    #[allow(clippy::too_many_lines)] // one pass sequence, read top to bottom
     pub fn record_bloom_and_resolve(
         &self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         exposure: f32,
         tonemap: f32,
+        flare: Option<SunFlare>,
     ) {
         let Some(t) = &self.targets else {
             return;
@@ -369,11 +452,48 @@ impl Post {
             (w.max(1) as f32, h.max(1) as f32)
         };
         let strength = BLOOM / t.bloom_levels.max(1) as f32;
+        let aspect = t.size.0 as f32 / t.size.1.max(1) as f32;
+        let flare = flare
+            .map(|f| SunFlare {
+                strength: f.strength * f.on_screen(),
+                ..f
+            })
+            .filter(|f| f.strength > 0.0);
+        let (sun, sun_color) = flare.map_or(([0.0; 4], [0.0, 0.0, 0.0, aspect]), |f| {
+            (
+                [f.uv[0], f.uv[1], f.strength, f.radius],
+                [f.color[0], f.color[1], f.color[2], aspect],
+            )
+        });
         let uniform = |texel: (f32, f32)| PostUniform {
             texel: [1.0 / texel.0, 1.0 / texel.1, 0.0, 0.0],
             params: [0.0, exposure, tonemap, strength],
             output: [0.0; 4],
+            sun,
+            sun_color,
         };
+        // The sun's visibility: how much of its disk still blazes in the
+        // HDR image (blocked by geometry or dimmed by clouds).
+        let visibility = t
+            .sun_visibility
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        if flare.is_some() {
+            let bind = self.bind(
+                device,
+                &hdr_view,
+                uniform((t.size.0 as f32, t.size.1 as f32)),
+                None,
+                None,
+            );
+            fullscreen_pass(
+                encoder,
+                "sun visibility",
+                &visibility,
+                wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                &self.sun_visibility,
+                &bind,
+            );
+        }
         // Down: the scene into mip 0, each mip into the next.
         for level in 0..t.bloom_levels {
             let (src, src_size) = if level == 0 {
@@ -381,7 +501,7 @@ impl Post {
             } else {
                 (&mips[level as usize - 1], size_of(level - 1))
             };
-            let bind = self.bind(device, src, uniform(src_size), None);
+            let bind = self.bind(device, src, uniform(src_size), None, None);
             fullscreen_pass(
                 encoder,
                 "bloom down",
@@ -397,7 +517,13 @@ impl Post {
         }
         // Up: each mip added onto the next larger one.
         for level in (1..t.bloom_levels).rev() {
-            let bind = self.bind(device, &mips[level as usize], uniform(size_of(level)), None);
+            let bind = self.bind(
+                device,
+                &mips[level as usize],
+                uniform(size_of(level)),
+                None,
+                None,
+            );
             fullscreen_pass(
                 encoder,
                 "bloom up",
@@ -414,6 +540,7 @@ impl Post {
             &hdr_view,
             uniform((t.size.0 as f32, t.size.1 as f32)),
             Some(&mips[0]),
+            flare.map(|_| &visibility),
         );
         fullscreen_pass(
             encoder,
@@ -443,8 +570,10 @@ impl Post {
             texel: [1.0 / t.size.0 as f32, 1.0 / t.size.1 as f32, 0.0, 0.0],
             params: [0.0; 4],
             output: [f32::from(u8::from(!format.is_srgb())), 0.0, 0.0, 0.0],
+            sun: [0.0; 4],
+            sun_color: [0.0; 4],
         };
-        let bind = self.bind(device, &ldr_view, uniform, None);
+        let bind = self.bind(device, &ldr_view, uniform, None, None);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind, &[]);
         pass.draw(0..3, 0..1);
@@ -529,6 +658,29 @@ mod tests {
         assert_eq!(bloom_level_count((960, 540)), 6);
         assert_eq!(bloom_level_count((32, 32)), 3); // 32, 16, 8
         assert_eq!(bloom_level_count((4, 4)), 1);
-        assert_eq!(std::mem::size_of::<PostUniform>(), 48);
+        assert_eq!(std::mem::size_of::<PostUniform>(), 80);
+    }
+
+    #[test]
+    fn the_sun_projects_where_the_camera_looks() {
+        let cam = crate::Camera3D::new(glam::Vec3::ZERO, glam::Vec3::new(0.0, 0.0, -10.0));
+        // Light traveling toward +Z: the sun is straight ahead (-Z).
+        let f = SunFlare::new(&cam, (800, 600), glam::Vec3::Z, 2.0, 1.0, [1.0; 3]).unwrap();
+        assert!((f.uv[0] - 0.5).abs() < 1e-4 && (f.uv[1] - 0.5).abs() < 1e-4);
+        assert!(f.radius > 0.0 && f.radius < 0.05);
+        assert!((f.on_screen() - 1.0).abs() < 1e-6);
+        // Behind the camera: no flare.
+        assert!(SunFlare::new(&cam, (800, 600), glam::Vec3::NEG_Z, 2.0, 1.0, [1.0; 3]).is_none());
+        // Far off to the side: faded out.
+        let side = SunFlare::new(
+            &cam,
+            (800, 600),
+            glam::Vec3::new(-3.0, 0.0, 1.0),
+            2.0,
+            1.0,
+            [1.0; 3],
+        )
+        .unwrap();
+        assert!(side.uv[0] > 1.15 && side.on_screen() == 0.0);
     }
 }

@@ -101,6 +101,12 @@ scene.add(
             fog_color=(0.55, 0.68, 0.85),    # match the background
             fog_density=0.012,               # per metre; 0.05 is thick
             fog_start=10.0,                  # metres of clear air first
+            sky=True,                        # a sky dome with a sun and clouds
+            zenith_color=(0.16, 0.34, 0.78), # sky colour straight up
+            sun_size=2.0,                    # sun disk diameter, degrees
+            sun_glow=1.0,                    # halo around the sun
+            clouds=0.35,                     # 0 clear .. 1 overcast
+            lens_flare=1.0,                  # Beautiful only
         )
     )
 )
@@ -109,11 +115,23 @@ scene.add(
 | Preset | Look |
 |---|---|
 | `"neutral"` | The default: white ambient, no fog, no tone mapping |
-| `"daylight"` | Blue sky, warm bounce, light haze, ACES |
-| `"dusk"` | Violet sky, dark red ground, dense warm fog, AgX |
-| `"night"` | Cold dark ambient, black fog close to the camera, ACES |
+| `"daylight"` | Blue sky dome with sun and clouds, warm bounce, light haze, ACES |
+| `"dusk"` | Violet sky with a big warm sun, dark red ground, dense warm fog, AgX |
+| `"night"` | Near-black sky, cold dark ambient, black fog close to the camera, ACES |
 
 How it combines with the sun:
+
+- **The sky** (`sky=True`) replaces the flat background with a dome: a
+  gradient from `background` at the horizon to `zenith_color` overhead,
+  the sun's disk exactly where the `DirectionalLight` shines from, a halo
+  that turns warm as the sun gets low, and two layers of drifting clouds.
+  Water reflects it and distant fog fades into it, so the horizon has no
+  seam. Move the sun (or drag **Time of Day** in Oberon) and the sky
+  follows.
+- **Lens flare** (`BEAUTIFUL` only): looking toward the sun adds glare,
+  a starburst, a row of coloured ghosts and a faint halo ring. It fades
+  out when the sun leaves the screen, and anything in front of the sun,
+  scenery or clouds, hides it.
 
 - Ambient is `DirectionalLight.ambient × mix(ground, sky)`, picked by how
   much a surface faces up. Keep the sky and ground colours near 1.0 in
@@ -158,6 +176,7 @@ same setting as the renderer grows.
   surfaces in full sun) bleed softly. Then the tone mapper runs, and FXAA
   smooths the edges.
 - **Refractive water** (see below).
+- **Lens flare** when the camera looks toward the sun (with `sky=True`).
 
 It's built to stay cheap. Each pixel filters only one shadow cascade (with
 dithering where cascades meet), bloom is a small dual-filter chain at half
@@ -188,12 +207,16 @@ glowing through wave crests. It receives shadows.
 | Preset | Look |
 |---|---|
 | `"pond"` / `"lake"` | Low, short waves and clear water |
-| `"ocean"` / `"sea"` | 200 m wide, tall long waves, deep blue |
+| `"ocean"` / `"sea"` | 200 m wide, tall long waves, deep blue, endless |
 | `"default"` | 20 m, gentle waves |
 
 ![Water on High: blended over the scene, waves, sky reflection, sun glint and shadows](../../assets/rendering/water_high.jpg)
 
 ![The same scene on Beautiful: refraction, depth absorption, soft cascaded shadows and bloom](../../assets/rendering/water_beautiful.jpg)
+
+`endless=True` carries the surface past its `size`, flat and calm, all
+the way to the horizon, so a sea doesn't end in a visible edge. Waves,
+foam and buoyancy stay within `size`; put the action there.
 
 Water is also physics: dynamic bodies float in it and ride its waves (see
 [Physics → Water](physics.md#water)). The surface isn't a solid collider,

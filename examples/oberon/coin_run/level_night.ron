@@ -22,6 +22,12 @@
                 fog_color: (0.008, 0.01, 0.02),
                 fog_density: 0.05,
                 fog_start: 2.0,
+                sky: true,
+                zenith_color: (0.002, 0.003, 0.01),
+                sun_size: 1.6,
+                sun_glow: 0.3,
+                clouds: 0.0,
+                lens_flare: 0.0,
             )),
         ),
         (

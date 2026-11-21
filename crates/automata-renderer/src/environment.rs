@@ -1,5 +1,5 @@
-//! Scene-wide look settings: sky/ground ambient, distance fog, exposure,
-//! and tone mapping.
+//! Scene-wide look settings: the sky and sun, sky/ground ambient, distance
+//! fog, exposure, and tone mapping.
 //!
 //! An [`Environment`] is set per frame with
 //! [`DrawList::set_environment`](crate::DrawList::set_environment). The
@@ -76,6 +76,24 @@ pub struct Environment {
     pub fog_density: f32,
     /// Distance from the camera where fog starts.
     pub fog_start: f32,
+    /// Draws a sky dome with a sun behind the scene instead of the flat
+    /// `background`, which becomes the horizon color. Reflections and fog
+    /// then take their colors from the same sky, so distant things fade
+    /// into the horizon.
+    pub sky: bool,
+    /// The sky's color straight up (linear RGB).
+    pub zenith_color: [f32; 3],
+    /// The sun disk's apparent diameter in degrees (the real sun is about
+    /// 0.53; games usually draw it larger).
+    pub sun_size: f32,
+    /// Brightness of the halo around the sun (`0` = none, `1` = default).
+    pub sun_glow: f32,
+    /// Cloud cover, `0` (clear) to `1` (overcast).
+    pub clouds: f32,
+    /// Lens flare and glare when looking toward the sun (`0` = off). Drawn
+    /// on the Beautiful preset only, and hidden when something blocks the
+    /// sun.
+    pub lens_flare: f32,
 }
 
 impl Default for Environment {
@@ -90,6 +108,12 @@ impl Default for Environment {
             fog_color: [0.5, 0.55, 0.6],
             fog_density: 0.02,
             fog_start: 0.0,
+            sky: false,
+            zenith_color: [0.16, 0.34, 0.78],
+            sun_size: 2.0,
+            sun_glow: 1.0,
+            clouds: 0.0,
+            lens_flare: 1.0,
         }
     }
 }
@@ -109,6 +133,10 @@ impl Environment {
             fog_color: [0.55, 0.68, 0.85],
             fog_density: 0.012,
             fog_start: 10.0,
+            sky: true,
+            zenith_color: [0.16, 0.34, 0.78],
+            clouds: 0.35,
+            ..Self::default()
         }
     }
 
@@ -125,6 +153,12 @@ impl Environment {
             fog_color: [0.32, 0.18, 0.2],
             fog_density: 0.03,
             fog_start: 4.0,
+            sky: true,
+            zenith_color: [0.1, 0.09, 0.24],
+            sun_size: 2.6,
+            sun_glow: 1.6,
+            clouds: 0.25,
+            ..Self::default()
         }
     }
 
@@ -141,6 +175,12 @@ impl Environment {
             fog_color: [0.008, 0.01, 0.02],
             fog_density: 0.05,
             fog_start: 2.0,
+            sky: true,
+            zenith_color: [0.002, 0.003, 0.01],
+            sun_size: 1.6,
+            sun_glow: 0.3,
+            lens_flare: 0.0,
+            ..Self::default()
         }
     }
 
@@ -169,6 +209,17 @@ mod tests {
         assert!((env.exposure - 1.0).abs() < f32::EPSILON);
         assert_eq!(env.tonemapping, Tonemapping::None);
         assert!(!env.fog);
+        assert!(!env.sky, "no sky dome unless asked for");
+    }
+
+    #[test]
+    fn presets_draw_a_sky_and_old_scenes_keep_theirs() {
+        assert!(Environment::daylight().sky && Environment::daylight().clouds > 0.0);
+        assert!(Environment::dusk().sky);
+        // A scene saved before the sky existed loads without one.
+        let old: Environment = ron::from_str("(exposure: 1.2, fog: true)").unwrap();
+        assert!(!old.sky);
+        assert!((old.exposure - 1.2).abs() < 1e-6);
     }
 
     #[test]

@@ -50,6 +50,8 @@ OCEAN = dict(
     wave_speed=1.0,
     wave_direction=25.0,
     foam=0.8,
+    # Past its 240 m the sea carries on, calm, to the horizon.
+    endless=True,
 )
 # The freshwater pool: calm and clear enough to see the bottom.
 POOL = dict(
@@ -172,6 +174,9 @@ def build():
                 fog_color=(0.62, 0.78, 0.95),
                 fog_density=0.006,
                 fog_start=35.0,
+                sky=True,
+                zenith_color=(0.16, 0.34, 0.78),
+                clouds=0.35,
             )
         )
     )

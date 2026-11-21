@@ -119,6 +119,9 @@ def build():
                 fog_color=(0.36, 0.39, 0.46),
                 fog_density=0.015,
                 fog_start=20.0,
+                sky=True,
+                zenith_color=(0.2, 0.26, 0.38),
+                clouds=0.6,
             )
         )
     )

@@ -136,7 +136,7 @@ class DirectionalLight:
     ) -> None: ...
 
 class Environment:
-    """Scene-wide look: ambient, background, exposure, tone mapping, fog.
+    """Scene-wide look: sky and sun, ambient, exposure, tone mapping, fog.
 
     Attach to any entity; the first entity carrying one sets the frame's look.
     """
@@ -150,6 +150,16 @@ class Environment:
     fog_color: tuple[float, float, float]
     fog_density: float
     fog_start: float
+    sky: bool
+    """Draw a sky dome with a sun; ``background`` becomes the horizon."""
+    zenith_color: tuple[float, float, float]
+    sun_size: float
+    """The sun disk's apparent diameter in degrees."""
+    sun_glow: float
+    clouds: float
+    """Cloud cover, 0 (clear) to 1 (overcast)."""
+    lens_flare: float
+    """Lens flare strength when looking at the sun (``"beautiful"`` only)."""
     def __init__(
         self,
         sky_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
@@ -161,6 +171,12 @@ class Environment:
         fog_color: tuple[float, float, float] = (0.5, 0.55, 0.6),
         fog_density: float = 0.02,
         fog_start: float = 0.0,
+        sky: bool = False,
+        zenith_color: tuple[float, float, float] = (0.16, 0.34, 0.78),
+        sun_size: float = 2.0,
+        sun_glow: float = 1.0,
+        clouds: float = 0.0,
+        lens_flare: float = 1.0,
     ) -> None: ...
     @staticmethod
     def preset(name: str) -> Environment:
@@ -187,6 +203,8 @@ class Water:
     """Buoyancy against colliders' density (2.0; colliders default to 1.0)."""
     drag: float
     """How much the water slows what moves and spins in it (1.0)."""
+    endless: bool
+    """The surface carries on to the horizon past ``size`` (oceans)."""
     def __init__(
         self,
         size: Optional[tuple[float, float]] = None,
@@ -200,6 +218,7 @@ class Water:
         foam: Optional[float] = None,
         density: Optional[float] = None,
         drag: Optional[float] = None,
+        endless: Optional[bool] = None,
     ) -> None: ...
     @staticmethod
     def preset(name: str) -> Water:

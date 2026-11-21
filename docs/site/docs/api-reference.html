@@ -113,20 +113,27 @@ shadowless default is used.</p>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Environment(sky_color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>), ground_color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>),
                background=(<span class="tok-n">0.012</span>, <span class="tok-n">0.012</span>, <span class="tok-n">0.012</span>), exposure=<span class="tok-n">1.0</span>,
                tonemapping=<span class="tok-s">&quot;none&quot;</span>, fog=<span class="tok-b">False</span>, fog_color=(<span class="tok-n">0.5</span>, <span class="tok-n">0.55</span>, <span class="tok-n">0.6</span>),
-               fog_density=<span class="tok-n">0.02</span>, fog_start=<span class="tok-n">0.0</span>)
+               fog_density=<span class="tok-n">0.02</span>, fog_start=<span class="tok-n">0.0</span>, sky=<span class="tok-b">False</span>,
+               zenith_color=(<span class="tok-n">0.16</span>, <span class="tok-n">0.34</span>, <span class="tok-n">0.78</span>), sun_size=<span class="tok-n">2.0</span>, sun_glow=<span class="tok-n">1.0</span>,
+               clouds=<span class="tok-n">0.0</span>, lens_flare=<span class="tok-n">1.0</span>)
 at.Environment.preset(<span class="tok-s">&quot;neutral&quot;</span> | <span class="tok-s">&quot;daylight&quot;</span> | <span class="tok-s">&quot;dusk&quot;</span> | <span class="tok-s">&quot;night&quot;</span>)</code></pre></div>
 <p>The scene look. The first entity carrying one wins. It sets hemisphere
 ambient (sky above, ground below, scaled by the sun's <code>ambient</code>), the
 background clear colour (overriding <code>Game.clear_color</code>), exposure, tone
 mapping (<code>&quot;none&quot;</code>, <code>&quot;reinhard&quot;</code>, <code>&quot;aces&quot;</code>, <code>&quot;agx&quot;</code>), and exponential
-distance fog. All arguments are readable as properties. Unknown tone
+distance fog. <code>sky=True</code> draws a sky dome instead of the flat background:
+a gradient from <code>background</code> (the horizon) to <code>zenith_color</code>, a sun disk
+<code>sun_size</code> degrees wide where the scene's <code>DirectionalLight</code> shines from,
+a halo (<code>sun_glow</code>), <code>clouds</code> cover from 0 to 1, and on <code>BEAUTIFUL</code> a lens
+flare (<code>lens_flare</code> strength) when the camera looks toward the sun. The
+non-neutral presets turn the sky on. All arguments are readable as properties. Unknown tone
 mapping or preset names raise <code>ValueError</code>. It's saved in scene files.
 Guide: <a href="guides/rendering-and-lights.html#environment">Rendering &amp; Lights</a>.</p>
 <h3 id="water">Water<a class="anchor" href="#water" aria-label="Link to this section">#</a></h3>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Water(size=(<span class="tok-n">20</span>, <span class="tok-n">20</span>), deep_color=(<span class="tok-n">0.01</span>, <span class="tok-n">0.07</span>, <span class="tok-n">0.11</span>),
          shallow_color=(<span class="tok-n">0.1</span>, <span class="tok-n">0.42</span>, <span class="tok-n">0.44</span>), clarity=<span class="tok-n">2.5</span>, wave_height=<span class="tok-n">0.12</span>,
          wave_length=<span class="tok-n">5.0</span>, wave_speed=<span class="tok-n">1.0</span>, wave_direction=<span class="tok-n">30.0</span>, foam=<span class="tok-n">0.6</span>,
-         density=<span class="tok-n">2.0</span>, drag=<span class="tok-n">1.0</span>)
+         density=<span class="tok-n">2.0</span>, drag=<span class="tok-n">1.0</span>, endless=<span class="tok-b">False</span>)
 at.Water.preset(<span class="tok-s">&quot;pond&quot;</span> | <span class="tok-s">&quot;lake&quot;</span> | <span class="tok-s">&quot;ocean&quot;</span> | <span class="tok-s">&quot;sea&quot;</span> | <span class="tok-s">&quot;default&quot;</span>)</code></pre></div>
 <p>A rectangle of animated water on the entity's local XZ plane, <code>size</code>
 metres wide, centred on its <code>Transform</code>. Waves are Gerstner waves
@@ -134,7 +141,9 @@ metres wide, centred on its <code>Transform</code>. Waves are Gerstner waves
 toward <code>wave_direction</code> degrees around +Y). Every quality preset draws it;
 <code>BEAUTIFUL</code> adds refraction of what's underneath, depth-based absorption
 (<code>clarity</code> is how many metres you can see down) and shoreline <code>foam</code>.
-It's also a volume of water for physics. Dynamic bodies in it float by
+<code>endless=True</code> (on the ocean and sea presets) continues the surface,
+flat and calm, out to the horizon; waves, foam and physics stay within
+<code>size</code>. It's also a volume of water for physics. Dynamic bodies in it float by
 buoyancy (<code>density</code> against their colliders' density, which defaults to
 1.0, so a default box floats half under) and are slowed by <code>drag</code>.
 All arguments are readable as properties, and it's saved in scene files.

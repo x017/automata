@@ -1020,12 +1020,24 @@ def test_environment_component_and_presets():
     with pytest.raises(ValueError):
         at.Environment.preset("noon")
 
+
     scene = at.Scene().add(at.Entity("look").add(dusk))
     text = scene.to_ron()
     assert "environment" in text and "Agx" in text
     back = at.Scene.from_ron(text)
     assert back.to_ron() == text
 
+
+def test_environment_sky_and_sun():
+    assert at.Environment().sky is False
+    day = at.Environment.preset("daylight")
+    assert day.sky and day.clouds > 0.0 and day.sun_size > 0.0
+    env = at.Environment(sky=True, zenith_color=(0.1, 0.2, 0.6), sun_size=3.0, clouds=0.5, lens_flare=0.0)
+    assert env.zenith_color == pytest.approx((0.1, 0.2, 0.6))
+    assert (env.sun_size, env.clouds, env.lens_flare) == pytest.approx((3.0, 0.5, 0.0))
+    assert env.sun_glow == pytest.approx(1.0)
+    text = at.Scene().add(at.Entity("look").add(env)).to_ron()
+    assert "sky: true" in text and "clouds: 0.5" in text
 
 def test_water_component_and_presets():
     water = at.Water(size=(40.0, 30.0), wave_height=0.3)
@@ -1034,6 +1046,8 @@ def test_water_component_and_presets():
     assert water.foam == pytest.approx(at.Water().foam)
     ocean = at.Water.preset("ocean")
     assert ocean.wave_height > at.Water.preset("pond").wave_height
+    assert ocean.endless and not at.Water.preset("pond").endless
+    assert at.Water(endless=True).endless
     with pytest.raises(ValueError):
         at.Water.preset("puddle")
 

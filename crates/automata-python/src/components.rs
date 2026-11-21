@@ -284,6 +284,12 @@ impl PyEnvironment {
         fog_color=(0.5, 0.55, 0.6),
         fog_density=0.02,
         fog_start=0.0,
+        sky=false,
+        zenith_color=(0.16, 0.34, 0.78),
+        sun_size=2.0,
+        sun_glow=1.0,
+        clouds=0.0,
+        lens_flare=1.0,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -296,6 +302,12 @@ impl PyEnvironment {
         fog_color: (f32, f32, f32),
         fog_density: f32,
         fog_start: f32,
+        sky: bool,
+        zenith_color: (f32, f32, f32),
+        sun_size: f32,
+        sun_glow: f32,
+        clouds: f32,
+        lens_flare: f32,
     ) -> PyResult<Self> {
         let rgb = |c: (f32, f32, f32)| [c.0, c.1, c.2];
         Ok(Self {
@@ -309,6 +321,12 @@ impl PyEnvironment {
                 fog_color: rgb(fog_color),
                 fog_density,
                 fog_start,
+                sky,
+                zenith_color: rgb(zenith_color),
+                sun_size,
+                sun_glow,
+                clouds,
+                lens_flare,
             },
         })
     }
@@ -393,6 +411,44 @@ impl PyEnvironment {
         self.inner.fog_start
     }
 
+    /// Whether a sky dome with a sun is drawn (``background`` is then the
+    /// horizon color).
+    #[getter]
+    fn sky(&self) -> bool {
+        self.inner.sky
+    }
+
+    /// The sky's color straight up (linear RGB).
+    #[getter]
+    fn zenith_color(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.zenith_color;
+        (r, g, b)
+    }
+
+    /// The sun disk's apparent diameter, degrees.
+    #[getter]
+    fn sun_size(&self) -> f32 {
+        self.inner.sun_size
+    }
+
+    /// Brightness of the sun's halo.
+    #[getter]
+    fn sun_glow(&self) -> f32 {
+        self.inner.sun_glow
+    }
+
+    /// Cloud cover, 0 (clear) to 1 (overcast).
+    #[getter]
+    fn clouds(&self) -> f32 {
+        self.inner.clouds
+    }
+
+    /// Lens flare strength when looking at the sun (Beautiful graphics).
+    #[getter]
+    fn lens_flare(&self) -> f32 {
+        self.inner.lens_flare
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "Environment(tonemapping={:?}, exposure={:.2}, fog={})",
@@ -447,6 +503,7 @@ impl PyWater {
         foam=None,
         density=None,
         drag=None,
+        endless=None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -461,6 +518,7 @@ impl PyWater {
         foam: Option<f32>,
         density: Option<f32>,
         drag: Option<f32>,
+        endless: Option<bool>,
     ) -> Self {
         let d = Water::default();
         let rgb = |c: (f32, f32, f32)| [c.0, c.1, c.2];
@@ -477,6 +535,7 @@ impl PyWater {
                 foam: foam.unwrap_or(d.foam),
                 density: density.unwrap_or(d.density),
                 drag: drag.unwrap_or(d.drag),
+                endless: endless.unwrap_or(d.endless),
             },
         }
     }
@@ -566,6 +625,12 @@ impl PyWater {
     #[getter]
     fn drag(&self) -> f32 {
         self.inner.drag
+    }
+
+    /// Whether the surface carries on to the horizon past ``size``.
+    #[getter]
+    fn endless(&self) -> bool {
+        self.inner.endless
     }
 
     fn __repr__(&self) -> String {

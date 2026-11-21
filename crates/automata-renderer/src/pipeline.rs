@@ -25,6 +25,12 @@ pub(crate) const POST_SHADER: &str = concat!(
     include_str!("shaders/tonemap.wgsl"),
     include_str!("shaders/post.wgsl")
 );
+/// WGSL source of the sky dome (with the shared lighting code).
+pub(crate) const SKY_SHADER: &str = concat!(
+    include_str!("shaders/tonemap.wgsl"),
+    include_str!("shaders/common.wgsl"),
+    include_str!("shaders/sky.wgsl")
+);
 /// WGSL source of the depth-only shadow pass shader.
 pub(crate) const SHADOW_SHADER: &str = include_str!("shaders/shadow.wgsl");
 
@@ -471,6 +477,59 @@ pub(crate) fn create_water_pipeline(
     })
 }
 
+/// The sky dome pipeline: a fullscreen triangle on the far plane, drawn
+/// where the depth buffer is still clear (`LessEqual`, no depth write).
+/// HDR targets get Beautiful's untonemapped entry point.
+pub(crate) fn create_sky_pipeline(
+    device: &wgpu::Device,
+    shared: &PipelineShared,
+    format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    let module = shader_module(device, "sky", SKY_SHADER);
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("sky"),
+        bind_group_layouts: &[
+            Some(&shared.camera_layout),
+            None,
+            None,
+            Some(&shared.light_layout),
+        ],
+        immediate_size: 0,
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("sky"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &module,
+            entry_point: Some("vs_sky"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: depth_format,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some(if format == HDR_FORMAT {
+                "fs_sky_hdr"
+            } else {
+                "fs_sky"
+            }),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &opaque_target(format),
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 /// Both shadow pipelines.
 pub(crate) fn create_shadow_pipelines(
     device: &wgpu::Device,
@@ -694,6 +753,7 @@ mod tests {
     fn water_and_post_wgsl_validate() {
         for (source, entries) in [
             (WATER_SHADER, &["vs_main", "fs_main"][..]),
+            (SKY_SHADER, &["vs_sky", "fs_sky", "fs_sky_hdr"][..]),
             (
                 POST_SHADER,
                 &[

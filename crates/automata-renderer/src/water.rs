@@ -47,6 +47,10 @@ pub struct Water {
     /// How quickly the water slows bodies moving through it (fraction of
     /// velocity lost per second when fully submerged).
     pub drag: f32,
+    /// The surface carries on to the horizon (a sea or ocean), beyond
+    /// `size`. Waves and buoyancy still cover only `size`; past it the
+    /// water carries on as a sheet that fades into the fog.
+    pub endless: bool,
 }
 
 impl Default for Water {
@@ -63,6 +67,7 @@ impl Default for Water {
             foam: 0.6,
             density: 2.0,
             drag: 1.0,
+            endless: false,
         }
     }
 }
@@ -91,6 +96,7 @@ impl Water {
             wave_height: 0.6,
             wave_length: 14.0,
             wave_speed: 1.0,
+            endless: true,
             ..Self::default()
         }
     }
@@ -481,6 +487,14 @@ pub(crate) fn ripple_texels() -> Vec<u8> {
 
 /// The unit water grid: `GRID_CELLS`² quads over `[-0.5, 0.5]` on XZ,
 /// facing +Y.
+/// How far the endless skirt reaches, in multiples of the surface size.
+const SKIRT_REACH: f32 = 60.0;
+
+/// The unit grid ([`GRID_CELLS`]² quads over `[-0.5, 0.5]` on XZ),
+/// followed by an "endless" skirt: a ring of quads from the grid's edge
+/// out to `SKIRT_REACH` sharing the edge vertices (no cracks). Draw
+/// [`grid_index_count`] indices for a bounded surface, all of them for an
+/// endless one.
 pub(crate) fn grid_mesh() -> MeshData {
     let n = GRID_CELLS;
     let mut vertices = Vec::with_capacity(((n + 1) * (n + 1)) as usize);
@@ -503,7 +517,36 @@ pub(crate) fn grid_mesh() -> MeshData {
             indices.extend_from_slice(&[i, i + row, i + 1, i + 1, i + row, i + row + 1]);
         }
     }
+    // The grid's boundary walked once around, and an outer ring pushed out
+    // radially to the skirt's square.
+    let mut boundary = Vec::with_capacity((4 * n) as usize);
+    boundary.extend(0..n); // z = 0 row, +x
+    boundary.extend((0..n).map(|z| z * row + n)); // x = n column, +z
+    boundary.extend((0..n).map(|x| n * row + (n - x))); // z = n row, -x
+    boundary.extend((0..n).map(|z| (n - z) * row)); // x = 0 column, -z
+    let outer_start = u32::try_from(vertices.len()).expect("grid fits u32 indices");
+    for &b in &boundary {
+        let p = vertices[b as usize].position;
+        let (x, z) = (p[0] * 2.0 * SKIRT_REACH, p[2] * 2.0 * SKIRT_REACH);
+        vertices.push(Vertex::new(
+            [x, 0.0, z],
+            [0.0, 1.0, 0.0],
+            [x + 0.5, z + 0.5],
+        ));
+    }
+    let count = 4 * n;
+    for k in 0..count {
+        let next = (k + 1) % count;
+        let (a, b) = (boundary[k as usize], boundary[next as usize]);
+        let (oa, ob) = (outer_start + k, outer_start + next);
+        indices.extend_from_slice(&[a, b, ob, a, ob, oa]);
+    }
     MeshData::new(vertices, indices)
+}
+
+/// Indices of the bounded grid (without the endless skirt).
+pub(crate) fn grid_index_count() -> u32 {
+    GRID_CELLS * GRID_CELLS * 6
 }
 
 #[cfg(test)]
@@ -515,16 +558,39 @@ mod tests {
         let grid = grid_mesh();
         assert_eq!(
             grid.vertices.len(),
-            ((GRID_CELLS + 1) * (GRID_CELLS + 1)) as usize
+            ((GRID_CELLS + 1) * (GRID_CELLS + 1) + 4 * GRID_CELLS) as usize
         );
-        assert_eq!(grid.indices.len(), (GRID_CELLS * GRID_CELLS * 6) as usize);
+        assert_eq!(
+            grid.indices.len(),
+            (grid_index_count() + GRID_CELLS * 4 * 6) as usize
+        );
+        // The skirt's triangles wind like the grid's.
+        let normal_y = |t: &[u32]| {
+            let [a, b, c] =
+                [t[0], t[1], t[2]].map(|i| glam::Vec3::from(grid.vertices[i as usize].position));
+            (b - a).cross(c - a).y
+        };
+        let grid_sign = normal_y(&grid.indices[..3]).signum();
+        for t in grid.indices[grid_index_count() as usize..].chunks(3) {
+            assert_eq!(normal_y(t).signum(), grid_sign, "{t:?}");
+        }
         let corner = |i: u32| glam::Vec3::from(grid.vertices[i as usize].position);
         // First triangle winds counter-clockwise seen from +Y.
         let [v0, v1, v2] = [0, 1, 2].map(|k| corner(grid.indices[k]));
         assert!((v1 - v0).cross(v2 - v0).y > 0.0);
-        let xs: Vec<f32> = grid.vertices.iter().map(|v| v.position[0]).collect();
+        let grid_vertices = ((GRID_CELLS + 1) * (GRID_CELLS + 1)) as usize;
+        let xs: Vec<f32> = grid.vertices[..grid_vertices]
+            .iter()
+            .map(|v| v.position[0])
+            .collect();
         assert_eq!(xs.iter().copied().fold(f32::MAX, f32::min), -0.5);
         assert_eq!(xs.iter().copied().fold(f32::MIN, f32::max), 0.5);
+        // The skirt reaches far past the surface.
+        let far = grid.vertices[grid_vertices..]
+            .iter()
+            .map(|v| v.position[0].abs())
+            .fold(0.0, f32::max);
+        assert!((far - SKIRT_REACH).abs() < 1e-3);
     }
 
     #[test]

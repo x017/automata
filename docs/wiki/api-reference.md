@@ -125,7 +125,9 @@ shadowless default is used.
 at.Environment(sky_color=(1, 1, 1), ground_color=(1, 1, 1),
                background=(0.012, 0.012, 0.012), exposure=1.0,
                tonemapping="none", fog=False, fog_color=(0.5, 0.55, 0.6),
-               fog_density=0.02, fog_start=0.0)
+               fog_density=0.02, fog_start=0.0, sky=False,
+               zenith_color=(0.16, 0.34, 0.78), sun_size=2.0, sun_glow=1.0,
+               clouds=0.0, lens_flare=1.0)
 at.Environment.preset("neutral" | "daylight" | "dusk" | "night")
 ```
 
@@ -133,7 +135,12 @@ The scene look. The first entity carrying one wins. It sets hemisphere
 ambient (sky above, ground below, scaled by the sun's `ambient`), the
 background clear colour (overriding `Game.clear_color`), exposure, tone
 mapping (`"none"`, `"reinhard"`, `"aces"`, `"agx"`), and exponential
-distance fog. All arguments are readable as properties. Unknown tone
+distance fog. `sky=True` draws a sky dome instead of the flat background:
+a gradient from `background` (the horizon) to `zenith_color`, a sun disk
+`sun_size` degrees wide where the scene's `DirectionalLight` shines from,
+a halo (`sun_glow`), `clouds` cover from 0 to 1, and on `BEAUTIFUL` a lens
+flare (`lens_flare` strength) when the camera looks toward the sun. The
+non-neutral presets turn the sky on. All arguments are readable as properties. Unknown tone
 mapping or preset names raise `ValueError`. It's saved in scene files.
 Guide: [Rendering & Lights](guides/rendering-and-lights.md#environment).
 
@@ -143,7 +150,7 @@ Guide: [Rendering & Lights](guides/rendering-and-lights.md#environment).
 at.Water(size=(20, 20), deep_color=(0.01, 0.07, 0.11),
          shallow_color=(0.1, 0.42, 0.44), clarity=2.5, wave_height=0.12,
          wave_length=5.0, wave_speed=1.0, wave_direction=30.0, foam=0.6,
-         density=2.0, drag=1.0)
+         density=2.0, drag=1.0, endless=False)
 at.Water.preset("pond" | "lake" | "ocean" | "sea" | "default")
 ```
 
@@ -153,7 +160,9 @@ metres wide, centred on its `Transform`. Waves are Gerstner waves
 toward `wave_direction` degrees around +Y). Every quality preset draws it;
 `BEAUTIFUL` adds refraction of what's underneath, depth-based absorption
 (`clarity` is how many metres you can see down) and shoreline `foam`.
-It's also a volume of water for physics. Dynamic bodies in it float by
+`endless=True` (on the ocean and sea presets) continues the surface,
+flat and calm, out to the horizon; waves, foam and physics stay within
+`size`. It's also a volume of water for physics. Dynamic bodies in it float by
 buoyancy (`density` against their colliders' density, which defaults to
 1.0, so a default box floats half under) and are slowed by `drag`.
 All arguments are readable as properties, and it's saved in scene files.

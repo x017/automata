@@ -34,6 +34,9 @@ pub enum Field {
     LightAzimuth,
     /// Sun height above the horizon, degrees (90 = straight down).
     LightElevation,
+    /// The sun's hour on a simple day arc (6 = sunrise, 12 = highest,
+    /// 18 = sunset); sets azimuth and elevation together.
+    LightTimeOfDay,
     /// Environment sky ambient channel 0..3.
     EnvSky(u8),
     /// Environment ground ambient channel 0..3.
@@ -44,6 +47,16 @@ pub enum Field {
     EnvFogColor(u8),
     /// Environment exposure multiplier.
     EnvExposure,
+    /// Sky color straight up, channel 0..3.
+    EnvZenith(u8),
+    /// Sun disk diameter, degrees.
+    EnvSunSize,
+    /// Sun halo brightness.
+    EnvSunGlow,
+    /// Cloud cover 0..1.
+    EnvClouds,
+    /// Lens flare strength.
+    EnvLensFlare,
     /// Water surface width (X) and length (Z): index 0..2.
     WaterSize(u8),
     /// Water deep color channel 0..3.
@@ -121,6 +134,10 @@ pub enum Flag {
     ColliderEnabled,
     /// Environment distance fog on/off.
     EnvFog,
+    /// Environment sky dome with a sun on/off.
+    EnvSkyDome,
+    /// Water reaches the horizon.
+    WaterEndless,
     /// Audio source repeats.
     AudioLoop,
     /// Audio source starts when the game starts.
@@ -164,11 +181,17 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::LightAmbient => data.directional_light?.ambient,
         F::LightAzimuth => sun_angles(data.directional_light?.direction).0,
         F::LightElevation => sun_angles(data.directional_light?.direction).1,
+        F::LightTimeOfDay => time_of_day(sun_angles(data.directional_light?.direction).0),
         F::EnvSky(i) => data.environment?.sky_color[axis(i)],
         F::EnvGround(i) => data.environment?.ground_color[axis(i)],
         F::EnvBackground(i) => data.environment?.background[axis(i)],
         F::EnvFogColor(i) => data.environment?.fog_color[axis(i)],
         F::EnvExposure => data.environment?.exposure,
+        F::EnvZenith(i) => data.environment?.zenith_color[axis(i)],
+        F::EnvSunSize => data.environment?.sun_size,
+        F::EnvSunGlow => data.environment?.sun_glow,
+        F::EnvClouds => data.environment?.clouds,
+        F::EnvLensFlare => data.environment?.lens_flare,
         F::EnvFogDensity => data.environment?.fog_density,
         F::EnvFogStart => data.environment?.fog_start,
         F::WaterSize(i) => data.water?.size[usize::from(i.min(1))],
@@ -229,9 +252,12 @@ pub fn range(field: Field) -> (f32, f32) {
         | F::EnvGround(_)
         | F::EnvBackground(_)
         | F::EnvFogColor(_)
+        | F::EnvZenith(_)
+        | F::EnvClouds
         | F::WaterDeep(_)
         | F::WaterShallow(_)
         | F::WaterFoam => (0.0, 1.0),
+        F::EnvSunSize => (0.05, 20.0),
         F::WaterSize(_) => (0.1, 100_000.0),
         F::WaterClarity => (0.05, 100.0),
         F::WaterWaveHeight | F::WaterWaveSpeed => (0.0, 20.0),
@@ -239,6 +265,7 @@ pub fn range(field: Field) -> (f32, f32) {
         F::WaterDensity | F::WaterDrag => (0.0, 1_000.0),
         F::WaterWaveDirection | F::LightAzimuth => (-180.0, 180.0),
         F::LightElevation => (-89.0, 89.0),
+        F::LightTimeOfDay => (5.0, 19.0),
         F::EnvExposure => (0.0, 16.0),
         F::EnvFogDensity => (0.0, 2.0),
         F::EnvFogStart => (0.0, 100_000.0),
@@ -247,7 +274,7 @@ pub fn range(field: Field) -> (f32, f32) {
         }
         F::CameraFov => (1.0, 179.0),
         F::CharacterSlope => (0.0, 89.0),
-        F::AudioVolume => (0.0, 4.0),
+        F::AudioVolume | F::EnvSunGlow | F::EnvLensFlare => (0.0, 4.0),
         F::AudioPitch => (0.05, 4.0),
         F::AudioRange => (0.5, 10_000.0),
         F::CameraNear => (0.001, 1_000.0),
@@ -279,6 +306,10 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::EnvGround(_)
         | F::EnvBackground(_)
         | F::EnvFogColor(_)
+        | F::EnvZenith(_)
+        | F::EnvClouds
+        | F::EnvSunGlow
+        | F::EnvLensFlare
         | F::WaterDeep(_)
         | F::WaterShallow(_)
         | F::WaterFoam
@@ -345,11 +376,23 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
             }
             None => return false,
         },
+        F::LightTimeOfDay => match &mut data.directional_light {
+            Some(l) => {
+                let (az, el) = sun_at_hour(v);
+                l.direction = sun_direction(az, el);
+            }
+            None => return false,
+        },
         F::EnvSky(_)
         | F::EnvGround(_)
         | F::EnvBackground(_)
         | F::EnvFogColor(_)
         | F::EnvExposure
+        | F::EnvZenith(_)
+        | F::EnvSunSize
+        | F::EnvSunGlow
+        | F::EnvClouds
+        | F::EnvLensFlare
         | F::EnvFogDensity
         | F::EnvFogStart => match &mut data.environment {
             Some(env) => match field {
@@ -358,6 +401,11 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
                 F::EnvBackground(i) => env.background[axis(i)] = v,
                 F::EnvFogColor(i) => env.fog_color[axis(i)] = v,
                 F::EnvExposure => env.exposure = v,
+                F::EnvZenith(i) => env.zenith_color[axis(i)] = v,
+                F::EnvSunSize => env.sun_size = v,
+                F::EnvSunGlow => env.sun_glow = v,
+                F::EnvClouds => env.clouds = v,
+                F::EnvLensFlare => env.lens_flare = v,
                 F::EnvFogDensity => env.fog_density = v,
                 _ => env.fog_start = v,
             },
@@ -470,6 +518,8 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::ColliderSensor => data.collider_3d.as_ref()?.sensor,
         Flag::ColliderEnabled => data.collider_3d.as_ref()?.enabled,
         Flag::EnvFog => data.environment?.fog,
+        Flag::EnvSkyDome => data.environment?.sky,
+        Flag::WaterEndless => data.water?.endless,
         Flag::AudioLoop => data.audio_source.as_ref()?.looping,
         Flag::AudioPlayOnStart => data.audio_source.as_ref()?.play_on_start,
         Flag::AudioSpatial => data.audio_source.as_ref()?.spatial,
@@ -497,6 +547,14 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
         },
         Flag::EnvFog => match &mut data.environment {
             Some(env) => env.fog = !env.fog,
+            None => return false,
+        },
+        Flag::EnvSkyDome => match &mut data.environment {
+            Some(env) => env.sky = !env.sky,
+            None => return false,
+        },
+        Flag::WaterEndless => match &mut data.water {
+            Some(w) => w.endless = !w.endless,
             None => return false,
         },
         Flag::AudioLoop | Flag::AudioPlayOnStart | Flag::AudioSpatial => {
@@ -710,6 +768,25 @@ pub fn sun_angles(direction: glam::Vec3) -> (f32, f32) {
     (azimuth, elevation)
 }
 
+/// Highest the sun climbs on the time-of-day arc, degrees.
+const NOON_ELEVATION: f32 = 65.0;
+
+/// The sun's azimuth / elevation (degrees) at `hour` on a simple day arc:
+/// it rises at 6 from -X, peaks at noon toward +Z, and sets at 18 in +X.
+#[must_use]
+pub fn sun_at_hour(hour: f32) -> (f32, f32) {
+    let from_noon = hour - 12.0;
+    let azimuth = (from_noon * 15.0).clamp(-180.0, 180.0);
+    let elevation = NOON_ELEVATION * (std::f32::consts::PI * (hour - 6.0) / 12.0).sin();
+    (azimuth, elevation)
+}
+
+/// The hour (0..24) whose arc position has this azimuth.
+#[must_use]
+pub fn time_of_day(azimuth: f32) -> f32 {
+    (12.0 + azimuth / 15.0).rem_euclid(24.0)
+}
+
 /// The light travel direction for a sun at `azimuth` / `elevation` degrees.
 #[must_use]
 pub fn sun_direction(azimuth: f32, elevation: f32) -> glam::Vec3 {
@@ -775,6 +852,27 @@ mod tests {
         let mut d = entity();
         assert_eq!(get(&d, Field::LightAmbient), None);
         assert!(!set(&mut d, Field::LightAmbient, 0.5));
+    }
+
+    #[test]
+    fn time_of_day_moves_the_sun_across_the_sky() {
+        let mut d = entity();
+        crate::doc::ComponentKind::Light.add_to(&mut d);
+        assert!(set(&mut d, Field::LightTimeOfDay, 12.0));
+        assert!((get(&d, Field::LightElevation).unwrap() - NOON_ELEVATION).abs() < 1e-3);
+        assert!((get(&d, Field::LightTimeOfDay).unwrap() - 12.0).abs() < 1e-3);
+        assert!(set(&mut d, Field::LightTimeOfDay, 18.5));
+        assert!(
+            get(&d, Field::LightElevation).unwrap() < 0.0,
+            "set below the horizon"
+        );
+        assert!((get(&d, Field::LightTimeOfDay).unwrap() - 18.5).abs() < 1e-3);
+        assert!(set(&mut d, Field::LightTimeOfDay, 7.0));
+        let (az, el) = sun_angles(d.directional_light.unwrap().direction);
+        assert!(
+            az < -60.0 && el > 0.0 && el < 25.0,
+            "a low morning sun: {az} {el}"
+        );
     }
 
     #[test]

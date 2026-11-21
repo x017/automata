@@ -72,11 +72,14 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 // The surface slope at `xz`: every wave (no LOD; the CPU folded the
 // constants, so a wave is a dot, a sin and a cos), as -dh/dx, -dh/dz
 // with the Gerstner normal's y term in z.
-fn wave_slope(xz: vec2<f32>) -> vec3<f32> {
+// Waves shorter than a few pixels' footprint (`footprint` metres) fade
+// out: far away they'd only alias into moire.
+fn wave_slope(xz: vec2<f32>, footprint: f32) -> vec3<f32> {
     var n = vec3<f32>(0.0, 1.0, 0.0);
     for (var i = 0; i < 4; i = i + 1) {
         let wk = water.wave_k[i];
-        let wa = water.wave_amp[i];
+        let fade = clamp(2.0 - footprint * wk.w * 0.6366, 0.0, 1.0); // 4 / (2 pi)
+        let wa = water.wave_amp[i] * fade;
         let phase = dot(wk.xy, xz) - wk.z;
         let c = cos(phase);
         n = n - vec3<f32>(wk.x * wa.z * c, wk.w * wa.w * sin(phase), wk.y * wa.z * c);
@@ -169,6 +172,7 @@ fn water_shade(in: VertexOutput, shadow: f32) -> WaterShade {
     let v = to_cam / max(dist, 1e-4);
     let l = normalize(-light.direction.xyz);
     let t = water.params.z;
+    let footprint = length(fwidth(in.base_xz));
 
     // Normal: the full wave sum plus two scrolling, differently scaled and
     // rotated layers of baked ripples. Their mipmaps fade them with
@@ -178,7 +182,10 @@ fn water_shade(in: VertexOutput, shadow: f32) -> WaterShade {
     let r1 = textureSample(ripple_map, ripple_sampler, uv1);
     let r2 = textureSample(ripple_map, ripple_sampler, uv2);
     let ripple = (r1.xy * 2.0 - 1.0) * 0.2 + (r2.xy * 2.0 - 1.0) * 0.12;
-    var n = normalize(wave_slope(in.base_xz) - vec3<f32>(ripple.x, 0.0, ripple.y));
+    // Ripples fade with distance too (mipmaps alone keep a grainy sheen
+    // at grazing angles).
+    let ripple_fade = clamp(1.5 - footprint * 4.0, 0.0, 1.0);
+    var n = normalize(wave_slope(in.base_xz, footprint) - vec3<f32>(ripple.x, 0.0, ripple.y) * ripple_fade);
     out.foam_noise = r2.z;
     if dot(n, v) < 0.0 {
         n = normalize(n + v * (0.01 - dot(n, v)));

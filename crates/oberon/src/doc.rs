@@ -528,6 +528,9 @@ impl Document {
             ambient: 0.35,
             shadows: true,
         });
+        // The sky with its sun, haze and clouds, on the sun itself (a fresh
+        // scene shouldn't look like a void).
+        doc.entities[sun].data.environment = Some(automata_renderer::Environment::daylight());
         let ground = doc.add_entity_named("Ground");
         doc.entities[ground].data.transform = Some(TransformData {
             position: [0.0, -0.1, 0.0],

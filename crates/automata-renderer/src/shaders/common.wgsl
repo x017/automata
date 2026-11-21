@@ -29,6 +29,9 @@ struct LightUniform {
     camera_forward: vec4<f32>, // xyz: camera forward
     background: vec4<f32>,     // rgb: clear color (the horizon in reflections)
     screen: vec4<f32>,         // xy: viewport size (px), z: near, w: far
+    inv_view_proj: mat4x4<f32>, // clip -> world (the sky's view rays)
+    sky_zenith: vec4<f32>,     // rgb: sky color straight up, a: sky dome on
+    sky_sun: vec4<f32>,        // x: cos(sun radius), y: glow, z: clouds, w: lens flare
 };
 @group(3) @binding(0) var<uniform> light: LightUniform;
 @group(3) @binding(1) var shadow_map: texture_depth_2d_array;
@@ -161,9 +164,80 @@ fn hemi(n: vec3<f32>) -> vec3<f32> {
     return mix(light.ground_tonemap.rgb, light.sky_exposure.rgb, n.y * 0.5 + 0.5);
 }
 
+// --- Sky dome ---------------------------------------------------------------
+// One sky for everything: the dome behind the scene (sky.wgsl adds the sun
+// disk and clouds), reflections, and fog, so distant things fade into the
+// horizon behind them. The horizon is the clear color, the top
+// `sky_zenith`; around the sun a halo of three exponential lobes (wide
+// haze, glow, tight corona) that warms and spreads as the sun gets low.
+
+fn sky_on() -> bool {
+    return light.sky_zenith.a > 0.5;
+}
+
+fn sun_dir() -> vec3<f32> {
+    return normalize(-light.direction.xyz);
+}
+
+// exp(k (cos - 1)): 1 at the sun, falling off with angle; cheaper than pow.
+fn lobe(mu: f32, k: f32) -> f32 {
+    return exp(k * (mu - 1.0));
+}
+
+// How low the sun is: 0 high in the sky, 1 at (and below) the horizon.
+fn sun_low() -> f32 {
+    return 1.0 - clamp(sun_dir().y * 3.0, 0.0, 1.0);
+}
+
+// The sunlight's tint in the sky: reddens toward sunset.
+fn sun_tint() -> vec3<f32> {
+    let low = sun_low();
+    return light.color_ambient.rgb * mix(vec3<f32>(1.0), vec3<f32>(1.0, 0.55, 0.28), low * low);
+}
+
+// The sky along `d` without the sun disk or clouds.
+fn sky_dome(d: vec3<f32>) -> vec3<f32> {
+    let horizon = light.background.rgb;
+    let up = clamp(d.y, 0.0, 1.0);
+    // A thin bright band at the horizon, deepening upward.
+    var c = mix(horizon, light.sky_zenith.rgb, sqrt(sqrt(up)) * (2.0 - sqrt(sqrt(up))));
+    let l = sun_dir();
+    let mu = dot(d, l);
+    let glow = light.sky_sun.y;
+    let above = smoothstep(-0.25, 0.05, l.y); // the halo sets with the sun
+    let low = sun_low();
+    let tint = sun_tint();
+    let edge = 1.0 - up;
+    let edge4 = edge * edge * edge * edge;
+    c = c + tint * glow * above * (
+        lobe(mu, 6.0) * (0.12 + 0.35 * low * edge4)
+        + lobe(mu, 60.0) * 0.35
+        + lobe(mu, 900.0) * 1.2);
+    if d.y < 0.0 {
+        // Below the horizon: fade to a dim ground (only seen in reflections
+        // and over the edge of the world).
+        let ground = light.ground_tonemap.rgb * light.color_ambient.a;
+        c = mix(c, ground, 1.0 - exp(d.y * 12.0));
+    }
+    return c;
+}
+
+// The fog's color looking along `d`: the horizon in that direction (with
+// the sun's glow), so fogged geometry melts into the sky behind it.
+fn fog_tint(d: vec3<f32>) -> vec3<f32> {
+    if !sky_on() {
+        return light.fog.rgb;
+    }
+    let flat_dir = normalize(vec3<f32>(d.x, 0.03, d.z) + vec3<f32>(0.0, max(d.y, 0.0) * 0.3, 0.0));
+    return sky_dome(flat_dir);
+}
+
 // The sky seen along `d`, for reflections: horizon (the clear color) up to
 // the sky ambient color, down to the ground color.
 fn sky_radiance(d: vec3<f32>) -> vec3<f32> {
+    if sky_on() {
+        return sky_dome(d);
+    }
     let horizon = light.background.rgb;
     if d.y >= 0.0 {
         return mix(horizon, light.sky_exposure.rgb, sqrt(clamp(d.y, 0.0, 1.0)));
@@ -247,9 +321,10 @@ fn apply_fog(lit: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
     if density <= 0.0 {
         return lit;
     }
-    let dist = max(distance(camera.view_pos.xyz, world) - light.fog_params.x, 0.0);
+    let to_frag = world - camera.view_pos.xyz;
+    let dist = max(length(to_frag) - light.fog_params.x, 0.0);
     let f = clamp(1.0 - exp(-density * dist), 0.0, 1.0);
-    return mix(lit, light.fog.rgb, f);
+    return mix(lit, fog_tint(to_frag / max(length(to_frag), 1e-4)), f);
 }
 
 // Beautiful's fog adds sun scattering: it glows toward the sun.
@@ -261,8 +336,12 @@ fn apply_fog_scatter(lit: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
     let to_frag = world - camera.view_pos.xyz;
     let dist = max(length(to_frag) - light.fog_params.x, 0.0);
     let f = clamp(1.0 - exp(-density * dist), 0.0, 1.0);
+    let d = to_frag / max(length(to_frag), 1e-4);
+    if sky_on() {
+        return mix(lit, fog_tint(d), f);
+    }
     let l = normalize(-light.direction.xyz);
-    let s2 = max(dot(normalize(to_frag), l), 0.0);
+    let s2 = max(dot(d, l), 0.0);
     let s4 = s2 * s2;
     let s8 = s4 * s4;
     let s = s8 * s8;

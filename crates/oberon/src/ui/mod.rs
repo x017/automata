@@ -2191,6 +2191,7 @@ impl Ui {
             let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
             y = ny;
             if open {
+                y = self.float_row(canvas, x, y, w, e, "Time of Day", Field::LightTimeOfDay);
                 y = self.float_row(canvas, x, y, w, e, "Azimuth", Field::LightAzimuth);
                 y = self.float_row(canvas, x, y, w, e, "Elevation", Field::LightElevation);
                 y = self.vec3_row(canvas, x, y, w, e, "Direction", Field::LightDirection);
@@ -2220,7 +2221,7 @@ impl Ui {
             if open {
                 y = self.color_row(canvas, x, y, w, e, "Sky", ColorTarget::EnvSky);
                 y = self.color_row(canvas, x, y, w, e, "Ground", ColorTarget::EnvGround);
-                y = self.color_row(canvas, x, y, w, e, "Background", ColorTarget::EnvBackground);
+                y = self.sky_rows(canvas, x, y, w, e);
                 y = self.choice_row(canvas, x, y, w, e, "Tone Mapping", Choice::Tonemapping);
                 y = self.float_row(canvas, x, y, w, e, "Exposure", Field::EnvExposure);
                 y = self.flag_row(canvas, x, y, w, e, "Fog", Flag::EnvFog);
@@ -2247,6 +2248,7 @@ impl Ui {
                 y = self.float_row(canvas, x, y, w, e, "Foam", Field::WaterFoam);
                 y = self.float_row(canvas, x, y, w, e, "Density", Field::WaterDensity);
                 y = self.float_row(canvas, x, y, w, e, "Drag", Field::WaterDrag);
+                y = self.flag_row(canvas, x, y, w, e, "Endless", Flag::WaterEndless);
                 y += 6.0;
             }
         }
@@ -5058,7 +5060,7 @@ mod tests {
     #[test]
     fn graphics_tab_offers_scene_setup_and_tests() {
         let mut c = canvas();
-        let mut doc = Document::starter();
+        let doc = Document::starter();
         let mut ui = Ui::new();
         let insp = lay().inspector;
         // Click the "Graphics" tab (second tab in the right dock's title).
@@ -5071,11 +5073,14 @@ mod tests {
             insp.y + layout::TITLEBAR_H / 2.0,
         );
         assert_eq!(ui.right_tab, RightTab::Graphics);
-        // No environment yet: the panel offers to create one; with one, the
-        // presets emit SetEnvironment.
-        let _ = ui.frame(&mut c, &doc, Pointer::default(), None);
-        doc.create(CreateKind::Environment);
-        let env_id = doc.entities.last().unwrap().id;
+        // The starter's sky lives on its sun; the presets emit
+        // SetEnvironment for it.
+        let env_id = doc
+            .entities
+            .iter()
+            .find(|e| e.data.environment.is_some())
+            .expect("the starter has a sky")
+            .id;
         let _ = ui.frame(&mut c, &doc, Pointer::default(), None);
         // Quality buttons edit the preference directly.
         ui.prefs.graphics_quality = automata_renderer::GraphicsQuality::Low;
