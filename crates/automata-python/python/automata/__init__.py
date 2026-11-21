@@ -103,6 +103,7 @@ from ._core import (
     Screen,
     Transform,
     TransformRef,
+    Water,
     __version__,
     asset_root,
     set_asset_root,
@@ -123,6 +124,7 @@ Component = Union[
     CharacterController,
     CharacterVelocity,
     AudioSource,
+    Water,
 ]
 
 #: A per-frame update callback.
@@ -244,6 +246,7 @@ __all__ = [
     "Screen",
     "Transform",
     "TransformRef",
+    "Water",
     "__version__",
     "asset_root",
     "set_asset_root",

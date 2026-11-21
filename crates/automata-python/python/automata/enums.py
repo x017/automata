@@ -165,14 +165,16 @@ class GraphicsQuality(str, Enum):
     """Graphics quality preset for ``Game(graphics=...)``.
 
     ``LOW`` disables shadows; ``MEDIUM``/``HIGH``/``ULTRA`` raise the
-    shadow map resolution (1024/2048/4096). Finer-grained controls
-    (render scale, MSAA, per-effect toggles) build on this setting.
+    shadow map resolution (1024/2048/4096). ``BEAUTIFUL`` renders in HDR
+    with physically based lighting, soft cascaded shadows, refracting
+    water with foam, bloom and FXAA.
     """
 
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     ULTRA = "ultra"
+    BEAUTIFUL = "beautiful"
 
 
 __all__ = [

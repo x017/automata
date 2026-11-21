@@ -140,10 +140,63 @@ class MyGame(at.Game):
 | `GraphicsQuality.MEDIUM` | on | 1024px |
 | `GraphicsQuality.HIGH` (default) | on | 2048px |
 | `GraphicsQuality.ULTRA` | on | 4096px |
+| `GraphicsQuality.BEAUTIFUL` | soft | 4 cascades × 2048px |
 
 `LOW` is also a *style*: pure flat-color faces with no shadow shading reads
 as clean minimalism. Finer-grained knobs (render scale, MSAA) build on this
 same setting as the renderer grows.
+
+### Beautiful
+
+`BEAUTIFUL` is the showcase preset. On top of what `HIGH` does it adds:
+
+- **Soft cascaded shadows.** Four cascades split the view so shadows stay
+  sharp up close and still reach the horizon. Edges get a soft penumbra.
+- **Physically based light** (GGX specular) and fog that glows toward the
+  sun.
+- **HDR with bloom**: bright highlights (sun glints on water, white
+  surfaces in full sun) bleed softly. Then the tone mapper runs, and FXAA
+  smooths the edges.
+- **Refractive water** (see below).
+
+It's built to stay cheap. Each pixel filters only one shadow cascade (with
+dithering where cascades meet), bloom is a small dual-filter chain at half
+resolution and below, and nothing on the other presets got slower. It
+still costs more than `HIGH`. Offer it as a setting rather than the
+default for games that should run on low-end laptops.
+
+## Water
+
+```python
+scene.add(
+    at.Entity("lake")
+    .add(at.Transform(position=(0, -0.5, 0)))
+    .add(at.Water.preset("lake"))          # or at.Water(size=(60, 40), ...)
+)
+```
+
+A `Water` component draws an animated surface `size` metres wide on the
+entity's XZ plane: rolling waves plus scrolling ripples, sky reflection
+that strengthens at grazing angles (Fresnel), a sun glint, and light
+glowing through wave crests. It receives shadows.
+
+- On every preset below `BEAUTIFUL` it's alpha-blended over the scene.
+- On `BEAUTIFUL` it refracts what's underneath. It fades to `deep_color`
+  with depth (`clarity` is how many metres you can see down), and draws
+  `foam` where it meets the shore or objects.
+
+| Preset | Look |
+|---|---|
+| `"pond"` / `"lake"` | Low, short waves and clear water |
+| `"ocean"` / `"sea"` | 200 m wide, tall long waves, deep blue |
+| `"default"` | 20 m, gentle waves |
+
+![Water on High: blended over the scene, waves, sky reflection, sun glint and shadows](../../assets/rendering/water_high.jpg)
+
+![The same scene on Beautiful: refraction, depth absorption, soft cascaded shadows and bloom](../../assets/rendering/water_beautiful.jpg)
+
+The water surface has no collider. Add a physics box under it if things
+should float or stop.
 
 ## Mood recipes
 

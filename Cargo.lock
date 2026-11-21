@@ -269,6 +269,7 @@ dependencies = [
  "image",
  "naga",
  "pollster",
+ "ron",
  "serde",
  "thiserror 2.0.21",
  "tracing",

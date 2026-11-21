@@ -6,7 +6,8 @@
 //! record frames without a GPU.
 //!
 //! Render order within a frame: the frame is cleared to the clear color, 3D
-//! meshes are drawn (with depth testing), then 2D sprites are drawn on top.
+//! meshes are drawn (with depth testing), then water surfaces, then 2D
+//! sprites on top.
 
 use std::sync::Arc;
 
@@ -31,6 +32,8 @@ pub struct DrawList {
     pub(crate) environment: Option<crate::Environment>,
     pub(crate) sprites: Vec<Sprite>,
     pub(crate) meshes: Vec<MeshDraw>,
+    pub(crate) waters: Vec<crate::water::WaterDraw>,
+    pub(crate) time: Option<f32>,
 }
 
 impl DrawList {
@@ -110,6 +113,23 @@ impl DrawList {
         });
     }
 
+    /// Draws a water surface (see [`crate::Water`]) placed by `model`.
+    pub fn water(&mut self, water: crate::Water, model: Mat4) {
+        self.waters.push(crate::water::WaterDraw { water, model });
+    }
+
+    /// Sets the animation time (seconds) for time-driven effects such as
+    /// water waves. Without one, the renderer uses its own clock.
+    pub fn set_time(&mut self, seconds: f32) {
+        self.time = Some(seconds);
+    }
+
+    /// The number of water surfaces recorded so far.
+    #[must_use]
+    pub fn water_count(&self) -> usize {
+        self.waters.len()
+    }
+
     /// The number of sprite draw commands recorded so far.
     #[must_use]
     pub fn sprite_count(&self) -> usize {
@@ -161,6 +181,8 @@ impl DrawList {
         self.environment = None;
         self.sprites.clear();
         self.meshes.clear();
+        self.waters.clear();
+        self.time = None;
         // The clear color intentionally persists across frames.
     }
 }
@@ -180,6 +202,8 @@ impl Default for DrawList {
             environment: None,
             sprites: Vec::new(),
             meshes: Vec::new(),
+            waters: Vec::new(),
+            time: None,
         }
     }
 }

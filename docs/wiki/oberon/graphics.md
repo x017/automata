@@ -14,8 +14,10 @@ scene tuned here looks the same in Play and under `at.run_scene`.
 
 ## Renderer
 
-- **Quality**: Low / Medium / High / Ultra. This sets the shadow map
-  resolution, or turns shadows off on Low. It applies immediately.
+- **Quality**: Low / Medium / High / Ultra / Beautiful. This sets the
+  shadow map resolution, or turns shadows off on Low. Beautiful switches to
+  soft cascaded shadows, physically based light, HDR bloom, FXAA and
+  refractive water. It applies immediately.
 - **Stats** update live: frame time in ms, fps, meshes drawn, and shadow
   map size. Use them with the *400 cubes* test scene to see what your
   scene costs.
@@ -26,6 +28,12 @@ scene tuned here looks the same in Play and under `at.run_scene`.
 | Medium | on | 1024 px |
 | High (default) | on | 2048 px |
 | Ultra | on | 4096 px |
+| Beautiful | soft, 4 cascades | 4 × 2048 px |
+
+Water is a component. Use **Create → Water** (it starts as a calm pond)
+or select an entity and use **Add Component → Water** in the Inspector.
+It has fields for size, colors, clarity, waves and foam.
+See [Rendering & Lights](../guides/rendering-and-lights.md#water).
 
 ## Sun
 

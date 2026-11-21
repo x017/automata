@@ -45,7 +45,8 @@ pub struct EngineConfig {
 
     /// Graphics quality preset (shadow resolution, effects toggles).
     ///
-    /// Defaults to high; `low` disables shadows.
+    /// Defaults to high; `low` disables shadows, `beautiful` adds soft
+    /// cascaded shadows, PBR light, bloom and refractive water.
     pub graphics_quality: automata_renderer::GraphicsQuality,
 
     /// Fixed physics timestep, in seconds (default 1/60).

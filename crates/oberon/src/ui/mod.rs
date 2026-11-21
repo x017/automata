@@ -2159,6 +2159,24 @@ impl Ui {
                 y += 6.0;
             }
         }
+        if d.water.is_some() {
+            let kind = ComponentKind::Water;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                y = self.float_row(canvas, x, y, w, e, "Width", Field::WaterSize(0));
+                y = self.float_row(canvas, x, y, w, e, "Length", Field::WaterSize(1));
+                y = self.color_row(canvas, x, y, w, e, "Deep", ColorTarget::WaterDeep);
+                y = self.color_row(canvas, x, y, w, e, "Shallow", ColorTarget::WaterShallow);
+                y = self.float_row(canvas, x, y, w, e, "Clarity", Field::WaterClarity);
+                y = self.float_row(canvas, x, y, w, e, "Wave Height", Field::WaterWaveHeight);
+                y = self.float_row(canvas, x, y, w, e, "Wave Length", Field::WaterWaveLength);
+                y = self.float_row(canvas, x, y, w, e, "Wave Speed", Field::WaterWaveSpeed);
+                y = self.float_row(canvas, x, y, w, e, "Direction", Field::WaterWaveDirection);
+                y = self.float_row(canvas, x, y, w, e, "Foam", Field::WaterFoam);
+                y += 6.0;
+            }
+        }
         if d.rigid_body.is_some() {
             let kind = ComponentKind::RigidBody;
             let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);

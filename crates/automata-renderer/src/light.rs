@@ -3,6 +3,7 @@
 
 use glam::Vec3;
 
+use crate::shadow::{ShadowCascades, MAX_CASCADES};
 use crate::Environment;
 
 /// The default direction light travels: mostly downward, slightly tilted
@@ -65,38 +66,65 @@ impl Default for Sun {
 /// Layout (WGSL): a `vec4` direction, a `vec4` color (alpha = ambient),
 /// the light-space view-projection matrix, and a `vec4` of params
 /// (x = shadow flag, y = shadow-map texel size).
+/// Soft shadow penumbra width on the Beautiful preset (metres).
+const SOFT_SHADOW_RADIUS: f32 = 0.05;
+
+/// What the light uniform needs to know about the frame being drawn.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameView {
+    pub camera: crate::Camera3D,
+    pub viewport: (u32, u32),
+    /// The clear color (linear RGB): the horizon in reflections.
+    pub background: [f32; 3],
+    /// Animation time (seconds).
+    pub time: f32,
+    /// Beautiful preset: PBR lighting, soft shadows, HDR output.
+    pub beautiful: bool,
+}
+
+impl Default for FrameView {
+    fn default() -> Self {
+        Self {
+            camera: crate::Camera3D::default(),
+            viewport: (1, 1),
+            background: [0.0; 3],
+            time: 0.0,
+            beautiful: false,
+        }
+    }
+}
+
+/// The lit shaders' light uniform (`LightUniform` in common.wgsl).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct LightUniform {
     pub direction: [f32; 4],
     pub color_ambient: [f32; 4],
-    pub light_view_proj: [[f32; 4]; 4],
+    pub cascades: [[f32; 16]; MAX_CASCADES],
+    pub splits: [f32; 4],
+    pub cascade_texel: [f32; 4],
+    pub cascade_bias: [f32; 4],
     pub params: [f32; 4],
-    /// rgb: sky ambient, a: exposure.
     pub sky_exposure: [f32; 4],
-    /// rgb: ground ambient, a: tone mapping mode.
     pub ground_tonemap: [f32; 4],
-    /// rgb: fog color, a: fog density (0 = no fog).
     pub fog: [f32; 4],
-    /// x: fog start distance; yzw unused.
     pub fog_params: [f32; 4],
+    pub camera_forward: [f32; 4],
+    pub background: [f32; 4],
+    pub screen: [f32; 4],
 }
 
 impl LightUniform {
-    /// Packs a sun plus its light-space transform for the shader.
-    #[cfg(test)]
+    /// Packs the sun (`sun.shadows` gates shadow sampling), the
+    /// environment, the shadow cascades (`map_size` texels per side) and
+    /// the frame.
     #[must_use]
-    pub fn new(sun: &Sun, light_view_proj: glam::Mat4, shadow_texel: f32) -> Self {
-        Self::with_environment(sun, &Environment::default(), light_view_proj, shadow_texel)
-    }
-
-    /// Packs a sun, the frame's environment, and the light-space transform.
-    #[must_use]
-    pub fn with_environment(
+    pub fn new(
         sun: &Sun,
         env: &Environment,
-        light_view_proj: glam::Mat4,
-        shadow_texel: f32,
+        shadows: &ShadowCascades,
+        map_size: u32,
+        frame: &FrameView,
     ) -> Self {
         let direction = sun.normalized_direction();
         let density = if env.fog {
@@ -107,15 +135,46 @@ impl LightUniform {
         let [sr, sg, sb] = env.sky_color;
         let [gr, gg, gb] = env.ground_color;
         let [fr, fg, fb] = env.fog_color;
+        let [br, bg, bb] = frame.background;
+        let size = map_size.max(1) as f32;
+        let mut cascades = [[0.0; 16]; MAX_CASCADES];
+        let mut texel = [1.0; 4];
+        let mut bias = [0.0; 4];
+        for i in 0..MAX_CASCADES {
+            cascades[i] = shadows.view_proj[i].to_cols_array();
+            texel[i] = 2.0 * shadows.half_extent[i] / size;
+            // About a texel of world-space depth, in the map's NDC units.
+            bias[i] = texel[i] / shadows.depth_range[i].max(1e-3);
+        }
+        let cam = frame.camera;
+        let forward = (cam.target - cam.position)
+            .try_normalize()
+            .unwrap_or(Vec3::NEG_Z);
         Self {
+            direction: [direction.x, direction.y, direction.z, SOFT_SHADOW_RADIUS],
+            color_ambient: [sun.color[0], sun.color[1], sun.color[2], sun.ambient],
+            cascades,
+            splits: shadows.splits,
+            cascade_texel: texel,
+            cascade_bias: bias,
+            params: [
+                f32::from(u8::from(sun.shadows)),
+                1.0 / size,
+                shadows.count as f32,
+                f32::from(u8::from(frame.beautiful)),
+            ],
             sky_exposure: [sr, sg, sb, env.exposure.max(0.0)],
             ground_tonemap: [gr, gg, gb, env.tonemapping.index()],
             fog: [fr, fg, fb, density],
-            fog_params: [env.fog_start.max(0.0), 0.0, 0.0, 0.0],
-            direction: [direction.x, direction.y, direction.z, 0.0],
-            color_ambient: [sun.color[0], sun.color[1], sun.color[2], sun.ambient],
-            light_view_proj: light_view_proj.to_cols_array_2d(),
-            params: [f32::from(u8::from(sun.shadows)), shadow_texel, 0.0, 0.0],
+            fog_params: [env.fog_start.max(0.0), frame.time, 0.0, 0.0],
+            camera_forward: [forward.x, forward.y, forward.z, 0.0],
+            background: [br, bg, bb, 1.0],
+            screen: [
+                frame.viewport.0.max(1) as f32,
+                frame.viewport.1.max(1) as f32,
+                cam.near,
+                cam.far,
+            ],
         }
     }
 }
@@ -139,16 +198,36 @@ mod tests {
         assert!((sun.normalized_direction().length() - 1.0).abs() < 1e-5);
     }
 
+    fn scene_shadows() -> ShadowCascades {
+        ShadowCascades::fit_scene(
+            crate::shadow::Sphere {
+                center: Vec3::ZERO,
+                radius: 10.0,
+            },
+            Vec3::NEG_Y,
+            2048,
+        )
+    }
+
     #[test]
     fn uniform_packs_shadow_flag_and_texel() {
         let sun = Sun {
             shadows: true,
             ..Sun::new(Vec3::NEG_Y)
         };
-        let uniform = LightUniform::new(&sun, glam::Mat4::IDENTITY, 1.0 / 2048.0);
-        assert_eq!(uniform.params[0], 1.0);
-        assert!((uniform.params[1] - 1.0 / 2048.0).abs() < f32::EPSILON);
-        assert_eq!(uniform.direction[1], -1.0);
+        let u = LightUniform::new(
+            &sun,
+            &Environment::default(),
+            &scene_shadows(),
+            2048,
+            &FrameView::default(),
+        );
+        assert_eq!(u.params[0], 1.0);
+        assert!((u.params[1] - 1.0 / 2048.0).abs() < f32::EPSILON);
+        assert_eq!(u.params[2], 1.0, "one cascade");
+        assert_eq!(u.params[3], 0.0, "forward path");
+        assert_eq!(u.direction[1], -1.0);
+        assert!(u.cascade_texel[0] > 0.0 && u.cascade_bias[0] > 0.0);
     }
 
     #[test]
@@ -157,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn uniform_packs_environment() {
+    fn uniform_packs_environment_and_frame() {
         let env = Environment {
             fog: true,
             fog_density: 0.5,
@@ -165,11 +244,26 @@ mod tests {
             tonemapping: crate::Tonemapping::Aces,
             ..Environment::default()
         };
-        let u = LightUniform::with_environment(&Sun::default(), &env, glam::Mat4::IDENTITY, 1.0);
+        let frame = FrameView {
+            viewport: (640, 480),
+            time: 3.0,
+            beautiful: true,
+            ..FrameView::default()
+        };
+        let u = LightUniform::new(&Sun::default(), &env, &scene_shadows(), 2048, &frame);
         assert!((u.fog[3] - 0.5).abs() < f32::EPSILON);
         assert!((u.sky_exposure[3] - 2.0).abs() < f32::EPSILON);
         assert!((u.ground_tonemap[3] - 2.0).abs() < f32::EPSILON);
-        let off = LightUniform::new(&Sun::default(), glam::Mat4::IDENTITY, 1.0);
+        assert_eq!(u.params[3], 1.0);
+        assert_eq!(u.fog_params[1], 3.0);
+        assert_eq!(&u.screen[..2], &[640.0, 480.0]);
+        let off = LightUniform::new(
+            &Sun::default(),
+            &Environment::default(),
+            &scene_shadows(),
+            2048,
+            &FrameView::default(),
+        );
         assert!(
             off.fog[3].abs() < f32::EPSILON,
             "fog disabled packs density 0"

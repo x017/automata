@@ -44,6 +44,24 @@ pub enum Field {
     EnvFogColor(u8),
     /// Environment exposure multiplier.
     EnvExposure,
+    /// Water surface width (X) and length (Z): index 0..2.
+    WaterSize(u8),
+    /// Water deep color channel 0..3.
+    WaterDeep(u8),
+    /// Water shallow color channel 0..3.
+    WaterShallow(u8),
+    /// Water clarity: how deep you can see (m).
+    WaterClarity,
+    /// Wave height (m).
+    WaterWaveHeight,
+    /// Wavelength of the main swell (m).
+    WaterWaveLength,
+    /// Wave speed multiplier.
+    WaterWaveSpeed,
+    /// Wind direction the waves travel (degrees).
+    WaterWaveDirection,
+    /// Shoreline foam amount.
+    WaterFoam,
     /// Environment fog density per unit.
     EnvFogDensity,
     /// Distance where the fog starts.
@@ -149,6 +167,15 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::EnvExposure => data.environment?.exposure,
         F::EnvFogDensity => data.environment?.fog_density,
         F::EnvFogStart => data.environment?.fog_start,
+        F::WaterSize(i) => data.water?.size[usize::from(i.min(1))],
+        F::WaterDeep(i) => data.water?.deep_color[axis(i)],
+        F::WaterShallow(i) => data.water?.shallow_color[axis(i)],
+        F::WaterClarity => data.water?.clarity,
+        F::WaterWaveHeight => data.water?.wave_height,
+        F::WaterWaveLength => data.water?.wave_length,
+        F::WaterWaveSpeed => data.water?.wave_speed,
+        F::WaterWaveDirection => data.water?.wave_direction,
+        F::WaterFoam => data.water?.foam,
         F::CameraPosition(i) => data.camera_3d?.position.to_array()[axis(i)],
         F::CameraTarget(i) => data.camera_3d?.target.to_array()[axis(i)],
         F::CameraFov => data.camera_3d?.fov_y_degrees,
@@ -195,8 +222,15 @@ pub fn range(field: Field) -> (f32, f32) {
         | F::EnvSky(_)
         | F::EnvGround(_)
         | F::EnvBackground(_)
-        | F::EnvFogColor(_) => (0.0, 1.0),
-        F::LightAzimuth => (-180.0, 180.0),
+        | F::EnvFogColor(_)
+        | F::WaterDeep(_)
+        | F::WaterShallow(_)
+        | F::WaterFoam => (0.0, 1.0),
+        F::WaterSize(_) => (0.1, 100_000.0),
+        F::WaterClarity => (0.05, 100.0),
+        F::WaterWaveHeight | F::WaterWaveSpeed => (0.0, 20.0),
+        F::WaterWaveLength => (0.1, 1_000.0),
+        F::WaterWaveDirection | F::LightAzimuth => (-180.0, 180.0),
         F::LightElevation => (-89.0, 89.0),
         F::EnvExposure => (0.0, 16.0),
         F::EnvFogDensity => (0.0, 2.0),
@@ -223,9 +257,12 @@ pub fn range(field: Field) -> (f32, f32) {
 pub fn scrub_step(field: Field) -> f32 {
     use Field as F;
     match field {
-        F::Rotation(_) | F::CameraFov | F::CharacterSlope | F::LightAzimuth | F::LightElevation => {
-            0.5
-        }
+        F::Rotation(_)
+        | F::CameraFov
+        | F::CharacterSlope
+        | F::LightAzimuth
+        | F::LightElevation
+        | F::WaterWaveDirection => 0.5,
         F::EnvFogDensity => 0.0005,
         F::MeshColor(_)
         | F::LightColor(_)
@@ -235,6 +272,10 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::EnvGround(_)
         | F::EnvBackground(_)
         | F::EnvFogColor(_)
+        | F::WaterDeep(_)
+        | F::WaterShallow(_)
+        | F::WaterFoam
+        | F::WaterWaveHeight
         | F::AudioVolume
         | F::AudioPitch
         | F::EnvExposure => 0.005,
@@ -312,6 +353,28 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
                 F::EnvExposure => env.exposure = v,
                 F::EnvFogDensity => env.fog_density = v,
                 _ => env.fog_start = v,
+            },
+            None => return false,
+        },
+        F::WaterSize(_)
+        | F::WaterDeep(_)
+        | F::WaterShallow(_)
+        | F::WaterClarity
+        | F::WaterWaveHeight
+        | F::WaterWaveLength
+        | F::WaterWaveSpeed
+        | F::WaterWaveDirection
+        | F::WaterFoam => match &mut data.water {
+            Some(water) => match field {
+                F::WaterSize(i) => water.size[usize::from(i.min(1))] = v,
+                F::WaterDeep(i) => water.deep_color[axis(i)] = v,
+                F::WaterShallow(i) => water.shallow_color[axis(i)] = v,
+                F::WaterClarity => water.clarity = v,
+                F::WaterWaveHeight => water.wave_height = v,
+                F::WaterWaveLength => water.wave_length = v,
+                F::WaterWaveSpeed => water.wave_speed = v,
+                F::WaterWaveDirection => water.wave_direction = v,
+                _ => water.foam = v,
             },
             None => return false,
         },
@@ -720,6 +783,25 @@ mod tests {
             d.directional_light.unwrap().direction.y < 0.0,
             "light shines down"
         );
+    }
+
+    #[test]
+    fn water_fields_edit_the_component() {
+        let mut d = EntityData::default();
+        assert_eq!(get(&d, Field::WaterWaveHeight), None);
+        crate::doc::ComponentKind::Water.add_to(&mut d);
+        assert!(set(&mut d, Field::WaterWaveHeight, 0.5));
+        assert!(set(&mut d, Field::WaterSize(1), 40.0));
+        assert!(
+            set(&mut d, Field::WaterShallow(0), 2.0),
+            "clamped, not rejected"
+        );
+        let water = d.water.unwrap();
+        assert!((water.wave_height - 0.5).abs() < f32::EPSILON);
+        assert!((water.size[1] - 40.0).abs() < f32::EPSILON);
+        assert!((water.shallow_color[0] - 1.0).abs() < f32::EPSILON);
+        crate::doc::ComponentKind::Water.remove_from(&mut d);
+        assert!(!set(&mut d, Field::WaterFoam, 0.5));
     }
 
     #[test]

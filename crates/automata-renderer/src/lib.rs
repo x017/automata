@@ -19,10 +19,13 @@ mod light;
 mod material;
 mod mesh;
 mod pipeline;
+mod post;
 mod quality;
 mod renderer;
+mod shadow;
 pub mod text;
 mod texture;
+mod water;
 
 pub use camera::{Camera2D, Camera3D};
 pub use context::RenderContext;
@@ -36,6 +39,7 @@ pub use quality::GraphicsQuality;
 pub use renderer::Renderer;
 pub use text::{TextAlign, TextAtlas, TextStyle};
 pub use texture::Texture;
+pub use water::Water;
 
 pub use wgpu::Color;
 pub use wgpu::Texture as RenderTarget;

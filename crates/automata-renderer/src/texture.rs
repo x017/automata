@@ -113,6 +113,28 @@ impl Texture {
         rgba: &[u8],
         pixelated: bool,
     ) -> Self {
+        Self::from_rgba_mipmapped_as(
+            device,
+            queue,
+            width,
+            height,
+            rgba,
+            pixelated,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        )
+    }
+
+    /// [`Texture::from_rgba_mipmapped`] with an explicit format (e.g.
+    /// `Rgba8Unorm` for data textures such as normal maps).
+    pub(crate) fn from_rgba_mipmapped_as(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+        pixelated: bool,
+        format: wgpu::TextureFormat,
+    ) -> Self {
         assert_eq!(
             rgba.len(),
             (width * height * 4) as usize,
@@ -129,7 +151,7 @@ impl Texture {
             mip_level_count: levels,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -174,7 +196,11 @@ impl Texture {
             },
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::MipmapFilterMode::Linear,
-            anisotropy_clamp: if pixelated { 1 } else { 8 },
+            anisotropy_clamp: if pixelated || format == wgpu::TextureFormat::Rgba8Unorm {
+                1
+            } else {
+                8
+            },
             ..wgpu::SamplerDescriptor::default()
         });
         Self {

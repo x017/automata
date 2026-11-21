@@ -137,6 +137,24 @@ distance fog. All arguments are readable as properties. Unknown tone
 mapping or preset names raise `ValueError`. It's saved in scene files.
 Guide: [Rendering & Lights](guides/rendering-and-lights.md#environment).
 
+### Water
+
+```python
+at.Water(size=(20, 20), deep_color=(0.01, 0.07, 0.11),
+         shallow_color=(0.1, 0.42, 0.44), clarity=2.5, wave_height=0.12,
+         wave_length=5.0, wave_speed=1.0, wave_direction=30.0, foam=0.6)
+at.Water.preset("pond" | "lake" | "ocean" | "sea" | "default")
+```
+
+A rectangle of animated water on the entity's local XZ plane, `size`
+metres wide, centred on its `Transform`. Waves are Gerstner waves
+(`wave_height` crest to rest, `wave_length` of the main wave, travelling
+toward `wave_direction` degrees around +Y). Every quality preset draws it;
+`BEAUTIFUL` adds refraction of what's underneath, depth-based absorption
+(`clarity` is how many metres you can see down) and shoreline `foam`.
+All arguments are readable as properties, and it's saved in scene files.
+Guide: [Rendering & Lights](guides/rendering-and-lights.md#water).
+
 ### Physics components
 
 ```text
@@ -314,7 +332,7 @@ All are `str` enums — members work anywhere the plain string does.
 | `at.MouseButton` | `LEFT`, `RIGHT`, `MIDDLE`, `BACK`, `FORWARD` | 5 |
 | `at.GamepadButton` | `SOUTH`, `EAST`, `NORTH`, `WEST`, triggers, thumbs, d-pad, `START`, `SELECT`… | 19 |
 | `at.GamepadAxis` | `LEFT_STICK_X/Y`, `RIGHT_STICK_X/Y`, `LEFT_Z`, `RIGHT_Z`, `DPAD_X/Y` | 8 |
-| `at.GraphicsQuality` | `LOW` (no shadows), `MEDIUM` (1024), `HIGH` (2048), `ULTRA` (4096) | 4 |
+| `at.GraphicsQuality` | `LOW` (no shadows), `MEDIUM` (1024), `HIGH` (2048), `ULTRA` (4096), `BEAUTIFUL` (soft cascaded shadows, PBR, bloom, refractive water) | 5 |
 
 ## Behaviour scripts (`automata.run_scene`)
 

@@ -130,6 +130,8 @@ pub enum CreateKind {
     Camera,
     /// Scene look settings (sky, fog, exposure, tone mapping).
     Environment,
+    /// An animated water surface.
+    Water,
     /// A cube with a dynamic rigid body and a box collider.
     PhysicsCube,
     /// A playable character: WASD / arrows to move, Space to jump in Play
@@ -139,13 +141,14 @@ pub enum CreateKind {
 
 impl CreateKind {
     /// Every kind, in menu order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Empty,
         Self::Cube,
         Self::Plane,
         Self::Light,
         Self::Camera,
         Self::Environment,
+        Self::Water,
         Self::PhysicsCube,
         Self::Player,
     ];
@@ -160,6 +163,7 @@ impl CreateKind {
             Self::Light => "Directional Light",
             Self::Camera => "Camera",
             Self::Environment => "Environment",
+            Self::Water => "Water",
             Self::PhysicsCube => "Physics Cube",
             Self::Player => "Player",
         }
@@ -177,6 +181,8 @@ pub enum ComponentKind {
     Camera,
     /// Scene look: ambient, fog, exposure, tone mapping.
     Environment,
+    /// Animated water surface.
+    Water,
     /// Rigid body.
     RigidBody,
     /// 3D collider.
@@ -189,11 +195,12 @@ pub enum ComponentKind {
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Mesh,
         Self::Light,
         Self::Camera,
         Self::Environment,
+        Self::Water,
         Self::RigidBody,
         Self::Collider,
         Self::Character,
@@ -208,6 +215,7 @@ impl ComponentKind {
             Self::Light => "Directional Light",
             Self::Camera => "Camera",
             Self::Environment => "Environment",
+            Self::Water => "Water",
             Self::RigidBody => "Rigidbody",
             Self::Collider => "Collider",
             Self::Character => "Character Controller",
@@ -223,6 +231,7 @@ impl ComponentKind {
             Self::Light => data.directional_light.is_some(),
             Self::Camera => data.camera_3d.is_some(),
             Self::Environment => data.environment.is_some(),
+            Self::Water => data.water.is_some(),
             Self::RigidBody => data.rigid_body.is_some(),
             Self::Collider => data.collider_3d.is_some(),
             Self::Character => data.character_controller.is_some(),
@@ -254,6 +263,10 @@ impl ComponentKind {
             Self::Environment => {
                 data.environment
                     .get_or_insert_with(automata_renderer::Environment::daylight);
+            }
+            Self::Water => {
+                data.water
+                    .get_or_insert_with(automata_renderer::Water::pond);
             }
             Self::RigidBody => {
                 data.rigid_body
@@ -295,6 +308,7 @@ impl ComponentKind {
             Self::Light => dst.directional_light = src.directional_light,
             Self::Camera => dst.camera_3d = src.camera_3d,
             Self::Environment => dst.environment = src.environment,
+            Self::Water => dst.water = src.water,
             Self::RigidBody => dst.rigid_body.clone_from(&src.rigid_body),
             Self::Collider => dst.collider_3d.clone_from(&src.collider_3d),
             Self::Character => {
@@ -313,6 +327,7 @@ impl ComponentKind {
             Self::Light => data.directional_light = None,
             Self::Camera => data.camera_3d = None,
             Self::Environment => data.environment = None,
+            Self::Water => data.water = None,
             Self::RigidBody => data.rigid_body = None,
             Self::Collider => data.collider_3d = None,
             Self::Character => {
@@ -1017,6 +1032,9 @@ impl Document {
             }
             CreateKind::Environment => {
                 ComponentKind::Environment.add_to(&mut data);
+            }
+            CreateKind::Water => {
+                ComponentKind::Water.add_to(&mut data);
             }
             CreateKind::PhysicsCube => {
                 if let Some(t) = &mut data.transform {

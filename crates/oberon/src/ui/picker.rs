@@ -26,6 +26,10 @@ pub enum ColorTarget {
     EnvBackground,
     /// Environment fog color (RGB).
     EnvFog,
+    /// Water deep color (RGB).
+    WaterDeep,
+    /// Water shallow color (RGB).
+    WaterShallow,
     /// A custom `Color` attribute, by key index in sorted order.
     Attribute(usize),
 }
@@ -41,6 +45,8 @@ impl ColorTarget {
             Self::EnvGround => (0..3).map(Field::EnvGround).collect(),
             Self::EnvBackground => (0..3).map(Field::EnvBackground).collect(),
             Self::EnvFog => (0..3).map(Field::EnvFogColor).collect(),
+            Self::WaterDeep => (0..3).map(Field::WaterDeep).collect(),
+            Self::WaterShallow => (0..3).map(Field::WaterShallow).collect(),
             Self::Attribute(_) => Vec::new(),
         }
     }

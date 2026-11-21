@@ -241,6 +241,11 @@ impl Ui {
         y += layout::ROW_STEP;
         let shadow = match self.prefs.graphics_quality {
             GraphicsQuality::Low => "Shadows off".to_string(),
+            q if q.is_beautiful() => format!(
+                "{}×{} px soft shadows · HDR bloom · FXAA",
+                q.shadow_cascades(),
+                q.shadow_map_size()
+            ),
             q => format!("{} px shadow map", q.shadow_map_size()),
         };
         let s = self.stats;

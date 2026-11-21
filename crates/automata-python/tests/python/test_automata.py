@@ -1027,6 +1027,28 @@ def test_environment_component_and_presets():
     assert back.to_ron() == text
 
 
+def test_water_component_and_presets():
+    water = at.Water(size=(40.0, 30.0), wave_height=0.3)
+    assert water.size == pytest.approx((40.0, 30.0))
+    assert water.wave_height == pytest.approx(0.3)
+    assert water.foam == pytest.approx(at.Water().foam)
+    ocean = at.Water.preset("ocean")
+    assert ocean.wave_height > at.Water.preset("pond").wave_height
+    with pytest.raises(ValueError):
+        at.Water.preset("puddle")
+
+    scene = at.Scene().add(at.Entity("sea").add(at.Transform()).add(ocean))
+    text = scene.to_ron()
+    assert "water" in text
+    assert at.Scene.from_ron(text).to_ron() == text
+
+    # A scene with water runs on every preset, Beautiful included.
+    for quality in ("low", "beautiful"):
+        game = at.Game(headless=True, graphics=quality, fixed_delta=1 / 60)
+        game.load_scene(at.Scene().add(at.Entity("sea").add(at.Transform()).add(ocean)))
+        assert game.run(lambda ctx: None, max_frames=2) == 2
+
+
 def test_scene_ron_round_trip_staged():
     scene = _kitchen_sink_scene()
     text = scene.to_ron()

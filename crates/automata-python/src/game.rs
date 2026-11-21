@@ -41,7 +41,7 @@ impl PyGame {
     /// `clear_color=(r, g, b, a)` sets the color the window is cleared to
     /// each frame (components 0.0..=1.0); the default is a very dark blue.
     /// `graphics` is a quality preset: `"low"` (no shadows), `"medium"`,
-    /// `"high"` (default), or `"ultra"`. `fixed_delta` (headless only)
+    /// `"high"` (default), `"ultra"`, or `"beautiful"`. `fixed_delta` (headless only)
     /// advances every frame by exactly that many seconds instead of the
     /// measured time: deterministic tests, and benchmarks where a slow frame
     /// mustn't trigger catch-up physics steps.
@@ -103,10 +103,11 @@ impl PyGame {
                 "medium" => automata_renderer::GraphicsQuality::Medium,
                 "high" => automata_renderer::GraphicsQuality::High,
                 "ultra" => automata_renderer::GraphicsQuality::Ultra,
+                "beautiful" => automata_renderer::GraphicsQuality::Beautiful,
                 other => {
                     return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "unknown graphics quality {other:?}; \
-                         expected \"low\", \"medium\", \"high\", or \"ultra\""
+                        "unknown graphics quality {other:?}; expected \"low\", \
+                         \"medium\", \"high\", \"ultra\", or \"beautiful\""
                     )));
                 }
             };

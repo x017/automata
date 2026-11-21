@@ -10,6 +10,7 @@
 
 use automata_renderer::{
     Camera2D, Camera3D, DrawList, Environment, Material, Mesh, MeshData, Sprite, Sun, Texture,
+    Water,
 };
 use std::sync::Arc;
 
@@ -189,6 +190,11 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
                 None => draw.mesh(mesh, model, material),
             }
         }
+    }
+
+    // Water surfaces: centred on their transform, waves in its local XZ.
+    for (water, global) in &mut world.query::<(&Water, &GlobalTransform)>() {
+        draw.water(*water, global.matrix());
     }
 
     for (renderer, global) in &mut world.query::<(&SpriteRenderer, &GlobalTransform)>() {
@@ -448,6 +454,17 @@ mod tests {
         scene.spawn((Environment::night(),));
         record_draw_list(scene.world(), &mut draw);
         assert_eq!(draw.environment(), Some(Environment::night()));
+    }
+
+    #[test]
+    fn water_component_records_a_water_draw() {
+        let mut scene = Scene::new();
+        scene.spawn((Water::pond(),));
+        scene.spawn((Water::ocean(), crate::Transform::default()));
+        crate::transform::propagate_transforms(scene.world_mut());
+        let mut draw = DrawList::new();
+        record_draw_list(scene.world(), &mut draw);
+        assert_eq!(draw.water_count(), 1, "only water with a transform draws");
     }
 
     #[test]

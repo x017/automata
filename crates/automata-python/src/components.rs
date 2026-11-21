@@ -2,7 +2,7 @@
 //! [`crate::scene::PyEntity`] and materialized into ECS components when the
 //! scene loads.
 
-use automata_renderer::{Camera2D, Camera3D, Environment, Tonemapping};
+use automata_renderer::{Camera2D, Camera3D, Environment, Tonemapping, Water};
 use automata_scene::{DirectionalLight, Transform};
 use glam::{EulerRot, Quat, Vec2, Vec3};
 use pyo3::exceptions::PyTypeError;
@@ -415,6 +415,158 @@ impl PyEnvironment {
     }
 }
 
+/// An animated water surface, centred on its entity's transform: Gerstner
+/// waves, sky reflections and sun glints on every preset; refraction,
+/// depth-based color and shoreline foam on ``"beautiful"`` graphics.
+///
+/// ```python
+/// scene.add(at.Entity("lake").add(at.Transform(position=(0, -0.5, 0)))
+///                            .add(at.Water.preset("pond")))
+/// scene.add(at.Entity("sea").add(at.Transform()).add(at.Water(
+///     size=(300, 300), wave_height=0.6, wave_length=18.0)))
+/// ```
+#[pyclass(name = "Water", module = "automata._core", frozen)]
+#[derive(Debug, Clone, Copy)]
+pub struct PyWater {
+    inner: Water,
+}
+
+#[pymethods]
+impl PyWater {
+    /// Creates a water surface; unspecified settings use the defaults.
+    #[new]
+    #[pyo3(signature = (
+        size=None,
+        deep_color=None,
+        shallow_color=None,
+        clarity=None,
+        wave_height=None,
+        wave_length=None,
+        wave_speed=None,
+        wave_direction=None,
+        foam=None,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        size: Option<(f32, f32)>,
+        deep_color: Option<(f32, f32, f32)>,
+        shallow_color: Option<(f32, f32, f32)>,
+        clarity: Option<f32>,
+        wave_height: Option<f32>,
+        wave_length: Option<f32>,
+        wave_speed: Option<f32>,
+        wave_direction: Option<f32>,
+        foam: Option<f32>,
+    ) -> Self {
+        let d = Water::default();
+        let rgb = |c: (f32, f32, f32)| [c.0, c.1, c.2];
+        Self {
+            inner: Water {
+                size: size.map_or(d.size, |(w, l)| [w, l]),
+                deep_color: deep_color.map_or(d.deep_color, rgb),
+                shallow_color: shallow_color.map_or(d.shallow_color, rgb),
+                clarity: clarity.unwrap_or(d.clarity),
+                wave_height: wave_height.unwrap_or(d.wave_height),
+                wave_length: wave_length.unwrap_or(d.wave_length),
+                wave_speed: wave_speed.unwrap_or(d.wave_speed),
+                wave_direction: wave_direction.unwrap_or(d.wave_direction),
+                foam: foam.unwrap_or(d.foam),
+            },
+        }
+    }
+
+    /// A named surface: ``"pond"`` (calm, clear) or ``"ocean"`` (big swell).
+    #[staticmethod]
+    fn preset(name: &str) -> PyResult<Self> {
+        let inner = match name.to_ascii_lowercase().as_str() {
+            "pond" | "lake" => Water::pond(),
+            "ocean" | "sea" => Water::ocean(),
+            "default" => Water::default(),
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unknown water preset {other:?}; expected 'pond' or 'ocean'"
+                )))
+            }
+        };
+        Ok(Self { inner })
+    }
+
+    /// Width (X) and length (Z) in world units.
+    #[getter]
+    fn size(&self) -> (f32, f32) {
+        (self.inner.size[0], self.inner.size[1])
+    }
+
+    /// Color of deep water (linear RGB).
+    #[getter]
+    fn deep_color(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.deep_color;
+        (r, g, b)
+    }
+
+    /// Tint of shallow water and wave crests (linear RGB).
+    #[getter]
+    fn shallow_color(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.shallow_color;
+        (r, g, b)
+    }
+
+    /// How deep you can see into the water (world units).
+    #[getter]
+    fn clarity(&self) -> f32 {
+        self.inner.clarity
+    }
+
+    /// Height of the main waves (world units).
+    #[getter]
+    fn wave_height(&self) -> f32 {
+        self.inner.wave_height
+    }
+
+    /// Wavelength of the main swell (world units).
+    #[getter]
+    fn wave_length(&self) -> f32 {
+        self.inner.wave_length
+    }
+
+    /// Wave speed multiplier.
+    #[getter]
+    fn wave_speed(&self) -> f32 {
+        self.inner.wave_speed
+    }
+
+    /// Direction the waves travel, in degrees around +Y.
+    #[getter]
+    fn wave_direction(&self) -> f32 {
+        self.inner.wave_direction
+    }
+
+    /// Shoreline foam amount (0..1).
+    #[getter]
+    fn foam(&self) -> f32 {
+        self.inner.foam
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Water(size=({:.1}, {:.1}), wave_height={:.2})",
+            self.inner.size[0], self.inner.size[1], self.inner.wave_height
+        )
+    }
+}
+
+impl PyWater {
+    /// The engine component value.
+    pub fn inner(&self) -> Water {
+        self.inner
+    }
+
+    /// Wraps an engine water surface for Python.
+    pub fn from_inner(inner: Water) -> Self {
+        Self { inner }
+    }
+}
+
 /// An orthographic 2D camera. The first entity carrying one becomes the
 /// frame's 2D camera.
 #[pyclass(name = "Camera2D", module = "automata._core", frozen)]
@@ -650,6 +802,8 @@ pub enum StagedComponent {
     DirectionalLight(DirectionalLight),
     /// Scene look (ambient, fog, tone mapping).
     Environment(Environment),
+    /// Animated water surface.
+    Water(Water),
     /// A sound the entity plays.
     AudioSource(automata_core::AudioSource),
 }
@@ -690,6 +844,9 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(e) = obj.cast::<PyEnvironment>() {
         return Ok(StagedComponent::Environment(e.get().inner()));
     }
+    if let Ok(w) = obj.cast::<PyWater>() {
+        return Ok(StagedComponent::Water(w.get().inner()));
+    }
     if let Ok(a) = obj.cast::<PyAudioSource>() {
         return Ok(StagedComponent::AudioSource(a.get().inner.clone()));
     }
@@ -697,7 +854,7 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
-         MeshRenderer, DirectionalLight, Environment, or AudioSource"
+         MeshRenderer, DirectionalLight, Environment, Water, or AudioSource"
     )))
 }
 

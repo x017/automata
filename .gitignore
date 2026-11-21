@@ -12,6 +12,9 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+# The extension module `maturin develop` builds into the package in place.
+crates/automata-python/python/automata/_core*.so
+crates/automata-python/python/automata/_core*.pyd
 
 # Environment
 .env

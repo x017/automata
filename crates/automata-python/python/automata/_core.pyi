@@ -167,6 +167,39 @@ class Environment:
         """``"neutral"``, ``"daylight"``, ``"dusk"``, or ``"night"``."""
         ...
 
+class Water:
+    """An animated water surface centred on its entity's transform.
+
+    Waves, sky reflections and sun glints on every preset; refraction,
+    depth-based color and shoreline foam on ``"beautiful"`` graphics.
+    """
+
+    size: tuple[float, float]
+    deep_color: tuple[float, float, float]
+    shallow_color: tuple[float, float, float]
+    clarity: float
+    wave_height: float
+    wave_length: float
+    wave_speed: float
+    wave_direction: float
+    foam: float
+    def __init__(
+        self,
+        size: Optional[tuple[float, float]] = None,
+        deep_color: Optional[tuple[float, float, float]] = None,
+        shallow_color: Optional[tuple[float, float, float]] = None,
+        clarity: Optional[float] = None,
+        wave_height: Optional[float] = None,
+        wave_length: Optional[float] = None,
+        wave_speed: Optional[float] = None,
+        wave_direction: Optional[float] = None,
+        foam: Optional[float] = None,
+    ) -> None: ...
+    @staticmethod
+    def preset(name: str) -> Water:
+        """``"pond"`` or ``"ocean"``."""
+        ...
+
 class Entity:
     """A game object builder: attach components, then add it to a Scene."""
 

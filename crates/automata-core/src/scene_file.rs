@@ -12,7 +12,7 @@
 //! as opaque noise. The Euler round-trip drift is far below f32 visual
 //! significance.
 
-use automata_renderer::{Camera2D, Camera3D, Environment, MeshData};
+use automata_renderer::{Camera2D, Camera3D, Environment, MeshData, Water};
 use automata_scene::{DirectionalLight, MeshVisual, MeshVisualKind, Name, SceneWorld, Transform};
 use glam::EulerRot;
 use serde::{Deserialize, Serialize};
@@ -67,6 +67,10 @@ pub struct EntityData {
     /// Scene look: ambient, fog, exposure, tone mapping, background.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<Environment>,
+    /// Animated water surface (waves, reflections; refraction and foam on
+    /// the Beautiful preset).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub water: Option<Water>,
     /// Primitive mesh visual.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh_visual: Option<MeshVisualData>,
@@ -279,6 +283,9 @@ impl SceneFile {
             if let Some(env) = eref.get::<&Environment>() {
                 data.environment = Some(*env);
             }
+            if let Some(water) = eref.get::<&Water>() {
+                data.water = Some(*water);
+            }
             if let Some(visual) = eref.get::<&MeshVisual>() {
                 data.mesh_visual = Some(MeshVisualData::from(&*visual));
             }
@@ -318,7 +325,7 @@ impl SceneFile {
     ///
     /// The inverse of [`SceneFile::from_world`]; editors (Oberon) and
     /// tooling use it to materialize a loaded scene file into a live world
-    /// for simulation or rendering. Entities get a [`GlobalTransform`] so
+    /// for simulation or rendering. Entities get a `GlobalTransform` so
     /// the renderer's draw-list recording sees them immediately.
     pub fn apply_to_world(&self, world: &mut SceneWorld) {
         use automata_scene::GlobalTransform;
@@ -344,6 +351,9 @@ impl SceneFile {
             }
             if let Some(env) = &data.environment {
                 let _ = world.insert_one(entity, *env);
+            }
+            if let Some(water) = &data.water {
+                let _ = world.insert_one(entity, *water);
             }
             if let Some(visual) = &data.mesh_visual {
                 let _ = world.insert_one(entity, MeshVisual::from(visual));
@@ -600,6 +610,22 @@ mod tests {
         assert!((env.exposure - 2.0).abs() < f32::EPSILON);
         assert_eq!(env.tonemapping, automata_renderer::Tonemapping::Aces);
         assert!(!env.fog);
+    }
+
+    #[test]
+    fn water_round_trips_and_tolerates_partial_fields() {
+        let mut world = SceneWorld::new();
+        world.spawn((Water::ocean(),));
+        let file = SceneFile::from_world(&world);
+        let back = SceneFile::from_ron(&file.to_ron().unwrap()).unwrap();
+        assert_eq!(back, file);
+        assert_eq!(back.entities[0].water, Some(Water::ocean()));
+        let partial =
+            SceneFile::from_ron("(version: 1, entities: [(water: Some((wave_height: 0.5)))])")
+                .unwrap();
+        let water = partial.entities[0].water.unwrap();
+        assert!((water.wave_height - 0.5).abs() < f32::EPSILON);
+        assert_eq!(water.size, Water::default().size);
     }
 
     #[test]

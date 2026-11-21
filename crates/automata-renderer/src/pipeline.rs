@@ -8,19 +8,68 @@ use crate::SPRITE_VERTEX_CAPACITY;
 
 /// WGSL source of the 2D sprite shader.
 pub(crate) const SPRITE_SHADER: &str = include_str!("shaders/sprite.wgsl");
-/// WGSL source of the 3D mesh shader.
-pub(crate) const MESH_SHADER: &str = include_str!("shaders/mesh.wgsl");
+/// WGSL source of the 3D mesh shader (with the shared lighting code).
+pub(crate) const MESH_SHADER: &str = concat!(
+    include_str!("shaders/tonemap.wgsl"),
+    include_str!("shaders/common.wgsl"),
+    include_str!("shaders/mesh.wgsl")
+);
+/// WGSL source of the water shader (with the shared lighting code).
+pub(crate) const WATER_SHADER: &str = concat!(
+    include_str!("shaders/tonemap.wgsl"),
+    include_str!("shaders/common.wgsl"),
+    include_str!("shaders/water.wgsl")
+);
+/// WGSL source of the Beautiful post chain (bloom, tone mapping, FXAA).
+pub(crate) const POST_SHADER: &str = concat!(
+    include_str!("shaders/tonemap.wgsl"),
+    include_str!("shaders/post.wgsl")
+);
 /// WGSL source of the depth-only shadow pass shader.
 pub(crate) const SHADOW_SHADER: &str = include_str!("shaders/shadow.wgsl");
 
-/// Depth texture format of the shadow map (sampled as `texture_depth_2d`).
+/// Depth texture format of the shadow map (sampled as
+/// `texture_depth_2d_array`, one layer per cascade).
 pub(crate) const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+/// Color format of the Beautiful path's HDR scene target.
+pub(crate) const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
+/// Depth format of the Beautiful path: copyable, so water can read the
+/// scene's depth.
+pub(crate) const HDR_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+/// Opaque (replacing) color target state.
+fn opaque_target(format: wgpu::TextureFormat) -> [Option<wgpu::ColorTargetState>; 1] {
+    [Some(wgpu::ColorTargetState {
+        format,
+        blend: None,
+        write_mask: wgpu::ColorWrites::ALL,
+    })]
+}
 
 /// Alpha-blended color target state for the given surface format.
 fn blend_target(format: wgpu::TextureFormat) -> [Option<wgpu::ColorTargetState>; 1] {
     [Some(wgpu::ColorTargetState {
         format,
         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+        write_mask: wgpu::ColorWrites::ALL,
+    })]
+}
+
+/// The HDR scene's color target: alpha-blended color, with alpha
+/// accumulating coverage (the post chain tone maps by it).
+fn coverage_target(format: wgpu::TextureFormat) -> [Option<wgpu::ColorTargetState>; 1] {
+    [Some(wgpu::ColorTargetState {
+        format,
+        blend: Some(wgpu::BlendState {
+            color: wgpu::BlendState::ALPHA_BLENDING.color,
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+        }),
         write_mask: wgpu::ColorWrites::ALL,
     })]
 }
@@ -43,9 +92,14 @@ pub(crate) struct PipelineShared {
     pub skinned_model_layout: wgpu::BindGroupLayout,
     pub light_layout: wgpu::BindGroupLayout,
     pub shadow_light_layout: wgpu::BindGroupLayout,
+    /// The water uniform (vertex + fragment).
+    pub water_layout: wgpu::BindGroupLayout,
+    /// The scene color and depth copies water refracts through.
+    pub scene_layout: wgpu::BindGroupLayout,
     pub sprite_shader: wgpu::ShaderModule,
     pub mesh_shader: wgpu::ShaderModule,
     pub shadow_shader: wgpu::ShaderModule,
+    pub water_shader: wgpu::ShaderModule,
 }
 
 impl PipelineShared {
@@ -126,7 +180,7 @@ impl PipelineShared {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
                     count: None,
@@ -137,6 +191,18 @@ impl PipelineShared {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
                     count: None,
                 },
+                // The first cascade as a plain 2D texture: the forward
+                // path's lookup (cheaper than an array on some GPUs).
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         // The shadow pass needs only the light-space transform (vertex).
@@ -145,6 +211,60 @@ impl PipelineShared {
                 label: Some("shadow light"),
                 entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX)],
             });
+        let water_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("water"),
+            entries: &[
+                uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
+                // The baked ripple texture (water::ripple_texels) + sampler.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let scene_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("scene copy"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
 
         Self {
             camera_layout,
@@ -154,9 +274,12 @@ impl PipelineShared {
             skinned_model_layout,
             light_layout,
             shadow_light_layout,
+            water_layout,
+            scene_layout,
             sprite_shader: shader_module(device, "sprite", SPRITE_SHADER),
             mesh_shader: shader_module(device, "mesh", MESH_SHADER),
             shadow_shader: shader_module(device, "shadow", SHADOW_SHADER),
+            water_shader: shader_module(device, "water", WATER_SHADER),
         }
     }
 }
@@ -277,16 +400,75 @@ impl PipelinePair {
     }
 }
 
-/// Both 3D mesh pipelines for the given surface format.
+/// Both 3D mesh pipelines for the given color and depth formats.
 pub(crate) fn create_mesh_pipelines(
     device: &wgpu::Device,
     shared: &PipelineShared,
     format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
 ) -> PipelinePair {
     PipelinePair {
-        plain: create_mesh_pipeline(device, shared, format, false),
-        skinned: create_mesh_pipeline(device, shared, format, true),
+        plain: create_mesh_pipeline(device, shared, format, depth_format, false),
+        skinned: create_mesh_pipeline(device, shared, format, depth_format, true),
     }
+}
+
+/// The water pipeline. `refract` (the Beautiful path) writes opaquely —
+/// the shader composes the refracted scene itself; otherwise the surface
+/// alpha-blends over the scene. Depth-tested, never depth-written.
+pub(crate) fn create_water_pipeline(
+    device: &wgpu::Device,
+    shared: &PipelineShared,
+    format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
+    refract: bool,
+) -> wgpu::RenderPipeline {
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("water"),
+        bind_group_layouts: &[
+            Some(&shared.camera_layout),
+            Some(&shared.water_layout),
+            Some(&shared.scene_layout),
+            Some(&shared.light_layout),
+        ],
+        immediate_size: 0,
+    });
+    let targets = if refract {
+        opaque_target(format)
+    } else {
+        blend_target(format)
+    };
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("water"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shared.water_shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &mesh_buffers(false),
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..wgpu::PrimitiveState::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: depth_format,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &shared.water_shader,
+            entry_point: Some(if refract { "fs_refract" } else { "fs_main" }),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &targets,
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 /// Both shadow pipelines.
@@ -306,6 +488,7 @@ fn create_mesh_pipeline(
     device: &wgpu::Device,
     shared: &PipelineShared,
     format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
     skinned: bool,
 ) -> wgpu::RenderPipeline {
     let model_layout = if skinned {
@@ -340,7 +523,7 @@ fn create_mesh_pipeline(
             ..wgpu::PrimitiveState::default()
         },
         depth_stencil: Some(wgpu::DepthStencilState {
-            format: wgpu::TextureFormat::Depth24Plus,
+            format: depth_format,
             depth_write_enabled: Some(true),
             depth_compare: Some(wgpu::CompareFunction::Less),
             stencil: wgpu::StencilState::default(),
@@ -349,9 +532,18 @@ fn create_mesh_pipeline(
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: &shared.mesh_shader,
-            entry_point: Some("fs_main"),
+            // Pipelines targeting the HDR scene are Beautiful's.
+            entry_point: Some(if format == HDR_FORMAT {
+                "fs_beautiful"
+            } else {
+                "fs_main"
+            }),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &blend_target(format),
+            targets: &if format == HDR_FORMAT {
+                coverage_target(format)
+            } else {
+                blend_target(format)
+            },
         }),
         multiview_mask: None,
         cache: None,
@@ -496,6 +688,31 @@ mod tests {
     #[test]
     fn shadow_wgsl_is_valid() {
         validate_wgsl("shadow", SHADOW_SHADER).unwrap();
+    }
+
+    #[test]
+    fn water_and_post_wgsl_validate() {
+        for (source, entries) in [
+            (WATER_SHADER, &["vs_main", "fs_main"][..]),
+            (
+                POST_SHADER,
+                &[
+                    "vs_fullscreen",
+                    "fs_downsample",
+                    "fs_upsample",
+                    "fs_resolve",
+                    "fs_fxaa",
+                ][..],
+            ),
+        ] {
+            let module = validate_module(source);
+            for name in entries {
+                assert!(
+                    module.entry_points.iter().any(|e| e.name == *name),
+                    "{name}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -112,10 +112,40 @@ scene files and edited in <a href="../oberon/graphics.html">Oberon's Graphics ta
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">MyGame</span>(at.Game):
     clear_color = (<span class="tok-n">0.55</span>, <span class="tok-n">0.78</span>, <span class="tok-n">0.95</span>, <span class="tok-n">1.0</span>)   <span class="tok-c"># the &quot;sky&quot; each frame clears to</span>
     graphics = at.GraphicsQuality.HIGH</code></pre></div>
-<div class="table"><table><thead><tr><th>Preset</th><th>Shadows</th><th>Shadow map</th></tr></thead><tbody><tr><td><code>GraphicsQuality.LOW</code></td><td>off</td><td>—</td></tr><tr><td><code>GraphicsQuality.MEDIUM</code></td><td>on</td><td>1024px</td></tr><tr><td><code>GraphicsQuality.HIGH</code> (default)</td><td>on</td><td>2048px</td></tr><tr><td><code>GraphicsQuality.ULTRA</code></td><td>on</td><td>4096px</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Preset</th><th>Shadows</th><th>Shadow map</th></tr></thead><tbody><tr><td><code>GraphicsQuality.LOW</code></td><td>off</td><td>—</td></tr><tr><td><code>GraphicsQuality.MEDIUM</code></td><td>on</td><td>1024px</td></tr><tr><td><code>GraphicsQuality.HIGH</code> (default)</td><td>on</td><td>2048px</td></tr><tr><td><code>GraphicsQuality.ULTRA</code></td><td>on</td><td>4096px</td></tr><tr><td><code>GraphicsQuality.BEAUTIFUL</code></td><td>soft</td><td>4 cascades × 2048px</td></tr></tbody></table></div>
 <p><code>LOW</code> is also a <em>style</em>: pure flat-color faces with no shadow shading reads
 as clean minimalism. Finer-grained knobs (render scale, MSAA) build on this
 same setting as the renderer grows.</p>
+<h3 id="beautiful">Beautiful<a class="anchor" href="#beautiful" aria-label="Link to this section">#</a></h3>
+<p><code>BEAUTIFUL</code> is the showcase preset. On top of what <code>HIGH</code> does it adds:</p>
+<ul><li><strong>Soft cascaded shadows.</strong> Four cascades split the view so shadows stay
+sharp up close and still reach the horizon. Edges get a soft penumbra.</li><li><strong>Physically based light</strong> (GGX specular) and fog that glows toward the
+sun.</li><li><strong>HDR with bloom</strong>: bright highlights (sun glints on water, white
+surfaces in full sun) bleed softly. Then the tone mapper runs, and FXAA
+smooths the edges.</li><li><strong>Refractive water</strong> (see below).</li></ul>
+<p>It's built to stay cheap. Each pixel filters only one shadow cascade (with
+dithering where cascades meet), bloom is a small dual-filter chain at half
+resolution and below, and nothing on the other presets got slower. It
+still costs more than <code>HIGH</code>. Offer it as a setting rather than the
+default for games that should run on low-end laptops.</p>
+<h2 id="water">Water<a class="anchor" href="#water" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>scene.add(
+    at.Entity(<span class="tok-s">&quot;lake&quot;</span>)
+    .add(at.Transform(position=(<span class="tok-n">0</span>, -<span class="tok-n">0.5</span>, <span class="tok-n">0</span>)))
+    .add(at.Water.preset(<span class="tok-s">&quot;lake&quot;</span>))          <span class="tok-c"># or at.Water(size=(60, 40), ...)</span>
+)</code></pre></div>
+<p>A <code>Water</code> component draws an animated surface <code>size</code> metres wide on the
+entity's XZ plane: rolling waves plus scrolling ripples, sky reflection
+that strengthens at grazing angles (Fresnel), a sun glint, and light
+glowing through wave crests. It receives shadows.</p>
+<ul><li>On every preset below <code>BEAUTIFUL</code> it's alpha-blended over the scene.</li><li>On <code>BEAUTIFUL</code> it refracts what's underneath. It fades to <code>deep_color</code>
+with depth (<code>clarity</code> is how many metres you can see down), and draws
+<code>foam</code> where it meets the shore or objects.</li></ul>
+<div class="table"><table><thead><tr><th>Preset</th><th>Look</th></tr></thead><tbody><tr><td><code>&quot;pond&quot;</code> / <code>&quot;lake&quot;</code></td><td>Low, short waves and clear water</td></tr><tr><td><code>&quot;ocean&quot;</code> / <code>&quot;sea&quot;</code></td><td>200 m wide, tall long waves, deep blue</td></tr><tr><td><code>&quot;default&quot;</code></td><td>20 m, gentle waves</td></tr></tbody></table></div>
+<p><img src="../../../assets/rendering/water_high.jpg" alt="Water on High: blended over the scene, waves, sky reflection, sun glint and shadows" loading="lazy" decoding="async"></p>
+<p><img src="../../../assets/rendering/water_beautiful.jpg" alt="The same scene on Beautiful: refraction, depth absorption, soft cascaded shadows and bloom" loading="lazy" decoding="async"></p>
+<p>The water surface has no collider. Add a physics box under it if things
+should float or stop.</p>
 <h2 id="mood-recipes">Mood recipes<a class="anchor" href="#mood-recipes" aria-label="Link to this section">#</a></h2>
 <p>Without an Environment, these recipes use the plain look. Add a preset on
 top to get fog and tone mapping too.</p>
@@ -126,7 +156,7 @@ top to get fog and tone mapping too.</p>
     <footer class="pager"><a class="prev" href="scenes-and-entities.html"><small>Previous</small>Scenes &amp; entities</a><a class="next" href="cameras.html"><small>Next</small>Cameras</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/rendering-and-lights.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#drawing-primitives">Drawing primitives</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#the-sun">The sun</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#sky-and-quality">Sky and quality</a></li><li class="l2"><a href="#mood-recipes">Mood recipes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#drawing-primitives">Drawing primitives</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#the-sun">The sun</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#sky-and-quality">Sky and quality</a></li><li class="l3"><a href="#beautiful">Beautiful</a></li><li class="l2"><a href="#water">Water</a></li><li class="l2"><a href="#mood-recipes">Mood recipes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

@@ -10,11 +10,13 @@ use crate::camera;
 use crate::composite::Compositor;
 use crate::draw::{DrawList, MeshDraw, Sprite};
 use crate::error::Result;
-use crate::light::LightUniform;
+use crate::light::{FrameView, LightUniform};
 use crate::material::{Material, MaterialInner};
 use crate::mesh::{Mesh, MeshData, MeshInner, SkinVertex};
 use crate::pipeline::{self, PipelineShared, SpriteVertex};
+use crate::shadow::{ShadowCascades, Sphere};
 use crate::texture::{Texture, TextureInner};
+use crate::water::WaterUniform;
 use crate::{GraphicsQuality, RenderContext, Sun};
 
 /// Depth buffer format used by the mesh pass.
@@ -43,8 +45,12 @@ struct PreparedFrame {
     model_bind_groups: Vec<wgpu::BindGroup>,
     sprite_runs: Vec<SpriteRun>,
     light_bind: wgpu::BindGroup,
-    light_view_proj: glam::Mat4,
+    shadows: ShadowCascades,
+    /// World bounding sphere per mesh (shadow culling).
+    mesh_spheres: Vec<Sphere>,
     render_shadows: bool,
+    /// One bind group per water draw.
+    water_binds: Vec<wgpu::BindGroup>,
 }
 
 /// A complete renderer: GPU context, pipelines, and resource factories.
@@ -60,11 +66,30 @@ pub struct Renderer {
     shadow_pipeline: pipeline::PipelinePair,
     sprite_batch: SpriteBatch,
     white_texture: Texture,
+    /// Tiling ripple normals/heights for water (baked once).
+    water_ripples: Texture,
     depth_texture: Option<wgpu::Texture>,
     shadow_texture: wgpu::Texture,
     shadow_sampler: wgpu::Sampler,
+    /// The whole shadow map array (sampled) and one view per cascade
+    /// (rendered into).
+    shadow_array_view: wgpu::TextureView,
+    shadow_layer_views: Vec<wgpu::TextureView>,
     shadow_map_size: u32,
     shadows_enabled: bool,
+    quality: GraphicsQuality,
+    /// The unit grid water surfaces draw with (built on first use).
+    water_mesh: Option<Mesh>,
+    /// Water pipelines by target format and refraction (Beautiful).
+    water_pipelines: Vec<(wgpu::TextureFormat, bool, wgpu::RenderPipeline)>,
+    /// Mesh pipelines targeting the HDR scene (Beautiful), built lazily.
+    hdr_mesh_pipeline: Option<pipeline::PipelinePair>,
+    /// Bloom, tone mapping and FXAA (Beautiful).
+    post: crate::post::Post,
+    /// 1x1 stand-ins for the scene copies forward-path water binds.
+    scene_placeholder: wgpu::BindGroup,
+    /// Animation time source when a draw list sets none.
+    clock: std::time::Instant,
     /// Scratch buffer for CPU->surface frame blits (reused across frames).
     blit_scratch: Vec<u8>,
     /// `(mesh, sprite)` pipelines targeting [`OFFSCREEN_FORMAT`], built lazily
@@ -92,43 +117,7 @@ impl Renderer {
         quality: GraphicsQuality,
     ) -> Result<Self> {
         let ctx = RenderContext::new(surface_target, size, vsync).await?;
-        let device = ctx.device();
-        let shared = PipelineShared::new(device);
-        let sprite_pipeline = pipeline::create_sprite_pipeline(device, &shared, ctx.format());
-        let mesh_pipeline = pipeline::create_mesh_pipelines(device, &shared, ctx.format());
-        let sprite_batch = SpriteBatch::new(device);
-        let white_texture = Texture::from_rgba(
-            device,
-            ctx.queue(),
-            1,
-            1,
-            &[255, 255, 255, 255],
-            wgpu::FilterMode::Linear,
-        );
-        let depth_texture = Some(create_depth_texture(device, size));
-        let shadow_pipeline = pipeline::create_shadow_pipelines(device, &shared);
-        let compositor = Compositor::new(device);
-        let (shadow_texture, shadow_sampler) =
-            create_shadow_resources(device, quality.shadow_map_size());
-
-        Ok(Self {
-            ctx,
-            shared,
-            sprite_pipeline,
-            mesh_pipeline,
-            shadow_pipeline,
-            sprite_batch,
-            white_texture,
-            depth_texture,
-            shadow_texture,
-            shadow_sampler,
-            shadow_map_size: quality.shadow_map_size(),
-            shadows_enabled: quality.shadows_enabled(),
-            blit_scratch: Vec::new(),
-            offscreen_pipelines: None,
-            offscreen_depth: None,
-            compositor,
-        })
+        Ok(Self::build(ctx, size, quality))
     }
 
     /// Creates a renderer without a surface, rendering into an offscreen
@@ -151,10 +140,16 @@ impl Renderer {
         quality: GraphicsQuality,
     ) -> Result<Self> {
         let ctx = RenderContext::new_offscreen(size).await?;
+        Ok(Self::build(ctx, size, quality))
+    }
+
+    /// Builds the pipelines and resources around a context.
+    fn build(ctx: RenderContext, size: (u32, u32), quality: GraphicsQuality) -> Self {
         let device = ctx.device();
         let shared = PipelineShared::new(device);
         let sprite_pipeline = pipeline::create_sprite_pipeline(device, &shared, ctx.format());
-        let mesh_pipeline = pipeline::create_mesh_pipelines(device, &shared, ctx.format());
+        let mesh_pipeline =
+            pipeline::create_mesh_pipelines(device, &shared, ctx.format(), DEPTH_FORMAT);
         let sprite_batch = SpriteBatch::new(device);
         let white_texture = Texture::from_rgba(
             device,
@@ -164,30 +159,49 @@ impl Renderer {
             &[255, 255, 255, 255],
             wgpu::FilterMode::Linear,
         );
+        let water_ripples = Texture::from_rgba_mipmapped_as(
+            device,
+            ctx.queue(),
+            crate::water::RIPPLE_SIZE,
+            crate::water::RIPPLE_SIZE,
+            &crate::water::ripple_texels(),
+            false,
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
         let depth_texture = Some(create_depth_texture(device, size));
         let shadow_pipeline = pipeline::create_shadow_pipelines(device, &shared);
         let compositor = Compositor::new(device);
-        let (shadow_texture, shadow_sampler) =
-            create_shadow_resources(device, quality.shadow_map_size());
-
-        Ok(Self {
-            ctx,
+        let shadow = ShadowResources::new(device, quality);
+        let post = crate::post::Post::new(device);
+        let scene_placeholder = placeholder_scene_bind_group(device, &shared);
+        Self {
             shared,
             sprite_pipeline,
             mesh_pipeline,
             shadow_pipeline,
             sprite_batch,
             white_texture,
+            water_ripples,
             depth_texture,
-            shadow_texture,
-            shadow_sampler,
+            shadow_texture: shadow.texture,
+            shadow_sampler: shadow.sampler,
+            shadow_array_view: shadow.array_view,
+            shadow_layer_views: shadow.layer_views,
             shadow_map_size: quality.shadow_map_size(),
             shadows_enabled: quality.shadows_enabled(),
+            quality,
+            water_mesh: None,
+            water_pipelines: Vec::new(),
+            hdr_mesh_pipeline: None,
+            post,
+            scene_placeholder,
+            clock: std::time::Instant::now(),
             blit_scratch: Vec::new(),
             offscreen_pipelines: None,
             offscreen_depth: None,
             compositor,
-        })
+            ctx,
+        }
     }
 
     /// Turns V-Sync on or off at runtime (takes effect next frame). With it
@@ -202,27 +216,34 @@ impl Renderer {
         self.ctx.vsync()
     }
 
-    /// Switches the quality preset at runtime (recreates the shadow map).
+    /// Switches the quality preset at runtime (recreates the shadow maps;
+    /// leaving Beautiful frees its HDR targets).
     pub fn set_quality(&mut self, quality: GraphicsQuality) {
-        let size = quality.shadow_map_size();
-        if size != self.shadow_map_size {
-            let (texture, sampler) = create_shadow_resources(self.ctx.device(), size);
-            self.shadow_texture = texture;
-            self.shadow_sampler = sampler;
-            self.shadow_map_size = size;
+        let layers = self.shadow_texture.depth_or_array_layers();
+        if quality.shadow_map_size() != self.shadow_map_size
+            || quality.shadow_cascades() != layers
+            || quality.is_beautiful() != self.quality.is_beautiful()
+        {
+            let shadow = ShadowResources::new(self.ctx.device(), quality);
+            // (Also rebuilt when Beautiful toggles: its sampler filters.)
+            self.shadow_texture = shadow.texture;
+            self.shadow_sampler = shadow.sampler;
+            self.shadow_array_view = shadow.array_view;
+            self.shadow_layer_views = shadow.layer_views;
+            self.shadow_map_size = quality.shadow_map_size();
         }
         self.shadows_enabled = quality.shadows_enabled();
+        if !quality.is_beautiful() {
+            self.post.release();
+            self.hdr_mesh_pipeline = None;
+        }
+        self.quality = quality;
     }
 
     /// The active quality preset.
     #[must_use]
     pub fn quality(&self) -> GraphicsQuality {
-        match (self.shadows_enabled, self.shadow_map_size) {
-            (false, _) => GraphicsQuality::Low,
-            (true, s) if s <= 1024 => GraphicsQuality::Medium,
-            (true, s) if s <= 2048 => GraphicsQuality::High,
-            _ => GraphicsQuality::Ultra,
-        }
+        self.quality
     }
 
     /// The underlying GPU context.
@@ -463,7 +484,12 @@ impl Renderer {
     fn ensure_offscreen_resources(&mut self, size: (u32, u32)) {
         if self.ctx.format() != OFFSCREEN_FORMAT && self.offscreen_pipelines.is_none() {
             let device = self.ctx.device();
-            let mesh = pipeline::create_mesh_pipelines(device, &self.shared, OFFSCREEN_FORMAT);
+            let mesh = pipeline::create_mesh_pipelines(
+                device,
+                &self.shared,
+                OFFSCREEN_FORMAT,
+                DEPTH_FORMAT,
+            );
             let sprite = pipeline::create_sprite_pipeline(device, &self.shared, OFFSCREEN_FORMAT);
             self.offscreen_pipelines = Some((mesh, sprite));
         }
@@ -757,7 +783,6 @@ impl Renderer {
     }
 
     /// Renders the frame into `target`, then presents if it's the surface.
-    #[allow(clippy::too_many_lines)] // one linear sequence of GPU passes
     fn execute_frame(&mut self, draw: &DrawList, target: FrameTarget) {
         let (viewport, offscreen) = match &target {
             FrameTarget::Offscreen { size, .. } => (*size, true),
@@ -766,32 +791,29 @@ impl Renderer {
                 ((s.0.max(1), s.1.max(1)), false)
             }
         };
+        let format = if offscreen {
+            OFFSCREEN_FORMAT
+        } else {
+            self.ctx.format()
+        };
+        let beautiful = self.quality.is_beautiful();
+        self.ensure_frame_pipelines(draw, viewport, format, beautiful);
+
         let mut encoder =
             self.ctx
                 .device()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("frame"),
                 });
+        let prepared = self.prepare_frame(draw, viewport, beautiful);
 
-        let shadow_view = self
-            .shadow_texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let prepared = self.prepare_frame(draw, viewport, &shadow_view);
-
-        // --- Shadow pass: depth from the sun's view, for shadow mapping ---
+        // --- Shadow passes: depth from the sun's view, one per cascade ---
         if prepared.render_shadows {
-            self.record_shadow_pass(
-                &mut encoder,
-                draw,
-                &prepared.model_bind_groups,
-                &shadow_view,
-                prepared.light_view_proj,
-            );
+            self.record_shadow_passes(&mut encoder, draw, &prepared);
         }
 
-        // --- Main pass: meshes (depth-tested, lit), then sprites ---
         // The view borrows the surface texture only for the scope of the
-        // pass; present() re-acquires it by value afterwards.
+        // passes; present() takes it by value afterwards.
         {
             let view = match &target {
                 FrameTarget::Surface(texture) => texture
@@ -806,69 +828,25 @@ impl Renderer {
             };
             let depth_view =
                 depth_texture.map(|t| t.create_view(&wgpu::TextureViewDescriptor::default()));
-            // Offscreen targets use pipelines built for their color format.
-            let (mesh_pipeline, sprite_pipeline) = match &self.offscreen_pipelines {
-                Some((mesh, sprite)) if offscreen => (mesh, sprite),
-                _ => (&self.mesh_pipeline, &self.sprite_pipeline),
-            };
-
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("main"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(draw.clear_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: depth_view.as_ref().map(|dv| {
-                    wgpu::RenderPassDepthStencilAttachment {
-                        view: dv,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
-                            store: wgpu::StoreOp::Discard,
-                        }),
-                        stencil_ops: None,
-                    }
-                }),
-                ..wgpu::RenderPassDescriptor::default()
-            });
-
-            if !draw.meshes.is_empty() {
-                let mut current: Option<bool> = None;
-                for (mesh_draw, model_bind) in draw.meshes.iter().zip(&prepared.model_bind_groups) {
-                    let skinned = mesh_draw.joints.is_some();
-                    if current != Some(skinned) {
-                        pass.set_pipeline(mesh_pipeline.get(skinned));
-                        pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
-                        pass.set_bind_group(3, &prepared.light_bind, &[]);
-                        current = Some(skinned);
-                    }
-                    Self::record_mesh(&mut pass, mesh_draw, model_bind);
-                }
-            }
-
-            if !draw.sprites.is_empty() {
-                pass.set_pipeline(sprite_pipeline);
-                pass.set_bind_group(0, &prepared.camera_2d_bind, &[]);
-                pass.set_vertex_buffer(0, self.sprite_batch.vertex_buffer.slice(..));
-                pass.set_index_buffer(
-                    self.sprite_batch.index_buffer.slice(..),
-                    wgpu::IndexFormat::Uint16,
+            if beautiful {
+                self.record_beautiful(
+                    &mut encoder,
+                    draw,
+                    &prepared,
+                    &view,
+                    depth_view.as_ref(),
+                    format,
                 );
-                for run in &prepared.sprite_runs {
-                    let texture_bind = self.sprite_batch.texture_bind_group(
-                        self.ctx.device(),
-                        &self.shared.texture_layout,
-                        &run.texture,
-                    );
-                    pass.set_bind_group(1, &texture_bind, &[]);
-                    let start = run.first_index;
-                    let end = start + run.index_count;
-                    pass.draw_indexed(start..end, 0, 0..1);
-                }
+            } else {
+                self.record_forward(
+                    &mut encoder,
+                    draw,
+                    &prepared,
+                    &view,
+                    depth_view.as_ref(),
+                    format,
+                    offscreen,
+                );
             }
         }
 
@@ -883,13 +861,370 @@ impl Renderer {
         }
     }
 
+    /// Builds what this frame needs and doesn't exist yet: the Beautiful
+    /// path's HDR targets and pipelines, and water pipelines.
+    fn ensure_frame_pipelines(
+        &mut self,
+        draw: &DrawList,
+        viewport: (u32, u32),
+        format: wgpu::TextureFormat,
+        beautiful: bool,
+    ) {
+        if !draw.waters.is_empty() && self.water_mesh.is_none() {
+            self.water_mesh = Some(self.create_mesh(&crate::water::grid_mesh()));
+        }
+        let device = self.ctx.device();
+        if beautiful {
+            self.post.ensure(device, viewport, format);
+            if self.hdr_mesh_pipeline.is_none() {
+                self.hdr_mesh_pipeline = Some(pipeline::create_mesh_pipelines(
+                    device,
+                    &self.shared,
+                    pipeline::HDR_FORMAT,
+                    pipeline::HDR_DEPTH_FORMAT,
+                ));
+            }
+        }
+        if !draw.waters.is_empty() {
+            let (water_format, depth) = if beautiful {
+                (pipeline::HDR_FORMAT, pipeline::HDR_DEPTH_FORMAT)
+            } else {
+                (format, DEPTH_FORMAT)
+            };
+            let exists = self
+                .water_pipelines
+                .iter()
+                .any(|(f, r, _)| *f == water_format && *r == beautiful);
+            if !exists {
+                let p = pipeline::create_water_pipeline(
+                    device,
+                    &self.shared,
+                    water_format,
+                    depth,
+                    beautiful,
+                );
+                self.water_pipelines.push((water_format, beautiful, p));
+            }
+        }
+    }
+
+    fn water_pipeline(
+        &self,
+        format: wgpu::TextureFormat,
+        refract: bool,
+    ) -> Option<&wgpu::RenderPipeline> {
+        self.water_pipelines
+            .iter()
+            .find(|(f, r, _)| *f == format && *r == refract)
+            .map(|(_, _, p)| p)
+    }
+
+    /// The forward path: meshes, water (blended) and sprites in one pass,
+    /// straight into the target.
+    #[allow(clippy::too_many_arguments)]
+    fn record_forward(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        draw: &DrawList,
+        prepared: &PreparedFrame,
+        view: &wgpu::TextureView,
+        depth_view: Option<&wgpu::TextureView>,
+        format: wgpu::TextureFormat,
+        offscreen: bool,
+    ) {
+        // Offscreen targets use pipelines built for their color format.
+        let (mesh_pipeline, sprite_pipeline) = match &self.offscreen_pipelines {
+            Some((mesh, sprite)) if offscreen => (mesh, sprite),
+            _ => (&self.mesh_pipeline, &self.sprite_pipeline),
+        };
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("main"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(draw.clear_color),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: depth_view.map(|dv| wgpu::RenderPassDepthStencilAttachment {
+                view: dv,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Discard,
+                }),
+                stencil_ops: None,
+            }),
+            ..wgpu::RenderPassDescriptor::default()
+        });
+        Self::record_meshes(&mut pass, draw, prepared, mesh_pipeline);
+        if let Some(water) = self.water_pipeline(format, false) {
+            self.record_waters(&mut pass, prepared, water, &self.scene_placeholder);
+        }
+        self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
+    }
+
+    /// The Beautiful path: the scene in HDR, water refracting through a copy
+    /// of it, bloom and tone mapping, then FXAA into the target with HUD
+    /// sprites drawn last (untouched by post effects).
+    #[allow(clippy::too_many_lines)] // one pass sequence, read top to bottom
+    fn record_beautiful(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        draw: &DrawList,
+        prepared: &PreparedFrame,
+        view: &wgpu::TextureView,
+        depth_view: Option<&wgpu::TextureView>,
+        format: wgpu::TextureFormat,
+    ) {
+        let (Some(targets), Some(mesh_pipeline)) = (&self.post.targets, &self.hdr_mesh_pipeline)
+        else {
+            return;
+        };
+        let device = self.ctx.device();
+        let hdr_view = targets
+            .hdr
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let hdr_depth = targets
+            .depth
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let water = self
+            .water_pipeline(pipeline::HDR_FORMAT, true)
+            .filter(|_| !draw.waters.is_empty());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("hdr scene"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &hdr_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        // Alpha 0 marks the background (no tone mapping).
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            a: 0.0,
+                            ..draw.clear_color
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &hdr_depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: if water.is_some() {
+                            wgpu::StoreOp::Store
+                        } else {
+                            wgpu::StoreOp::Discard
+                        },
+                    }),
+                    stencil_ops: None,
+                }),
+                ..wgpu::RenderPassDescriptor::default()
+            });
+            Self::record_meshes(&mut pass, draw, prepared, mesh_pipeline);
+        }
+
+        if let Some(water) = water {
+            // Water reads the scene behind it from copies (a texture can't
+            // be sampled while it's being drawn into).
+            let extent = targets.hdr.size();
+            encoder.copy_texture_to_texture(
+                targets.hdr.as_image_copy(),
+                targets.scene_copy.as_image_copy(),
+                extent,
+            );
+            encoder.copy_texture_to_texture(
+                targets.depth.as_image_copy(),
+                targets.depth_copy.as_image_copy(),
+                extent,
+            );
+            let scene_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("scene copy"),
+                layout: &self.shared.scene_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(
+                            &targets
+                                .scene_copy
+                                .create_view(&wgpu::TextureViewDescriptor::default()),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(
+                            &targets
+                                .depth_copy
+                                .create_view(&wgpu::TextureViewDescriptor::default()),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&self.post_sampler()),
+                    },
+                ],
+            });
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("water"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &hdr_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &hdr_depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..wgpu::RenderPassDescriptor::default()
+            });
+            self.record_waters(&mut pass, prepared, water, &scene_bind);
+        }
+
+        let env = draw.environment.unwrap_or_default();
+        self.post.record_bloom_and_resolve(
+            device,
+            encoder,
+            env.exposure.max(0.0),
+            beautiful_tonemap(draw.environment),
+        );
+
+        // Final: FXAA into the target, then sprites on top.
+        let sprite_pipeline = match &self.offscreen_pipelines {
+            Some((_, sprite)) if format == OFFSCREEN_FORMAT && format != self.ctx.format() => {
+                sprite
+            }
+            _ => &self.sprite_pipeline,
+        };
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("final"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: depth_view.map(|dv| wgpu::RenderPassDepthStencilAttachment {
+                view: dv,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Discard,
+                }),
+                stencil_ops: None,
+            }),
+            ..wgpu::RenderPassDescriptor::default()
+        });
+        self.post.draw_fxaa(device, &mut pass, format);
+        self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
+    }
+
+    /// A linear clamping sampler for the scene copies.
+    fn post_sampler(&self) -> wgpu::Sampler {
+        self.ctx.device().create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("scene copy"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..wgpu::SamplerDescriptor::default()
+        })
+    }
+
+    /// Records every mesh (depth-tested, lit).
+    fn record_meshes(
+        pass: &mut wgpu::RenderPass<'_>,
+        draw: &DrawList,
+        prepared: &PreparedFrame,
+        pipelines: &pipeline::PipelinePair,
+    ) {
+        let mut current: Option<bool> = None;
+        for (mesh_draw, model_bind) in draw.meshes.iter().zip(&prepared.model_bind_groups) {
+            let skinned = mesh_draw.joints.is_some();
+            if current != Some(skinned) {
+                pass.set_pipeline(pipelines.get(skinned));
+                pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
+                pass.set_bind_group(3, &prepared.light_bind, &[]);
+                current = Some(skinned);
+            }
+            Self::record_mesh(pass, mesh_draw, model_bind);
+        }
+    }
+
+    /// Records every water surface with `pipeline`.
+    fn record_waters(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        prepared: &PreparedFrame,
+        pipeline: &wgpu::RenderPipeline,
+        scene: &wgpu::BindGroup,
+    ) {
+        let Some(mesh) = &self.water_mesh else {
+            return;
+        };
+        if prepared.water_binds.is_empty() {
+            return;
+        }
+        let mesh = &mesh.inner;
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
+        pass.set_bind_group(2, scene, &[]);
+        pass.set_bind_group(3, &prepared.light_bind, &[]);
+        pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+        pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        for bind in &prepared.water_binds {
+            pass.set_bind_group(1, bind, &[]);
+            pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+        }
+    }
+
+    /// Records the frame's sprites (on top, depth ignored).
+    fn record_sprites(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        draw: &DrawList,
+        prepared: &PreparedFrame,
+        pipeline: &wgpu::RenderPipeline,
+    ) {
+        if draw.sprites.is_empty() {
+            return;
+        }
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &prepared.camera_2d_bind, &[]);
+        pass.set_vertex_buffer(0, self.sprite_batch.vertex_buffer.slice(..));
+        pass.set_index_buffer(
+            self.sprite_batch.index_buffer.slice(..),
+            wgpu::IndexFormat::Uint16,
+        );
+        for run in &prepared.sprite_runs {
+            let texture_bind = self.sprite_batch.texture_bind_group(
+                self.ctx.device(),
+                &self.shared.texture_layout,
+                &run.texture,
+            );
+            pass.set_bind_group(1, &texture_bind, &[]);
+            let start = run.first_index;
+            let end = start + run.index_count;
+            pass.draw_indexed(start..end, 0, 0..1);
+        }
+    }
+
     /// Builds the frame's GPU resources from the draw list: camera, model,
-    /// and light bind groups, the sprite batch, and the sun's shadow setup.
+    /// light and water bind groups, the sprite batch, and the sun's shadow
+    /// cascades.
     fn prepare_frame(
         &mut self,
         draw: &DrawList,
         viewport: (u32, u32),
-        shadow_view: &wgpu::TextureView,
+        beautiful: bool,
     ) -> PreparedFrame {
         let camera_2d_bind = self.camera_bind_group(
             draw.camera_2d.map_or_else(
@@ -921,11 +1256,70 @@ impl Renderer {
 
         // Sunlight: the draw list's sun, or a default shadowless light.
         let sun = draw.sun.unwrap_or_default();
-        let light_view_proj = light_view_proj(draw, &sun);
+        let (mesh_spheres, scene) = scene_bounds(draw);
+        let direction = sun.normalized_direction();
+        let cascades = self.quality.shadow_cascades() as usize;
+        let shadows = if cascades > 1 {
+            let aspect = viewport.0 as f32 / viewport.1.max(1) as f32;
+            ShadowCascades::fit_camera(
+                &camera_3d,
+                aspect,
+                scene,
+                direction,
+                self.shadow_map_size,
+                cascades,
+            )
+        } else {
+            ShadowCascades::fit_scene(scene, direction, self.shadow_map_size)
+        };
         let render_shadows = sun.shadows && self.shadows_enabled && !draw.meshes.is_empty();
         let env = draw.environment.unwrap_or_default();
-        let light_bind =
-            self.light_bind_group(&sun, &env, light_view_proj, render_shadows, shadow_view);
+        let c = draw.clear_color;
+        let time = draw
+            .time
+            .unwrap_or_else(|| self.clock.elapsed().as_secs_f32());
+        #[allow(clippy::cast_possible_truncation)] // colors fit f32
+        let background = [c.r as f32, c.g as f32, c.b as f32];
+        let frame = FrameView {
+            camera: camera_3d,
+            viewport,
+            background,
+            time,
+            beautiful,
+        };
+        let light_bind = self.light_bind_group(&sun, &env, &shadows, render_shadows, &frame);
+        let water_binds = draw
+            .waters
+            .iter()
+            .map(|w| {
+                let uniform = WaterUniform::new(w, beautiful, time);
+                let device = self.ctx.device();
+                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("water"),
+                    contents: bytemuck::bytes_of(&uniform),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+                let ripples = &self.water_ripples.inner;
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("water"),
+                    layout: &self.shared.water_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&ripples.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&ripples.sampler),
+                        },
+                    ],
+                })
+            })
+            .collect();
 
         PreparedFrame {
             camera_2d_bind,
@@ -933,31 +1327,34 @@ impl Renderer {
             model_bind_groups,
             sprite_runs,
             light_bind,
-            light_view_proj,
+            shadows,
+            mesh_spheres,
             render_shadows,
+            water_binds,
         }
     }
 
-    /// Builds the frame's light bind group (sun uniform + shadow map +
+    /// Builds the frame's light bind group (uniform + shadow map array +
     /// comparison sampler). `render_shadows` gates shadow sampling in the
-    /// shader — when false the shadow map is bound but never read.
+    /// shader — when false the shadow maps are bound but never read.
     fn light_bind_group(
         &self,
         sun: &Sun,
         env: &crate::Environment,
-        light_view_proj: glam::Mat4,
+        shadows: &ShadowCascades,
         render_shadows: bool,
-        shadow_view: &wgpu::TextureView,
+        frame: &FrameView,
     ) -> wgpu::BindGroup {
         let device = self.ctx.device();
-        let light_uniform = LightUniform::with_environment(
+        let light_uniform = LightUniform::new(
             &Sun {
                 shadows: render_shadows,
                 ..*sun
             },
             env,
-            light_view_proj,
-            1.0 / self.shadow_map_size as f32,
+            shadows,
+            self.shadow_map_size,
+            frame,
         );
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("light"),
@@ -974,62 +1371,80 @@ impl Renderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(shadow_view),
+                    resource: wgpu::BindingResource::TextureView(&self.shadow_array_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&self.shadow_layer_views[0]),
+                },
             ],
         })
     }
 
-    /// Records the depth-only shadow pass: every mesh drawn from the sun's
-    /// viewpoint into the shadow map.
-    fn record_shadow_pass(
+    /// Records the depth-only shadow passes: per cascade, every mesh that
+    /// can cast into it, drawn from the sun's viewpoint into its layer.
+    fn record_shadow_passes(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         draw: &DrawList,
-        model_bind_groups: &[wgpu::BindGroup],
-        shadow_view: &wgpu::TextureView,
-        light_view_proj: glam::Mat4,
+        prepared: &PreparedFrame,
     ) {
-        let light_vp_bind = self.uniform_bind_group(
-            Some("shadow light"),
-            bytemuck::cast_slice(&light_view_proj.to_cols_array()),
-            &self.shared.shadow_light_layout,
-        );
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("shadow"),
-            color_attachments: &[],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: shadow_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            ..wgpu::RenderPassDescriptor::default()
-        });
-        let mut current: Option<bool> = None;
-        for (mesh_draw, model_bind) in draw.meshes.iter().zip(model_bind_groups) {
-            let skinned = mesh_draw.joints.is_some();
-            if current != Some(skinned) {
-                pass.set_pipeline(self.shadow_pipeline.get(skinned));
-                pass.set_bind_group(0, &light_vp_bind, &[]);
-                current = Some(skinned);
-            }
-            pass.set_bind_group(1, model_bind, &[]);
-            pass.set_vertex_buffer(0, mesh_draw.mesh.inner.vertex_buffer.slice(..));
-            if let (true, Some(skin)) = (skinned, &mesh_draw.mesh.inner.skin_buffer) {
-                pass.set_vertex_buffer(1, skin.slice(..));
-            }
-            pass.set_index_buffer(
-                mesh_draw.mesh.inner.index_buffer.slice(..),
-                wgpu::IndexFormat::Uint32,
+        let shadows = &prepared.shadows;
+        for (cascade, layer_view) in self
+            .shadow_layer_views
+            .iter()
+            .enumerate()
+            .take(shadows.count)
+        {
+            let light_vp_bind = self.uniform_bind_group(
+                Some("shadow light"),
+                bytemuck::cast_slice(&shadows.view_proj[cascade].to_cols_array()),
+                &self.shared.shadow_light_layout,
             );
-            pass.draw_indexed(0..mesh_draw.mesh.inner.index_count, 0, 0..1);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("shadow"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: layer_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..wgpu::RenderPassDescriptor::default()
+            });
+            let mut current: Option<bool> = None;
+            let draws = draw
+                .meshes
+                .iter()
+                .zip(&prepared.model_bind_groups)
+                .zip(&prepared.mesh_spheres);
+            for ((mesh_draw, model_bind), sphere) in draws {
+                if shadows.count > 1 && !shadows.touches(cascade, *sphere) {
+                    continue;
+                }
+                let skinned = mesh_draw.joints.is_some();
+                if current != Some(skinned) {
+                    pass.set_pipeline(self.shadow_pipeline.get(skinned));
+                    pass.set_bind_group(0, &light_vp_bind, &[]);
+                    current = Some(skinned);
+                }
+                pass.set_bind_group(1, model_bind, &[]);
+                pass.set_vertex_buffer(0, mesh_draw.mesh.inner.vertex_buffer.slice(..));
+                if let (true, Some(skin)) = (skinned, &mesh_draw.mesh.inner.skin_buffer) {
+                    pass.set_vertex_buffer(1, skin.slice(..));
+                }
+                pass.set_index_buffer(
+                    mesh_draw.mesh.inner.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                pass.draw_indexed(0..mesh_draw.mesh.inner.index_count, 0, 0..1);
+            }
         }
     }
 
@@ -1074,60 +1489,162 @@ fn create_depth_texture(device: &wgpu::Device, size: (u32, u32)) -> wgpu::Textur
     })
 }
 
-/// The shadow map depth texture and its comparison sampler.
-fn create_shadow_resources(device: &wgpu::Device, size: u32) -> (wgpu::Texture, wgpu::Sampler) {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("shadow map"),
-        size: wgpu::Extent3d {
-            width: size.max(1),
-            height: size.max(1),
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: pipeline::SHADOW_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
-    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: Some("shadow comparison"),
-        compare: Some(wgpu::CompareFunction::LessEqual),
-        ..wgpu::SamplerDescriptor::default()
-    });
-    (texture, sampler)
+/// The shadow map array (one layer per cascade), its views and comparison
+/// sampler.
+struct ShadowResources {
+    texture: wgpu::Texture,
+    sampler: wgpu::Sampler,
+    array_view: wgpu::TextureView,
+    layer_views: Vec<wgpu::TextureView>,
 }
 
-/// The sun's view-projection matrix, fit around the frame's meshes so the
-/// shadow map covers the visible scene.
-fn light_view_proj(draw: &DrawList, sun: &Sun) -> glam::Mat4 {
-    use glam::camera::rh::{proj::directx, view};
-
-    if draw.meshes.is_empty() {
-        return glam::Mat4::IDENTITY;
+impl ShadowResources {
+    fn new(device: &wgpu::Device, quality: GraphicsQuality) -> Self {
+        let size = quality.shadow_map_size().max(1);
+        let layers = quality.shadow_cascades().max(1);
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("shadow map"),
+            size: wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: layers,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: pipeline::SHADOW_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        // Beautiful's soft taps each compare a bilinear 2x2 footprint; the
+        // other presets keep single compares (cheap on every GPU).
+        let filter = if quality.is_beautiful() {
+            wgpu::FilterMode::Linear
+        } else {
+            wgpu::FilterMode::Nearest
+        };
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("shadow comparison"),
+            mag_filter: filter,
+            min_filter: filter,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..wgpu::SamplerDescriptor::default()
+        });
+        let array_view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("shadow map array"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..wgpu::TextureViewDescriptor::default()
+        });
+        let layer_views = (0..layers)
+            .map(|layer| {
+                texture.create_view(&wgpu::TextureViewDescriptor {
+                    label: Some("shadow cascade"),
+                    dimension: Some(wgpu::TextureViewDimension::D2),
+                    base_array_layer: layer,
+                    array_layer_count: Some(1),
+                    ..wgpu::TextureViewDescriptor::default()
+                })
+            })
+            .collect();
+        Self {
+            texture,
+            sampler,
+            array_view,
+            layer_views,
+        }
     }
-    // World-space AABB over the meshes' bounding spheres.
+}
+
+/// The scene bindings forward-path water uses: 1x1 stand-ins (blended
+/// water never samples the scene behind it).
+fn placeholder_scene_bind_group(device: &wgpu::Device, shared: &PipelineShared) -> wgpu::BindGroup {
+    let texture = |label, format| {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+    };
+    let color = texture("scene placeholder", pipeline::HDR_FORMAT);
+    let depth = texture("depth placeholder", pipeline::HDR_DEPTH_FORMAT);
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("scene placeholder"),
+        layout: &shared.scene_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(
+                    &color.create_view(&wgpu::TextureViewDescriptor::default()),
+                ),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(
+                    &depth.create_view(&wgpu::TextureViewDescriptor::default()),
+                ),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+        ],
+    })
+}
+
+/// Each mesh's world bounding sphere, and one sphere around them all
+/// (the shadow casters).
+fn scene_bounds(draw: &DrawList) -> (Vec<Sphere>, Sphere) {
+    let spheres: Vec<Sphere> = draw
+        .meshes
+        .iter()
+        .map(|mesh_draw| {
+            let (scale, _, center) = mesh_draw.model.to_scale_rotation_translation();
+            Sphere {
+                center,
+                radius: posed_radius(mesh_draw) * scale.max_element(),
+            }
+        })
+        .collect();
+    if spheres.is_empty() {
+        let scene = Sphere {
+            center: glam::Vec3::ZERO,
+            radius: 1.0,
+        };
+        return (spheres, scene);
+    }
     let mut min = glam::Vec3::splat(f32::MAX);
     let mut max = glam::Vec3::splat(f32::MIN);
-    for mesh_draw in &draw.meshes {
-        let (scale, _, center) = mesh_draw.model.to_scale_rotation_translation();
-        let radius = posed_radius(mesh_draw) * scale.max_element();
-        min = min.min(center - glam::Vec3::splat(radius));
-        max = max.max(center + glam::Vec3::splat(radius));
+    for s in &spheres {
+        min = min.min(s.center - glam::Vec3::splat(s.radius));
+        max = max.max(s.center + glam::Vec3::splat(s.radius));
     }
-    let center = (min + max) * 0.5;
-    let radius = ((max - min) * 0.5).length().max(1.0) * 1.1; // 10% margin
-
-    let direction = sun.normalized_direction();
-    let up = if direction.y.abs() > 0.95 {
-        glam::Vec3::Z
-    } else {
-        glam::Vec3::Y
+    let scene = Sphere {
+        center: (min + max) * 0.5,
+        radius: ((max - min) * 0.5).length(),
     };
-    let eye = center - direction * (radius + 5.0);
-    let view = view::look_at_mat4(eye, center, up);
-    let proj = directx::orthographic(-radius, radius, -radius, radius, 0.1, radius * 2.0 + 10.0);
-    proj * view
+    (spheres, scene)
+}
+
+/// The post chain's tone curve index. Beautiful renders in HDR, so an
+/// environment without a curve gets Khronos PBR Neutral (index 4, shader
+/// only): authored colors pass through unchanged and only highlights roll
+/// off, instead of clipping the bright range bloom works with.
+fn beautiful_tonemap(env: Option<crate::Environment>) -> f32 {
+    const NEUTRAL: f32 = 4.0;
+    match env.map(|e| e.tonemapping) {
+        None | Some(crate::Tonemapping::None) => NEUTRAL,
+        Some(t) => t.index(),
+    }
 }
 
 /// A sphere around the model origin containing the draw's vertices. A
@@ -1673,5 +2190,117 @@ mod tests {
             brighter * 100 <= pixels,
             "shadows made {brighter} of {pixels} pixels brighter"
         );
+    }
+
+    #[test]
+    fn offscreen_beautiful_shadow_darkens_occluded_ground() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping Beautiful shadow test");
+            return;
+        };
+        renderer.set_quality(GraphicsQuality::Beautiful);
+        assert_eq!(renderer.quality(), GraphicsQuality::Beautiful);
+        // Cascades, soft filtering, HDR, bloom and FXAA all on: shadows
+        // still only remove light.
+        let sun = crate::Sun::new(glam::Vec3::new(-1.0, -0.5, 0.5));
+        let lit = shadow_scene_brightness(&mut renderer, sun);
+        let shadowed = shadow_scene_brightness(
+            &mut renderer,
+            crate::Sun {
+                shadows: true,
+                ..sun
+            },
+        );
+        let darker = lit
+            .iter()
+            .zip(&shadowed)
+            .filter(|(l, s)| **s + 45 < **l)
+            .count();
+        assert!(
+            darker * 25 >= lit.len(),
+            "the shadow should cover at least 4% of the image: {darker} darker"
+        );
+        assert!(lit.iter().any(|&b| b > 150), "the scene is lit");
+    }
+
+    #[test]
+    fn offscreen_quality_round_trips_through_beautiful() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping quality switch test");
+            return;
+        };
+        for quality in GraphicsQuality::ALL {
+            renderer.set_quality(quality);
+            assert_eq!(renderer.quality(), quality);
+            let lit = shadow_scene_brightness(
+                &mut renderer,
+                crate::Sun {
+                    shadows: true,
+                    ..crate::Sun::default()
+                },
+            );
+            assert!(lit.iter().any(|&b| b > 60), "{quality:?} draws the scene");
+        }
+        renderer.set_quality(GraphicsQuality::Beautiful);
+        assert!(
+            renderer.post.targets.is_some(),
+            "Beautiful drew through HDR targets"
+        );
+        renderer.set_quality(GraphicsQuality::High);
+        assert!(
+            renderer.post.targets.is_none(),
+            "leaving Beautiful frees HDR targets"
+        );
+    }
+
+    /// Renders a water plane seen from above over a dark floor, returning
+    /// the center pixel.
+    fn water_center(renderer: &mut Renderer) -> [u8; 4] {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let floor = renderer.create_material([0.05, 0.05, 0.05, 1.0], None);
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_time(1.0);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 6.0, 3.0),
+            glam::Vec3::ZERO,
+        ));
+        draw.set_sun(crate::Sun::new(glam::Vec3::new(-0.3, -1.0, -0.2)));
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::new(20.0, 0.2, 20.0),
+                glam::Quat::IDENTITY,
+                glam::Vec3::new(0.0, -1.0, 0.0),
+            ),
+            &floor,
+        );
+        let water = crate::Water {
+            size: [20.0, 20.0],
+            ..crate::Water::default()
+        };
+        draw.water(water, glam::Mat4::IDENTITY);
+        renderer.render_offscreen(&draw, &target);
+        center_pixel(&read_pixels(renderer, &target, size), size)
+    }
+
+    #[test]
+    fn offscreen_water_tints_the_scene_on_every_preset() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping water test");
+            return;
+        };
+        for quality in [GraphicsQuality::Low, GraphicsQuality::Beautiful] {
+            renderer.set_quality(quality);
+            let [r, g, b, _] = water_center(&mut renderer);
+            // The default water is blue-green over a near-black floor.
+            assert!(
+                u32::from(g) + u32::from(b) > 2 * u32::from(r) + 10,
+                "{quality:?}: water should tint the floor blue-green, got {:?}",
+                [r, g, b]
+            );
+        }
     }
 }

@@ -442,7 +442,9 @@ game.run(<span class="tok-k">lambda</span> ctx: <span class="tok-b">None</span>)
 <p>Everything renders with Blinn-Phong shading: diffuse from the sun, a subtle
 specular highlight, and ambient so shadow sides aren't pitch black.</p>
 <ul><li><strong>Shadows</strong> are automatic for every mesh when the sun has <code>shadows=True</code>.</li><li><strong>Quality presets:</strong> <code>LOW</code> disables shadows (fastest, flat look),
-<code>MEDIUM</code>/<code>HIGH</code>/<code>ULTRA</code> use 1024/2048/4096 shadow maps.</li><li><strong>Mood is data:</strong> <code>clear_color</code> + sun <code>color</code> + <code>ambient</code> is your whole
+<code>MEDIUM</code>/<code>HIGH</code>/<code>ULTRA</code> use 1024/2048/4096 shadow maps, and <code>BEAUTIFUL</code>
+adds soft cascaded shadows, physically based light, bloom and refractive
+<a href="guides/rendering-and-lights.html#water">water</a>.</li><li><strong>Mood is data:</strong> <code>clear_color</code> + sun <code>color</code> + <code>ambient</code> is your whole
 color grade. Golden hour = warm color + low ambient + long direction.</li></ul>
 <p><strong>Exercise:</strong> make a night scene (dark blue <code>clear_color</code>, pale blue sun,
 <code>ambient=0.15</code>).</p>
