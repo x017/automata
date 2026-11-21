@@ -520,6 +520,76 @@ mod tests {
         );
     }
 
+    /// The finished tutorial project plays in Oberon: every script loads and
+    /// runs without errors, the intro flies the camera rail, and then the
+    /// camera settles in behind the player (skipped without python3).
+    #[test]
+    fn the_coin_run_tutorial_project_plays() {
+        use crate::bridge::{BridgeMsg, ScriptBridge};
+        let python = crate::bridge::default_python();
+        if std::process::Command::new(python)
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let level = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/oberon/coin_run/level.ron");
+        let doc = Document::load(&level).unwrap();
+        let mut play = PlaySession::start(&doc);
+        let runtime = std::env::temp_dir().join(format!("oberon_coin_run_{}", std::process::id()));
+        let mut bridge = ScriptBridge::start(python, &runtime, &doc.base_dir()).unwrap();
+        let mut errors = Vec::new();
+        let mut intro_distance = 0.0_f32;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        // 7 s of play: the 5 s flyover, the 1 s blend, and a second of follow.
+        while play.elapsed < 7.0 && std::time::Instant::now() < deadline {
+            for msg in bridge.poll() {
+                match msg {
+                    BridgeMsg::Frame(w) => play.apply_script_writes(&w),
+                    BridgeMsg::Error { msg, .. } => errors.push(msg),
+                    _ => {}
+                }
+            }
+            let states = play.script_states(|rel| doc.resolve(rel));
+            if bridge.send_frame(TIMESTEP, play.elapsed, &[], &states) {
+                play.update(TIMESTEP);
+                if (play.elapsed - 2.5).abs() < TIMESTEP {
+                    let (cam, player) = (
+                        play.scene_camera().unwrap(),
+                        play.player_position().unwrap(),
+                    );
+                    intro_distance = cam.position.distance(player);
+                }
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&runtime);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(play.elapsed >= 7.0, "the runner kept up: {}", play.elapsed);
+        assert!(
+            intro_distance > 10.0,
+            "mid-intro the camera is out on the rail: {intro_distance}"
+        );
+        let (cam, player) = (
+            play.scene_camera().unwrap(),
+            play.player_position().unwrap(),
+        );
+        let distance = cam.position.distance(player);
+        assert!(
+            (6.0..12.0).contains(&distance),
+            "then it follows the player: {distance}"
+        );
+        assert!(
+            cam.target.distance(player) < 2.0,
+            "looking at them: {:?} vs {player:?}",
+            cam.target
+        );
+    }
+
     /// The whole loop with a real interpreter: Oberon state → Python script
     /// → writes applied to the simulation (skipped without python3).
     #[test]

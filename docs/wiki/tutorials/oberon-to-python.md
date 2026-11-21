@@ -74,6 +74,7 @@ testable in CI.
 `tests/test_level.py`:
 
 ```python
+import math
 import os
 import automata as at
 
@@ -95,14 +96,16 @@ def test_player_stands_on_the_ground():
     assert 0.5 < heights[-1] < 1.5, "the player fell through the floor"
 
 
-def test_camera_follows_the_player():
+def test_intro_starts_at_the_first_shot():
     seen = []
 
     def after(ctx):
-        seen.append(ctx.scene["Main Camera"].camera_3d.target)
+        seen.append(ctx.scene["Main Camera"].camera_3d.position)
 
-    at.run_scene(LEVEL, headless=True, max_frames=60, update=after)
-    assert seen[-1][1] > 0.5, "the camera looks at the player, not the floor"
+    at.run_scene(LEVEL, headless=True, max_frames=10, update=after)
+    shot = at.Scene.load(LEVEL).find("Shot 1")
+    position = next(c for c in shot.components() if isinstance(c, at.Transform)).position
+    assert math.dist(seen[-1], position) < 0.5
 ```
 
 ```console
@@ -111,18 +114,48 @@ pytest -q
 ```
 
 `update=` runs after your scripts every frame and receives the raw engine
-context, so it's the place for assertions. The finished example project
-has a test like this:
-[`test_coin_run_example_plays_headless`](../../../crates/automata-python/tests/python/test_attributes_prefabs.py).
+context, so it's the place for assertions.
 
-**Testing logic that needs input:** keep the logic in plain functions and
-test those directly. Behaviour scripts are ordinary modules:
+> **Headless time is real time.** A headless run goes as fast as it can,
+> and `ctx.time` follows the real clock, so 120 frames last a fraction of
+> a second. Anything timed, like the five-second intro, won't have
+> happened yet. Test timed logic directly instead, as below.
+
+**Testing logic that needs time or input:** keep the logic in plain
+functions and test those directly. Behaviour scripts are ordinary modules:
 
 ```python
 from automata.scripting import load_script
 
 rail = load_script("my_game/scripts/camera_rail.py")
-assert rail.smoothstep(0.5) == 0.5
+
+
+def test_smoothstep_eases_in_and_out():
+    assert rail.smoothstep(0.5) == 0.5
+    assert rail.smoothstep(0.1) < 0.1
+
+
+def test_the_rail_ends_after_the_last_shot():
+    keys = [((0, 5, 10), (0, 0, 0)), ((10, 5, 0), (0, 0, 0))]
+    assert rail.rail(keys, 0.0) == keys[0]
+    assert rail.rail(keys, rail.SHOT_TIME) is None
+```
+
+To test `update` itself, pass small fake objects for `entity` and `ctx`
+that have just the attributes the script uses, such as
+`ctx.time.elapsed`, `ctx.input.just_pressed` and `entity.camera`. The
+finished project does this to check that Space skips the intro, that Q / E
+orbit, and that sprinting widens the view.
+
+**Finished files:** the example project has the game launcher
+[`main.py`](../../../examples/oberon/coin_run/main.py) (with a `--headless`
+flag and a choice of `dusk` or `night`) and the full test suite
+[`tests/test_level.py`](../../../examples/oberon/coin_run/tests/test_level.py),
+which CI runs on every push:
+
+```console
+python examples/oberon/coin_run/main.py night
+pytest examples/oberon/coin_run/tests
 ```
 
 ## 5. Share it

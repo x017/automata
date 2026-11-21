@@ -103,8 +103,12 @@ collect views once per frame with `for view in scene`.
 **Spawn during play.** `ctx.scene.spawn(entity)` is how projectiles, drops,
 and waves appear. The entity exists from the next frame.
 
-**Level switching.** `self.load_scene(Level2())` inside `on_update` swaps
-the world immediately (current frame finishes first).
+**Level switching.** `self.load_scene(Level2())` inside `on_update` or an
+`on_<event>` handler swaps the world when the frame's callback returns: the
+next frame sees only the new level. Other writes to the old level's
+entities that frame are dropped, and anything you `spawn` that frame lands
+in the new level. (In plain-function style, `ctx.scene.load(Level2())` does
+the same.)
 
 ## See also
 

@@ -38,8 +38,8 @@ collects them, a score counts up, and you win when they're all gone.</p>
 <p><strong>You'll learn:</strong></p>
 <ul><li>behaviour scripts (<code>start</code> / <code>update</code>)</li><li>attributes</li><li>reading other entities</li><li>the Console</li><li>hot reload</li></ul>
 <p><strong>Start from:</strong> the scene from <a href="first-scene.html">Your first scene</a>. Open
-it with Ctrl+O. Or build the finished version with
-<code>python examples/oberon/coin_run/build_level.py</code> and follow along.</p>
+it with Ctrl+O. Or open the finished version,
+<code>examples/oberon/coin_run/level.ron</code>, and follow along.</p>
 <h2 id="1-a-coin">1. A coin<a class="anchor" href="#1-a-coin" aria-label="Link to this section">#</a></h2>
 <ol><li><strong>+ → Cube</strong>, renamed <code>Coin 1</code>.</li><li>Scale it to <code>0.5, 0.5, 0.12</code>: a flat disc-ish block.</li><li>Colour it gold: <code>#FFC733</code>.</li><li>Set its Y position to <code>1</code> so it floats at chest height.</li></ol>
 <h2 id="2-the-coin-script">2. The coin script<a class="anchor" href="#2-the-coin-script" aria-label="Link to this section">#</a></h2>
@@ -83,8 +83,9 @@ That's how the score will know.</li></ul>
 <p>Keep Play running. In the code editor, change <code>t * 2.5</code> to <code>t * 8.0</code> and
 save. Within half a second the Console says <code>Reloaded coin.py</code>, and the
 coin spins faster. You don't need to restart.</p>
-<p>Now break it on purpose: type <code>entity.transfrom</code> and save. The Console
-shows the error with a <strong>coin.py:17</strong> link. That coin pauses; the rest of
+<p>Now break it on purpose: on that same line, change <code>entity.transform</code> to
+<code>entity.transfrom</code> and save. The Console shows the error with a
+<strong>coin.py:22</strong> link. That coin pauses; the rest of
 the game keeps running. Fix the typo and save, and it resumes.</p>
 <h2 id="4-many-coins-different-values">4. Many coins, different values<a class="anchor" href="#4-many-coins-different-values" aria-label="Link to this section">#</a></h2>
 <p>Stop. Select the coin and press <strong>Ctrl+D</strong> five times. The copies share
@@ -106,7 +107,7 @@ it <code>Rules</code>. Attach a new script, <code>scripts/rules.py</code>:</p>
 
 <span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
     entity.state[<span class="tok-s">&quot;score&quot;</span>] = <span class="tok-n">0</span>
-    <span class="tok-b">print</span>(<span class="tok-s">f&quot;Collect {len(coins(ctx))} coins!&quot;</span>)
+    <span class="tok-b">print</span>(<span class="tok-s">f&quot;Collect {len(coins(ctx))} coins! WASD to move, Space to jump, Q/E to turn.&quot;</span>)
 
 
 <span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):

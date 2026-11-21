@@ -224,3 +224,59 @@ def test_coin_run_example_plays_headless(tmp_path):
 
     at.run_scene(str(tmp_path / "level.ron"), headless=True, max_frames=20, update=after)
     assert scores[-1] == 1
+
+
+def _level(name, floor):
+    scene = at.Scene().add(at.Entity(name))
+    if floor:
+        scene.add(
+            at.Entity("floor")
+            .add(at.Transform(position=(0, 0, 0)))
+            .add(at.RigidBody.fixed())
+            .add(at.Collider3D.cuboid(20.0, 1.0, 20.0))
+        )
+    scene.add(
+        at.Entity("ball")
+        .add(at.Transform(position=(0, 2, 0)))
+        .add(at.RigidBody.dynamic())
+        .add(at.Collider3D.ball(0.5))
+    )
+    return scene
+
+
+def test_load_scene_switches_levels_while_running():
+    """`Game.load_scene` from an event handler mid-run (the Cookbook's level switch)."""
+    seen = {}
+
+    class Levels(at.Game):
+        headless = True
+        target_fps = 60  # headless time is real time; give physics real seconds
+
+        def on_start(self):
+            self.load_scene(_level("level 1", floor=True))
+
+        def on_update(self, ctx):
+            frame = ctx.time.frame
+            if frame == 45:
+                seen["rest_y"] = ctx.scene["ball"].transform.position[1]
+                ctx.events.send("level_complete")
+            if frame == 46:
+                seen["old_names"] = sorted(ctx.scene.names())
+            if frame == 47:
+                seen["new_names"] = sorted(ctx.scene.names())
+            if frame == 105:
+                seen["fell_to"] = ctx.scene["ball"].transform.position[1]
+                ctx.quit()
+
+        def on_level_complete(self, _payload):
+            self.load_scene(_level("level 2", floor=False))  # no floor this time
+
+    game = Levels()
+    game.run(max_frames=400)
+    assert seen["rest_y"] == pytest.approx(1.0, abs=0.1)  # resting on level 1's floor
+    assert seen["old_names"] == ["ball", "floor", "level 1"]
+    assert seen["new_names"] == ["ball", "level 2"]
+    assert seen["fell_to"] < -1.0, "level 1's floor collider must be gone"
+    # Outside the loop, load_scene applies at once again.
+    game2 = at.Game(headless=True)
+    game2.load_scene(_level("solo", floor=False))

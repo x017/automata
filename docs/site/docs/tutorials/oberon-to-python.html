@@ -67,7 +67,8 @@ your player so it behaves the same everywhere.</p></aside>
 physics, the same scripts, as fast as possible. That makes gameplay
 testable in CI.</p>
 <p><code>tests/test_level.py</code>:</p>
-<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> os
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> math
+<span class="tok-k">import</span> os
 <span class="tok-k">import</span> automata <span class="tok-k">as</span> at
 
 LEVEL = os.path.join(os.path.dirname(__file__), <span class="tok-s">&quot;..&quot;</span>, <span class="tok-s">&quot;my_game&quot;</span>, <span class="tok-s">&quot;level.ron&quot;</span>)
@@ -88,26 +89,52 @@ LEVEL = os.path.join(os.path.dirname(__file__), <span class="tok-s">&quot;..&quo
     <span class="tok-k">assert</span> <span class="tok-n">0.5</span> &lt; heights[-<span class="tok-n">1</span>] &lt; <span class="tok-n">1.5</span>, <span class="tok-s">&quot;the player fell through the floor&quot;</span>
 
 
-<span class="tok-k">def</span> <span class="tok-f">test_camera_follows_the_player</span>():
+<span class="tok-k">def</span> <span class="tok-f">test_intro_starts_at_the_first_shot</span>():
     seen = []
 
     <span class="tok-k">def</span> <span class="tok-f">after</span>(ctx):
-        seen.append(ctx.scene[<span class="tok-s">&quot;Main Camera&quot;</span>].camera_3d.target)
+        seen.append(ctx.scene[<span class="tok-s">&quot;Main Camera&quot;</span>].camera_3d.position)
 
-    at.run_scene(LEVEL, headless=<span class="tok-b">True</span>, max_frames=<span class="tok-n">60</span>, update=after)
-    <span class="tok-k">assert</span> seen[-<span class="tok-n">1</span>][<span class="tok-n">1</span>] &gt; <span class="tok-n">0.5</span>, <span class="tok-s">&quot;the camera looks at the player, not the floor&quot;</span></code></pre></div>
+    at.run_scene(LEVEL, headless=<span class="tok-b">True</span>, max_frames=<span class="tok-n">10</span>, update=after)
+    shot = at.Scene.load(LEVEL).find(<span class="tok-s">&quot;Shot 1&quot;</span>)
+    position = <span class="tok-b">next</span>(c <span class="tok-k">for</span> c <span class="tok-k">in</span> shot.components() <span class="tok-k">if</span> <span class="tok-b">isinstance</span>(c, at.Transform)).position
+    <span class="tok-k">assert</span> math.dist(seen[-<span class="tok-n">1</span>], position) &lt; <span class="tok-n">0.5</span></code></pre></div>
 <div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>pip install pytest
 pytest -q</code></pre></div>
 <p><code>update=</code> runs after your scripts every frame and receives the raw engine
-context, so it's the place for assertions. The finished example project
-has a test like this:
-<a href="https://github.com/x017/automata/blob/main/crates/automata-python/tests/python/test_attributes_prefabs.py" rel="noopener"><code>test_coin_run_example_plays_headless</code></a>.</p>
-<p><strong>Testing logic that needs input:</strong> keep the logic in plain functions and
-test those directly. Behaviour scripts are ordinary modules:</p>
+context, so it's the place for assertions.</p>
+<aside class="note"><p><strong>Headless time is real time.</strong> A headless run goes as fast as it can,
+and <code>ctx.time</code> follows the real clock, so 120 frames last a fraction of
+a second. Anything timed, like the five-second intro, won't have
+happened yet. Test timed logic directly instead, as below.</p></aside>
+<p><strong>Testing logic that needs time or input:</strong> keep the logic in plain
+functions and test those directly. Behaviour scripts are ordinary modules:</p>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">from</span> automata.scripting <span class="tok-k">import</span> load_script
 
 rail = load_script(<span class="tok-s">&quot;my_game/scripts/camera_rail.py&quot;</span>)
-<span class="tok-k">assert</span> rail.smoothstep(<span class="tok-n">0.5</span>) == <span class="tok-n">0.5</span></code></pre></div>
+
+
+<span class="tok-k">def</span> <span class="tok-f">test_smoothstep_eases_in_and_out</span>():
+    <span class="tok-k">assert</span> rail.smoothstep(<span class="tok-n">0.5</span>) == <span class="tok-n">0.5</span>
+    <span class="tok-k">assert</span> rail.smoothstep(<span class="tok-n">0.1</span>) &lt; <span class="tok-n">0.1</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">test_the_rail_ends_after_the_last_shot</span>():
+    keys = [((<span class="tok-n">0</span>, <span class="tok-n">5</span>, <span class="tok-n">10</span>), (<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>)), ((<span class="tok-n">10</span>, <span class="tok-n">5</span>, <span class="tok-n">0</span>), (<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>))]
+    <span class="tok-k">assert</span> rail.rail(keys, <span class="tok-n">0.0</span>) == keys[<span class="tok-n">0</span>]
+    <span class="tok-k">assert</span> rail.rail(keys, rail.SHOT_TIME) <span class="tok-k">is</span> <span class="tok-b">None</span></code></pre></div>
+<p>To test <code>update</code> itself, pass small fake objects for <code>entity</code> and <code>ctx</code>
+that have just the attributes the script uses, such as
+<code>ctx.time.elapsed</code>, <code>ctx.input.just_pressed</code> and <code>entity.camera</code>. The
+finished project does this to check that Space skips the intro, that Q / E
+orbit, and that sprinting widens the view.</p>
+<p><strong>Finished files:</strong> the example project has the game launcher
+<a href="https://github.com/x017/automata/blob/main/examples/oberon/coin_run/main.py" rel="noopener"><code>main.py</code></a> (with a <code>--headless</code>
+flag and a choice of <code>dusk</code> or <code>night</code>) and the full test suite
+<a href="https://github.com/x017/automata/blob/main/examples/oberon/coin_run/tests/test_level.py" rel="noopener"><code>tests/test_level.py</code></a>,
+which CI runs on every push:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>python examples/oberon/coin_run/main.py night
+pytest examples/oberon/coin_run/tests</code></pre></div>
 <h2 id="5-share-it">5. Share it<a class="anchor" href="#5-share-it" aria-label="Link to this section">#</a></h2>
 <p>A game is a folder: <code>main.py</code>, <code>level.ron</code>, <code>scripts/</code>, and any prefabs.
 To share it:</p>

@@ -92,8 +92,12 @@ per-frame for a handful of lookups. For hot loops over many entities,
 collect views once per frame with <code>for view in scene</code>.</p>
 <p><strong>Spawn during play.</strong> <code>ctx.scene.spawn(entity)</code> is how projectiles, drops,
 and waves appear. The entity exists from the next frame.</p>
-<p><strong>Level switching.</strong> <code>self.load_scene(Level2())</code> inside <code>on_update</code> swaps
-the world immediately (current frame finishes first).</p>
+<p><strong>Level switching.</strong> <code>self.load_scene(Level2())</code> inside <code>on_update</code> or an
+<code>on_&lt;event&gt;</code> handler swaps the world when the frame's callback returns: the
+next frame sees only the new level. Other writes to the old level's
+entities that frame are dropped, and anything you <code>spawn</code> that frame lands
+in the new level. (In plain-function style, <code>ctx.scene.load(Level2())</code> does
+the same.)</p>
 <h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
 <ul><li><a href="rendering-and-lights.html">Rendering &amp; Lights</a> — cameras, meshes, suns</li><li><a href="physics.html">Physics</a> — bodies and colliders in depth</li><li><a href="oop-style.html">OOP Style</a> — <code>Game</code>/<code>Scene</code>/<code>Entity</code> subclassing rules</li><li><a href="../api-reference.html">API Reference</a></li></ul>
     </article>

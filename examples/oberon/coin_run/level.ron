@@ -4,8 +4,8 @@
         (
             name: Some("Sun"),
             directional_light: Some((
-                direction: (-0.45, -1.0, -0.3),
-                color: (1.0, 0.96, 0.88),
+                direction: (-0.32898992, -0.81915206, -0.4698463),
+                color: (1.0, 0.9607843, 0.8784314),
                 ambient: 0.45,
                 shadows: true,
             )),
@@ -20,8 +20,8 @@
                 tonemapping: Aces,
                 fog: true,
                 fog_color: (0.55, 0.68, 0.85),
-                fog_density: 0.012,
-                fog_start: 10.0,
+                fog_density: 0.01,
+                fog_start: 15.0,
             )),
         ),
         (
@@ -253,22 +253,55 @@
             )),
         ),
         (
-            name: Some("Main Camera"),
+            name: Some("Shot 1"),
+            transform: Some((
+                position: (-10.0, 7.0, 10.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            attributes: {
+                "look": Vec3((2.0, 1.0, -4.0)),
+            },
+        ),
+        (
+            name: Some("Shot 2"),
+            transform: Some((
+                position: (14.0, 4.5, -1.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            attributes: {
+                "look": Vec3((6.0, 2.5, -8.0)),
+            },
+        ),
+        (
+            name: Some("Shot 3"),
             transform: Some((
                 position: (0.0, 4.4, 8.0),
                 rotation_euler: (0.0, 0.0, 0.0),
                 scale: (1.0, 1.0, 1.0),
             )),
+            attributes: {
+                "look": Vec3((0.0, 1.5, 0.0)),
+            },
+        ),
+        (
+            name: Some("Main Camera"),
+            transform: Some((
+                position: (-10.0, 7.0, 10.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
             camera_3d: Some((
-                position: (0.0, 4.4, 8.0),
-                target: (0.0, 1.5, 0.0),
+                position: (-10.0, 7.0, 10.0),
+                target: (2.0, 1.0, -4.0),
                 up: (0.0, 1.0, 0.0),
                 fov_y_degrees: 60.0,
                 near: 0.1,
                 far: 1000.0,
             )),
             script: Some((
-                path: "scripts/follow_camera.py",
+                path: "scripts/camera_rail.py",
             )),
         ),
         (

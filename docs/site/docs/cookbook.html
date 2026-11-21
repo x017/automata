@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cookbook · AUTOMATA docs</title>
-<meta name="description" content="Small recipes for problems every game hits. Each is complete enough to paste into the platformer and adapt.">
+<meta name="description" content="Small recipes for problems every game hits. Each is complete enough to paste into the capstone platformer (examples/python/oop_platformer.py) and adapt. The names (WALK_SPEED, GRAVITY, JUMP_SPEED,…">
 <meta name="theme-color" content="#000000">
 <link rel="stylesheet" href="_static/docs.css">
 <script>window.DOCS_ROOT = "";</script>
@@ -34,16 +34,28 @@
     <article class="prose">
 <h1>Cookbook</h1>
 <p>Small recipes for problems every game hits. Each is complete enough to
-paste into the platformer and adapt.</p>
+paste into the <a href="zero-to-hero.html#module-11--capstone-coin-runner">capstone platformer</a>
+(<code>examples/python/oop_platformer.py</code>) and adapt. The names (<code>WALK_SPEED</code>,
+<code>GRAVITY</code>, <code>JUMP_SPEED</code>, <code>self.controls</code>, <code>self.cam_x</code>) are the capstone's.</p>
+<p><strong>All of them, pasted in:</strong>
+<a href="https://github.com/x017/automata/blob/main/examples/python/cookbook_platformer.py" rel="noopener"><code>examples/python/cookbook_platformer.py</code></a>
+is the capstone with every recipe on this page working together, and
+<a href="https://github.com/x017/automata/blob/main/examples/python/tests/test_cookbook_platformer.py" rel="noopener"><code>examples/python/tests/test_cookbook_platformer.py</code></a>
+tests them headless:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>python examples/python/cookbook_platformer.py
+pytest examples/python/tests</code></pre></div>
+<p>When recipes combine, they share state. The finished file merges the three
+movement recipes into one <code>move</code> method, for example.</p>
 <h2 id="movement">Movement<a class="anchor" href="#movement" aria-label="Link to this section">#</a></h2>
 <h3 id="double-jump">Double jump<a class="anchor" href="#double-jump" aria-label="Link to this section">#</a></h3>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()          <span class="tok-c"># the capstone loads the level and controls</span>
     <span class="tok-b">self</span>.jumps_left = <span class="tok-n">2</span>
 
 <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
     player = ctx.scene[<span class="tok-s">&quot;player&quot;</span>]
     dx = <span class="tok-b">self</span>.controls.axis(<span class="tok-s">&quot;move_x&quot;</span>, ctx.input)
-    <span class="tok-k">if</span> ctx.physics.grounded(player):
+    <span class="tok-k">if</span> ctx.physics.grounded(player) <span class="tok-k">and</span> <span class="tok-b">self</span>.vy &lt;= <span class="tok-n">0.0</span>:
         <span class="tok-b">self</span>.jumps_left = <span class="tok-n">2</span>
         <span class="tok-b">self</span>.vy = -<span class="tok-n">1.0</span>
     <span class="tok-k">else</span>:
@@ -52,9 +64,16 @@ paste into the platformer and adapt.</p>
     <span class="tok-k">if</span> <span class="tok-b">self</span>.controls.just_pressed(<span class="tok-s">&quot;jump&quot;</span>, ctx.input) <span class="tok-k">and</span> <span class="tok-b">self</span>.jumps_left &gt; <span class="tok-n">0</span>:
         <span class="tok-b">self</span>.vy = JUMP_SPEED
         <span class="tok-b">self</span>.jumps_left -= <span class="tok-n">1</span>
-    player.character_velocity = (dx * WALK, <span class="tok-b">self</span>.vy, <span class="tok-n">0.0</span>)</code></pre></div>
+    player.character_velocity = (dx * WALK_SPEED, <span class="tok-b">self</span>.vy, <span class="tok-n">0.0</span>)</code></pre></div>
+<p><code>self.vy &lt;= 0.0</code> matters: right after a jump the player can still touch
+the ground for a frame, and refilling <code>jumps_left</code> then would allow a
+third jump.</p>
 <h3 id="coyote-time-jump-shortly-after-leaving-a-ledge">Coyote time (jump shortly after leaving a ledge)<a class="anchor" href="#coyote-time-jump-shortly-after-leaving-a-ledge" aria-label="Link to this section">#</a></h3>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>COYOTE = <span class="tok-n">0.12</span>  <span class="tok-c"># seconds</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()
+    <span class="tok-b">self</span>.coyote = <span class="tok-n">0.0</span>
 
 <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
     <span class="tok-k">if</span> ctx.physics.grounded(ctx.scene[<span class="tok-s">&quot;player&quot;</span>]):
@@ -65,6 +84,10 @@ paste into the platformer and adapt.</p>
     <span class="tok-c"># ... allow jump while can_jump</span></code></pre></div>
 <h3 id="jump-buffering-jump-pressed-just-before-landing-still-works">Jump buffering (jump pressed just before landing still works)<a class="anchor" href="#jump-buffering-jump-pressed-just-before-landing-still-works" aria-label="Link to this section">#</a></h3>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>BUFFER = <span class="tok-n">0.12</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()
+    <span class="tok-b">self</span>.jump_buffer = <span class="tok-n">0.0</span>
 
 <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
     <span class="tok-b">self</span>.jump_buffer = BUFFER <span class="tok-k">if</span> <span class="tok-b">self</span>.controls.just_pressed(<span class="tok-s">&quot;jump&quot;</span>, ctx.input) \
@@ -85,6 +108,10 @@ paste into the platformer and adapt.</p>
 <h3 id="screen-shake">Screen shake<a class="anchor" href="#screen-shake" aria-label="Link to this section">#</a></h3>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> random
 
+<span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()
+    <span class="tok-b">self</span>.shake = <span class="tok-n">0.0</span>
+
 <span class="tok-k">def</span> <span class="tok-f">on_hit</span>(<span class="tok-b">self</span>, payload):
     <span class="tok-b">self</span>.shake = <span class="tok-n">0.25</span>  <span class="tok-c"># seconds of shake</span>
 
@@ -98,47 +125,71 @@ paste into the platformer and adapt.</p>
     )</code></pre></div>
 <h2 id="spawning--timing">Spawning &amp; timing<a class="anchor" href="#spawning--timing" aria-label="Link to this section">#</a></h2>
 <h3 id="spawn-waves-on-a-timer">Spawn waves on a timer<a class="anchor" href="#spawn-waves-on-a-timer" aria-label="Link to this section">#</a></h3>
-<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()
+    <span class="tok-b">self</span>.next_wave, <span class="tok-b">self</span>.wave = <span class="tok-n">5.0</span>, <span class="tok-n">0</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
     <span class="tok-b">self</span>.next_wave -= ctx.time.delta
     <span class="tok-k">if</span> <span class="tok-b">self</span>.next_wave &lt;= <span class="tok-n">0.0</span>:
         <span class="tok-b">self</span>.next_wave = <span class="tok-n">5.0</span>
         <span class="tok-b">self</span>.wave += <span class="tok-n">1</span>
         <span class="tok-k">for</span> i <span class="tok-k">in</span> <span class="tok-b">range</span>(<span class="tok-b">self</span>.wave):
-            ctx.scene.spawn(Enemy(x=<span class="tok-n">8.0</span> + i * <span class="tok-n">1.5</span>))   <span class="tok-c"># appears next frame</span></code></pre></div>
+            ctx.scene.spawn(Crate(position=(<span class="tok-n">2.0</span> + i * <span class="tok-n">1.5</span>, <span class="tok-n">8.0</span>, <span class="tok-n">0.0</span>)))   <span class="tok-c"># appears next frame</span></code></pre></div>
+<p><code>Crate</code> is the capstone's; any <code>Entity</code> subclass works.</p>
 <h3 id="pickup-by-proximity-no-physics-sensors-needed">Pickup by proximity (no physics sensors needed)<a class="anchor" href="#pickup-by-proximity-no-physics-sensors-needed" aria-label="Link to this section">#</a></h3>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
     px, py, _ = ctx.scene[<span class="tok-s">&quot;player&quot;</span>].transform.position
     <span class="tok-k">for</span> name, (cx, cy) <span class="tok-k">in</span> <span class="tok-b">list</span>(<span class="tok-b">self</span>.coins.items()):
+        coin = ctx.scene.find(name)
+        <span class="tok-k">if</span> coin <span class="tok-k">is</span> <span class="tok-b">None</span>:  <span class="tok-c"># spawned this frame; it exists from the next</span>
+            <span class="tok-k">continue</span>
         <span class="tok-k">if</span> <span class="tok-b">abs</span>(px - cx) &lt; <span class="tok-n">0.8</span> <span class="tok-k">and</span> <span class="tok-b">abs</span>(py - cy) &lt; <span class="tok-n">1.0</span>:
-            ctx.scene.find(name).despawn()
+            coin.despawn()
             <span class="tok-k">del</span> <span class="tok-b">self</span>.coins[name]
-            ctx.events.send(<span class="tok-s">&quot;coin_pickup&quot;</span>, {<span class="tok-s">&quot;score&quot;</span>: <span class="tok-b">self</span>.score + <span class="tok-n">1</span>})</code></pre></div>
+            <span class="tok-b">self</span>.score += <span class="tok-n">1</span>
+            ctx.events.send(<span class="tok-s">&quot;coin_pickup&quot;</span>, {<span class="tok-s">&quot;score&quot;</span>: <span class="tok-b">self</span>.score})</code></pre></div>
 <h2 id="flow-control">Flow control<a class="anchor" href="#flow-control" aria-label="Link to this section">#</a></h2>
 <h3 id="pause">Pause<a class="anchor" href="#pause" aria-label="Link to this section">#</a></h3>
-<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()
+    <span class="tok-b">self</span>.paused = <span class="tok-b">False</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
     <span class="tok-k">if</span> ctx.input.just_pressed(at.Key.ESCAPE):
         <span class="tok-b">self</span>.paused = <span class="tok-k">not</span> <span class="tok-b">self</span>.paused
     <span class="tok-k">if</span> <span class="tok-b">self</span>.paused:
-        <span class="tok-k">return</span>  <span class="tok-c"># world freezes; camera/menus still drawable if you return late</span>
-    <span class="tok-c"># ... game logic below only runs unpaused</span></code></pre></div>
-<p>(Physics keeps stepping — for a full freeze, skip writing velocities while
-paused so characters stay put; dynamic bodies keep settling.)</p>
+        ctx.scene[<span class="tok-s">&quot;player&quot;</span>].character_velocity = (<span class="tok-n">0.0</span>, <span class="tok-n">0.0</span>, <span class="tok-n">0.0</span>)
+        <span class="tok-k">return</span>  <span class="tok-c"># the game logic below only runs unpaused</span>
+    <span class="tok-c"># ... game logic</span></code></pre></div>
+<p>Physics keeps stepping while paused. A character's velocity stays at
+whatever you last wrote, so set it to zero or the player keeps sliding.
+Dynamic bodies (crates) keep settling.</p>
 <h3 id="switching-levels">Switching levels<a class="anchor" href="#switching-levels" aria-label="Link to this section">#</a></h3>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_level_complete</span>(<span class="tok-b">self</span>, payload):
     <span class="tok-b">self</span>.level += <span class="tok-n">1</span>
-    <span class="tok-b">self</span>.load_scene(make_level(<span class="tok-b">self</span>.level))   <span class="tok-c"># applies immediately</span></code></pre></div>
+    <span class="tok-b">self</span>.load_scene(make_level(<span class="tok-b">self</span>.level))   <span class="tok-c"># the next frame is the new level</span></code></pre></div>
+<p><code>make_level(n)</code> is your own function returning a <code>Scene</code>. Send
+<code>level_complete</code> when the last coin goes, and reset per-level state (the
+coin table, timers) after loading.</p>
 <h2 id="input">Input<a class="anchor" href="#input" aria-label="Link to this section">#</a></h2>
 <h3 id="rebindable-controls-screen-core-loop">Rebindable controls screen (core loop)<a class="anchor" href="#rebindable-controls-screen-core-loop" aria-label="Link to this section">#</a></h3>
-<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># entering &quot;listen&quot; mode</span>
-<span class="tok-b">self</span>.listening_for = <span class="tok-s">&quot;jump&quot;</span>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()
+    <span class="tok-b">self</span>.listening_for = <span class="tok-b">None</span>
 
 <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    <span class="tok-k">if</span> <span class="tok-b">self</span>.listening_for <span class="tok-k">is</span> <span class="tok-b">None</span> <span class="tok-k">and</span> ctx.input.just_pressed(at.Key.F1):
+        <span class="tok-b">self</span>.listening_for = <span class="tok-s">&quot;jump&quot;</span>          <span class="tok-c"># entering &quot;listen&quot; mode</span>
+        <span class="tok-k">return</span>
     <span class="tok-k">if</span> <span class="tok-b">self</span>.listening_for:
         <span class="tok-k">for</span> key <span class="tok-k">in</span> at.Key:
-            <span class="tok-k">if</span> ctx.input.just_pressed(key):
+            <span class="tok-k">if</span> key != at.Key.F1 <span class="tok-k">and</span> ctx.input.just_pressed(key):
                 <span class="tok-b">self</span>.controls.rebind(<span class="tok-b">self</span>.listening_for, [at.Binding.key(key)])
                 <span class="tok-b">self</span>.listening_for = <span class="tok-b">None</span>
-                <span class="tok-k">break</span></code></pre></div>
+                <span class="tok-k">break</span>
+        <span class="tok-k">return</span>                               <span class="tok-c"># swallow input while listening</span>
+    <span class="tok-c"># ... normal game logic</span></code></pre></div>
 <h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
 <ul><li><a href="zero-to-hero.html">Zero to Hero</a> — the guided path</li><li><a href="api-reference.html">API Reference</a></li></ul>
     </article>

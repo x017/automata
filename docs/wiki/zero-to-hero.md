@@ -6,6 +6,14 @@ a follow camera, and a headless test suite. Every module is a complete,
 runnable program.
 
 Work through the modules in order; each one adds exactly one concept.
+Every module and every exercise solution is a file in
+[`examples/python/zero_to_hero/`](../../examples/python/zero_to_hero), so
+you can run any of them (`python examples/python/zero_to_hero/module_06.py`)
+or check them all at once without a window:
+
+```console
+pytest examples/python/zero_to_hero
+```
 
 - [Module 0 — The smallest game](#module-0--the-smallest-game)
 - [Module 1 — Scenes, entities, components](#module-1--scenes-entities-components)
@@ -47,6 +55,18 @@ new `Game` to run again.
 
 **Exercise:** pass `max_frames=120` to `run` and print the return value.
 
+**Solution** ([`exercises/exercise_00.py`](../../examples/python/zero_to_hero/exercises/exercise_00.py)):
+
+```python
+import automata as at
+
+game = at.Game(title="module 0")
+frames = game.run(lambda ctx: None, max_frames=120)
+print(f"ran {frames} frames")
+```
+
+It prints `ran 120 frames`: the loop stopped itself.
+
 ---
 
 ## Module 1 — Scenes, entities, components
@@ -87,6 +107,28 @@ An orange cube. The anatomy:
 `Camera3D` entity *and* an entity with both `Transform` and `MeshRenderer`.
 
 **Exercise:** add a second cube at `(2, 0, 0)` with a different color.
+
+**Solution** ([`exercises/exercise_01.py`](../../examples/python/zero_to_hero/exercises/exercise_01.py)):
+
+```python
+scene = (
+    at.Scene()
+    .add(at.Entity("camera").add(at.Camera3D(position=(1, 2, 6), target=(1, 0, 0))))
+    .add(
+        at.Entity("cube")
+        .add(at.Transform(position=(0, 0, 0)))
+        .add(at.MeshRenderer.cube(size=1.0, color=(0.95, 0.45, 0.15, 1.0)))
+    )
+    .add(
+        at.Entity("second cube")
+        .add(at.Transform(position=(2, 0, 0)))
+        .add(at.MeshRenderer.cube(size=1.0, color=(0.4, 0.7, 0.9, 1.0)))
+    )
+)
+```
+
+The camera now aims at `(1, 0, 0)`, halfway between the cubes, so both
+are in frame.
 
 ---
 
@@ -133,6 +175,18 @@ Facts to internalize:
 
 **Exercise:** make the camera bob up and down (`2.0 + math.sin(t)`) instead
 of orbiting.
+
+**Solution** ([`exercises/exercise_02.py`](../../examples/python/zero_to_hero/exercises/exercise_02.py)):
+
+```python
+def update(ctx):
+    # Bob: the camera rises and falls in front of the cube.
+    t = ctx.time.elapsed
+    ctx.scene["cam"].camera_3d = at.Camera3D(position=(0.0, 2.0 + math.sin(t), 6.0), target=(0, 0, 0))
+
+
+game.run(update)
+```
 
 ---
 
@@ -186,7 +240,7 @@ Key ideas:
 **Exercise:** pulse the cube's color instead of scale… trick question —
 color lives on `MeshRenderer`, which is fixed at spawn. Change *size*,
 *position*, or *rotation*; material swaps are a spawn-a-new-entity job (for
-now).
+now). The answer is the module itself, with *scale* changing.
 
 ---
 
@@ -245,6 +299,22 @@ The layers:
 **Exercise:** bind jump to both `Key.SPACE` and `GamepadButton.SOUTH`, and
 print `"jump!"` when it's just-pressed.
 
+**Solution** ([`exercises/exercise_04.py`](../../examples/python/zero_to_hero/exercises/exercise_04.py)):
+
+```python
+controls = at.ActionMap()
+controls.bind("jump", at.Binding.key(at.Key.SPACE))
+controls.bind("jump", at.Binding.gamepad_button(at.GamepadButton.SOUTH))  # stacks with Space
+
+
+def update(ctx):
+    if controls.just_pressed("jump", ctx.input):
+        print("jump!")
+
+
+game.run(update)
+```
+
 ---
 
 ## Module 5 — Physics: bodies and colliders
@@ -302,6 +372,27 @@ mix; pick one per game.
 
 **Exercise:** drop five crates from different heights with different
 restitutions.
+
+**Solution** ([`exercises/exercise_05.py`](../../examples/python/zero_to_hero/exercises/exercise_05.py)):
+
+```python
+# (height, restitution): higher numbers bounce more; 0.0 lands dead.
+DROPS = [(3.0, 0.0), (4.0, 0.2), (5.0, 0.4), (6.0, 0.6), (7.0, 0.8)]
+
+scene = (
+    at.Scene()
+    .add(at.Entity("cam").add(at.Camera3D(position=(0, 4, 11), target=(0, 1.5, 0))))
+    .add(
+        at.Entity("floor")
+        .add(at.Transform(position=(0, 0, 0), scale=(20, 1, 20)))
+        .add(at.MeshRenderer.cube(size=1.0, color=(0.35, 0.65, 0.30, 1.0)))
+        .add(at.RigidBody.fixed())
+        .add(at.Collider3D.cuboid(20.0, 1.0, 20.0))
+    )
+```
+
+`scene.add` returns the scene, but you don't have to chain it: a loop
+works just as well.
 
 ---
 
@@ -377,6 +468,35 @@ The recipe, line by line:
 
 **Exercise:** add a double jump (track jumps used since last grounded).
 
+**Solution** ([`exercises/exercise_06.py`](../../examples/python/zero_to_hero/exercises/exercise_06.py)), the changed part:
+
+```python
+MAX_JUMPS = 2
+vy = 0.0
+jumps_used = 0
+
+
+def update(ctx):
+    global vy, jumps_used
+    player = ctx.scene["player"]
+    dx = controls.axis("move_x", ctx.input)
+
+    if ctx.physics.grounded(player) and vy <= 0.0:
+        vy = -1.0  # keep contact so snap-to-ground works on slopes
+        jumps_used = 0
+    else:
+        vy -= GRAVITY * ctx.time.delta
+
+    if controls.just_pressed("jump", ctx.input) and jumps_used < MAX_JUMPS:
+        vy = JUMP  # the first jump from the ground, the second in mid-air
+        jumps_used += 1
+```
+
+Two details matter. The jump check moves out of the grounded branch so it
+also works in the air. And the reset only happens while falling or
+standing (`vy <= 0.0`): right after a jump the player can still touch the
+ground for a frame, and resetting then would give a free third jump.
+
 ---
 
 ## Module 7 — Lights, shadows, and quality
@@ -407,8 +527,26 @@ scene = (
             )
         )
     )
-    # ... floor, cubes from module 6 ...
+    .add(
+        at.Entity("floor")
+        .add(at.Transform(scale=(30, 1, 8)))
+        .add(at.MeshRenderer.cube(color=(0.35, 0.65, 0.30, 1.0)))
+    )
+    .add(
+        at.Entity("tall")
+        .add(at.Transform(position=(-1.5, 1.5, 0), scale=(1, 2, 1)))
+        .add(at.MeshRenderer.cube(color=(0.95, 0.45, 0.15, 1.0)))
+    )
+    .add(
+        at.Entity("short")
+        .add(at.Transform(position=(1.5, 1.0, 0.5)))
+        .add(at.MeshRenderer.cube(color=(0.4, 0.7, 0.9, 1.0)))
+    )
 )
+
+game = MyGame()
+game.load_scene(scene)
+game.run(lambda ctx: None)
 ```
 
 Everything renders with Blinn-Phong shading: diffuse from the sun, a subtle
@@ -423,6 +561,46 @@ specular highlight, and ambient so shadow sides aren't pitch black.
 **Exercise:** make a night scene (dark blue `clear_color`, pale blue sun,
 `ambient=0.15`).
 
+**Solution** ([`exercises/exercise_07.py`](../../examples/python/zero_to_hero/exercises/exercise_07.py)), the changed part:
+
+```python
+class MyGame(at.Game):
+    title = "module 7: night"
+    clear_color = (0.02, 0.03, 0.08, 1.0)      # dark blue night sky
+    graphics = at.GraphicsQuality.HIGH          # shadow map resolution
+
+
+scene = (
+    at.Scene()
+    .add(at.Entity("cam").add(at.Camera3D(position=(0, 3.5, 9), target=(0, 1, 0))))
+    .add(
+        at.Entity("sun").add(
+            at.DirectionalLight(
+                direction=(-0.45, -1.0, -0.3),   # where the light travels
+                color=(0.6, 0.7, 1.0),           # pale blue moonlight
+                ambient=0.15,                    # deep shadows
+                shadows=True,                    # shadow-mapped shadows
+            )
+        )
+    )
+    .add(
+        at.Entity("floor")
+        .add(at.Transform(scale=(30, 1, 8)))
+        .add(at.MeshRenderer.cube(color=(0.35, 0.65, 0.30, 1.0)))
+    )
+    .add(
+        at.Entity("tall")
+        .add(at.Transform(position=(-1.5, 1.5, 0), scale=(1, 2, 1)))
+        .add(at.MeshRenderer.cube(color=(0.95, 0.45, 0.15, 1.0)))
+    )
+    .add(
+        at.Entity("short")
+        .add(at.Transform(position=(1.5, 1.0, 0.5)))
+        .add(at.MeshRenderer.cube(color=(0.4, 0.7, 0.9, 1.0)))
+    )
+)
+```
+
 ---
 
 ## Module 8 — Events and resources
@@ -431,18 +609,48 @@ specular highlight, and ambient so shadow sides aren't pitch black.
 `ctx.resources` stores arbitrary Python objects across frames.
 
 ```python
+import automata as at
+
+COINS = {"coin_0": -1.5, "coin_1": 1.0, "coin_2": 3.5}
+
+
+class Level(at.Scene):
+    def __init__(self):
+        super().__init__()
+        self.add(at.Entity("cam").add(at.Camera3D(position=(0, 3, 9), target=(0, 0.5, 0))))
+        player = at.Entity("player").add(at.Transform(position=(-4, 0.5, 0)))
+        self.add(player.add(at.MeshRenderer.cube(size=0.8, color=(0.95, 0.45, 0.15, 1.0))))
+        for name, x in COINS.items():
+            coin = at.Entity(name).add(at.Transform(position=(x, 0.5, 0)))
+            self.add(coin.add(at.MeshRenderer.cube(size=0.4, color=(1.0, 0.85, 0.25, 1.0))))
+
+
 class CoinGame(at.Game):
+    title = "module 8"
+
     def on_start(self):
         self.load_scene(Level())
         self.score = 0
+        self.x = -4.0
+        self.coins = dict(COINS)
+        self.controls = at.ActionMap()
+        self.controls.bind_axis("move_x", at.AxisBinding.key_pair(at.Key.A, at.Key.D))
 
     def on_update(self, ctx):
-        # ... when the player grabs a coin:
-        ctx.events.send("coin_pickup", {"score": self.score + 1})
+        self.x += self.controls.axis("move_x", ctx.input) * 4.0 * ctx.time.delta
+        ctx.scene["player"].transform.position = (self.x, 0.5, 0.0)
+        for name, cx in list(self.coins.items()):
+            if abs(self.x - cx) < 0.6:  # the player grabs a coin
+                ctx.scene[name].despawn()
+                del self.coins[name]
+                ctx.events.send("coin_pickup", {"score": self.score + 1})
 
     def on_coin_pickup(self, payload):      # auto-registered by name
         self.score = payload["score"]
         print(f"score: {self.score}")
+
+
+CoinGame().run()
 ```
 
 - `ctx.events.send(name, payload)` / `ctx.events.read(name)` — payloads are
@@ -458,8 +666,37 @@ class CoinGame(at.Game):
 **Events vs resources:** events are *things that happened* (transient);
 resources are *things that are* (persistent).
 
-**Exercise:** keep `score` in `ctx.resources` instead of an attribute, and
-print it from a second handler.
+**Exercise:** keep `score` in `ctx.resources` instead of an attribute.
+Then send a second event, `all_collected`, when the last coin goes, and
+handle it with its own method.
+
+**Solution** ([`exercises/exercise_08.py`](../../examples/python/zero_to_hero/exercises/exercise_08.py)), the changed part:
+
+```python
+    def on_update(self, ctx):
+        if "score" not in ctx.resources:
+            ctx.resources.set("score", 0)
+        self.x += self.controls.axis("move_x", ctx.input) * 4.0 * ctx.time.delta
+        ctx.scene["player"].transform.position = (self.x, 0.5, 0.0)
+        for name, cx in list(self.coins.items()):
+            if abs(self.x - cx) < 0.6:  # the player grabs a coin
+                ctx.scene[name].despawn()
+                del self.coins[name]
+                score = ctx.resources.get("score") + 1
+                ctx.resources.set("score", score)  # takes effect immediately
+                ctx.events.send("coin_pickup", {"score": score})
+                if not self.coins:
+                    ctx.events.send("all_collected", {"score": score})
+
+    def on_coin_pickup(self, payload):      # auto-registered by name
+        print(f"score: {payload['score']}")
+
+    def on_all_collected(self, payload):    # a second handler, a second event
+        print(f"all {len(COINS)} coins! final score {payload['score']}")
+```
+
+Handlers get the payload, not `ctx`, so everything a handler needs goes in
+the payload.
 
 ---
 
@@ -470,6 +707,33 @@ class attributes; hooks are methods. This is the style for anything past a
 toy.
 
 ```python
+import automata as at
+
+SKY = (0.55, 0.78, 0.95, 1.0)
+WALK, GRAVITY, JUMP = 5.0, 20.0, 9.5
+
+
+class Camera(at.Entity):
+    def __init__(self):
+        super().__init__("camera")
+        self.add(at.Camera3D(position=(0, 3.5, 10), target=(0, 1, 0)))
+
+
+class Sun(at.Entity):
+    def __init__(self):
+        super().__init__("sun")
+        self.add(at.DirectionalLight(direction=(-0.45, -1.0, -0.3), ambient=0.35, shadows=True))
+
+
+class Ground(at.Entity):
+    def __init__(self):
+        super().__init__("ground")
+        self.add(at.Transform(scale=(30, 1, 8)))
+        self.add(at.MeshRenderer.cube(color=(0.35, 0.65, 0.30, 1.0)))
+        self.add(at.RigidBody.fixed())
+        self.add(at.Collider3D.cuboid(30, 1, 8))
+
+
 class Player(at.Entity):
     def __init__(self):
         super().__init__("player")
@@ -498,11 +762,25 @@ class Platformer(at.Game):
 
     def on_start(self):
         self.load_scene(Level())
+        self.vy = 0.0
         self.controls = at.ActionMap()
-        ...
+        self.controls.bind_axis("move_x", at.AxisBinding.key_pair(at.Key.A, at.Key.D))
+        self.controls.bind("jump", at.Binding.key(at.Key.SPACE))
 
-    def on_update(self, ctx): ...
-    def on_coin_pickup(self, payload): ...
+    def on_update(self, ctx):
+        player = ctx.scene["player"]
+        if ctx.physics.grounded(player):
+            self.vy = -1.0
+            if self.controls.just_pressed("jump", ctx.input):
+                self.vy = JUMP
+        else:
+            self.vy -= GRAVITY * ctx.time.delta
+        dx = self.controls.axis("move_x", ctx.input)
+        player.character_velocity = (dx * WALK, self.vy, 0.0)
+
+
+if __name__ == "__main__":
+    Platformer().run()
 ```
 
 Why this scales (the Django lesson):
@@ -522,7 +800,37 @@ parameters, but pass them as **keywords** — the first positional argument
 of an `Entity` constructor is always the entity name
 (`Crate(position=(2, 1, 0))`, not `Crate((2, 1, 0))`).
 
-**Exercise:** refactor module 6 into `Player`/`Level`/`Platformer` classes.
+This is module 6 again, rebuilt as classes. Compare the two files side by
+side:
+[`module_06.py`](../../examples/python/zero_to_hero/module_06.py) and
+[`module_09.py`](../../examples/python/zero_to_hero/module_09.py).
+
+**Exercise:** add a `Crate` archetype that takes a keyword `size`, and
+stack three crates in the level.
+
+**Solution** ([`exercises/exercise_09.py`](../../examples/python/zero_to_hero/exercises/exercise_09.py)), the changed part:
+
+```python
+class Crate(at.Entity):
+    def __init__(self, position, size=0.8):
+        super().__init__()  # unnamed: crates are never looked up
+        self.add(at.Transform(position=position))
+        self.add(at.MeshRenderer.cube(size=size, color=(0.72, 0.52, 0.30, 1.0)))
+        self.add(at.RigidBody.dynamic())
+        self.add(at.Collider3D.cuboid(size, size, size))
+
+
+class Level(at.Scene):
+    def __init__(self):
+        super().__init__()
+        self.add(Camera())
+        self.add(Sun())
+        self.add(Ground())
+        self.add(Player())
+        self.add(Crate(position=(1, 1, 0)))
+        self.add(Crate(position=(3, 1, 0), size=1.2))
+        self.add(Crate(position=(3, 3, 0), size=0.6))  # stacked on the big one
+```
 
 ---
 
@@ -534,7 +842,7 @@ with no window or GPU. That makes your game a pytest target.
 ```python
 import pytest
 
-from mygame import Platformer  # the Game subclass from your game module
+from oop_platformer import Platformer  # the Game subclass from your game module
 
 
 def test_player_lands_on_the_ground():
@@ -551,11 +859,19 @@ def test_player_lands_on_the_ground():
 
     game = Probe()
     game.run()
-    assert game.landed_y == pytest.approx(1.0, abs=0.05)
+    assert game.landed_y == pytest.approx(1.4, abs=0.1)  # floor top 0.5 + capsule 0.9
 ```
 
+Save it as `test_platformer.py` next to your game and run `pytest`. Here
+the game is the capstone, `examples/python/oop_platformer.py` (Module 11).
+The finished copy is
+[`test_module_10.py`](../../examples/python/zero_to_hero/test_module_10.py).
+
+The player spawns at y = 1.4 and should still be there after landing: the
+floor's top is at 0.5, and the capsule's centre sits 0.9 above its base.
+
 The probe subclasses the game, wraps `on_update`, and inspects the world
-after 120 frames. (The same wrap works without subclassing:
+after 120 frames. With `target_fps = 60`, that's two real seconds. (The same wrap works without subclassing:
 `game.run(update=my_probe)` — an explicit callback wins over `on_update`;
 call `Platformer.on_update(game, ctx)` inside it to keep the real logic.)
 
@@ -569,8 +885,38 @@ Patterns that work well:
 - The engine's own suite (`crates/automata-python/tests/python`) is 50+
   examples of this style.
 
-**Exercise:** test that collecting a coin despawns it (spawn near the
-player, run 60 frames, assert `ctx.scene.find("coin_0")` is `None`).
+**Exercise:** test that collecting a coin despawns it (spawn a coin on
+the player, run 60 frames, assert `ctx.scene.find(...)` is `None`).
+
+**Solution** ([`exercises/test_exercise_10.py`](../../examples/python/zero_to_hero/exercises/test_exercise_10.py)):
+
+```python
+from oop_platformer import Coin, Platformer
+
+
+def test_collecting_a_coin_despawns_it():
+    class Probe(Platformer):
+        headless = True
+
+        def on_update(self, ctx):
+            if ctx.time.frame == 1:  # drop a coin right on the player
+                ctx.scene.spawn(Coin("coin_near", x=-4.0, y=1.4))
+                self.coins["coin_near"] = (-4.0, 1.4)
+            super().on_update(ctx)
+            if ctx.time.frame == 60:
+                self.found = ctx.scene.find("coin_near")
+                ctx.quit()
+
+    game = Probe()
+    game.run()
+    assert game.found is None
+    assert "coin_near" not in game.coins
+    assert game.score == 1
+```
+
+The coin is spawned *before* `super().on_update(ctx)`, and it only exists
+from the next frame on. The game's pickup loop skips names that `find`
+can't see yet, so this is safe.
 
 ---
 
@@ -596,6 +942,9 @@ What it demonstrates, line by line:
 | Spinning coins, proximity pickup, `coin_pickup` events | Modules 3, 8 |
 | Sky `clear_color`, warm shadowed sun, quality preset | Module 7 |
 | `--headless` flag for CI | Module 10 |
+
+The heart of it, the game class (abridged; the entity classes and
+`on_start` are in the file):
 
 ```python
 class Platformer(at.Game):
@@ -642,8 +991,8 @@ class Platformer(at.Game):
 
 ### Where next
 
-- [Cookbook](cookbook.md) — double jump, coyote time, moving platforms,
-  spawn waves, pause, scene switching.
+- [Cookbook](cookbook.md) — double jump, coyote time, jump buffering,
+  screen shake, spawn waves, pause, level switching, rebinding.
 - [Project Structure](guides/project-structure.md) — when one file becomes
   five.
 - [API Reference](api-reference.md) — every class, every parameter.

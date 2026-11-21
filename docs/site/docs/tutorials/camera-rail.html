@@ -42,17 +42,26 @@ third-person follow camera smoothly.</p>
 <p>Hard-coding positions means you can't see them. Use entities instead:</p>
 <ol><li><strong>+ → Empty</strong>, renamed <code>Shot 1</code>. An Empty only needs a position, so
 move it to where the camera should be for the opening shot.</li><li>Add an attribute <code>look</code> of type <strong>Vec3</strong>, set to the point the shot
-should look at.</li><li>Repeat for <code>Shot 2</code> and <code>Shot 3</code>.</li></ol>
+should look at.</li><li>Repeat for <code>Shot 2</code> and <code>Shot 3</code>. Shots play in name order. Put the
+last one where the follow camera starts (behind the player, at the
+camera's own position), so the hand-off is seamless.</li></ol>
 <aside class="note"><p>Quick way to place a marker: frame the shot, then press <strong>+ → Camera</strong>.
 It lands at your eye position. Copy its <strong>Eye</strong> into the Empty's
 position and its <strong>Look At</strong> into <code>look</code>. Then delete the temporary
 camera.</p></aside>
 <h2 id="2-the-rail-script">2. The rail script<a class="anchor" href="#2-the-rail-script" aria-label="Link to this section">#</a></h2>
-<p>Replace <code>scripts/follow_camera.py</code>, or make a new script on the camera:</p>
-<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> math
+<p>An entity runs one script, so select <strong>Main Camera</strong>, remove its Script
+component, and attach a new one, <code>scripts/camera_rail.py</code>. The end of the
+rail script brings the orbiting follow camera back.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-s">&quot;&quot;&quot;camera_rail: an intro flyover through the Shot markers, then a follow camera.&quot;&quot;&quot;</span>
 
-SHOT_TIME = <span class="tok-n">2.5</span>   <span class="tok-c"># seconds per segment</span>
-BLEND = <span class="tok-n">1.0</span>       <span class="tok-c"># seconds to blend into the follow camera</span>
+<span class="tok-k">import</span> math
+
+SHOT_TIME = <span class="tok-n">2.5</span>  <span class="tok-c"># seconds per segment</span>
+BLEND = <span class="tok-n">1.0</span>  <span class="tok-c"># seconds to blend into the follow camera</span>
+DISTANCE = <span class="tok-n">8.0</span>
+HEIGHT = <span class="tok-n">3.5</span>
+TURN = <span class="tok-n">2.0</span>  <span class="tok-c"># radians per second, Q / E orbit after the intro</span>
 
 
 <span class="tok-k">def</span> <span class="tok-f">smoothstep</span>(t):
@@ -66,11 +75,13 @@ BLEND = <span class="tok-n">1.0</span>       <span class="tok-c"># seconds to bl
 
 <span class="tok-k">def</span> <span class="tok-f">shots</span>(ctx):
     found = <span class="tok-b">sorted</span>((e <span class="tok-k">for</span> e <span class="tok-k">in</span> ctx.scene <span class="tok-k">if</span> e.name.startswith(<span class="tok-s">&quot;Shot &quot;</span>)), key=<span class="tok-k">lambda</span> e: e.name)
-    <span class="tok-k">return</span> [(e.transform.position, e.attributes[<span class="tok-s">&quot;look&quot;</span>]) <span class="tok-k">for</span> e <span class="tok-k">in</span> found]
+    <span class="tok-k">return</span> [(<span class="tok-b">tuple</span>(e.transform.position), <span class="tok-b">tuple</span>(e.attributes[<span class="tok-s">&quot;look&quot;</span>])) <span class="tok-k">for</span> e <span class="tok-k">in</span> found]
 
 
 <span class="tok-k">def</span> <span class="tok-f">rail</span>(keys, time):
     <span class="tok-s">&quot;&quot;&quot;Position and target `time` seconds into the flyover, or None when done.&quot;&quot;&quot;</span>
+    <span class="tok-k">if</span> <span class="tok-b">len</span>(keys) &lt; <span class="tok-n">2</span>:
+        <span class="tok-k">return</span> <span class="tok-b">None</span>
     segment = <span class="tok-b">int</span>(time // SHOT_TIME)
     <span class="tok-k">if</span> segment &gt;= <span class="tok-b">len</span>(keys) - <span class="tok-n">1</span>:
         <span class="tok-k">return</span> <span class="tok-b">None</span>
@@ -82,37 +93,49 @@ BLEND = <span class="tok-n">1.0</span>       <span class="tok-c"># seconds to bl
 <span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
     entity.state[<span class="tok-s">&quot;keys&quot;</span>] = shots(ctx)
     entity.state[<span class="tok-s">&quot;yaw&quot;</span>] = <span class="tok-n">0.0</span>
+    entity.state[<span class="tok-s">&quot;done_at&quot;</span>] = <span class="tok-b">None</span>
 
 
 <span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
     cam = entity.camera
-    keys = entity.state[<span class="tok-s">&quot;keys&quot;</span>]
     t = ctx.time.elapsed
-    on_rail = rail(keys, t) <span class="tok-k">if</span> <span class="tok-b">len</span>(keys) &gt;= <span class="tok-n">2</span> <span class="tok-k">else</span> <span class="tok-b">None</span>
 
+    <span class="tok-c"># Skippable intro: Space jumps straight to the hand-off.</span>
+    <span class="tok-k">if</span> entity.state[<span class="tok-s">&quot;keys&quot;</span>] <span class="tok-k">and</span> ctx.input.just_pressed(<span class="tok-s">&quot;space&quot;</span>):
+        entity.state[<span class="tok-s">&quot;keys&quot;</span>] = []
+
+    on_rail = rail(entity.state[<span class="tok-s">&quot;keys&quot;</span>], t)
     <span class="tok-k">if</span> on_rail <span class="tok-k">is</span> <span class="tok-k">not</span> <span class="tok-b">None</span>:
         cam.position, cam.target = on_rail
         <span class="tok-k">return</span>
 
     <span class="tok-c"># After the flyover: follow, easing in over BLEND seconds.</span>
-    done_at = (<span class="tok-b">len</span>(keys) - <span class="tok-n">1</span>) * SHOT_TIME <span class="tok-k">if</span> <span class="tok-b">len</span>(keys) &gt;= <span class="tok-n">2</span> <span class="tok-k">else</span> <span class="tok-n">0.0</span>
-    blend = smoothstep((t - done_at) / BLEND)
-    yaw = entity.state[<span class="tok-s">&quot;yaw&quot;</span>]
-    offset = (<span class="tok-n">8.0</span> * math.sin(yaw), <span class="tok-n">3.5</span>, <span class="tok-n">8.0</span> * math.cos(yaw))
+    <span class="tok-k">if</span> entity.state[<span class="tok-s">&quot;done_at&quot;</span>] <span class="tok-k">is</span> <span class="tok-b">None</span>:
+        entity.state[<span class="tok-s">&quot;done_at&quot;</span>] = t
+    blend = smoothstep((t - entity.state[<span class="tok-s">&quot;done_at&quot;</span>]) / BLEND)
+    yaw = entity.state[<span class="tok-s">&quot;yaw&quot;</span>] + ctx.input.axis(<span class="tok-s">&quot;q&quot;</span>, <span class="tok-s">&quot;e&quot;</span>) * TURN * ctx.time.delta
+    entity.state[<span class="tok-s">&quot;yaw&quot;</span>] = yaw
+    offset = (DISTANCE * math.sin(yaw), HEIGHT, DISTANCE * math.cos(yaw))
     cam.follow(ctx.scene[<span class="tok-s">&quot;Player&quot;</span>], offset=offset, smooth=<span class="tok-n">1.0</span> + <span class="tok-n">7.0</span> * blend)</code></pre></div>
 <p>Play. The camera glides through the shots and then settles in behind the
-player.</p>
+player. Press Space during the flyover to skip it.</p>
+<p>The finished level has three shots and this script, in
+<a href="https://github.com/x017/automata/blob/main/examples/oberon/coin_run/scripts/camera_rail.py" rel="noopener"><code>scripts/camera_rail.py</code></a>.
+To add Steps 3 and 4 from the previous tutorial (look-ahead and sprint
+zoom) after the hand-off, copy <code>look_ahead</code> and <code>sprint_zoom</code> from
+<code>follow_camera.py</code> and call them after <code>cam.follow</code>.</p>
 <h2 id="how-it-works">How it works<a class="anchor" href="#how-it-works" aria-label="Link to this section">#</a></h2>
 <ul><li><strong>Keyframes are data in the scene.</strong> Moving a Shot entity in the editor
 changes the flyover without touching code. Designers can tweak it.</li><li><strong><code>smoothstep</code></strong> eases each segment in and out. Linear interpolation
 would jerk at every keyframe; smoothstep has zero speed at both ends.</li><li><strong>The hand-off</strong> reuses <code>follow</code>, but ramps its <code>smooth</code> from 1 (lazy)
 to 8 (normal) over <code>BLEND</code> seconds. The camera drifts from the last
-shot to its follow position instead of cutting.</li><li>Everything keys off <code>ctx.time.elapsed</code>, so the shot takes the same time
+shot to its follow position instead of cutting. <code>done_at</code> remembers
+when the rail ended, so skipping blends the same way.</li><li>Everything keys off <code>ctx.time.elapsed</code>, so the shot takes the same time
 on any machine.</li></ul>
 <h2 id="variations">Variations<a class="anchor" href="#variations" aria-label="Link to this section">#</a></h2>
-<p><strong>Skippable intro:</strong> jump straight to the hand-off when the player presses
-a key.</p>
-<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;space&quot;</span>):
+<p><strong>Skip with any key:</strong> the script skips on Space. To skip on the first
+movement key instead:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">if</span> entity.state[<span class="tok-s">&quot;keys&quot;</span>] <span class="tok-k">and</span> <span class="tok-b">any</span>(ctx.input.just_pressed(k) <span class="tok-k">for</span> k <span class="tok-k">in</span> (<span class="tok-s">&quot;w&quot;</span>, <span class="tok-s">&quot;a&quot;</span>, <span class="tok-s">&quot;s&quot;</span>, <span class="tok-s">&quot;d&quot;</span>, <span class="tok-s">&quot;space&quot;</span>)):
     entity.state[<span class="tok-s">&quot;keys&quot;</span>] = []</code></pre></div>
 <p><strong>Catmull-Rom curves:</strong> with four or more shots, a spline passes through
 every key without stopping at each one. Replace <code>lerp</code> and <code>smoothstep</code>
@@ -126,6 +149,7 @@ with:</p>
 <p><strong>Dolly zoom (the "Vertigo" shot):</strong> move the camera back while narrowing
 the field of view, keeping the subject the same size:</p>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>width = <span class="tok-n">4.0</span>                              <span class="tok-c"># metres of subject to keep in frame</span>
+distance = math.dist(cam.position, ctx.scene[<span class="tok-s">&quot;Player&quot;</span>].transform.position)
 cam.fov = math.degrees(<span class="tok-n">2</span> * math.atan(width / (<span class="tok-n">2</span> * distance)))</code></pre></div>
 <p><strong>Next:</strong> <a href="lighting-and-mood.html">Lighting &amp; mood</a>.</p>
     </article>

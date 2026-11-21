@@ -115,8 +115,66 @@ jolt the view.</p>
 framing, since the first frame of Play starts from where the camera is
 placed.</p>
 <h2 id="the-finished-script">The finished script<a class="anchor" href="#the-finished-script" aria-label="Link to this section">#</a></h2>
-<p><a href="https://github.com/x017/automata/blob/main/examples/oberon/coin_run/scripts/follow_camera.py" rel="noopener"><code>examples/oberon/coin_run/scripts/follow_camera.py</code></a>
-is Step 2. Steps 3 and 4 are left for you to add.</p>
+<p>All four steps together, with one small function per step:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-s">&quot;&quot;&quot;follow_camera: the finished third-person camera from the tutorial.&quot;&quot;&quot;</span>
+
+<span class="tok-k">import</span> math
+
+DISTANCE = <span class="tok-n">8.0</span>
+HEIGHT = <span class="tok-n">3.5</span>
+SMOOTH = <span class="tok-n">6.0</span>
+TURN = <span class="tok-n">2.0</span>  <span class="tok-c"># radians per second</span>
+LOOK_AHEAD = <span class="tok-n">0.35</span>  <span class="tok-c"># seconds of travel to lead by</span>
+FOV = <span class="tok-n">60.0</span>
+SPRINT_FOV = <span class="tok-n">72.0</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;yaw&quot;</span>] = <span class="tok-n">0.0</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">orbit_offset</span>(entity, ctx):
+    <span class="tok-s">&quot;&quot;&quot;Step 2: rotate the offset around the player with Q / E.&quot;&quot;&quot;</span>
+    yaw = entity.state[<span class="tok-s">&quot;yaw&quot;</span>] + ctx.input.axis(<span class="tok-s">&quot;q&quot;</span>, <span class="tok-s">&quot;e&quot;</span>) * TURN * ctx.time.delta
+    entity.state[<span class="tok-s">&quot;yaw&quot;</span>] = yaw
+    <span class="tok-k">return</span> (DISTANCE * math.sin(yaw), HEIGHT, DISTANCE * math.cos(yaw))
+
+
+<span class="tok-k">def</span> <span class="tok-f">look_ahead</span>(entity, ctx, player):
+    <span class="tok-s">&quot;&quot;&quot;Step 3: aim a little ahead of where the player is heading.&quot;&quot;&quot;</span>
+    p = player.transform.position
+    last = entity.state.get(<span class="tok-s">&quot;last&quot;</span>, p)
+    dt = <span class="tok-b">max</span>(ctx.time.delta, <span class="tok-n">1e-4</span>)
+    vel = [(a - b) / dt <span class="tok-k">for</span> a, b <span class="tok-k">in</span> <span class="tok-b">zip</span>(p, last)]
+    entity.state[<span class="tok-s">&quot;last&quot;</span>] = p
+
+    lead = entity.state.get(<span class="tok-s">&quot;lead&quot;</span>, (<span class="tok-n">0.0</span>, <span class="tok-n">0.0</span>, <span class="tok-n">0.0</span>))
+    goal = (vel[<span class="tok-n">0</span>] * LOOK_AHEAD, <span class="tok-n">0.0</span>, vel[<span class="tok-n">2</span>] * LOOK_AHEAD)
+    k = <span class="tok-b">min</span>(<span class="tok-n">1.0</span>, <span class="tok-n">4.0</span> * ctx.time.delta)
+    lead = <span class="tok-b">tuple</span>(v + (g - v) * k <span class="tok-k">for</span> v, g <span class="tok-k">in</span> <span class="tok-b">zip</span>(lead, goal))
+    entity.state[<span class="tok-s">&quot;lead&quot;</span>] = lead
+    <span class="tok-k">return</span> (p[<span class="tok-n">0</span>] + lead[<span class="tok-n">0</span>], p[<span class="tok-n">1</span>] + <span class="tok-n">0.6</span>, p[<span class="tok-n">2</span>] + lead[<span class="tok-n">2</span>])
+
+
+<span class="tok-k">def</span> <span class="tok-f">sprint_zoom</span>(cam, ctx):
+    <span class="tok-s">&quot;&quot;&quot;Step 4: ease the field of view wider while Shift is held.&quot;&quot;&quot;</span>
+    goal_fov = SPRINT_FOV <span class="tok-k">if</span> ctx.input.pressed(<span class="tok-s">&quot;shift&quot;</span>) <span class="tok-k">else</span> FOV
+    cam.fov += (goal_fov - cam.fov) * <span class="tok-b">min</span>(<span class="tok-n">1.0</span>, <span class="tok-n">6.0</span> * ctx.time.delta)
+
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    player = ctx.scene[<span class="tok-s">&quot;Player&quot;</span>]
+    cam = entity.camera
+    cam.follow(player, offset=orbit_offset(entity, ctx), smooth=SMOOTH)  <span class="tok-c"># Step 1</span>
+    cam.look_at(look_ahead(entity, ctx, player))
+    sprint_zoom(cam, ctx)</code></pre></div>
+<p><code>ctx.input.axis(&quot;q&quot;, &quot;e&quot;)</code> is shorthand for
+<code>float(pressed(&quot;e&quot;)) - float(pressed(&quot;q&quot;))</code>.</p>
+<p>It's in the example project as
+<a href="https://github.com/x017/automata/blob/main/examples/oberon/coin_run/scripts/follow_camera.py" rel="noopener"><code>scripts/follow_camera.py</code></a>.
+The finished level runs the intro from the next tutorial first. To skip it,
+attach <code>scripts/follow_camera.py</code> to <strong>Main Camera</strong> instead of
+<code>camera_rail.py</code>.</p>
 <p><strong>Next:</strong> <a href="camera-rail.html">Camera rail &amp; intro shot</a>.</p>
     </article>
     <footer class="pager"><a class="prev" href="coin-collector.html"><small>Previous</small>Coin collector</a><a class="next" href="camera-rail.html"><small>Next</small>Camera rail &amp; intro shot</a></footer>

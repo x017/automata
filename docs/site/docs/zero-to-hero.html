@@ -37,7 +37,12 @@
 <strong>Coin Runner</strong> — a playable 3D platformer with physics, shadows, collectibles,
 a follow camera, and a headless test suite. Every module is a complete,
 runnable program.</p>
-<p>Work through the modules in order; each one adds exactly one concept.</p>
+<p>Work through the modules in order; each one adds exactly one concept.
+Every module and every exercise solution is a file in
+<a href="https://github.com/x017/automata/tree/main/examples/python/zero_to_hero" rel="noopener"><code>examples/python/zero_to_hero/</code></a>, so
+you can run any of them (<code>python examples/python/zero_to_hero/module_06.py</code>)
+or check them all at once without a window:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>pytest examples/python/zero_to_hero</code></pre></div>
 <ul><li><a href="#module-0--the-smallest-game">Module 0 — The smallest game</a></li><li><a href="#module-1--scenes-entities-components">Module 1 — Scenes, entities, components</a></li><li><a href="#module-2--cameras-the-art-of-seeing">Module 2 — Cameras: the art of seeing</a></li><li><a href="#module-3--transforms-move-rotate-scale">Module 3 — Transforms: move, rotate, scale</a></li><li><a href="#module-4--input-and-action-maps">Module 4 — Input and action maps</a></li><li><a href="#module-5--physics-bodies-and-colliders">Module 5 — Physics: bodies and colliders</a></li><li><a href="#module-6--the-character-controller">Module 6 — The character controller</a></li><li><a href="#module-7--lights-shadows-and-quality">Module 7 — Lights, shadows, and quality</a></li><li><a href="#module-8--events-and-resources">Module 8 — Events and resources</a></li><li><a href="#module-9--oop-architecture">Module 9 — OOP architecture</a></li><li><a href="#module-10--headless-testing">Module 10 — Headless testing</a></li><li><a href="#module-11--capstone-coin-runner">Module 11 — Capstone: Coin Runner</a></li></ul>
 <hr>
 <h2 id="module-0--the-smallest-game">Module 0 — The smallest game<a class="anchor" href="#module-0--the-smallest-game" aria-label="Link to this section">#</a></h2>
@@ -54,6 +59,13 @@ engine contract:</p>
 <p>A game runs <strong>once</strong>. After <code>run</code> returns, the engine has shut down; build a
 new <code>Game</code> to run again.</p>
 <p><strong>Exercise:</strong> pass <code>max_frames=120</code> to <code>run</code> and print the return value.</p>
+<p><strong>Solution</strong> (<a href="https://github.com/x017/automata/blob/main/examples/python/zero_to_hero/exercises/exercise_00.py" rel="noopener"><code>exercises/exercise_00.py</code></a>):</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+game = at.Game(title=<span class="tok-s">&quot;module 0&quot;</span>)
+frames = game.run(<span class="tok-k">lambda</span> ctx: <span class="tok-b">None</span>, max_frames=<span class="tok-n">120</span>)
+<span class="tok-b">print</span>(<span class="tok-s">f&quot;ran {frames} frames&quot;</span>)</code></pre></div>
+<p>It prints <code>ran 120 frames</code>: the loop stopped itself.</p>
 <hr>
 <h2 id="module-1--scenes-entities-components">Module 1 — Scenes, entities, components<a class="anchor" href="#module-1--scenes-entities-components" aria-label="Link to this section">#</a></h2>
 <p><strong>Concept:</strong> a scene is a bag of entities; an entity is a bag of components;
@@ -83,6 +95,23 @@ world, replacing whatever was there.</li></ul>
 <p><strong>The golden rule of 3D visibility:</strong> a scene draws nothing until it has a
 <code>Camera3D</code> entity <em>and</em> an entity with both <code>Transform</code> and <code>MeshRenderer</code>.</p>
 <p><strong>Exercise:</strong> add a second cube at <code>(2, 0, 0)</code> with a different color.</p>
+<p><strong>Solution</strong> (<a href="https://github.com/x017/automata/blob/main/examples/python/zero_to_hero/exercises/exercise_01.py" rel="noopener"><code>exercises/exercise_01.py</code></a>):</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>scene = (
+    at.Scene()
+    .add(at.Entity(<span class="tok-s">&quot;camera&quot;</span>).add(at.Camera3D(position=(<span class="tok-n">1</span>, <span class="tok-n">2</span>, <span class="tok-n">6</span>), target=(<span class="tok-n">1</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>))))
+    .add(
+        at.Entity(<span class="tok-s">&quot;cube&quot;</span>)
+        .add(at.Transform(position=(<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>)))
+        .add(at.MeshRenderer.cube(size=<span class="tok-n">1.0</span>, color=(<span class="tok-n">0.95</span>, <span class="tok-n">0.45</span>, <span class="tok-n">0.15</span>, <span class="tok-n">1.0</span>)))
+    )
+    .add(
+        at.Entity(<span class="tok-s">&quot;second cube&quot;</span>)
+        .add(at.Transform(position=(<span class="tok-n">2</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>)))
+        .add(at.MeshRenderer.cube(size=<span class="tok-n">1.0</span>, color=(<span class="tok-n">0.4</span>, <span class="tok-n">0.7</span>, <span class="tok-n">0.9</span>, <span class="tok-n">1.0</span>)))
+    )
+)</code></pre></div>
+<p>The camera now aims at <code>(1, 0, 0)</code>, halfway between the cubes, so both
+are in frame.</p>
 <hr>
 <h2 id="module-2--cameras-the-art-of-seeing">Module 2 — Cameras: the art of seeing<a class="anchor" href="#module-2--cameras-the-art-of-seeing" aria-label="Link to this section">#</a></h2>
 <p><strong>Concept:</strong> the first entity with a camera component becomes the frame's
@@ -117,6 +146,14 @@ cameras all work.</li><li>Without any camera, meshes render through a fallback c
 <code>(0, 0, 5)</code> looking at the origin — handy for debugging, never ship it.</li><li>There's also <code>Camera2D(center, half_height)</code> for orthographic 2D views.</li></ul>
 <p><strong>Exercise:</strong> make the camera bob up and down (<code>2.0 + math.sin(t)</code>) instead
 of orbiting.</p>
+<p><strong>Solution</strong> (<a href="https://github.com/x017/automata/blob/main/examples/python/zero_to_hero/exercises/exercise_02.py" rel="noopener"><code>exercises/exercise_02.py</code></a>):</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(ctx):
+    <span class="tok-c"># Bob: the camera rises and falls in front of the cube.</span>
+    t = ctx.time.elapsed
+    ctx.scene[<span class="tok-s">&quot;cam&quot;</span>].camera_3d = at.Camera3D(position=(<span class="tok-n">0.0</span>, <span class="tok-n">2.0</span> + math.sin(t), <span class="tok-n">6.0</span>), target=(<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>))
+
+
+game.run(update)</code></pre></div>
 <hr>
 <h2 id="module-3--transforms-move-rotate-scale">Module 3 — Transforms: move, rotate, scale<a class="anchor" href="#module-3--transforms-move-rotate-scale" aria-label="Link to this section">#</a></h2>
 <p><strong>Concept:</strong> <code>Transform</code> is position + rotation + scale; writes you make in
@@ -157,7 +194,7 @@ rotations with <code>==</code> — write them, don't round-trip them.</li><li><c
 <p><strong>Exercise:</strong> pulse the cube's color instead of scale… trick question —
 color lives on <code>MeshRenderer</code>, which is fixed at spawn. Change <em>size</em>,
 <em>position</em>, or <em>rotation</em>; material swaps are a spawn-a-new-entity job (for
-now).</p>
+now). The answer is the module itself, with <em>scale</em> changing.</p>
 <hr>
 <h2 id="module-4--input-and-action-maps">Module 4 — Input and action maps<a class="anchor" href="#module-4--input-and-action-maps" aria-label="Link to this section">#</a></h2>
 <p><strong>Concept:</strong> poll hardware directly for toys; bind named actions for games.</p>
@@ -202,6 +239,18 @@ The enums (<code>Key</code>, <code>MouseButton</code>, <code>GamepadButton</code
 your editor autocompletes and the type checker catches typos. Prefer them.</li></ul>
 <p><strong>Exercise:</strong> bind jump to both <code>Key.SPACE</code> and <code>GamepadButton.SOUTH</code>, and
 print <code>&quot;jump!&quot;</code> when it's just-pressed.</p>
+<p><strong>Solution</strong> (<a href="https://github.com/x017/automata/blob/main/examples/python/zero_to_hero/exercises/exercise_04.py" rel="noopener"><code>exercises/exercise_04.py</code></a>):</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>controls = at.ActionMap()
+controls.bind(<span class="tok-s">&quot;jump&quot;</span>, at.Binding.key(at.Key.SPACE))
+controls.bind(<span class="tok-s">&quot;jump&quot;</span>, at.Binding.gamepad_button(at.GamepadButton.SOUTH))  <span class="tok-c"># stacks with Space</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(ctx):
+    <span class="tok-k">if</span> controls.just_pressed(<span class="tok-s">&quot;jump&quot;</span>, ctx.input):
+        <span class="tok-b">print</span>(<span class="tok-s">&quot;jump!&quot;</span>)
+
+
+game.run(update)</code></pre></div>
 <hr>
 <h2 id="module-5--physics-bodies-and-colliders">Module 5 — Physics: bodies and colliders<a class="anchor" href="#module-5--physics-bodies-and-colliders" aria-label="Link to this section">#</a></h2>
 <p><strong>Concept:</strong> <code>RigidBody</code> says <em>how</em> a thing moves, <code>Collider3D</code> says <em>what</em>
@@ -243,6 +292,22 @@ Modifiers chain: <code>.friction(0.8)</code>, <code>.restitution(0.3)</code>, <c
 mix; pick one per game.</p>
 <p><strong>Exercise:</strong> drop five crates from different heights with different
 restitutions.</p>
+<p><strong>Solution</strong> (<a href="https://github.com/x017/automata/blob/main/examples/python/zero_to_hero/exercises/exercise_05.py" rel="noopener"><code>exercises/exercise_05.py</code></a>):</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># (height, restitution): higher numbers bounce more; 0.0 lands dead.</span>
+DROPS = [(<span class="tok-n">3.0</span>, <span class="tok-n">0.0</span>), (<span class="tok-n">4.0</span>, <span class="tok-n">0.2</span>), (<span class="tok-n">5.0</span>, <span class="tok-n">0.4</span>), (<span class="tok-n">6.0</span>, <span class="tok-n">0.6</span>), (<span class="tok-n">7.0</span>, <span class="tok-n">0.8</span>)]
+
+scene = (
+    at.Scene()
+    .add(at.Entity(<span class="tok-s">&quot;cam&quot;</span>).add(at.Camera3D(position=(<span class="tok-n">0</span>, <span class="tok-n">4</span>, <span class="tok-n">11</span>), target=(<span class="tok-n">0</span>, <span class="tok-n">1.5</span>, <span class="tok-n">0</span>))))
+    .add(
+        at.Entity(<span class="tok-s">&quot;floor&quot;</span>)
+        .add(at.Transform(position=(<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>), scale=(<span class="tok-n">20</span>, <span class="tok-n">1</span>, <span class="tok-n">20</span>)))
+        .add(at.MeshRenderer.cube(size=<span class="tok-n">1.0</span>, color=(<span class="tok-n">0.35</span>, <span class="tok-n">0.65</span>, <span class="tok-n">0.30</span>, <span class="tok-n">1.0</span>)))
+        .add(at.RigidBody.fixed())
+        .add(at.Collider3D.cuboid(<span class="tok-n">20.0</span>, <span class="tok-n">1.0</span>, <span class="tok-n">20.0</span>))
+    )</code></pre></div>
+<p><code>scene.add</code> returns the scene, but you don't have to chain it: a loop
+works just as well.</p>
 <hr>
 <h2 id="module-6--the-character-controller">Module 6 — The character controller<a class="anchor" href="#module-6--the-character-controller" aria-label="Link to this section">#</a></h2>
 <p><strong>Concept:</strong> a kinematic body + <code>CharacterController</code> + a per-frame
@@ -304,6 +369,30 @@ snagging; the standard character shape.</li><li><code>CharacterController(snap_t
 slopes, autostep, ground snapping.</li><li>Every frame: compute <code>vy</code> yourself (gravity + jump), read <code>dx</code> from the
 action map, write <code>player.character_velocity = (dx * WALK, vy, 0)</code>.</li><li><code>ctx.physics.grounded(player)</code> is your "can I jump?" query.</li></ol>
 <p><strong>Exercise:</strong> add a double jump (track jumps used since last grounded).</p>
+<p><strong>Solution</strong> (<a href="https://github.com/x017/automata/blob/main/examples/python/zero_to_hero/exercises/exercise_06.py" rel="noopener"><code>exercises/exercise_06.py</code></a>), the changed part:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>MAX_JUMPS = <span class="tok-n">2</span>
+vy = <span class="tok-n">0.0</span>
+jumps_used = <span class="tok-n">0</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(ctx):
+    <span class="tok-k">global</span> vy, jumps_used
+    player = ctx.scene[<span class="tok-s">&quot;player&quot;</span>]
+    dx = controls.axis(<span class="tok-s">&quot;move_x&quot;</span>, ctx.input)
+
+    <span class="tok-k">if</span> ctx.physics.grounded(player) <span class="tok-k">and</span> vy &lt;= <span class="tok-n">0.0</span>:
+        vy = -<span class="tok-n">1.0</span>  <span class="tok-c"># keep contact so snap-to-ground works on slopes</span>
+        jumps_used = <span class="tok-n">0</span>
+    <span class="tok-k">else</span>:
+        vy -= GRAVITY * ctx.time.delta
+
+    <span class="tok-k">if</span> controls.just_pressed(<span class="tok-s">&quot;jump&quot;</span>, ctx.input) <span class="tok-k">and</span> jumps_used &lt; MAX_JUMPS:
+        vy = JUMP  <span class="tok-c"># the first jump from the ground, the second in mid-air</span>
+        jumps_used += <span class="tok-n">1</span></code></pre></div>
+<p>Two details matter. The jump check moves out of the grounded branch so it
+also works in the air. And the reset only happens while falling or
+standing (<code>vy &lt;= 0.0</code>): right after a jump the player can still touch the
+ground for a frame, and resetting then would give a free third jump.</p>
 <hr>
 <h2 id="module-7--lights-shadows-and-quality">Module 7 — Lights, shadows, and quality<a class="anchor" href="#module-7--lights-shadows-and-quality" aria-label="Link to this section">#</a></h2>
 <p><strong>Concept:</strong> one <code>DirectionalLight</code> entity is the sun; <code>clear_color</code> is the
@@ -330,8 +419,26 @@ scene = (
             )
         )
     )
-    <span class="tok-c"># ... floor, cubes from module 6 ...</span>
-)</code></pre></div>
+    .add(
+        at.Entity(<span class="tok-s">&quot;floor&quot;</span>)
+        .add(at.Transform(scale=(<span class="tok-n">30</span>, <span class="tok-n">1</span>, <span class="tok-n">8</span>)))
+        .add(at.MeshRenderer.cube(color=(<span class="tok-n">0.35</span>, <span class="tok-n">0.65</span>, <span class="tok-n">0.30</span>, <span class="tok-n">1.0</span>)))
+    )
+    .add(
+        at.Entity(<span class="tok-s">&quot;tall&quot;</span>)
+        .add(at.Transform(position=(-<span class="tok-n">1.5</span>, <span class="tok-n">1.5</span>, <span class="tok-n">0</span>), scale=(<span class="tok-n">1</span>, <span class="tok-n">2</span>, <span class="tok-n">1</span>)))
+        .add(at.MeshRenderer.cube(color=(<span class="tok-n">0.95</span>, <span class="tok-n">0.45</span>, <span class="tok-n">0.15</span>, <span class="tok-n">1.0</span>)))
+    )
+    .add(
+        at.Entity(<span class="tok-s">&quot;short&quot;</span>)
+        .add(at.Transform(position=(<span class="tok-n">1.5</span>, <span class="tok-n">1.0</span>, <span class="tok-n">0.5</span>)))
+        .add(at.MeshRenderer.cube(color=(<span class="tok-n">0.4</span>, <span class="tok-n">0.7</span>, <span class="tok-n">0.9</span>, <span class="tok-n">1.0</span>)))
+    )
+)
+
+game = MyGame()
+game.load_scene(scene)
+game.run(<span class="tok-k">lambda</span> ctx: <span class="tok-b">None</span>)</code></pre></div>
 <p>Everything renders with Blinn-Phong shading: diffuse from the sun, a subtle
 specular highlight, and ambient so shadow sides aren't pitch black.</p>
 <ul><li><strong>Shadows</strong> are automatic for every mesh when the sun has <code>shadows=True</code>.</li><li><strong>Quality presets:</strong> <code>LOW</code> disables shadows (fastest, flat look),
@@ -339,22 +446,88 @@ specular highlight, and ambient so shadow sides aren't pitch black.</p>
 color grade. Golden hour = warm color + low ambient + long direction.</li></ul>
 <p><strong>Exercise:</strong> make a night scene (dark blue <code>clear_color</code>, pale blue sun,
 <code>ambient=0.15</code>).</p>
+<p><strong>Solution</strong> (<a href="https://github.com/x017/automata/blob/main/examples/python/zero_to_hero/exercises/exercise_07.py" rel="noopener"><code>exercises/exercise_07.py</code></a>), the changed part:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">MyGame</span>(at.Game):
+    title = <span class="tok-s">&quot;module 7: night&quot;</span>
+    clear_color = (<span class="tok-n">0.02</span>, <span class="tok-n">0.03</span>, <span class="tok-n">0.08</span>, <span class="tok-n">1.0</span>)      <span class="tok-c"># dark blue night sky</span>
+    graphics = at.GraphicsQuality.HIGH          <span class="tok-c"># shadow map resolution</span>
+
+
+scene = (
+    at.Scene()
+    .add(at.Entity(<span class="tok-s">&quot;cam&quot;</span>).add(at.Camera3D(position=(<span class="tok-n">0</span>, <span class="tok-n">3.5</span>, <span class="tok-n">9</span>), target=(<span class="tok-n">0</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>))))
+    .add(
+        at.Entity(<span class="tok-s">&quot;sun&quot;</span>).add(
+            at.DirectionalLight(
+                direction=(-<span class="tok-n">0.45</span>, -<span class="tok-n">1.0</span>, -<span class="tok-n">0.3</span>),   <span class="tok-c"># where the light travels</span>
+                color=(<span class="tok-n">0.6</span>, <span class="tok-n">0.7</span>, <span class="tok-n">1.0</span>),           <span class="tok-c"># pale blue moonlight</span>
+                ambient=<span class="tok-n">0.15</span>,                    <span class="tok-c"># deep shadows</span>
+                shadows=<span class="tok-b">True</span>,                    <span class="tok-c"># shadow-mapped shadows</span>
+            )
+        )
+    )
+    .add(
+        at.Entity(<span class="tok-s">&quot;floor&quot;</span>)
+        .add(at.Transform(scale=(<span class="tok-n">30</span>, <span class="tok-n">1</span>, <span class="tok-n">8</span>)))
+        .add(at.MeshRenderer.cube(color=(<span class="tok-n">0.35</span>, <span class="tok-n">0.65</span>, <span class="tok-n">0.30</span>, <span class="tok-n">1.0</span>)))
+    )
+    .add(
+        at.Entity(<span class="tok-s">&quot;tall&quot;</span>)
+        .add(at.Transform(position=(-<span class="tok-n">1.5</span>, <span class="tok-n">1.5</span>, <span class="tok-n">0</span>), scale=(<span class="tok-n">1</span>, <span class="tok-n">2</span>, <span class="tok-n">1</span>)))
+        .add(at.MeshRenderer.cube(color=(<span class="tok-n">0.95</span>, <span class="tok-n">0.45</span>, <span class="tok-n">0.15</span>, <span class="tok-n">1.0</span>)))
+    )
+    .add(
+        at.Entity(<span class="tok-s">&quot;short&quot;</span>)
+        .add(at.Transform(position=(<span class="tok-n">1.5</span>, <span class="tok-n">1.0</span>, <span class="tok-n">0.5</span>)))
+        .add(at.MeshRenderer.cube(color=(<span class="tok-n">0.4</span>, <span class="tok-n">0.7</span>, <span class="tok-n">0.9</span>, <span class="tok-n">1.0</span>)))
+    )
+)</code></pre></div>
 <hr>
 <h2 id="module-8--events-and-resources">Module 8 — Events and resources<a class="anchor" href="#module-8--events-and-resources" aria-label="Link to this section">#</a></h2>
 <p><strong>Concept:</strong> <code>ctx.events</code> passes named messages (delivered next frame);
 <code>ctx.resources</code> stores arbitrary Python objects across frames.</p>
-<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">CoinGame</span>(at.Game):
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+COINS = {<span class="tok-s">&quot;coin_0&quot;</span>: -<span class="tok-n">1.5</span>, <span class="tok-s">&quot;coin_1&quot;</span>: <span class="tok-n">1.0</span>, <span class="tok-s">&quot;coin_2&quot;</span>: <span class="tok-n">3.5</span>}
+
+
+<span class="tok-k">class</span> <span class="tok-f">Level</span>(at.Scene):
+    <span class="tok-k">def</span> <span class="tok-f">__init__</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">super</span>().__init__()
+        <span class="tok-b">self</span>.add(at.Entity(<span class="tok-s">&quot;cam&quot;</span>).add(at.Camera3D(position=(<span class="tok-n">0</span>, <span class="tok-n">3</span>, <span class="tok-n">9</span>), target=(<span class="tok-n">0</span>, <span class="tok-n">0.5</span>, <span class="tok-n">0</span>))))
+        player = at.Entity(<span class="tok-s">&quot;player&quot;</span>).add(at.Transform(position=(-<span class="tok-n">4</span>, <span class="tok-n">0.5</span>, <span class="tok-n">0</span>)))
+        <span class="tok-b">self</span>.add(player.add(at.MeshRenderer.cube(size=<span class="tok-n">0.8</span>, color=(<span class="tok-n">0.95</span>, <span class="tok-n">0.45</span>, <span class="tok-n">0.15</span>, <span class="tok-n">1.0</span>))))
+        <span class="tok-k">for</span> name, x <span class="tok-k">in</span> COINS.items():
+            coin = at.Entity(name).add(at.Transform(position=(x, <span class="tok-n">0.5</span>, <span class="tok-n">0</span>)))
+            <span class="tok-b">self</span>.add(coin.add(at.MeshRenderer.cube(size=<span class="tok-n">0.4</span>, color=(<span class="tok-n">1.0</span>, <span class="tok-n">0.85</span>, <span class="tok-n">0.25</span>, <span class="tok-n">1.0</span>))))
+
+
+<span class="tok-k">class</span> <span class="tok-f">CoinGame</span>(at.Game):
+    title = <span class="tok-s">&quot;module 8&quot;</span>
+
     <span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
         <span class="tok-b">self</span>.load_scene(Level())
         <span class="tok-b">self</span>.score = <span class="tok-n">0</span>
+        <span class="tok-b">self</span>.x = -<span class="tok-n">4.0</span>
+        <span class="tok-b">self</span>.coins = <span class="tok-b">dict</span>(COINS)
+        <span class="tok-b">self</span>.controls = at.ActionMap()
+        <span class="tok-b">self</span>.controls.bind_axis(<span class="tok-s">&quot;move_x&quot;</span>, at.AxisBinding.key_pair(at.Key.A, at.Key.D))
 
     <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
-        <span class="tok-c"># ... when the player grabs a coin:</span>
-        ctx.events.send(<span class="tok-s">&quot;coin_pickup&quot;</span>, {<span class="tok-s">&quot;score&quot;</span>: <span class="tok-b">self</span>.score + <span class="tok-n">1</span>})
+        <span class="tok-b">self</span>.x += <span class="tok-b">self</span>.controls.axis(<span class="tok-s">&quot;move_x&quot;</span>, ctx.input) * <span class="tok-n">4.0</span> * ctx.time.delta
+        ctx.scene[<span class="tok-s">&quot;player&quot;</span>].transform.position = (<span class="tok-b">self</span>.x, <span class="tok-n">0.5</span>, <span class="tok-n">0.0</span>)
+        <span class="tok-k">for</span> name, cx <span class="tok-k">in</span> <span class="tok-b">list</span>(<span class="tok-b">self</span>.coins.items()):
+            <span class="tok-k">if</span> <span class="tok-b">abs</span>(<span class="tok-b">self</span>.x - cx) &lt; <span class="tok-n">0.6</span>:  <span class="tok-c"># the player grabs a coin</span>
+                ctx.scene[name].despawn()
+                <span class="tok-k">del</span> <span class="tok-b">self</span>.coins[name]
+                ctx.events.send(<span class="tok-s">&quot;coin_pickup&quot;</span>, {<span class="tok-s">&quot;score&quot;</span>: <span class="tok-b">self</span>.score + <span class="tok-n">1</span>})
 
     <span class="tok-k">def</span> <span class="tok-f">on_coin_pickup</span>(<span class="tok-b">self</span>, payload):      <span class="tok-c"># auto-registered by name</span>
         <span class="tok-b">self</span>.score = payload[<span class="tok-s">&quot;score&quot;</span>]
-        <span class="tok-b">print</span>(<span class="tok-s">f&quot;score: {self.score}&quot;</span>)</code></pre></div>
+        <span class="tok-b">print</span>(<span class="tok-s">f&quot;score: {self.score}&quot;</span>)
+
+
+CoinGame().run()</code></pre></div>
 <ul><li><code>ctx.events.send(name, payload)</code> / <code>ctx.events.read(name)</code> — payloads are
 any Python object. An event sent this frame becomes readable on the next
 frame — handlers, physics follow-ups, everything — then it expires.
@@ -364,14 +537,65 @@ like <code>score</code>, <code>current_level</code>, or a shared RNG. It's a dic
 engine lifetime.</li></ul>
 <p><strong>Events vs resources:</strong> events are <em>things that happened</em> (transient);
 resources are <em>things that are</em> (persistent).</p>
-<p><strong>Exercise:</strong> keep <code>score</code> in <code>ctx.resources</code> instead of an attribute, and
-print it from a second handler.</p>
+<p><strong>Exercise:</strong> keep <code>score</code> in <code>ctx.resources</code> instead of an attribute.
+Then send a second event, <code>all_collected</code>, when the last coin goes, and
+handle it with its own method.</p>
+<p><strong>Solution</strong> (<a href="https://github.com/x017/automata/blob/main/examples/python/zero_to_hero/exercises/exercise_08.py" rel="noopener"><code>exercises/exercise_08.py</code></a>), the changed part:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>    <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+        <span class="tok-k">if</span> <span class="tok-s">&quot;score&quot;</span> <span class="tok-k">not</span> <span class="tok-k">in</span> ctx.resources:
+            ctx.resources.<span class="tok-b">set</span>(<span class="tok-s">&quot;score&quot;</span>, <span class="tok-n">0</span>)
+        <span class="tok-b">self</span>.x += <span class="tok-b">self</span>.controls.axis(<span class="tok-s">&quot;move_x&quot;</span>, ctx.input) * <span class="tok-n">4.0</span> * ctx.time.delta
+        ctx.scene[<span class="tok-s">&quot;player&quot;</span>].transform.position = (<span class="tok-b">self</span>.x, <span class="tok-n">0.5</span>, <span class="tok-n">0.0</span>)
+        <span class="tok-k">for</span> name, cx <span class="tok-k">in</span> <span class="tok-b">list</span>(<span class="tok-b">self</span>.coins.items()):
+            <span class="tok-k">if</span> <span class="tok-b">abs</span>(<span class="tok-b">self</span>.x - cx) &lt; <span class="tok-n">0.6</span>:  <span class="tok-c"># the player grabs a coin</span>
+                ctx.scene[name].despawn()
+                <span class="tok-k">del</span> <span class="tok-b">self</span>.coins[name]
+                score = ctx.resources.get(<span class="tok-s">&quot;score&quot;</span>) + <span class="tok-n">1</span>
+                ctx.resources.<span class="tok-b">set</span>(<span class="tok-s">&quot;score&quot;</span>, score)  <span class="tok-c"># takes effect immediately</span>
+                ctx.events.send(<span class="tok-s">&quot;coin_pickup&quot;</span>, {<span class="tok-s">&quot;score&quot;</span>: score})
+                <span class="tok-k">if</span> <span class="tok-k">not</span> <span class="tok-b">self</span>.coins:
+                    ctx.events.send(<span class="tok-s">&quot;all_collected&quot;</span>, {<span class="tok-s">&quot;score&quot;</span>: score})
+
+    <span class="tok-k">def</span> <span class="tok-f">on_coin_pickup</span>(<span class="tok-b">self</span>, payload):      <span class="tok-c"># auto-registered by name</span>
+        <span class="tok-b">print</span>(<span class="tok-s">f&quot;score: {payload[&#x27;score&#x27;]}&quot;</span>)
+
+    <span class="tok-k">def</span> <span class="tok-f">on_all_collected</span>(<span class="tok-b">self</span>, payload):    <span class="tok-c"># a second handler, a second event</span>
+        <span class="tok-b">print</span>(<span class="tok-s">f&quot;all {len(COINS)} coins! final score {payload[&#x27;score&#x27;]}&quot;</span>)</code></pre></div>
+<p>Handlers get the payload, not <code>ctx</code>, so everything a handler needs goes in
+the payload.</p>
 <hr>
 <h2 id="module-9--oop-architecture">Module 9 — OOP architecture<a class="anchor" href="#module-9--oop-architecture" aria-label="Link to this section">#</a></h2>
 <p><strong>Concept:</strong> subclass <code>Game</code>, <code>Scene</code>, and <code>Entity</code>; engine options are
 class attributes; hooks are methods. This is the style for anything past a
 toy.</p>
-<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">Player</span>(at.Entity):
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+SKY = (<span class="tok-n">0.55</span>, <span class="tok-n">0.78</span>, <span class="tok-n">0.95</span>, <span class="tok-n">1.0</span>)
+WALK, GRAVITY, JUMP = <span class="tok-n">5.0</span>, <span class="tok-n">20.0</span>, <span class="tok-n">9.5</span>
+
+
+<span class="tok-k">class</span> <span class="tok-f">Camera</span>(at.Entity):
+    <span class="tok-k">def</span> <span class="tok-f">__init__</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">super</span>().__init__(<span class="tok-s">&quot;camera&quot;</span>)
+        <span class="tok-b">self</span>.add(at.Camera3D(position=(<span class="tok-n">0</span>, <span class="tok-n">3.5</span>, <span class="tok-n">10</span>), target=(<span class="tok-n">0</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>)))
+
+
+<span class="tok-k">class</span> <span class="tok-f">Sun</span>(at.Entity):
+    <span class="tok-k">def</span> <span class="tok-f">__init__</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">super</span>().__init__(<span class="tok-s">&quot;sun&quot;</span>)
+        <span class="tok-b">self</span>.add(at.DirectionalLight(direction=(-<span class="tok-n">0.45</span>, -<span class="tok-n">1.0</span>, -<span class="tok-n">0.3</span>), ambient=<span class="tok-n">0.35</span>, shadows=<span class="tok-b">True</span>))
+
+
+<span class="tok-k">class</span> <span class="tok-f">Ground</span>(at.Entity):
+    <span class="tok-k">def</span> <span class="tok-f">__init__</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">super</span>().__init__(<span class="tok-s">&quot;ground&quot;</span>)
+        <span class="tok-b">self</span>.add(at.Transform(scale=(<span class="tok-n">30</span>, <span class="tok-n">1</span>, <span class="tok-n">8</span>)))
+        <span class="tok-b">self</span>.add(at.MeshRenderer.cube(color=(<span class="tok-n">0.35</span>, <span class="tok-n">0.65</span>, <span class="tok-n">0.30</span>, <span class="tok-n">1.0</span>)))
+        <span class="tok-b">self</span>.add(at.RigidBody.fixed())
+        <span class="tok-b">self</span>.add(at.Collider3D.cuboid(<span class="tok-n">30</span>, <span class="tok-n">1</span>, <span class="tok-n">8</span>))
+
+
+<span class="tok-k">class</span> <span class="tok-f">Player</span>(at.Entity):
     <span class="tok-k">def</span> <span class="tok-f">__init__</span>(<span class="tok-b">self</span>):
         <span class="tok-b">super</span>().__init__(<span class="tok-s">&quot;player&quot;</span>)
         <span class="tok-b">self</span>.add(at.Transform(position=(-<span class="tok-n">4</span>, <span class="tok-n">1.4</span>, <span class="tok-n">0</span>)))
@@ -399,11 +623,25 @@ toy.</p>
 
     <span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
         <span class="tok-b">self</span>.load_scene(Level())
+        <span class="tok-b">self</span>.vy = <span class="tok-n">0.0</span>
         <span class="tok-b">self</span>.controls = at.ActionMap()
-        ...
+        <span class="tok-b">self</span>.controls.bind_axis(<span class="tok-s">&quot;move_x&quot;</span>, at.AxisBinding.key_pair(at.Key.A, at.Key.D))
+        <span class="tok-b">self</span>.controls.bind(<span class="tok-s">&quot;jump&quot;</span>, at.Binding.key(at.Key.SPACE))
 
-    <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx): ...
-    <span class="tok-k">def</span> <span class="tok-f">on_coin_pickup</span>(<span class="tok-b">self</span>, payload): ...</code></pre></div>
+    <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+        player = ctx.scene[<span class="tok-s">&quot;player&quot;</span>]
+        <span class="tok-k">if</span> ctx.physics.grounded(player):
+            <span class="tok-b">self</span>.vy = -<span class="tok-n">1.0</span>
+            <span class="tok-k">if</span> <span class="tok-b">self</span>.controls.just_pressed(<span class="tok-s">&quot;jump&quot;</span>, ctx.input):
+                <span class="tok-b">self</span>.vy = JUMP
+        <span class="tok-k">else</span>:
+            <span class="tok-b">self</span>.vy -= GRAVITY * ctx.time.delta
+        dx = <span class="tok-b">self</span>.controls.axis(<span class="tok-s">&quot;move_x&quot;</span>, ctx.input)
+        player.character_velocity = (dx * WALK, <span class="tok-b">self</span>.vy, <span class="tok-n">0.0</span>)
+
+
+<span class="tok-k">if</span> __name__ == <span class="tok-s">&quot;__main__&quot;</span>:
+    Platformer().run()</code></pre></div>
 <p>Why this scales (the Django lesson):</p>
 <ul><li><strong>Declarative class attributes</strong> for engine options — readable at a
 glance, overridable per subclass (`class DebugPlatformer(Platformer):
@@ -415,14 +653,39 @@ importable unit, like a model class. Scenes compose them.</li><li><strong>Hooks 
 parameters, but pass them as <strong>keywords</strong> — the first positional argument
 of an <code>Entity</code> constructor is always the entity name
 (<code>Crate(position=(2, 1, 0))</code>, not <code>Crate((2, 1, 0))</code>).</p>
-<p><strong>Exercise:</strong> refactor module 6 into <code>Player</code>/<code>Level</code>/<code>Platformer</code> classes.</p>
+<p>This is module 6 again, rebuilt as classes. Compare the two files side by
+side:
+<a href="https://github.com/x017/automata/blob/main/examples/python/zero_to_hero/module_06.py" rel="noopener"><code>module_06.py</code></a> and
+<a href="https://github.com/x017/automata/blob/main/examples/python/zero_to_hero/module_09.py" rel="noopener"><code>module_09.py</code></a>.</p>
+<p><strong>Exercise:</strong> add a <code>Crate</code> archetype that takes a keyword <code>size</code>, and
+stack three crates in the level.</p>
+<p><strong>Solution</strong> (<a href="https://github.com/x017/automata/blob/main/examples/python/zero_to_hero/exercises/exercise_09.py" rel="noopener"><code>exercises/exercise_09.py</code></a>), the changed part:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">Crate</span>(at.Entity):
+    <span class="tok-k">def</span> <span class="tok-f">__init__</span>(<span class="tok-b">self</span>, position, size=<span class="tok-n">0.8</span>):
+        <span class="tok-b">super</span>().__init__()  <span class="tok-c"># unnamed: crates are never looked up</span>
+        <span class="tok-b">self</span>.add(at.Transform(position=position))
+        <span class="tok-b">self</span>.add(at.MeshRenderer.cube(size=size, color=(<span class="tok-n">0.72</span>, <span class="tok-n">0.52</span>, <span class="tok-n">0.30</span>, <span class="tok-n">1.0</span>)))
+        <span class="tok-b">self</span>.add(at.RigidBody.dynamic())
+        <span class="tok-b">self</span>.add(at.Collider3D.cuboid(size, size, size))
+
+
+<span class="tok-k">class</span> <span class="tok-f">Level</span>(at.Scene):
+    <span class="tok-k">def</span> <span class="tok-f">__init__</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">super</span>().__init__()
+        <span class="tok-b">self</span>.add(Camera())
+        <span class="tok-b">self</span>.add(Sun())
+        <span class="tok-b">self</span>.add(Ground())
+        <span class="tok-b">self</span>.add(Player())
+        <span class="tok-b">self</span>.add(Crate(position=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>)))
+        <span class="tok-b">self</span>.add(Crate(position=(<span class="tok-n">3</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>), size=<span class="tok-n">1.2</span>))
+        <span class="tok-b">self</span>.add(Crate(position=(<span class="tok-n">3</span>, <span class="tok-n">3</span>, <span class="tok-n">0</span>), size=<span class="tok-n">0.6</span>))  <span class="tok-c"># stacked on the big one</span></code></pre></div>
 <hr>
 <h2 id="module-10--headless-testing">Module 10 — Headless testing<a class="anchor" href="#module-10--headless-testing" aria-label="Link to this section">#</a></h2>
 <p><strong>Concept:</strong> <code>headless=True</code> runs the real loop — physics, events, logic —
 with no window or GPU. That makes your game a pytest target.</p>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> pytest
 
-<span class="tok-k">from</span> mygame <span class="tok-k">import</span> Platformer  <span class="tok-c"># the Game subclass from your game module</span>
+<span class="tok-k">from</span> oop_platformer <span class="tok-k">import</span> Platformer  <span class="tok-c"># the Game subclass from your game module</span>
 
 
 <span class="tok-k">def</span> <span class="tok-f">test_player_lands_on_the_ground</span>():
@@ -439,9 +702,15 @@ with no window or GPU. That makes your game a pytest target.</p>
 
     game = Probe()
     game.run()
-    <span class="tok-k">assert</span> game.landed_y == pytest.approx(<span class="tok-n">1.0</span>, <span class="tok-b">abs</span>=<span class="tok-n">0.05</span>)</code></pre></div>
+    <span class="tok-k">assert</span> game.landed_y == pytest.approx(<span class="tok-n">1.4</span>, <span class="tok-b">abs</span>=<span class="tok-n">0.1</span>)  <span class="tok-c"># floor top 0.5 + capsule 0.9</span></code></pre></div>
+<p>Save it as <code>test_platformer.py</code> next to your game and run <code>pytest</code>. Here
+the game is the capstone, <code>examples/python/oop_platformer.py</code> (Module 11).
+The finished copy is
+<a href="https://github.com/x017/automata/blob/main/examples/python/zero_to_hero/test_module_10.py" rel="noopener"><code>test_module_10.py</code></a>.</p>
+<p>The player spawns at y = 1.4 and should still be there after landing: the
+floor's top is at 0.5, and the capsule's centre sits 0.9 above its base.</p>
 <p>The probe subclasses the game, wraps <code>on_update</code>, and inspects the world
-after 120 frames. (The same wrap works without subclassing:
+after 120 frames. With <code>target_fps = 60</code>, that's two real seconds. (The same wrap works without subclassing:
 <code>game.run(update=my_probe)</code> — an explicit callback wins over <code>on_update</code>;
 call <code>Platformer.on_update(game, ctx)</code> inside it to keep the real logic.)</p>
 <p>Patterns that work well:</p>
@@ -449,8 +718,33 @@ call <code>Platformer.on_update(game, ctx)</code> inside it to keep the real log
 mode there's no keyboard, so test <em>logic</em> (jump impulse when grounded)
 and <em>outcomes</em> (ball rests at y = 1.0), not raw input plumbing.</li><li><code>max_frames=N</code> bounds every test.</li><li><code>MeshRenderer</code> is inert headless — scenes are safe to load unchanged.</li><li>The engine's own suite (<code>crates/automata-python/tests/python</code>) is 50+
 examples of this style.</li></ul>
-<p><strong>Exercise:</strong> test that collecting a coin despawns it (spawn near the
-player, run 60 frames, assert <code>ctx.scene.find(&quot;coin_0&quot;)</code> is <code>None</code>).</p>
+<p><strong>Exercise:</strong> test that collecting a coin despawns it (spawn a coin on
+the player, run 60 frames, assert <code>ctx.scene.find(...)</code> is <code>None</code>).</p>
+<p><strong>Solution</strong> (<a href="https://github.com/x017/automata/blob/main/examples/python/zero_to_hero/exercises/test_exercise_10.py" rel="noopener"><code>exercises/test_exercise_10.py</code></a>):</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">from</span> oop_platformer <span class="tok-k">import</span> Coin, Platformer
+
+
+<span class="tok-k">def</span> <span class="tok-f">test_collecting_a_coin_despawns_it</span>():
+    <span class="tok-k">class</span> <span class="tok-f">Probe</span>(Platformer):
+        headless = <span class="tok-b">True</span>
+
+        <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+            <span class="tok-k">if</span> ctx.time.frame == <span class="tok-n">1</span>:  <span class="tok-c"># drop a coin right on the player</span>
+                ctx.scene.spawn(Coin(<span class="tok-s">&quot;coin_near&quot;</span>, x=-<span class="tok-n">4.0</span>, y=<span class="tok-n">1.4</span>))
+                <span class="tok-b">self</span>.coins[<span class="tok-s">&quot;coin_near&quot;</span>] = (-<span class="tok-n">4.0</span>, <span class="tok-n">1.4</span>)
+            <span class="tok-b">super</span>().on_update(ctx)
+            <span class="tok-k">if</span> ctx.time.frame == <span class="tok-n">60</span>:
+                <span class="tok-b">self</span>.found = ctx.scene.find(<span class="tok-s">&quot;coin_near&quot;</span>)
+                ctx.quit()
+
+    game = Probe()
+    game.run()
+    <span class="tok-k">assert</span> game.found <span class="tok-k">is</span> <span class="tok-b">None</span>
+    <span class="tok-k">assert</span> <span class="tok-s">&quot;coin_near&quot;</span> <span class="tok-k">not</span> <span class="tok-k">in</span> game.coins
+    <span class="tok-k">assert</span> game.score == <span class="tok-n">1</span></code></pre></div>
+<p>The coin is spawned <em>before</em> <code>super().on_update(ctx)</code>, and it only exists
+from the next frame on. The game's pickup loop skips names that <code>find</code>
+can't see yet, so this is safe.</p>
 <hr>
 <h2 id="module-11--capstone-coin-runner">Module 11 — Capstone: Coin Runner<a class="anchor" href="#module-11--capstone-coin-runner" aria-label="Link to this section">#</a></h2>
 <p>The complete game — everything from modules 0–10 in one file. This is
@@ -459,6 +753,8 @@ player, run 60 frames, assert <code>ctx.scene.find(&quot;coin_0&quot;)</code> is
 python examples/python/oop_platformer.py --headless # CI</code></pre></div>
 <p>What it demonstrates, line by line:</p>
 <div class="table"><table><thead><tr><th>Feature</th><th>Where it came from</th></tr></thead><tbody><tr><td><code>class Platformer(at.Game)</code> with class-attribute options</td><td>Module 9</td></tr><tr><td><code>Sun</code>, <code>Camera</code>, <code>Ground</code>, <code>Player</code>, <code>Platform</code>, <code>Coin</code>, <code>Crate</code> entity classes</td><td>Modules 1, 5, 6, 7</td></tr><tr><td>A smooth <strong>follow camera</strong> written per frame</td><td>Module 2</td></tr><tr><td>A/D + arrows + gamepad stick all driving <code>move_x</code></td><td>Module 4</td></tr><tr><td>Grounded-jump gravity loop</td><td>Module 6</td></tr><tr><td>Spinning coins, proximity pickup, <code>coin_pickup</code> events</td><td>Modules 3, 8</td></tr><tr><td>Sky <code>clear_color</code>, warm shadowed sun, quality preset</td><td>Module 7</td></tr><tr><td><code>--headless</code> flag for CI</td><td>Module 10</td></tr></tbody></table></div>
+<p>The heart of it, the game class (abridged; the entity classes and
+<code>on_start</code> are in the file):</p>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">Platformer</span>(at.Game):
     title = <span class="tok-s">&quot;oop platformer&quot;</span>
     headless = <span class="tok-s">&quot;--headless&quot;</span> <span class="tok-k">in</span> sys.argv
@@ -500,8 +796,8 @@ python examples/python/oop_platformer.py --headless # CI</code></pre></div>
                 <span class="tok-b">self</span>.score += <span class="tok-n">1</span>
                 ctx.events.send(<span class="tok-s">&quot;coin_pickup&quot;</span>, {<span class="tok-s">&quot;score&quot;</span>: <span class="tok-b">self</span>.score, <span class="tok-s">&quot;total&quot;</span>: <span class="tok-b">len</span>(COINS)})</code></pre></div>
 <h3 id="where-next">Where next<a class="anchor" href="#where-next" aria-label="Link to this section">#</a></h3>
-<ul><li><a href="cookbook.html">Cookbook</a> — double jump, coyote time, moving platforms,
-spawn waves, pause, scene switching.</li><li><a href="guides/project-structure.html">Project Structure</a> — when one file becomes
+<ul><li><a href="cookbook.html">Cookbook</a> — double jump, coyote time, jump buffering,
+screen shake, spawn waves, pause, level switching, rebinding.</li><li><a href="guides/project-structure.html">Project Structure</a> — when one file becomes
 five.</li><li><a href="api-reference.html">API Reference</a> — every class, every parameter.</li></ul>
 <p>You are no longer a beginner. Ship something small and weird.</p>
     </article>

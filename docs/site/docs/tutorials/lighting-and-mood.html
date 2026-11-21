@@ -58,7 +58,8 @@ objects pick up a gentle haze, which adds depth.</p></li></ol>
 <h2 id="2-golden-dusk">2. Golden dusk<a class="anchor" href="#2-golden-dusk" aria-label="Link to this section">#</a></h2>
 <ol><li>Click the <strong>Dusk</strong> preset.</li><li><strong>Sun:</strong>
 <ul><li><strong>Elevation</strong> <code>8</code>: long dramatic shadows.</li><li><strong>Azimuth</strong>: rotate until shadows stretch across the play area
-toward the camera.</li><li><strong>Color</strong> <code>#FFB36B</code>: deep orange.</li><li><strong>Ambient</strong> <code>0.3</code>.</li></ul></li><li>Notice the ambient: the <strong>Sky</strong> is violet and the <strong>Ground</strong> a dark
+toward the camera. With the camera behind the player that's about
+<code>200</code>, a low sun from the far side of the level.</li><li><strong>Color</strong> <code>#FFB36B</code>: deep orange.</li><li><strong>Ambient</strong> <code>0.3</code>.</li></ul></li><li>Notice the ambient: the <strong>Sky</strong> is violet and the <strong>Ground</strong> a dark
 red. Faces pointing up get the cool sky, and the undersides get warm
 bounce. That colour contrast is most of what makes a scene feel like
 sunset.</li><li><strong>Tone Mapping</strong> is AgX. Compare it with ACES on the colour chart:
@@ -67,7 +68,7 @@ farthest pillars just disappear (about <code>0.03</code>), and set <strong>Fog S
 so the play area stays crisp.</li></ol>
 <h2 id="3-moonlit-night">3. Moonlit night<a class="anchor" href="#3-moonlit-night" aria-label="Link to this section">#</a></h2>
 <ol><li>Click the <strong>Night</strong> preset.</li><li><strong>Sun</strong> (it's the moon now):
-<ul><li><strong>Elevation</strong> <code>40</code>.</li><li><strong>Color</strong> <code>#9DB4FF</code>: cold blue.</li><li><strong>Ambient</strong> <code>0.2</code>.</li></ul></li><li>Night scenes fail when everything is just dark. Keep <strong>contrast</strong>:
+<ul><li><strong>Elevation</strong> <code>40</code>, <strong>Azimuth</strong> <code>320</code>.</li><li><strong>Color</strong> <code>#9DB4FF</code>: cold blue.</li><li><strong>Ambient</strong> <code>0.2</code>.</li></ul></li><li>Night scenes fail when everything is just dark. Keep <strong>contrast</strong>:
 <ul><li>The moon stays fairly bright, so lit faces read.</li><li>Ambient stays low, so shadows are deep.</li><li>Fog is black and close (<strong>Fog Start</strong> <code>2</code>), so the world falls away
 into darkness.</li></ul></li><li>To make it moodier, lower <strong>Exposure</strong> to <code>0.8</code>. Don't lower the
 moon's colour, which loses the shape of objects.</li></ol>
@@ -80,6 +81,13 @@ Medium is usually indistinguishable from High at a distance.</p>
 look is stored in the scene's <strong>Environment</strong> and <strong>Directional Light</strong>
 entities. Select them in the Hierarchy and the Inspector shows the same
 fields.</p>
+<p>To keep all three looks, use <strong>File → Save As…</strong> after each one, for
+example <code>level.ron</code>, <code>level_dusk.ron</code> and <code>level_night.ron</code>.</p>
+<p><strong>Finished files:</strong> the example project ships all three:
+<a href="https://github.com/x017/automata/blob/main/examples/oberon/coin_run/level.ron" rel="noopener"><code>level.ron</code></a> (afternoon),
+<a href="https://github.com/x017/automata/blob/main/examples/oberon/coin_run/level_dusk.ron" rel="noopener"><code>level_dusk.ron</code></a> and
+<a href="https://github.com/x017/automata/blob/main/examples/oberon/coin_run/level_night.ron" rel="noopener"><code>level_night.ron</code></a>.
+Open any of them in Oberon and look at the Graphics tab.</p>
 <h2 id="6-the-same-look-in-python">6. The same look in Python<a class="anchor" href="#6-the-same-look-in-python" aria-label="Link to this section">#</a></h2>
 <p>Everything above is data, so code-first games get the same result:</p>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
@@ -105,7 +113,21 @@ scene.add(
         )
     )
 )</code></pre></div>
-<p>Or start from a preset with <code>at.Environment.preset(&quot;night&quot;)</code>.</p>
+<p>Or start from a preset with <code>at.Environment.preset(&quot;night&quot;)</code>. Environment
+values are read-only, so to change a few fields of a preset, copy it into a
+new one. This is how
+<a href="https://github.com/x017/automata/blob/main/examples/oberon/coin_run/build_level.py" rel="noopener"><code>build_level.py</code></a> makes
+the three looks:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>FIELDS = (<span class="tok-s">&quot;sky_color&quot;</span>, <span class="tok-s">&quot;ground_color&quot;</span>, <span class="tok-s">&quot;background&quot;</span>, <span class="tok-s">&quot;exposure&quot;</span>, <span class="tok-s">&quot;tonemapping&quot;</span>,
+          <span class="tok-s">&quot;fog&quot;</span>, <span class="tok-s">&quot;fog_color&quot;</span>, <span class="tok-s">&quot;fog_density&quot;</span>, <span class="tok-s">&quot;fog_start&quot;</span>)
+
+
+<span class="tok-k">def</span> <span class="tok-f">environment</span>(preset, **changes):
+    base = at.Environment.preset(preset)
+    <span class="tok-k">return</span> at.Environment(**{**{f: <span class="tok-b">getattr</span>(base, f) <span class="tok-k">for</span> f <span class="tok-k">in</span> FIELDS}, **changes})
+
+
+dusk = environment(<span class="tok-s">&quot;dusk&quot;</span>, tonemapping=<span class="tok-s">&quot;agx&quot;</span>, fog_density=<span class="tok-n">0.03</span>, fog_start=<span class="tok-n">8.0</span>)</code></pre></div>
 <aside class="note"><p><strong>Direction from angles:</strong> the light travels <em>toward</em>
 <code>-(cos(el)·sin(az), sin(el), cos(el)·cos(az))</code>, where <code>az</code> is Azimuth
 and <code>el</code> is Elevation in radians.</p></aside>

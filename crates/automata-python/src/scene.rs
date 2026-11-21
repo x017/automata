@@ -327,7 +327,14 @@ impl PyScene {
 
 /// Replaces the contents of an ECS scene with staged entities.
 pub fn load_staged(scene: &mut Scene, staged: &[StagedEntity]) {
-    scene.world_mut().clear();
+    // Despawn one by one rather than `clear()`: clearing resets the entity
+    // allocator, so the new scene would reuse the old entities' exact ids
+    // and systems keyed by entity (physics bodies) would mistake them for
+    // the old ones. Despawning bumps each id's generation.
+    let old: Vec<EntityId> = scene.world().iter().map(|e| e.entity()).collect();
+    for entity in old {
+        let _ = scene.world_mut().despawn(entity);
+    }
     for entity in staged {
         spawn_staged(scene, entity);
     }
@@ -408,6 +415,10 @@ pub struct FrameWrites {
     pub spawns: Vec<StagedEntity>,
     /// Entities to despawn (recursively).
     pub despawns: Vec<EntityId>,
+    /// A whole scene to switch to. Replaces the world before this frame's
+    /// spawns are applied; writes aimed at the old scene's entities are
+    /// dropped.
+    pub load: Option<Vec<StagedEntity>>,
 }
 
 /// Shared write buffer between the per-frame views and the game loop.
@@ -419,6 +430,13 @@ pub fn apply_writes(scene: &mut Scene, writes: &WriteQueue) {
         let mut writes = writes.borrow_mut();
         std::mem::take(&mut *writes)
     };
+    if let Some(staged) = drained.load {
+        load_staged(scene, &staged);
+        for staged in drained.spawns {
+            spawn_staged(scene, &staged);
+        }
+        return;
+    }
     for (bits, transform) in drained.transforms {
         if let Some(entity) = EntityId::from_bits(bits) {
             if let Ok(mut current) = scene.world_mut().get::<&mut Transform>(entity) {
@@ -565,6 +583,15 @@ impl SceneView {
         let entity = entity_from_bits(id)?;
         self.writes.borrow_mut().despawns.push(entity);
         Ok(())
+    }
+
+    /// Switches to another scene: every current entity goes and the staged
+    /// `Scene`'s entities replace them, after the callback returns. Other
+    /// writes to this frame's entities are dropped; entities spawned this
+    /// frame land in the new scene. `Game.load_scene` calls this while the
+    /// game is running.
+    fn load(&self, scene: &PyScene) {
+        self.writes.borrow_mut().load = Some(scene.staged_entities().to_vec());
     }
 }
 

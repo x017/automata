@@ -29,7 +29,7 @@ at.Game(
 | Member | Type | Notes |
 |---|---|---|
 | `run(update=None, max_frames=None) -> int` | method | drives the loop; returns frames run; a Game runs once |
-| `load_scene(scene)` | method | replaces the world; callable before `run` or inside `update` |
+| `load_scene(scene)` | method | replaces the world: at once before `run`, at the end of the frame inside `update` or a handler |
 | `quit()` | method | requests shutdown |
 | `state` | property | `"created"` / `"running"` / `"shutdown"` |
 | `update(fn)` | decorator | registers the per-frame callback |
@@ -173,6 +173,7 @@ ctx.scene["name"]                    # KeyError when missing
 for view in ctx.scene: ...
 ctx.scene.spawn(entity)              # appears next frame
 ctx.scene.despawn(id)
+ctx.scene.load(scene)                # switch levels; the next frame sees only `scene`
 ```
 
 ```text

@@ -324,6 +324,20 @@ class Game(_core.Game):
         self._update_fn: Optional[UpdateFn] = None
         self._event_handlers: Dict[str, List[EventFn]] = {}
         self._started = False
+        self._frame_scene: Optional[SceneView] = None
+
+    def load_scene(self, scene: Scene) -> None:
+        """Replaces the world with the entities of `scene`.
+
+        Before `run` (and in `on_start`) the scene loads at once. While the
+        game is running, from `on_update` or an `on_<event>` handler, the
+        switch happens when the frame's callback returns, so the next frame
+        sees the new scene.
+        """
+        if self._frame_scene is not None:
+            self._frame_scene.load(scene)
+        else:
+            super().load_scene(scene)
 
     # -- OOP hooks ------------------------------------------------------
 
@@ -395,11 +409,15 @@ class Game(_core.Game):
             self.on_start()
 
         def tick(ctx: FrameContext) -> None:
-            fn(ctx)
-            for name, callbacks in handlers.items():
-                for payload in ctx.events.read(name):
-                    for callback in callbacks:
-                        callback(payload)
+            self._frame_scene = ctx.scene
+            try:
+                fn(ctx)
+                for name, callbacks in handlers.items():
+                    for payload in ctx.events.read(name):
+                        for callback in callbacks:
+                            callback(payload)
+            finally:
+                self._frame_scene = None
 
         return super().run(tick, max_frames)
 

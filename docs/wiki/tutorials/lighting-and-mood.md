@@ -50,7 +50,8 @@ Under **Renderer**, set Quality to **High** and note the frame time.
 2. **Sun:**
    - **Elevation** `8`: long dramatic shadows.
    - **Azimuth**: rotate until shadows stretch across the play area
-     toward the camera.
+     toward the camera. With the camera behind the player that's about
+     `200`, a low sun from the far side of the level.
    - **Color** `#FFB36B`: deep orange.
    - **Ambient** `0.3`.
 3. Notice the ambient: the **Sky** is violet and the **Ground** a dark
@@ -67,7 +68,7 @@ Under **Renderer**, set Quality to **High** and note the frame time.
 
 1. Click the **Night** preset.
 2. **Sun** (it's the moon now):
-   - **Elevation** `40`.
+   - **Elevation** `40`, **Azimuth** `320`.
    - **Color** `#9DB4FF`: cold blue.
    - **Ambient** `0.2`.
 3. Night scenes fail when everything is just dark. Keep **contrast**:
@@ -90,6 +91,15 @@ Under Test Scenes, click **Remove N test objects**, then **Ctrl+S**. The
 look is stored in the scene's **Environment** and **Directional Light**
 entities. Select them in the Hierarchy and the Inspector shows the same
 fields.
+
+To keep all three looks, use **File → Save As…** after each one, for
+example `level.ron`, `level_dusk.ron` and `level_night.ron`.
+
+**Finished files:** the example project ships all three:
+[`level.ron`](../../../examples/oberon/coin_run/level.ron) (afternoon),
+[`level_dusk.ron`](../../../examples/oberon/coin_run/level_dusk.ron) and
+[`level_night.ron`](../../../examples/oberon/coin_run/level_night.ron).
+Open any of them in Oberon and look at the Graphics tab.
 
 ## 6. The same look in Python
 
@@ -121,7 +131,24 @@ scene.add(
 )
 ```
 
-Or start from a preset with `at.Environment.preset("night")`.
+Or start from a preset with `at.Environment.preset("night")`. Environment
+values are read-only, so to change a few fields of a preset, copy it into a
+new one. This is how
+[`build_level.py`](../../../examples/oberon/coin_run/build_level.py) makes
+the three looks:
+
+```python
+FIELDS = ("sky_color", "ground_color", "background", "exposure", "tonemapping",
+          "fog", "fog_color", "fog_density", "fog_start")
+
+
+def environment(preset, **changes):
+    base = at.Environment.preset(preset)
+    return at.Environment(**{**{f: getattr(base, f) for f in FIELDS}, **changes})
+
+
+dusk = environment("dusk", tonemapping="agx", fog_density=0.03, fog_start=8.0)
+```
 
 > **Direction from angles:** the light travels *toward*
 > `-(cos(el)·sin(az), sin(el), cos(el)·cos(az))`, where `az` is Azimuth

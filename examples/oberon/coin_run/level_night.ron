@@ -1,0 +1,319 @@
+(
+    version: 1,
+    entities: [
+        (
+            name: Some("Sun"),
+            directional_light: Some((
+                direction: (0.49240386, -0.64278764, -0.58682406),
+                color: (0.6156863, 0.7058824, 1.0),
+                ambient: 0.2,
+                shadows: true,
+            )),
+        ),
+        (
+            name: Some("Environment"),
+            environment: Some((
+                sky_color: (0.25, 0.3, 0.5),
+                ground_color: (0.05, 0.05, 0.08),
+                background: (0.008, 0.01, 0.02),
+                exposure: 0.8,
+                tonemapping: Aces,
+                fog: true,
+                fog_color: (0.008, 0.01, 0.02),
+                fog_density: 0.05,
+                fog_start: 2.0,
+            )),
+        ),
+        (
+            name: Some("Ground"),
+            transform: Some((
+                position: (0.0, -0.1, -4.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (30.0, 0.2, 30.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.36, 0.5, 0.32, 1.0),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (30.0, 0.2, 30.0),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Ledge"),
+            transform: Some((
+                position: (6.0, 1.0, -9.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (4.0, 2.0, 3.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.55, 0.5, 0.45, 1.0),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (4.0, 2.0, 3.0),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Player"),
+            transform: Some((
+                position: (0.0, 0.9, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.8, 1.6, 0.8),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 0.56, 0.24, 1.0),
+            )),
+            rigid_body: Some((
+                body_type: KinematicPosition,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (0.8, 1.6, 0.8),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+            character_controller: Some((
+                mode: Normal,
+                max_slope_climb_angle: 0.7853982,
+                min_slope_slide_angle: 0.5235988,
+                autostep_height: None,
+                snap_to_ground: Some(0.3),
+                offset: 0.05,
+                slide: true,
+            )),
+            character_velocity: Some((
+                velocity: (0.0, 0.0, 0.0),
+            )),
+            script: Some((
+                path: "scripts/player.py",
+            )),
+        ),
+        (
+            name: Some("Coin 1"),
+            transform: Some((
+                position: (3.0, 1.0, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.5, 0.5, 0.12),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 0.78, 0.2, 1.0),
+            )),
+            attributes: {
+                "value": Int(1),
+            },
+            script: Some((
+                path: "scripts/coin.py",
+            )),
+        ),
+        (
+            name: Some("Coin 2"),
+            transform: Some((
+                position: (6.0, 1.0, -2.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.5, 0.5, 0.12),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 0.78, 0.2, 1.0),
+            )),
+            attributes: {
+                "value": Int(1),
+            },
+            script: Some((
+                path: "scripts/coin.py",
+            )),
+        ),
+        (
+            name: Some("Coin 3"),
+            transform: Some((
+                position: (9.0, 1.0, -5.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.5, 0.5, 0.12),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 0.78, 0.2, 1.0),
+            )),
+            attributes: {
+                "value": Int(1),
+            },
+            script: Some((
+                path: "scripts/coin.py",
+            )),
+        ),
+        (
+            name: Some("Coin 4"),
+            transform: Some((
+                position: (6.0, 3.2, -9.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.5, 0.5, 0.12),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 0.78, 0.2, 1.0),
+            )),
+            attributes: {
+                "value": Int(5),
+            },
+            script: Some((
+                path: "scripts/coin.py",
+            )),
+        ),
+        (
+            name: Some("Coin 5"),
+            transform: Some((
+                position: (0.0, 1.0, -8.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.5, 0.5, 0.12),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 0.78, 0.2, 1.0),
+            )),
+            attributes: {
+                "value": Int(1),
+            },
+            script: Some((
+                path: "scripts/coin.py",
+            )),
+        ),
+        (
+            name: Some("Coin 6"),
+            transform: Some((
+                position: (-4.0, 1.0, -4.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.5, 0.5, 0.12),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 0.78, 0.2, 1.0),
+            )),
+            attributes: {
+                "value": Int(1),
+            },
+            script: Some((
+                path: "scripts/coin.py",
+            )),
+        ),
+        (
+            name: Some("Shot 1"),
+            transform: Some((
+                position: (-10.0, 7.0, 10.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            attributes: {
+                "look": Vec3((2.0, 1.0, -4.0)),
+            },
+        ),
+        (
+            name: Some("Shot 2"),
+            transform: Some((
+                position: (14.0, 4.5, -1.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            attributes: {
+                "look": Vec3((6.0, 2.5, -8.0)),
+            },
+        ),
+        (
+            name: Some("Shot 3"),
+            transform: Some((
+                position: (0.0, 4.4, 8.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            attributes: {
+                "look": Vec3((0.0, 1.5, 0.0)),
+            },
+        ),
+        (
+            name: Some("Main Camera"),
+            transform: Some((
+                position: (-10.0, 7.0, 10.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            camera_3d: Some((
+                position: (-10.0, 7.0, 10.0),
+                target: (2.0, 1.0, -4.0),
+                up: (0.0, 1.0, 0.0),
+                fov_y_degrees: 60.0,
+                near: 0.1,
+                far: 1000.0,
+            )),
+            script: Some((
+                path: "scripts/camera_rail.py",
+            )),
+        ),
+        (
+            name: Some("Rules"),
+            transform: Some((
+                position: (-4.0, 0.5, 3.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            script: Some((
+                path: "scripts/rules.py",
+            )),
+        ),
+    ],
+)

@@ -161,5 +161,11 @@ jobs:
       - name: Python tests
         run: pytest crates/automata-python/tests/python
 
+      - name: Tutorials (Oberon track, Zero to Hero, Cookbook)
+        run: |
+          pytest examples/oberon/coin_run/tests examples/python/zero_to_hero examples/python/tests
+          python examples/oberon/coin_run/main.py --headless
+          python examples/python/cookbook_platformer.py --headless
+
       - name: Headless demo
         run: python examples/python/headless_demo.py

@@ -51,7 +51,7 @@ at.Error                <span class="tok-c"># engine runtime failure exception</
     clear_color=<span class="tok-b">None</span>,                   <span class="tok-c"># (r, g, b, a) window background</span>
     graphics=<span class="tok-b">None</span>,                      <span class="tok-c"># at.GraphicsQuality.HIGH etc.</span>
 )</code></pre></div>
-<div class="table"><table><thead><tr><th>Member</th><th>Type</th><th>Notes</th></tr></thead><tbody><tr><td><code>run(update=None, max_frames=None) -&gt; int</code></td><td>method</td><td>drives the loop; returns frames run; a Game runs once</td></tr><tr><td><code>load_scene(scene)</code></td><td>method</td><td>replaces the world; callable before <code>run</code> or inside <code>update</code></td></tr><tr><td><code>quit()</code></td><td>method</td><td>requests shutdown</td></tr><tr><td><code>state</code></td><td>property</td><td><code>&quot;created&quot;</code> / <code>&quot;running&quot;</code> / <code>&quot;shutdown&quot;</code></td></tr><tr><td><code>update(fn)</code></td><td>decorator</td><td>registers the per-frame callback</td></tr><tr><td><code>on_event(name)</code></td><td>decorator</td><td>registers a handler for events named <code>name</code></td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Member</th><th>Type</th><th>Notes</th></tr></thead><tbody><tr><td><code>run(update=None, max_frames=None) -&gt; int</code></td><td>method</td><td>drives the loop; returns frames run; a Game runs once</td></tr><tr><td><code>load_scene(scene)</code></td><td>method</td><td>replaces the world: at once before <code>run</code>, at the end of the frame inside <code>update</code> or a handler</td></tr><tr><td><code>quit()</code></td><td>method</td><td>requests shutdown</td></tr><tr><td><code>state</code></td><td>property</td><td><code>&quot;created&quot;</code> / <code>&quot;running&quot;</code> / <code>&quot;shutdown&quot;</code></td></tr><tr><td><code>update(fn)</code></td><td>decorator</td><td>registers the per-frame callback</td></tr><tr><td><code>on_event(name)</code></td><td>decorator</td><td>registers a handler for events named <code>name</code></td></tr></tbody></table></div>
 <p>OOP subclass hooks: <code>on_start()</code>, <code>on_update(ctx)</code>, <code>on_&lt;event&gt;(payload)</code>.
 Class attributes mirror every constructor option; kwargs win over them.</p>
 <h2 id="scene--entity-staging">Scene &amp; Entity (staging)<a class="anchor" href="#scene--entity-staging" aria-label="Link to this section">#</a></h2>
@@ -139,7 +139,8 @@ ctx.scene.find(name) -&gt; EntityView | None
 ctx.scene[&quot;name&quot;]                    # KeyError when missing
 for view in ctx.scene: ...
 ctx.scene.spawn(entity)              # appears next frame
-ctx.scene.despawn(id)</code></pre></div>
+ctx.scene.despawn(id)
+ctx.scene.load(scene)                # switch levels; the next frame sees only `scene`</code></pre></div>
 <div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>view.id                  # stable while alive
 view.name
 view.transform           # TransformRef; assign a Transform to replace

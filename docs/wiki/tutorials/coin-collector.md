@@ -11,8 +11,8 @@ collects them, a score counts up, and you win when they're all gone.
 - hot reload
 
 **Start from:** the scene from [Your first scene](first-scene.md). Open
-it with Ctrl+O. Or build the finished version with
-`python examples/oberon/coin_run/build_level.py` and follow along.
+it with Ctrl+O. Or open the finished version,
+`examples/oberon/coin_run/level.ron`, and follow along.
 
 ## 1. A coin
 
@@ -75,8 +75,9 @@ Keep Play running. In the code editor, change `t * 2.5` to `t * 8.0` and
 save. Within half a second the Console says `Reloaded coin.py`, and the
 coin spins faster. You don't need to restart.
 
-Now break it on purpose: type `entity.transfrom` and save. The Console
-shows the error with a **coin.py:17** link. That coin pauses; the rest of
+Now break it on purpose: on that same line, change `entity.transform` to
+`entity.transfrom` and save. The Console shows the error with a
+**coin.py:22** link. That coin pauses; the rest of
 the game keeps running. Fix the typo and save, and it resumes.
 
 ## 4. Many coins, different values
@@ -108,7 +109,7 @@ def coins(ctx):
 
 def start(entity, ctx):
     entity.state["score"] = 0
-    print(f"Collect {len(coins(ctx))} coins!")
+    print(f"Collect {len(coins(ctx))} coins! WASD to move, Space to jump, Q/E to turn.")
 
 
 def update(entity, ctx):
