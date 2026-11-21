@@ -349,6 +349,10 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
                                 let who = entity.name.as_deref().unwrap_or("an entity");
                                 check_model(project, base, who, path, &mut out);
                             }
+                            if let Some(source) = &entity.audio_source {
+                                let who = entity.name.as_deref().unwrap_or("an entity");
+                                check_sound(project, base, who, &source.clip, &mut out);
+                            }
                         }
                     }
                 },
@@ -400,6 +404,38 @@ fn check_model(project: &Path, base: &Path, who: &str, rel: &str, out: &mut Vec<
                 "{who}: model {rel} uses {shown}, outside the project; it won't ship"
             )));
         }
+    }
+}
+
+/// Checks an Audio Source's clip: set, present, a sound file, and inside
+/// the project so it ships.
+fn check_sound(project: &Path, base: &Path, who: &str, rel: &str, out: &mut Vec<Message>) {
+    if rel.trim().is_empty() {
+        out.push(Message::warn(format!(
+            "{who}: the Audio Source has no clip and will stay silent"
+        )));
+        return;
+    }
+    let file = if Path::new(rel).is_absolute() {
+        PathBuf::from(rel)
+    } else {
+        automata_assets::join_relative(base, rel)
+    };
+    if !file.is_file() {
+        out.push(Message::error(format!("{who}: sound {rel} not found")));
+        return;
+    }
+    if !automata_core::audio_source::is_audio_path(&file) {
+        out.push(Message::warn(format!(
+            "{who}: {rel} isn't a sound file the engine plays (.ogg, .wav, .mp3, .flac)"
+        )));
+    }
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if !canon(&file).starts_with(canon(project)) {
+        out.push(Message::error(format!(
+            "{who}: sound {rel} is outside the project folder and won't ship \
+             (drop it into the editor to import it into sounds/)"
+        )));
     }
 }
 
@@ -1136,6 +1172,51 @@ mod tests {
         assert!(has(Level::Error, "Ghost: model models/ghost.glb not found"));
         assert!(has(Level::Error, "is outside the project folder"));
         let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn validation_checks_audio_clips() {
+        use automata_core::scene_file::{EntityData, SceneFile};
+        use automata_core::AudioSource;
+        let dir = project("sounds");
+        std::fs::create_dir_all(dir.join("sounds")).unwrap();
+        std::fs::write(dir.join("sounds/bell.ogg"), b"ogg").unwrap();
+        let source = |name: &str, clip: &str| EntityData {
+            name: Some(name.into()),
+            audio_source: Some(AudioSource::new(clip)),
+            ..Default::default()
+        };
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                source("Bell", "sounds/bell.ogg"),
+                source("Gone", "sounds/gone.wav"),
+                source("Mute", ""),
+            ],
+        };
+        std::fs::write(dir.join("s.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("s.ron".into()),
+            ..BuildConfig::default()
+        };
+        let problems = validate(&dir, &cfg);
+        let has = |level: Level, text: &str| {
+            problems
+                .iter()
+                .any(|m| m.level == level && m.text.contains(text))
+        };
+        assert!(
+            !problems.iter().any(|m| m.text.starts_with("Bell")),
+            "{problems:?}"
+        );
+        assert!(
+            has(Level::Error, "Gone: sound sounds/gone.wav not found"),
+            "{problems:?}"
+        );
+        assert!(
+            has(Level::Warning, "Mute: the Audio Source has no clip"),
+            "{problems:?}"
+        );
     }
 
     #[test]

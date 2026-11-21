@@ -75,6 +75,11 @@ pub struct PyInput {
     /// Scroll wheel delta accumulated during the frame.
     #[pyo3(get)]
     pub scroll: (f64, f64),
+    /// Raw mouse movement since the previous frame, `(dx, dy)` (`+y` is
+    /// down). Keeps reporting while the cursor is locked: use it for
+    /// mouse-look.
+    #[pyo3(get)]
+    pub mouse_delta: (f64, f64),
     /// Modifier key state.
     #[pyo3(get)]
     pub modifiers: PyModifiers,
@@ -94,6 +99,7 @@ impl PyInput {
         let mut snapshot = Self {
             cursor: input.cursor_position(),
             scroll: input.scroll_delta(),
+            mouse_delta: input.mouse_delta(),
             modifiers: PyModifiers {
                 shift: modifiers.shift_key(),
                 ctrl: modifiers.control_key(),
@@ -313,6 +319,9 @@ pub struct FrameContext {
     /// Audio playback and control.
     #[pyo3(get)]
     pub audio: crate::audio::PyAudio,
+    /// Window size, HUD drawing and cursor lock.
+    #[pyo3(get)]
+    pub screen: crate::screen::PyScreen,
     /// Named Python-object storage.
     #[pyo3(get)]
     pub resources: PyResources,
@@ -332,6 +341,7 @@ impl FrameContext {
         physics: crate::physics::PyPhysics,
         physics2d: crate::physics::PyPhysics2D,
         audio: crate::audio::PyAudio,
+        screen: crate::screen::PyScreen,
     ) -> Self {
         Self {
             time,
@@ -341,6 +351,7 @@ impl FrameContext {
             physics,
             physics2d,
             audio,
+            screen,
             resources,
             quit,
         }

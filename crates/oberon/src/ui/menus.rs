@@ -58,6 +58,9 @@ pub enum DialogKind {
     /// Import a model file (from anywhere) into the scene, or onto an
     /// entity.
     ImportModel(Option<u64>),
+    /// Import a sound file (from anywhere) into the scene, or onto an
+    /// entity's Audio Source.
+    ImportSound(Option<u64>),
     /// Keyboard shortcut reference.
     Shortcuts,
     /// About Oberon.
@@ -102,6 +105,9 @@ pub enum UiAction {
     /// Pick a model from the project: for a new entity (`None`) or to show
     /// on an entity.
     PickModel(Option<u64>),
+    /// Pick a sound from the project: for a new entity (`None`) or for an
+    /// entity's Audio Source.
+    PickSound(Option<u64>),
 }
 
 /// Commands from a script tab's context menu (VS Code's set).
@@ -381,6 +387,18 @@ impl Ui {
                     UiAction::Dialog(DialogKind::ImportModel(None)),
                     editing,
                 ));
+                items.push(MenuItem::ui(
+                    "Sound…",
+                    "",
+                    UiAction::PickSound(None),
+                    editing,
+                ));
+                items.push(MenuItem::ui(
+                    "Import Sound…",
+                    "",
+                    UiAction::Dialog(DialogKind::ImportSound(None)),
+                    editing,
+                ));
                 items
             }
             3 => match doc.selected_index() {
@@ -556,6 +574,12 @@ impl Ui {
             UiAction::PickModel(None),
             editing,
         ));
+        items.push(MenuItem::ui(
+            "Create Sound…",
+            "",
+            UiAction::PickSound(None),
+            editing,
+        ));
         items
     }
 
@@ -659,6 +683,7 @@ impl Ui {
             UiAction::CommandPalette => self.open_palette(doc),
             UiAction::QuickOpen => self.open_quick_open(),
             UiAction::PickModel(target) => self.open_model_picker(target),
+            UiAction::PickSound(target) => self.open_sound_picker(target),
             UiAction::Tab(cmd) => self.tab_command(cmd),
         }
     }

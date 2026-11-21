@@ -28,6 +28,7 @@ mod keys;
 mod physics;
 mod physics_components;
 mod scene;
+mod screen;
 mod serialize;
 
 use pyo3::prelude::*;
@@ -58,6 +59,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<context::PyResources>()?;
     m.add_class::<events::PyEvents>()?;
     m.add_class::<audio::PyAudio>()?;
+    m.add_class::<screen::PyScreen>()?;
     m.add_class::<gamepads::PyGamepads>()?;
     m.add_class::<gamepads::PyGamepad>()?;
     m.add_class::<gamepads::PyGamepadEvent>()?;
@@ -74,6 +76,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<components::PyMeshRenderer>()?;
     m.add_class::<components::PyDirectionalLight>()?;
     m.add_class::<components::PyEnvironment>()?;
+    m.add_class::<components::PyAudioSource>()?;
     m.add_function(wrap_pyfunction!(components::set_asset_root, m)?)?;
     m.add_function(wrap_pyfunction!(components::asset_root, m)?)?;
     Ok(())

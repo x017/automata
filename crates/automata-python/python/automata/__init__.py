@@ -72,6 +72,8 @@ from ._core import (
     Attributes,
     Audio,
     AxisBinding,
+    Audio,
+    AudioSource,
     Binding,
     Camera2D,
     Camera3D,
@@ -98,6 +100,7 @@ from ._core import (
     Resources,
     RigidBody,
     SceneView,
+    Screen,
     Transform,
     TransformRef,
     __version__,
@@ -119,6 +122,7 @@ Component = Union[
     Collider3D,
     CharacterController,
     CharacterVelocity,
+    AudioSource,
 ]
 
 #: A per-frame update callback.
@@ -202,6 +206,8 @@ __all__ = [
     "AxisBinding",
     "Binding",
     "Camera2D",
+    "Audio",
+    "AudioSource",
     "Camera3D",
     "CharacterController",
     "CharacterVelocity",
@@ -235,6 +241,7 @@ __all__ = [
     "RigidBody",
     "Scene",
     "SceneView",
+    "Screen",
     "Transform",
     "TransformRef",
     "__version__",

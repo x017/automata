@@ -13,15 +13,19 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use automata_audio::AudioEngine;
+use automata_core::audio_source::{AudioCommand, AudioSource, AudioSourcePlayer};
 use automata_core::{Attributes, TransformData};
 use automata_physics::{
-    BodyType, CharacterController, CharacterVelocity, PhysicsWorld3D, RigidBody,
+    BodyType, CharacterController, CharacterVelocity, PhysicsWorld3D, RigidBody, WorldShape,
 };
 use automata_renderer::Camera3D;
 use automata_scene::{Entity, Name, Scene, Transform};
 use glam::Vec3;
 
-use crate::bridge::{EntityState, EntityWrite};
+use crate::bridge::{
+    AudioWrite, ColliderShape, EntityState, EntityWrite, FrameInput, FrameReply, HudItem,
+};
 use crate::doc::Document;
 
 /// The fixed physics timestep (seconds).
@@ -82,6 +86,14 @@ pub struct PlaySession {
     /// Entities with a behaviour script: Python drives them (characters
     /// with a script skip the built-in WASD controller).
     scripted: HashSet<Entity>,
+    /// Plays the scene's Audio Sources.
+    sources: AudioSourcePlayer,
+    /// Sound commands from scripts, applied by [`Self::update_audio`].
+    audio_commands: Vec<AudioCommand>,
+    /// What scripts drew on the HUD in their latest frame.
+    pub hud: Vec<HudItem>,
+    /// A cursor lock request from a script, taken by the app.
+    pub lock_request: Option<bool>,
 }
 
 impl PlaySession {
@@ -144,7 +156,148 @@ impl PlaySession {
             input: PlayInput::default(),
             characters,
             scripted,
+            sources: AudioSourcePlayer::new(),
+            audio_commands: Vec::new(),
+            hud: Vec::new(),
+            lock_request: None,
         }
+    }
+
+    /// The document id of a simulated entity.
+    fn doc_id(&self, entity: Entity) -> Option<u64> {
+        self.map
+            .iter()
+            .find(|(_, e)| *e == entity)
+            .and_then(|&(i, _)| self.doc.entities.get(i))
+            .map(|e| e.id)
+    }
+
+    /// Mouse-independent frame data for scripts: solid colliders (for
+    /// raycasts) and which Audio Sources are playing.
+    #[must_use]
+    pub fn frame_input(&self) -> FrameInput {
+        let to4 = |q: glam::Quat| [q.x, q.y, q.z, q.w];
+        let colliders = self
+            .physics
+            .collider_snapshot()
+            .shapes()
+            .into_iter()
+            .filter(|(_, _, sensor)| !*sensor)
+            .filter_map(|(entity, shape, _)| {
+                let id = self.doc_id(entity)?;
+                Some(match shape {
+                    WorldShape::Cuboid {
+                        center,
+                        rotation,
+                        half_extents,
+                    } => ColliderShape::Cuboid {
+                        id,
+                        center: center.to_array(),
+                        rotation: to4(rotation),
+                        half: half_extents.to_array(),
+                    },
+                    WorldShape::Ball { center, radius } => ColliderShape::Ball {
+                        id,
+                        center: center.to_array(),
+                        radius,
+                    },
+                    WorldShape::Capsule {
+                        center,
+                        rotation,
+                        half_height,
+                        radius,
+                    } => ColliderShape::Capsule {
+                        id,
+                        center: center.to_array(),
+                        rotation: to4(rotation),
+                        half_height,
+                        radius,
+                    },
+                })
+            })
+            .collect();
+        let playing = self
+            .map
+            .iter()
+            .filter(|(_, e)| self.sources.is_playing(*e))
+            .filter_map(|&(i, _)| self.doc.entities.get(i).map(|e| e.id))
+            .collect();
+        FrameInput {
+            colliders,
+            playing,
+            ..FrameInput::default()
+        }
+    }
+
+    /// Applies a whole runner reply: entity writes, sounds, HUD, cursor.
+    pub fn apply_frame(&mut self, reply: &FrameReply) {
+        self.apply_script_writes(&reply.writes);
+        for s in &reply.sounds {
+            self.audio_commands.push(AudioCommand::OneShot {
+                path: s.path.clone(),
+                volume: s.volume,
+                pitch: s.pitch,
+                position: s.position.map(Vec3::from),
+            });
+        }
+        self.hud.clone_from(&reply.hud);
+        if reply.lock.is_some() {
+            self.lock_request = reply.lock;
+        }
+    }
+
+    /// Runs the scene's audio for this frame: `play_on_start` sources,
+    /// script requests and distance fading. `root` is the scene folder.
+    /// Returns problems for the Console (missing clips, once each).
+    pub fn update_audio(
+        &mut self,
+        engine: &mut AudioEngine,
+        root: &std::path::Path,
+    ) -> Vec<String> {
+        if self.paused {
+            return Vec::new();
+        }
+        let commands = std::mem::take(&mut self.audio_commands);
+        self.sources
+            .update(self.scene.world(), engine, Some(root), commands)
+    }
+
+    /// Stops every sound this session started (Stop / pause).
+    pub fn stop_audio(&mut self, engine: &mut AudioEngine) {
+        self.audio_commands.clear();
+        self.sources.stop_all(engine);
+    }
+
+    /// Pauses or resumes this session's sounds.
+    pub fn pause_audio(&self, engine: &mut AudioEngine, paused: bool) {
+        if paused {
+            self.sources.pause_all(engine);
+        } else {
+            self.sources.resume_all(engine);
+        }
+    }
+
+    /// Number of sounds this session is playing.
+    #[must_use]
+    pub fn voice_count(&self) -> usize {
+        self.sources.voice_count()
+    }
+
+    /// Removes a simulated entity (a script despawned it).
+    fn despawn(&mut self, entity: Entity) {
+        let Some(pos) = self.map.iter().position(|(_, e)| *e == entity) else {
+            return;
+        };
+        let (index, _) = self.map.remove(pos);
+        for (i, _) in &mut self.map {
+            if *i > index {
+                *i -= 1;
+            }
+        }
+        self.doc.entities.remove(index);
+        self.scripted.remove(&entity);
+        self.characters.retain(|c| c.entity != entity);
+        let _ = self.scene.world_mut().despawn(entity);
     }
 
     /// Number of entities with a behaviour script.
@@ -185,6 +338,7 @@ impl PlaySession {
                         let (p, t) = (c.position, c.target);
                         [p.x, p.y, p.z, t.x, t.y, t.z, c.fov_y_degrees]
                     }),
+                    has_audio: world.get::<&AudioSource>(entity).is_ok(),
                 })
             })
             .collect()
@@ -196,6 +350,7 @@ impl PlaySession {
         if writes.is_empty() {
             return;
         }
+        let mut despawned = Vec::new();
         for w in writes {
             let Some(&(i, entity)) = self
                 .map
@@ -204,6 +359,15 @@ impl PlaySession {
             else {
                 continue;
             };
+            match w.audio {
+                Some(AudioWrite::Play) => self.audio_commands.push(AudioCommand::Play(entity)),
+                Some(AudioWrite::Stop) => self.audio_commands.push(AudioCommand::Stop(entity)),
+                None => {}
+            }
+            if w.despawn {
+                despawned.push(entity);
+                continue;
+            }
             let world = self.scene.world_mut();
             if w.position.is_some() || w.rotation.is_some() || w.scale.is_some() {
                 if let Ok(mut t) = world.get::<&mut Transform>(entity) {
@@ -240,6 +404,9 @@ impl PlaySession {
                     self.doc.entities[i].data.camera_3d = Some(*cam);
                 }
             }
+        }
+        for entity in despawned {
+            self.despawn(entity);
         }
         self.write_back();
     }
@@ -547,7 +714,7 @@ mod tests {
         while play.elapsed < 7.0 && std::time::Instant::now() < deadline {
             for msg in bridge.poll() {
                 match msg {
-                    BridgeMsg::Frame(w) => play.apply_script_writes(&w),
+                    BridgeMsg::Frame(w) => play.apply_frame(&w),
                     BridgeMsg::Error { msg, .. } => errors.push(msg),
                     _ => {}
                 }
@@ -590,6 +757,134 @@ mod tests {
         );
     }
 
+    /// FPS building blocks through the real runner: raycasts against the
+    /// session's colliders, mouse input, cursor lock, the HUD, Audio Source
+    /// playback and one-shots, and despawning (skipped without python3).
+    #[test]
+    fn scripts_raycast_play_sounds_draw_a_hud_and_despawn() {
+        use crate::bridge::{BridgeMsg, ScriptBridge};
+        use crate::doc::ComponentKind;
+        use automata_core::AttributeValue as A;
+        let python = crate::bridge::default_python();
+        if std::process::Command::new(python)
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("oberon_play_fps_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sounds")).unwrap();
+        crate::sounds::tests::write_test_wav(&dir.join("sounds/beep.wav"), 22_050, 2.0);
+        std::fs::write(
+            dir.join("shooter.py"),
+            "def start(entity, ctx):\n\
+             \x20   ctx.input.lock_mouse()\n\
+             \n\
+             def update(entity, ctx):\n\
+             \x20   hit = ctx.physics.raycast((20, 1, 0), (0, 0, -1), 50, ignore=entity)\n\
+             \x20   entity.attributes['hit'] = hit.entity.name if hit and hit.entity else 'none'\n\
+             \x20   entity.attributes['dist'] = hit.distance if hit else -1.0\n\
+             \x20   entity.attributes['dx'] = ctx.input.mouse_delta[0]\n\
+             \x20   entity.attributes['click'] = ctx.input.mouse_pressed('left')\n\
+             \x20   entity.attributes['locked'] = ctx.input.mouse_locked\n\
+             \x20   ctx.hud.rect(ctx.hud.center[0], ctx.hud.center[1], 4, 4)\n\
+             \x20   n = entity.attributes.get('n', 0) + 1\n\
+             \x20   entity.attributes['n'] = n\n\
+             \x20   if n == 3:\n\
+             \x20       entity.audio.play()\n\
+             \x20       ctx.audio.play('sounds/beep.wav', volume=0.5, position=entity)\n\
+             \x20   if n == 6 and hit and hit.entity:\n\
+             \x20       hit.entity.despawn()\n",
+        )
+        .unwrap();
+
+        let mut doc = Document::starter();
+        doc.path = Some(dir.join("level.ron"));
+        let target = doc.create(CreateKind::Cube);
+        doc.rename_entity(target, "Target");
+        doc.modify(target, false, |d| {
+            if let Some(t) = &mut d.transform {
+                t.position = [20.0, 1.0, -5.0];
+            }
+        });
+        doc.add_component(target, ComponentKind::Collider);
+        let i = doc.add_entity_named("Shooter");
+        let shooter = doc.entities[i].id;
+        doc.modify(shooter, false, |d| {
+            d.script = Some(automata_core::Script {
+                path: "shooter.py".into(),
+            });
+            d.audio_source = Some(AudioSource::new("sounds/beep.wav"));
+        });
+
+        let mut play = PlaySession::start(&doc);
+        play.update(TIMESTEP); // colliders exist after the first step
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        let mut engine = AudioEngine::new();
+        let mut errors = Vec::new();
+        let mut most_voices = 0;
+        let mut lock = None;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while bridge.answered < 12 && std::time::Instant::now() < deadline {
+            for msg in bridge.poll() {
+                match msg {
+                    BridgeMsg::Frame(w) => {
+                        play.apply_frame(&w);
+                        lock = lock.or(play.lock_request.take());
+                    }
+                    BridgeMsg::Error { msg, traceback, .. } => {
+                        errors.push(format!("{msg}\n{traceback}"));
+                    }
+                    _ => {}
+                }
+            }
+            let problems = play.update_audio(&mut engine, &dir);
+            assert!(problems.is_empty(), "{problems:?}");
+            most_voices = most_voices.max(play.voice_count());
+            let mut input = play.frame_input();
+            input.mouse_delta = [3.0, 0.0];
+            input.mouse_buttons = vec!["left"];
+            input.mouse_locked = lock == Some(true);
+            input.screen = [800, 600];
+            let states = play.script_states(|rel| doc.resolve(rel));
+            if bridge.send_frame_with(TIMESTEP, play.elapsed, &[], &states, &input) {
+                play.update(TIMESTEP);
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(lock, Some(true), "start() captured the mouse");
+        assert_eq!(most_voices, 2, "the source and the one-shot played");
+        assert_eq!(play.hud.len(), 1);
+        assert!((play.hud[0].x - 400.0).abs() < 1e-3, "{:?}", play.hud[0]);
+        let shooter = play
+            .doc
+            .entities
+            .iter()
+            .find(|e| e.name() == "Shooter")
+            .unwrap();
+        let attr = |k: &str| shooter.data.attributes.get(k).cloned();
+        assert_eq!(attr("dx"), Some(A::Float(3.0)));
+        assert_eq!(attr("click"), Some(A::Bool(true)));
+        assert_eq!(attr("locked"), Some(A::Bool(true)));
+        // The target was hit at its near face (z = -4.5) until despawned.
+        assert!(
+            !play.doc.entities.iter().any(|e| e.name() == "Target"),
+            "the hit entity was despawned: {:?} {:?}",
+            shooter.data.attributes,
+            play.frame_input().colliders
+        );
+        assert_eq!(
+            attr("hit"),
+            Some(A::Text("none".into())),
+            "nothing left to hit"
+        );
+    }
+
     /// The whole loop with a real interpreter: Oberon state → Python script
     /// → writes applied to the simulation (skipped without python3).
     #[test]
@@ -622,7 +917,7 @@ mod tests {
         while bridge.answered < 40 && std::time::Instant::now() < deadline {
             for msg in bridge.poll() {
                 match msg {
-                    BridgeMsg::Frame(w) => play.apply_script_writes(&w),
+                    BridgeMsg::Frame(w) => play.apply_frame(&w),
                     BridgeMsg::Error { msg, .. } => errors.push(msg),
                     _ => {}
                 }

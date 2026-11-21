@@ -10,8 +10,9 @@ In the editor's Play mode those scripts run in a bridged Python process;
 A behaviour script is a module with optional `start(entity, ctx)`,
 `update(entity, ctx)` and `stop(entity, ctx)` functions. `entity` offers
 `name`, `transform`, `character_velocity`, `attributes`, `grounded`,
-`camera` and a per-entity `state` dict; `ctx` offers `input`, `time`,
-`physics`, `scene`, `camera`, `events`, `resources`, `log(...)` and `quit()`.
+`camera`, `audio` and a per-entity `state` dict; `ctx` offers `input`,
+`time`, `physics`, `scene`, `camera`, `audio`, `hud`, `events`,
+`resources`, `log(...)` and `quit()`.
 """
 
 import importlib.util
@@ -178,6 +179,11 @@ class ScriptEntity:
     def attributes(self) -> Any:
         return self._view.attributes
 
+    @property
+    def audio(self) -> "ScriptAudio":
+        """This entity's Audio Source: ``play()``, ``stop()``, ``playing``."""
+        return ScriptAudio(self)
+
     def despawn(self) -> None:
         self._view.despawn()
 
@@ -185,18 +191,89 @@ class ScriptEntity:
         return f"ScriptEntity({self.name!r})"
 
 
+class ScriptAudio:
+    """``entity.audio``: plays the entity's Audio Source component."""
+
+    def __init__(self, entity: "ScriptEntity") -> None:
+        self._e = entity
+
+    def _raw(self) -> Any:
+        return _FRAME["ctx"].audio
+
+    @property
+    def source(self) -> Any:
+        """The ``AudioSource`` component, or None."""
+        return self._e._view.audio_source
+
+    def play(self) -> None:
+        """Starts the sound (restarts it if it's already playing)."""
+        self._raw().play_source(self._e._view)
+
+    def stop(self) -> None:
+        self._raw().stop_source(self._e._view)
+
+    @property
+    def playing(self) -> bool:
+        """Whether it was playing at the start of the frame."""
+        return bool(self._raw().source_playing(self._e._view))
+
+    def __repr__(self) -> str:
+        return f"Audio({self._e.name!r})"
+
+
+# The raw frame context of the frame being run (for ScriptAudio).
+_FRAME: Dict[str, Any] = {}
+
+
 def _unwrap(entity: Any) -> Any:
     return entity._view if isinstance(entity, ScriptEntity) else entity
 
 
+class Hit:
+    """A raycast hit: ``entity`` (or None), ``point``, ``normal``, ``distance``."""
+
+    __slots__ = ("entity", "point", "normal", "distance")
+
+    def __init__(self, entity: Any, point: Any, normal: Any, distance: float) -> None:
+        self.entity = entity
+        self.point = tuple(point)
+        self.normal = tuple(normal)
+        self.distance = float(distance)
+
+    def __repr__(self) -> str:
+        name = getattr(self.entity, "name", None)
+        return f"Hit({name!r}, distance={self.distance:.2f})"
+
+
 class _Physics:
-    def __init__(self, physics: Any) -> None:
+    def __init__(self, physics: Any, scene: "_Scene") -> None:
         self._p = physics
+        self._scene = scene
 
     def grounded(self, entity: Any) -> bool:
         if isinstance(entity, ScriptEntity):
             return entity.grounded
         return bool(self._p.grounded(entity))
+
+    def raycast(
+        self,
+        origin: Any,
+        direction: Any,
+        max_distance: float = 100.0,
+        ignore: Any = None,
+    ) -> Optional[Hit]:
+        """The first collider along a ray, right now, or None.
+
+        ``ignore`` skips one entity (usually the caster). Sensors are skipped.
+        """
+        o = tuple(float(v) for v in origin)[:3]
+        d = tuple(float(v) for v in direction)[:3]
+        exclude = _unwrap(ignore) if ignore is not None else None
+        hit = self._p.raycast(o, d, float(max_distance), exclude)
+        if hit is None:
+            return None
+        bits, point, normal, distance = hit
+        return Hit(self._scene.by_id(bits), point, normal, distance)
 
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._p, name)
@@ -213,6 +290,18 @@ class _Scene:
     def __init__(self, scene: Any, handles: Dict[str, ScriptEntity]) -> None:
         self._s = scene
         self._h = handles
+
+    def by_id(self, bits: int) -> Any:
+        """The entity with this id, as a script handle (None if gone)."""
+        for handle in self._h.values():
+            if handle._view is not None and int(handle._view.id) == bits:
+                return handle
+        for view in self._s:
+            if int(view.id) == bits:
+                temp = ScriptEntity(view.name or "")
+                temp._view = view
+                return temp
+        return None
 
     def find(self, name: str) -> Any:
         handle = self._h.get(name)
@@ -270,8 +359,89 @@ class _Input:
         """-1, 0, or 1 from two keys."""
         return float(self.pressed(positive)) - float(self.pressed(negative))
 
+    @property
+    def mouse_delta(self) -> Tuple[float, float]:
+        """Mouse movement since last frame (dx, dy); +y is down."""
+        dx, dy = self._raw.mouse_delta
+        return (float(dx), float(dy))
+
+    def lock_mouse(self, locked: bool = True) -> None:
+        """Hides and captures the cursor for mouse-look (False releases it)."""
+        _FRAME["ctx"].screen.lock_cursor(bool(locked))
+
+    @property
+    def mouse_locked(self) -> bool:
+        return bool(_FRAME["ctx"].screen.cursor_locked)
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self._raw, name)
+
+
+class _Audio:
+    """``ctx.audio`` for scripts: one-shot sounds by file name."""
+
+    def __init__(self, raw: Any) -> None:
+        self._raw = raw
+
+    def play(
+        self,
+        path: str,
+        volume: float = 1.0,
+        pitch: float = 1.0,
+        position: Any = None,
+    ) -> None:
+        """Plays a sound file once (relative to the scene folder). With a
+        ``position`` (a point or an entity) it fades with distance."""
+        if hasattr(position, "transform"):
+            position = position.transform.position
+        pos = tuple(float(v) for v in position)[:3] if position is not None else None
+        self._raw.play_at(str(path), float(volume), float(pitch), pos)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._raw, name)
+
+
+class _Hud:
+    """``ctx.hud``: draw images and rectangles over the game this frame.
+
+    Coordinates are screen pixels from the top-left; shapes are placed by
+    their centre. Call every frame you want them shown.
+    """
+
+    def __init__(self, screen: Any) -> None:
+        self._s = screen
+
+    @property
+    def size(self) -> Tuple[int, int]:
+        w, h = self._s.size
+        return (int(w), int(h))
+
+    @property
+    def center(self) -> Tuple[float, float]:
+        w, h = self.size
+        return (w / 2.0, h / 2.0)
+
+    def image(
+        self,
+        path: str,
+        x: float,
+        y: float,
+        size: Any = None,
+        color: Any = (1.0, 1.0, 1.0, 1.0),
+        rotation: float = 0.0,
+    ) -> None:
+        sz = None if size is None else (float(size[0]), float(size[1]))
+        self._s.image(str(path), float(x), float(y), sz, tuple(float(c) for c in color), float(rotation))
+
+    def rect(
+        self,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        color: Any = (1.0, 1.0, 1.0, 1.0),
+    ) -> None:
+        self._s.rect(float(x), float(y), float(width), float(height), tuple(float(c) for c in color))
 
 
 class ScriptContext:
@@ -279,12 +449,15 @@ class ScriptContext:
 
     def __init__(self, ctx: Any, handles: Dict[str, ScriptEntity]) -> None:
         self.raw = ctx
+        _FRAME["ctx"] = ctx
         self.input = _Input(ctx.input)
         self.time = ctx.time
         self.events = ctx.events
         self.resources = ctx.resources
-        self.physics = _Physics(ctx.physics)
         self.scene = _Scene(ctx.scene, handles)
+        self.physics = _Physics(ctx.physics, self.scene)
+        self.audio = _Audio(ctx.audio)
+        self.hud = _Hud(ctx.screen)
 
     @property
     def camera(self) -> Optional[ScriptCamera]:

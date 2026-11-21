@@ -59,6 +59,8 @@ pub(super) fn run_windowed(
         quit_requested,
         input: InputState::new(),
         gamepads: automata_input::Gamepads::new(),
+        focused: true,
+        cursor_applied: false,
         window: None,
         renderer: None,
         draw,
@@ -85,6 +87,11 @@ struct WinitDriver<'a, F: FnMut(&mut AppContext<'_>)> {
     quit_requested: &'a mut bool,
     input: InputState,
     gamepads: automata_input::Gamepads,
+    /// Whether the window has keyboard focus (raw mouse motion is ignored
+    /// otherwise: X11 reports it for the whole desktop).
+    focused: bool,
+    /// The cursor lock last applied to the window.
+    cursor_applied: bool,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     draw: DrawList,
@@ -127,6 +134,7 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
             self.quit_requested,
         ));
         self.input.end_frame();
+        self.apply_cursor_lock();
 
         // Built-in scene systems (transform propagation) and the
         // scene-to-renderer bridge run after the game update. Plain-data
@@ -159,7 +167,50 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
     }
 }
 
+impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
+    /// Applies the game's cursor-lock request to the window when it changed.
+    fn apply_cursor_lock(&mut self) {
+        let wanted = self.world.cursor_locked() && self.focused;
+        if wanted == self.cursor_applied {
+            return;
+        }
+        let Some(window) = &self.window else {
+            return;
+        };
+        self.cursor_applied = wanted;
+        lock_cursor(window, wanted);
+    }
+}
+
+/// Hides and captures the cursor (or releases it). Platforms without a
+/// true lock (X11) get a confined cursor; raw mouse motion still drives
+/// mouse-look either way.
+fn lock_cursor(window: &Window, locked: bool) {
+    use winit::window::CursorGrabMode;
+    if locked {
+        if window.set_cursor_grab(CursorGrabMode::Locked).is_err() {
+            let _ = window.set_cursor_grab(CursorGrabMode::Confined);
+        }
+    } else {
+        let _ = window.set_cursor_grab(CursorGrabMode::None);
+    }
+    window.set_cursor_visible(!locked);
+}
+
 impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        if let winit::event::DeviceEvent::MouseMotion { delta } = event {
+            if self.focused {
+                self.input.handle_mouse_motion(delta.0, delta.1);
+            }
+        }
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -228,6 +279,17 @@ impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
                         }
                     }
                 }
+            }
+            WindowEvent::Focused(focused) => {
+                self.focused = focused;
+                // The OS drops the grab when focus leaves; re-apply on return.
+                self.cursor_applied = false;
+                if !focused {
+                    if let Some(window) = &self.window {
+                        lock_cursor(window, false);
+                    }
+                }
+                self.apply_cursor_lock();
             }
             event => self.input.handle_window_event(&event),
         }

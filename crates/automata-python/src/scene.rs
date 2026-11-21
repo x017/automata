@@ -157,6 +157,10 @@ impl PyEntity {
                     StagedComponent::Environment(v) => {
                         Py::new(py, crate::components::PyEnvironment::from_inner(*v))?.into_any()
                     }
+                    StagedComponent::AudioSource(v) => {
+                        Py::new(py, crate::components::PyAudioSource::from_inner(v.clone()))?
+                            .into_any()
+                    }
                 })
             })
             .collect()
@@ -385,6 +389,9 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
             StagedComponent::Environment(c) => {
                 let _ = scene.world_mut().insert_one(id, *c);
             }
+            StagedComponent::AudioSource(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
         }
     }
     if !staged.attributes.is_empty() {
@@ -485,6 +492,7 @@ struct EntitySnapshot {
     camera_3d: Option<Camera3D>,
     attributes: AttributeMap,
     script: Option<String>,
+    audio_source: Option<automata_core::AudioSource>,
 }
 
 /// Read access to the scene during the update callback.
@@ -513,17 +521,21 @@ impl SceneView {
                 Option<&Camera3D>,
                 Option<&Attributes>,
                 Option<&Script>,
+                Option<&automata_core::AudioSource>,
             )>()
             .iter()
             .map(
-                |(id, name, transform, velocity, camera, attributes, script)| EntitySnapshot {
-                    id,
-                    name: name.map(|n| n.0.clone()),
-                    transform: transform.copied(),
-                    character_velocity: velocity.copied(),
-                    camera_3d: camera.copied(),
-                    attributes: attributes.map(|a| a.0.clone()).unwrap_or_default(),
-                    script: script.map(|s| s.path.clone()),
+                |(id, name, transform, velocity, camera, attributes, script, audio)| {
+                    EntitySnapshot {
+                        id,
+                        name: name.map(|n| n.0.clone()),
+                        transform: transform.copied(),
+                        character_velocity: velocity.copied(),
+                        camera_3d: camera.copied(),
+                        attributes: attributes.map(|a| a.0.clone()).unwrap_or_default(),
+                        script: script.map(|s| s.path.clone()),
+                        audio_source: audio.cloned(),
+                    }
                 },
             )
             .collect();
@@ -610,6 +622,7 @@ pub struct EntityView {
     camera_3d: Option<Camera3D>,
     attributes: AttributeMap,
     script: Option<String>,
+    audio_source: Option<automata_core::AudioSource>,
     writes: WriteQueue,
 }
 
@@ -623,6 +636,7 @@ impl EntityView {
             camera_3d: snapshot.camera_3d,
             attributes: snapshot.attributes.clone(),
             script: snapshot.script.clone(),
+            audio_source: snapshot.audio_source.clone(),
             writes,
         }
     }
@@ -736,6 +750,15 @@ impl EntityView {
     #[getter]
     fn script(&self) -> Option<String> {
         self.script.clone()
+    }
+
+    /// The entity's `AudioSource`, or `None`. Play it with
+    /// `ctx.audio.play_source(view)`.
+    #[getter]
+    fn audio_source(&self) -> Option<crate::components::PyAudioSource> {
+        self.audio_source
+            .clone()
+            .map(crate::components::PyAudioSource::from_inner)
     }
 
     /// Queues the entity (and its children) for despawn after the callback.

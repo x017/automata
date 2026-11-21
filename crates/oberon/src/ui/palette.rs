@@ -34,6 +34,13 @@ pub enum PaletteAction {
         /// The entity to show it on.
         target: Option<u64>,
     },
+    /// Add a sound to the scene (`target: None`) or play it from an entity.
+    Sound {
+        /// The sound file.
+        path: PathBuf,
+        /// The entity whose Audio Source gets it.
+        target: Option<u64>,
+    },
 }
 
 /// One searchable entry.
@@ -364,7 +371,52 @@ impl Ui {
                 Some(id) => Intent::SetModel { id, path },
                 None => Intent::AddModel { path, at: None },
             }),
+            PaletteAction::Sound { path, target } => self.out.push(match target {
+                Some(id) => Intent::SetAudioClip { id, path },
+                None => Intent::AddSound { path, at: None },
+            }),
         }
+    }
+
+    /// The sound picker: the project's sound files by name, plus "Import
+    /// from file…". Picks a clip for a new entity (`target: None`) or for
+    /// entity `target`'s Audio Source.
+    pub fn open_sound_picker(&mut self, target: Option<u64>) {
+        let root = self.project_root.clone();
+        let rel = |p: &Path| p.strip_prefix(&root).unwrap_or(p).display().to_string();
+        let mut items: Vec<PaletteItem> = crate::sounds::project_sounds(&root, 2000)
+            .into_iter()
+            .map(|path| PaletteItem {
+                label: path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                group: "Sound",
+                hint: rel(&path),
+                action: PaletteAction::Sound { path, target },
+            })
+            .collect();
+        items.push(PaletteItem {
+            label: "Import from file…".into(),
+            group: "Import",
+            hint: "copies it into sounds/".into(),
+            action: PaletteAction::Menu(Action::Ui(super::menus::UiAction::Dialog(
+                super::menus::DialogKind::ImportSound(target),
+            ))),
+        });
+        self.menu = None;
+        self.picker = None;
+        self.palette = Some(Palette {
+            query: String::new(),
+            selected: 0,
+            items,
+            files_only: true,
+            placeholder: Some(if target.is_some() {
+                "Choose a sound for this entity…"
+            } else {
+                "Add a sound to the scene…"
+            }),
+        });
     }
 
     /// The model picker: the project's models (`.glb`, `.gltf`, `.obj`) by

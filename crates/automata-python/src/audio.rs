@@ -15,7 +15,10 @@
 //! The `audio-cpal` feature switches to real device output.
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
+
+use automata_core::AudioCommand;
 
 use automata_audio::{AudioEngine, PlayOptions};
 use pyo3::exceptions::{PyKeyError, PyValueError};
@@ -33,7 +36,15 @@ pub(crate) type SharedAudio = Rc<RefCell<AudioEngine>>;
 #[derive(Clone)]
 pub struct PyAudio {
     engine: SharedAudio,
+    /// Requests for the scene's audio-source player, applied after the
+    /// callback.
+    commands: Rc<RefCell<Vec<AudioCommand>>>,
+    /// Entities (bits) whose source was playing at the start of the frame.
+    playing: Rc<HashSet<u64>>,
 }
+
+/// Queued audio-source requests, shared with the game loop.
+pub(crate) type AudioCommands = Rc<RefCell<Vec<AudioCommand>>>;
 
 impl std::fmt::Debug for PyAudio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -42,10 +53,32 @@ impl std::fmt::Debug for PyAudio {
 }
 
 impl PyAudio {
-    /// Binds the audio view to the shared engine.
-    pub(crate) fn new(engine: SharedAudio) -> Self {
-        Self { engine }
+    /// Binds the view with the frame's source-command queue and the
+    /// entities whose sources are playing.
+    pub(crate) fn for_frame(
+        engine: SharedAudio,
+        commands: AudioCommands,
+        playing: HashSet<u64>,
+    ) -> Self {
+        Self {
+            engine,
+            commands,
+            playing: Rc::new(playing),
+        }
     }
+}
+
+fn entity_of(obj: &Bound<'_, PyAny>) -> PyResult<automata_scene::Entity> {
+    if let Ok(bits) = obj.extract::<u64>() {
+        return crate::scene::entity_from_bits(bits);
+    }
+    if let Ok(view) = obj.cast::<crate::scene::EntityView>() {
+        return crate::scene::entity_from_bits(view.borrow().id_bits());
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(format!(
+        "expected an entity id (int) or EntityView, got {}",
+        obj.get_type().name()?
+    )))
 }
 
 /// Maps an audio error to the right Python exception.
@@ -60,6 +93,41 @@ fn audio_err(err: &automata_audio::AudioError) -> PyErr {
 
 #[pymethods]
 impl PyAudio {
+    /// Starts (or restarts) an entity's `AudioSource` after this frame's
+    /// callback.
+    fn play_source(&self, entity: &Bound<'_, PyAny>) -> PyResult<()> {
+        let e = entity_of(entity)?;
+        self.commands.borrow_mut().push(AudioCommand::Play(e));
+        Ok(())
+    }
+
+    /// Stops an entity's `AudioSource` after this frame's callback.
+    fn stop_source(&self, entity: &Bound<'_, PyAny>) -> PyResult<()> {
+        let e = entity_of(entity)?;
+        self.commands.borrow_mut().push(AudioCommand::Stop(e));
+        Ok(())
+    }
+
+    /// Whether an entity's `AudioSource` was playing at the start of the
+    /// frame.
+    fn source_playing(&self, entity: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let e = entity_of(entity)?;
+        Ok(self.playing.contains(&e.to_bits().get()))
+    }
+
+    /// Plays a sound file once, resolved like `AudioSource` clips (against
+    /// the scene folder). With `position=(x, y, z)` it fades with distance
+    /// from the camera. Missing files are logged, not raised.
+    #[pyo3(signature = (path, volume=1.0, pitch=1.0, position=None))]
+    fn play_at(&self, path: &str, volume: f32, pitch: f32, position: Option<(f32, f32, f32)>) {
+        self.commands.borrow_mut().push(AudioCommand::OneShot {
+            path: path.replace('\\', "/"),
+            volume,
+            pitch,
+            position: position.map(|(x, y, z)| glam::Vec3::new(x, y, z)),
+        });
+    }
+
     /// Plays a sound file and returns its id.
     ///
     /// `volume` is a linear amplitude (`1.0` = full). `loop_` repeats the

@@ -91,6 +91,9 @@ pub struct EntityData {
     /// The Python behaviour script attached to the entity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub script: Option<Script>,
+    /// A sound the entity plays (see [`crate::audio_source`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_source: Option<crate::AudioSource>,
 }
 
 /// A custom attribute value: the small set of types an editor can show and
@@ -300,6 +303,9 @@ impl SceneFile {
             if let Some(script) = eref.get::<&Script>() {
                 data.script = Some((*script).clone());
             }
+            if let Some(source) = eref.get::<&crate::AudioSource>() {
+                data.audio_source = Some((*source).clone());
+            }
             entities.push(data);
         }
         Self {
@@ -362,6 +368,9 @@ impl SceneFile {
             }
             if let Some(script) = &data.script {
                 let _ = world.insert_one(entity, script.clone());
+            }
+            if let Some(source) = &data.audio_source {
+                let _ = world.insert_one(entity, source.clone());
             }
         }
     }
@@ -444,6 +453,46 @@ mod tests {
             .unwrap();
         assert_eq!(enemy.attributes, file.entities[0].attributes);
         assert_eq!(enemy.script, file.entities[0].script);
+    }
+
+    #[test]
+    fn audio_sources_round_trip_and_stay_terse() {
+        let data = EntityData {
+            name: Some("Radio".into()),
+            transform: Some(TransformData::default()),
+            audio_source: Some(crate::AudioSource {
+                looping: true,
+                spatial: true,
+                ..crate::AudioSource::new("sounds/music.ogg")
+            }),
+            ..EntityData::default()
+        };
+        let file = SceneFile {
+            version: SCENE_FILE_VERSION,
+            entities: vec![data, EntityData::default()],
+        };
+        let text = file.to_ron().unwrap();
+        assert_eq!(text.matches("audio_source").count(), 1, "{text}");
+        let back = SceneFile::from_ron(&text).unwrap();
+        assert_eq!(back, file);
+        // Hand-written files may leave settings out.
+        let short = SceneFile::from_ron(
+            r#"(version: 1, entities: [(name: Some("Bell"), audio_source: Some((clip: "bell.wav")))])"#,
+        )
+        .unwrap();
+        let source = short.entities[0].audio_source.clone().unwrap();
+        assert_eq!(source.clip, "bell.wav");
+        assert!((source.volume - 1.0).abs() < 1e-6 && !source.looping);
+
+        let mut world = SceneWorld::new();
+        back.apply_to_world(&mut world);
+        let again = SceneFile::from_world(&world);
+        let radio = again
+            .entities
+            .iter()
+            .find(|e| e.name.as_deref() == Some("Radio"))
+            .unwrap();
+        assert_eq!(radio.audio_source, file.entities[0].audio_source);
     }
 
     #[test]

@@ -47,6 +47,9 @@ pub struct PhysicsWorld3D {
     body_entities: HashMap<r3::dynamics::RigidBodyHandle, Entity>,
     entity_bodies: HashMap<Entity, r3::dynamics::RigidBodyHandle>,
     entity_colliders: HashMap<Entity, ColliderHandle>,
+    /// Entities with a collider but no [`RigidBody`]: simulated as fixed
+    /// bodies that follow their [`Transform`] (scripts may move them).
+    static_colliders: HashMap<Entity, Transform>,
     controllers: HashMap<Entity, KinematicCharacterController>,
     grounded: HashMap<Entity, bool>,
     last_dt: f32,
@@ -93,6 +96,7 @@ impl PhysicsWorld3D {
             body_entities: HashMap::new(),
             entity_bodies: HashMap::new(),
             entity_colliders: HashMap::new(),
+            static_colliders: HashMap::new(),
             controllers: HashMap::new(),
             grounded: HashMap::new(),
             last_dt: 1.0 / 60.0,
@@ -130,6 +134,11 @@ impl PhysicsWorld3D {
     /// Synchronise the Rapier world with the ECS scene: spawn bodies for new
     /// [`RigidBody`] entities, update kinematic targets, remove despawned
     /// entities. Called each fixed tick before [`step`](Self::step).
+    ///
+    /// An entity with a [`Collider3D`] but no [`RigidBody`] is static
+    /// scenery (walls, floors, props): it blocks bodies and characters and
+    /// is hit by ray casts, and it follows its [`Transform`] when a script
+    /// moves it.
     pub fn sync_from_scene(&mut self, scene: &mut SceneWorld) {
         self.spawn_missing(scene);
         self.update_existing(scene);
@@ -152,6 +161,29 @@ impl PhysicsWorld3D {
             to_spawn.push((entity, body.clone(), transform.copied(), collider));
         }
 
+        let mut statics = Vec::new();
+        let mut static_query = scene
+            .query::<hecs::Without<(hecs::Entity, &Collider3D, Option<&Transform>), &RigidBody>>();
+        for (entity, collider, transform) in &mut static_query {
+            if !self.entity_bodies.contains_key(&entity) {
+                statics.push((entity, collider.clone(), transform.copied()));
+            }
+        }
+        drop(static_query);
+        drop(bodies_query);
+        for (entity, collider, transform) in statics {
+            let t = transform.unwrap_or_default();
+            let builder = RigidBodyBuilder::fixed()
+                .translation(Vector::new(t.position.x, t.position.y, t.position.z))
+                .rotation(t.rotation.to_scaled_axis());
+            let handle = self.bodies.insert(builder.build());
+            self.entity_bodies.insert(entity, handle);
+            self.body_entities.insert(handle, entity);
+            self.static_colliders.insert(entity, t);
+            self.attach_collider(entity, handle, &collider);
+            trace!(?entity, "physics: spawned static collider");
+        }
+
         for (entity, body, transform, collider) in to_spawn {
             let mut builder = match body.body_type {
                 BodyType::Dynamic => RigidBodyBuilder::dynamic(),
@@ -164,9 +196,11 @@ impl PhysicsWorld3D {
             .angular_damping(body.angular_damping);
 
             if let Some(t) = transform {
+                // The builder takes a scaled axis (axis × angle), not the
+                // quaternion's vector part.
                 builder = builder
                     .translation(Vector::new(t.position.x, t.position.y, t.position.z))
-                    .rotation(Vector::new(t.rotation.x, t.rotation.y, t.rotation.z));
+                    .rotation(t.rotation.to_scaled_axis());
             }
 
             let handle = self.bodies.insert(builder.build());
@@ -218,6 +252,31 @@ impl PhysicsWorld3D {
     }
 
     fn update_existing(&mut self, scene: &mut SceneWorld) {
+        // Static colliders follow their transform when it changes.
+        let mut moved = Vec::new();
+        for (entity, last) in &self.static_colliders {
+            if let Ok(t) = scene.get::<&Transform>(*entity) {
+                if t.position != last.position || t.rotation != last.rotation {
+                    moved.push((*entity, *t));
+                }
+            }
+        }
+        for (entity, t) in moved {
+            self.static_colliders.insert(entity, t);
+            if let Some(rb) = self
+                .entity_bodies
+                .get(&entity)
+                .and_then(|h| self.bodies.get_mut(*h))
+            {
+                rb.set_position(
+                    Pose::from_parts(
+                        Vector::new(t.position.x, t.position.y, t.position.z),
+                        t.rotation,
+                    ),
+                    true,
+                );
+            }
+        }
         let mut updates = Vec::new();
         let mut bodies_query = scene.query::<(hecs::Entity, &RigidBody, Option<&Transform>)>();
         for (entity, body, transform) in &mut bodies_query {
@@ -256,7 +315,15 @@ impl PhysicsWorld3D {
     fn despawn_removed(&mut self, scene: &mut SceneWorld) {
         let mut to_remove = Vec::new();
         for entity in self.entity_bodies.keys() {
-            if scene.get::<&RigidBody>(*entity).is_err() {
+            let has_body = scene.get::<&RigidBody>(*entity).is_ok();
+            let keep = if self.static_colliders.contains_key(entity) {
+                // Gone, lost its collider, or became a real body (respawned
+                // as one next sync).
+                !has_body && scene.get::<&Collider3D>(*entity).is_ok()
+            } else {
+                has_body
+            };
+            if !keep {
                 to_remove.push(*entity);
             }
         }
@@ -279,6 +346,7 @@ impl PhysicsWorld3D {
             );
         }
         self.entity_colliders.remove(&entity);
+        self.static_colliders.remove(&entity);
         self.controllers.remove(&entity);
         self.grounded.remove(&entity);
         trace!(?entity, "physics: removed 3D body");
@@ -565,6 +633,26 @@ impl PhysicsWorld3D {
             })
     }
 
+    /// Every enabled collider's shape and world pose, for answering raycasts
+    /// later without the world (see [`ColliderSnapshot`]).
+    #[must_use]
+    pub fn collider_snapshot(&self) -> ColliderSnapshot {
+        let colliders = self
+            .colliders
+            .iter()
+            .filter(|(_, c)| c.is_enabled())
+            .filter_map(|(_, c)| {
+                Some(SnapshotCollider {
+                    entity: user_data_to_entity(c.user_data)?,
+                    shape: c.shared_shape().clone(),
+                    pose: *c.position(),
+                    sensor: c.is_sensor(),
+                })
+            })
+            .collect();
+        ColliderSnapshot { colliders }
+    }
+
     /// Shape-cast: sweep a shape from `origin` along `direction` and report
     /// the first impact.
     #[must_use]
@@ -635,5 +723,149 @@ fn controller_from_config(config: &CharacterController) -> KinematicCharacterCon
         min_slope_slide_angle: config.min_slope_slide_angle,
         snap_to_ground: config.snap_to_ground.map(CharacterLength::Absolute),
         normal_nudge_factor: 0.01,
+    }
+}
+
+/// One collider in a [`ColliderSnapshot`].
+#[derive(Clone)]
+struct SnapshotCollider {
+    entity: Entity,
+    shape: r3::geometry::SharedShape,
+    pose: Pose,
+    sensor: bool,
+}
+
+/// The colliders of a [`PhysicsWorld3D`] frozen at one moment: their
+/// shapes and world poses. Raycasts against it answer immediately, so
+/// game code can ask "what's under the crosshair?" in the middle of a
+/// frame without touching the live world.
+#[derive(Clone, Default)]
+pub struct ColliderSnapshot {
+    colliders: Vec<SnapshotCollider>,
+}
+
+impl std::fmt::Debug for ColliderSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ColliderSnapshot")
+            .field("colliders", &self.colliders.len())
+            .finish()
+    }
+}
+
+/// A collider's shape in world space, as plain numbers (for tools and
+/// script runners that do their own ray tests).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WorldShape {
+    /// A box: centre, rotation, half extents.
+    Cuboid {
+        /// World-space centre.
+        center: Vec3,
+        /// World rotation.
+        rotation: Quat,
+        /// Half the size along each local axis.
+        half_extents: Vec3,
+    },
+    /// A sphere.
+    Ball {
+        /// World-space centre.
+        center: Vec3,
+        /// Radius.
+        radius: f32,
+    },
+    /// A capsule along its local Y axis.
+    Capsule {
+        /// World-space centre.
+        center: Vec3,
+        /// World rotation.
+        rotation: Quat,
+        /// Half the length of the straight part.
+        half_height: f32,
+        /// Radius.
+        radius: f32,
+    },
+}
+
+impl ColliderSnapshot {
+    /// The closest hit along a ray (`direction` need not be normalized),
+    /// honouring the filter's excluded entity and sensor setting.
+    #[must_use]
+    pub fn cast_ray(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        max_distance: f32,
+        filter: &RayFilter,
+    ) -> Option<RayHit> {
+        let len = direction.length();
+        if len <= f32::EPSILON || !len.is_finite() {
+            return None;
+        }
+        let dir = direction / len;
+        let ray = r3::geometry::Ray::new(origin, dir);
+        let mut best: Option<RayHit> = None;
+        for c in &self.colliders {
+            if (filter.exclude_sensors && c.sensor) || filter.exclude_entity == Some(c.entity) {
+                continue;
+            }
+            let limit = best.as_ref().map_or(max_distance, |b| b.distance);
+            if let Some(hit) = c
+                .shape
+                .cast_ray_and_get_normal(&c.pose, &ray, limit, filter.solid)
+            {
+                best = Some(RayHit {
+                    entity: c.entity,
+                    point: origin + dir * hit.time_of_impact,
+                    normal: hit.normal,
+                    distance: hit.time_of_impact,
+                });
+            }
+        }
+        best
+    }
+
+    /// Every collider as `(entity, world shape, sensor)`. Shapes other
+    /// than boxes, balls and capsules are skipped.
+    #[must_use]
+    pub fn shapes(&self) -> Vec<(Entity, WorldShape, bool)> {
+        self.colliders
+            .iter()
+            .filter_map(|c| {
+                let center = c.pose.translation;
+                let rotation = c.pose.rotation;
+                let shape = if let Some(b) = c.shape.as_cuboid() {
+                    WorldShape::Cuboid {
+                        center,
+                        rotation,
+                        half_extents: b.half_extents,
+                    }
+                } else if let Some(b) = c.shape.as_ball() {
+                    WorldShape::Ball {
+                        center,
+                        radius: b.radius,
+                    }
+                } else {
+                    let cap = c.shape.as_capsule()?;
+                    WorldShape::Capsule {
+                        center,
+                        rotation,
+                        half_height: cap.half_height(),
+                        radius: cap.radius,
+                    }
+                };
+                Some((c.entity, shape, c.sensor))
+            })
+            .collect()
+    }
+
+    /// Number of colliders.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.colliders.len()
+    }
+
+    /// Whether there are no colliders.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.colliders.is_empty()
     }
 }

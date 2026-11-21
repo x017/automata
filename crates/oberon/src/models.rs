@@ -17,7 +17,20 @@ pub const MODELS_DIR: &str = "models";
 /// folders), at most `limit`, sorted by path.
 #[must_use]
 pub fn project_models(root: &Path, limit: usize) -> Vec<PathBuf> {
-    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>, limit: usize) {
+    project_files(root, limit, is_model_path)
+}
+
+/// Files under `root` that `want` accepts (skipping hidden, build and
+/// virtualenv folders), at most `limit`, sorted by path.
+#[must_use]
+pub fn project_files(root: &Path, limit: usize, want: fn(&Path) -> bool) -> Vec<PathBuf> {
+    fn walk(
+        dir: &Path,
+        depth: usize,
+        out: &mut Vec<PathBuf>,
+        limit: usize,
+        want: fn(&Path) -> bool,
+    ) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
@@ -41,27 +54,27 @@ pub fn project_models(root: &Path, limit: usize) -> Vec<PathBuf> {
             }
             if path.is_dir() {
                 if depth < 6 {
-                    walk(&path, depth + 1, out, limit);
+                    walk(&path, depth + 1, out, limit, want);
                 }
-            } else if is_model_path(&path) {
+            } else if want(&path) {
                 out.push(path);
             }
         }
     }
     let mut out = Vec::new();
-    walk(root, 0, &mut out, limit);
+    walk(root, 0, &mut out, limit, want);
     out
 }
 
 /// Whether `path` is inside `dir` (after resolving `..` and links where
 /// possible).
-fn is_inside(path: &Path, dir: &Path) -> bool {
+pub(crate) fn is_inside(path: &Path, dir: &Path) -> bool {
     let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     canon(path).starts_with(canon(dir))
 }
 
 /// `dir/name`, or `dir/stem 2.ext`, `dir/stem 3.ext`, … whichever is free.
-fn free_name(dir: &Path, name: &str) -> PathBuf {
+pub(crate) fn free_name(dir: &Path, name: &str) -> PathBuf {
     let first = dir.join(name);
     if !first.exists() {
         return first;

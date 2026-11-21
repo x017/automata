@@ -460,13 +460,20 @@ impl<'a> Doc<'a> {
         Image::decode(bytes)
     }
 
-    /// `(name, base color, texture, texcoord set)` of material `index`.
-    fn material(&mut self, index: Option<usize>) -> (String, [f32; 4], Option<Arc<Image>>, usize) {
+    /// What a part needs from material `index`.
+    fn material(&mut self, index: Option<usize>) -> Material {
         let Some(mat) = index
             .and_then(|i| arr(&self.json, "materials").get(i))
             .cloned()
         else {
-            return ("Default".into(), [1.0; 4], None, 0);
+            return Material {
+                name: "Default".into(),
+                color: [1.0; 4],
+                texture: None,
+                texcoord: 0,
+                uv_transform: None,
+                pixelated: false,
+            };
         };
         let name = mat.get("name").and_then(Json::as_str).map_or_else(
             || format!("Material {}", index.unwrap_or(0)),
@@ -487,12 +494,31 @@ impl<'a> Doc<'a> {
             ),
             (None, None) => ([1.0; 4], None),
         };
-        let texcoord = usize_of(tex.and_then(|t| t.get("texCoord"))).unwrap_or(0);
-        let source = usize_of(tex.and_then(|t| t.get("index")))
+        let (uv_transform, texcoord_override) = uv_transform(tex);
+        let texcoord = texcoord_override
+            .or_else(|| usize_of(tex.and_then(|t| t.get("texCoord"))))
+            .unwrap_or(0);
+        let texture_def = usize_of(tex.and_then(|t| t.get("index")))
             .and_then(|t| arr(&self.json, "textures").get(t))
-            .and_then(|t| usize_of(t.get("source")));
+            .cloned();
+        let source = texture_def.as_ref().and_then(|t| usize_of(t.get("source")));
+        // magFilter 9728 = NEAREST.
+        let pixelated = texture_def
+            .as_ref()
+            .and_then(|t| usize_of(t.get("sampler")))
+            .and_then(|s| arr(&self.json, "samplers").get(s))
+            .and_then(|s| s.get("magFilter"))
+            .and_then(Json::as_i64)
+            == Some(9728);
         let texture = source.and_then(|s| self.image(s));
-        (name, color, texture, texcoord)
+        Material {
+            name,
+            color,
+            texture,
+            texcoord,
+            uv_transform,
+            pixelated,
+        }
     }
 }
 
@@ -527,8 +553,45 @@ struct PartBuilder {
     name: String,
     color: [f32; 4],
     texture: Option<Arc<Image>>,
+    pixelated: bool,
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
+}
+
+/// What a part needs from its glTF material.
+struct Material {
+    name: String,
+    color: [f32; 4],
+    texture: Option<Arc<Image>>,
+    /// The `TEXCOORD_n` set the color texture reads.
+    texcoord: usize,
+    /// `KHR_texture_transform`, as a 2×3 matrix applied to the UVs.
+    uv_transform: Option<[f32; 6]>,
+    /// The sampler magnifies with nearest filtering.
+    pixelated: bool,
+}
+
+/// The `KHR_texture_transform` of a texture reference, as a row-major 2×3
+/// matrix `[a, b, tx, c, d, ty]` (u' = a·u + b·v + tx, v' = c·u + d·v + ty),
+/// or `None` when absent or the identity. Same convention as three.js.
+fn uv_transform(tex: Option<&Json>) -> (Option<[f32; 6]>, Option<usize>) {
+    let Some(ext) = tex
+        .and_then(|t| t.get("extensions"))
+        .and_then(|e| e.get("KHR_texture_transform"))
+    else {
+        return (None, None);
+    };
+    let [ox, oy] = floats(ext.get("offset"), [0.0, 0.0]);
+    let [sx, sy] = floats(ext.get("scale"), [1.0, 1.0]);
+    let [angle] = floats(ext.get("rotation"), [0.0]);
+    let (sin, cos) = angle.sin_cos();
+    let matrix = [sx * cos, sx * sin, ox, -sy * sin, sy * cos, oy];
+    let identity = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+    let changed = matrix
+        .iter()
+        .zip(identity)
+        .any(|(a, b)| (a - b).abs() > 1e-6);
+    (changed.then_some(matrix), usize_of(ext.get("texCoord")))
 }
 
 /// Triangle-list indices for a primitive `mode`, or `None` for points/lines.
@@ -629,21 +692,22 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
             };
 
             // Find (or start) the part for this material.
+            let mat = doc.material(material);
             let slot = if let Some(i) = parts.iter().position(|p| p.key == material) {
                 i
             } else {
-                let (name, color, texture, _) = doc.material(material);
                 parts.push(PartBuilder {
                     key: material,
-                    name,
-                    color,
-                    texture,
+                    name: mat.name.clone(),
+                    color: mat.color,
+                    texture: mat.texture.clone(),
+                    pixelated: mat.pixelated,
                     vertices: Vec::new(),
                     indices: Vec::new(),
                 });
                 parts.len() - 1
             };
-            let (_, _, _, texcoord) = doc.material(material);
+            let texcoord = mat.texcoord;
             let uvs = match usize_of(attrs.and_then(|a| a.get(&format!("TEXCOORD_{texcoord}")))) {
                 Some(acc) => Some(doc.floats(acc)?),
                 None => None,
@@ -678,10 +742,16 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
                         (normal_matrix * Vec3::new(n[i * c], n[i * c + 1], n[i * c + 2]))
                             .normalize_or(Vec3::Y)
                     });
-                let uv = uvs
+                let mut uv = uvs
                     .as_ref()
                     .filter(|(_, c)| *c >= 2)
                     .map_or([0.0, 0.0], |(t, c)| [t[i * c], t[i * c + 1]]);
+                if let Some(m) = mat.uv_transform {
+                    uv = [
+                        m[0] * uv[0] + m[1] * uv[1] + m[2],
+                        m[3] * uv[0] + m[4] * uv[1] + m[5],
+                    ];
+                }
                 verts.push(Vertex::new(p.into(), n.into(), uv));
             }
             let mesh = if normals.is_some() {
@@ -704,6 +774,7 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
                 mesh: MeshData::new(p.vertices, p.indices),
                 color: p.color,
                 texture: p.texture,
+                pixelated: p.pixelated,
             })
             .collect(),
         deps: doc.deps,

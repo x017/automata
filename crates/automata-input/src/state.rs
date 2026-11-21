@@ -26,6 +26,7 @@ pub struct InputState {
     just_released_buttons: HashSet<MouseButton>,
     cursor_position: Option<(f64, f64)>,
     scroll_delta: (f64, f64),
+    mouse_delta: (f64, f64),
     modifiers: ModifiersState,
 }
 
@@ -117,6 +118,14 @@ impl InputState {
         self.scroll_delta.1 += y;
     }
 
+    /// Accumulates raw mouse movement (winit's `DeviceEvent::MouseMotion`).
+    /// Unlike the cursor position it keeps reporting at the screen edge and
+    /// while the cursor is locked, which is what mouse-look needs.
+    pub fn handle_mouse_motion(&mut self, dx: f64, dy: f64) {
+        self.mouse_delta.0 += dx;
+        self.mouse_delta.1 += dy;
+    }
+
     /// Records the currently held modifier keys.
     pub fn handle_modifiers(&mut self, state: ModifiersState) {
         self.modifiers = state;
@@ -129,6 +138,7 @@ impl InputState {
         self.just_pressed_buttons.clear();
         self.just_released_buttons.clear();
         self.scroll_delta = (0.0, 0.0);
+        self.mouse_delta = (0.0, 0.0);
     }
 
     // ------------------------------------------------------------------
@@ -181,6 +191,13 @@ impl InputState {
     #[must_use]
     pub fn scroll_delta(&self) -> (f64, f64) {
         self.scroll_delta
+    }
+
+    /// Raw mouse movement accumulated since the previous frame (`+x` right,
+    /// `+y` down), in device units (roughly pixels).
+    #[must_use]
+    pub fn mouse_delta(&self) -> (f64, f64) {
+        self.mouse_delta
     }
 
     /// The currently held modifier keys.

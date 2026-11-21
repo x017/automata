@@ -27,6 +27,10 @@ use crate::scene::{apply_writes, load_staged, FrameWrites, PyScene, SceneView, W
 pub struct PyGame {
     app: Application,
     resources: ResourceStore,
+    /// Plays the scene's `AudioSource` components.
+    sources: automata_core::AudioSourcePlayer,
+    /// Images drawn by `ctx.screen`.
+    hud: crate::screen::HudTextures,
 }
 
 #[pymethods]
@@ -100,6 +104,8 @@ impl PyGame {
         Ok(Self {
             app: Application::new(config),
             resources: Rc::new(RefCell::new(HashMap::new())),
+            sources: automata_core::AudioSourcePlayer::new(),
+            hud: crate::screen::HudTextures::default(),
         })
     }
 
@@ -130,7 +136,12 @@ impl PyGame {
     /// Engine failures raise `automata.Error`; exceptions raised by
     /// `update` stop the loop and propagate unchanged.
     #[pyo3(signature = (update, max_frames=None))]
-    fn run(&mut self, update: &Bound<'_, PyAny>, max_frames: Option<u64>) -> PyResult<u64> {
+    fn run(
+        &mut self,
+        py: Python<'_>,
+        update: &Bound<'_, PyAny>,
+        max_frames: Option<u64>,
+    ) -> PyResult<u64> {
         if self.app.state() == automata_core::AppState::Shutdown {
             return Err(AutomataError::new_err(
                 "this game has already shut down; create a new Game to run again",
@@ -144,8 +155,20 @@ impl PyGame {
         let outbox: EventOutbox = Rc::new(RefCell::new(Vec::new()));
         let resources = Rc::clone(&self.resources);
         let mut update_error: Option<PyErr> = None;
+        crate::components::default_asset_root(py);
+        let screen: crate::screen::ScreenQueue = Rc::default();
+        let audio_commands: crate::audio::AudioCommands = Rc::default();
+        let Self {
+            app, sources, hud, ..
+        } = self;
+        let mut extras = FrameExtras {
+            sources,
+            hud,
+            screen: &screen,
+            audio_commands: &audio_commands,
+        };
 
-        let run_result = self.app.run(|ctx| {
+        let run_result = app.run(|ctx| {
             run_python_frame(
                 ctx,
                 update,
@@ -154,6 +177,7 @@ impl PyGame {
                 &physics_queue,
                 &outbox,
                 &resources,
+                &mut extras,
                 &mut update_error,
             );
             let hit_limit = max_frames.is_some_and(|limit| ctx.time().frame_count() >= limit);
@@ -195,6 +219,14 @@ impl PyGame {
     }
 }
 
+/// Per-run state beyond the basic queues: audio sources and the screen.
+struct FrameExtras<'a> {
+    sources: &'a mut automata_core::AudioSourcePlayer,
+    hud: &'a mut crate::screen::HudTextures,
+    screen: &'a crate::screen::ScreenQueue,
+    audio_commands: &'a crate::audio::AudioCommands,
+}
+
 /// Runs one frame's Python update and applies the buffered writes.
 #[allow(clippy::too_many_arguments)]
 fn run_python_frame(
@@ -205,6 +237,7 @@ fn run_python_frame(
     physics_queue: &crate::physics::PhysicsQueue,
     outbox: &EventOutbox,
     resources: &ResourceStore,
+    extras: &mut FrameExtras<'_>,
     update_error: &mut Option<PyErr>,
 ) {
     let (physics, physics2d) = {
@@ -226,7 +259,28 @@ fn run_python_frame(
     let gamepad_events = crate::gamepads::PyGamepadEvent::convert_all(
         ctx.events().read::<automata_input::GamepadEvent>().cloned(),
     );
-    let audio = crate::audio::PyAudio::new(ctx.audio());
+    let playing: std::collections::HashSet<u64> = ctx
+        .scene()
+        .world()
+        .query::<(automata_scene::Entity, &automata_core::AudioSource)>()
+        .iter()
+        .map(|(e, _)| e)
+        .filter(|e| extras.sources.is_playing(*e))
+        .map(|e| e.to_bits().get())
+        .collect();
+    let audio =
+        crate::audio::PyAudio::for_frame(ctx.audio(), Rc::clone(extras.audio_commands), playing);
+    let root = automata_assets::root();
+    // Headless runs have no surface; report the default window size.
+    let size = ctx
+        .renderer()
+        .map_or((1280, 720), automata_renderer::Renderer::size);
+    let screen = crate::screen::PyScreen::new(
+        size,
+        ctx.world_state().cursor_locked(),
+        root.clone(),
+        Rc::clone(extras.screen),
+    );
     let frame = FrameContext::new(
         FrameTime {
             delta: ctx.time().delta().as_secs_f64(),
@@ -241,6 +295,7 @@ fn run_python_frame(
         physics,
         physics2d,
         audio,
+        screen,
     );
 
     let call_result = update.call1((frame,));
@@ -253,6 +308,35 @@ fn run_python_frame(
         crate::physics::apply_physics_ops(w3, w2, physics_queue);
     }
     PyEvents::flush(ctx.events(), outbox);
+
+    // Audio sources: play-on-start, script requests, distance fading.
+    let commands = std::mem::take(&mut *extras.audio_commands.borrow_mut());
+    {
+        let audio = ctx.audio();
+        let mut audio = audio.borrow_mut();
+        for message in
+            extras
+                .sources
+                .update(ctx.scene().world(), &mut audio, root.as_deref(), commands)
+        {
+            tracing::warn!("{message}");
+            eprintln!("automata: {message}");
+        }
+    }
+    // The screen: cursor lock and this frame's HUD.
+    let frame = std::mem::take(&mut *extras.screen.borrow_mut());
+    if let Some(locked) = frame.lock {
+        ctx.world_state_mut().set_cursor_locked(locked);
+    }
+    if !frame.items.is_empty() {
+        let sprites = ctx
+            .renderer()
+            .map(|r| extras.hud.sprites(r, &frame.items))
+            .unwrap_or_default();
+        for sprite in sprites {
+            ctx.draw().sprite(sprite);
+        }
+    }
 
     if let Err(err) = call_result {
         tracing::error!(error = %err, "python update callback raised");

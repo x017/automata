@@ -48,6 +48,7 @@ pub mod play;
 pub mod present;
 pub mod project;
 pub mod render;
+pub mod sounds;
 pub mod text;
 pub mod theme;
 pub mod ui;

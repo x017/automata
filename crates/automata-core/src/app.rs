@@ -58,9 +58,22 @@ pub struct WorldState {
     physics2d: automata_physics::PhysicsWorld2D,
     physics_accumulator: f32,
     audio: SharedAudio,
+    cursor_locked: bool,
 }
 
 impl WorldState {
+    /// Whether the game asked for the cursor to be locked (hidden and held
+    /// in the window, for mouse-look). The windowed runtime applies it.
+    #[must_use]
+    pub fn cursor_locked(&self) -> bool {
+        self.cursor_locked
+    }
+
+    /// Locks (hides and captures) or releases the cursor.
+    pub fn set_cursor_locked(&mut self, locked: bool) {
+        self.cursor_locked = locked;
+    }
+
     /// The active scene.
     #[must_use]
     pub fn scene(&self) -> &Scene {

@@ -75,6 +75,8 @@ pub enum AssetKind {
     Script,
     /// A 3D model (`.glb`, `.gltf`, `.obj`).
     Model,
+    /// A sound (`.ogg`, `.wav`, `.mp3`, `.flac`).
+    Audio,
     /// Anything else.
     Other,
 }
@@ -84,6 +86,14 @@ pub enum AssetKind {
 pub fn asset_kind(path: &Path, dir: bool) -> AssetKind {
     if dir {
         return AssetKind::Folder;
+    }
+    // A model's import settings (`tree.glb.import.ron`) aren't a scene.
+    if path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.to_ascii_lowercase().ends_with(".import.ron"))
+    {
+        return AssetKind::Other;
     }
     match path
         .extension()
@@ -95,6 +105,7 @@ pub fn asset_kind(path: &Path, dir: bool) -> AssetKind {
         Some("prefab") => AssetKind::Prefab,
         Some("py") => AssetKind::Script,
         Some("glb" | "gltf" | "obj") => AssetKind::Model,
+        Some("ogg" | "wav" | "mp3" | "flac") => AssetKind::Audio,
         _ => AssetKind::Other,
     }
 }
@@ -110,6 +121,7 @@ pub fn open_intent(path: &Path, dir: bool) -> Option<Intent> {
             path: path.to_path_buf(),
             at: None,
         }),
+        AssetKind::Audio => Some(Intent::PreviewSound(path.to_path_buf())),
         AssetKind::Folder | AssetKind::Other => None,
     }
 }
@@ -306,7 +318,10 @@ impl Ui {
                 if self.p.pressed {
                     clicked_row = true;
                     self.project.selected = Some(item.path.clone());
-                    if kind == AssetKind::Model && editing && !self.p.double_click {
+                    if matches!(kind, AssetKind::Model | AssetKind::Audio)
+                        && editing
+                        && !self.p.double_click
+                    {
                         self.file_drag = Some(FileDrag {
                             path: item.path.clone(),
                             origin: (self.p.x, self.p.y),
@@ -452,6 +467,29 @@ impl Ui {
                     });
                 }
             }
+            AssetKind::Audio => {
+                menu.push(item_menu("Preview", open_intent(&item.path, false)));
+                menu.push(MenuItem {
+                    label: "Add to Scene".into(),
+                    shortcut: "",
+                    action: Some(Action::Intent(Intent::AddSound {
+                        path: item.path.clone(),
+                        at: None,
+                    })),
+                    enabled: editing,
+                });
+                if let Some(i) = doc.selected_index() {
+                    menu.push(MenuItem {
+                        label: format!("Play from {}", doc.entities[i].name()),
+                        shortcut: "",
+                        action: Some(Action::Intent(Intent::SetAudioClip {
+                            id: doc.entities[i].id,
+                            path: item.path.clone(),
+                        })),
+                        enabled: editing,
+                    });
+                }
+            }
             AssetKind::Folder | AssetKind::Other => {}
         }
         if !menu.is_empty() {
@@ -588,8 +626,35 @@ pub fn draw_tree_icon(canvas: &mut Canvas, kind: AssetKind, cx: f32, cy: f32) {
             canvas.fill_rect(cx - 2.5, cy + 0.5, 3.5, 1.2, color::axis_y());
         }
         AssetKind::Model => draw_model_icon(canvas, cx, cy, color::accent_soft()),
+        AssetKind::Audio => draw_sound_icon(canvas, cx, cy, color::accent_soft()),
         AssetKind::Other => super::draw_small_file_icon(canvas, cx, cy, false),
     }
+}
+
+/// A speaker with one sound wave: the sound file icon.
+pub fn draw_sound_icon(canvas: &mut Canvas, cx: f32, cy: f32, c: tiny_skia::Color) {
+    canvas.fill_polygon(
+        &[
+            (cx - 6.0, cy - 2.0),
+            (cx - 3.5, cy - 2.0),
+            (cx + 0.5, cy - 5.5),
+            (cx + 0.5, cy + 5.5),
+            (cx - 3.5, cy + 2.0),
+            (cx - 6.0, cy + 2.0),
+        ],
+        c,
+    );
+    canvas.polyline(
+        &[
+            (cx + 3.0, cy - 3.5),
+            (cx + 4.6, cy - 1.5),
+            (cx + 5.0, cy),
+            (cx + 4.6, cy + 1.5),
+            (cx + 3.0, cy + 3.5),
+        ],
+        c,
+        1.3,
+    );
 }
 
 /// A wireframe cube in two-point view: the model file icon.

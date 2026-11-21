@@ -397,6 +397,23 @@ pub enum Intent {
     },
     /// Refit an entity's box collider to its mesh.
     FitCollider(u64),
+    /// Create an entity with an Audio Source playing a sound file. `at` is
+    /// the drop point in the scene view (`None`: where the camera looks).
+    AddSound {
+        /// The sound file.
+        path: PathBuf,
+        /// Drop point in logical pixels.
+        at: Option<(f32, f32)>,
+    },
+    /// Give an entity an Audio Source with this clip (or swap its clip).
+    SetAudioClip {
+        /// Entity id.
+        id: u64,
+        /// The sound file.
+        path: PathBuf,
+    },
+    /// Play a sound file once in the editor (again stops it).
+    PreviewSound(PathBuf),
     /// Open a script in the code editor.
     OpenScript(PathBuf),
     /// Create a script from the template (if missing) and open it.
@@ -655,6 +672,8 @@ pub struct Ui {
     dialog: Option<Dialog>,
     /// Recently opened scenes (most recent first), set by the app.
     pub recent: Vec<PathBuf>,
+    /// Decoded sound summaries for the Inspector.
+    pub clips: crate::sounds::ClipCache,
     /// The project directory (file dialogs and the Files panel), set by
     /// the app.
     pub project_root: PathBuf,
@@ -764,6 +783,7 @@ impl Ui {
             picker: None,
             dialog: None,
             recent: Vec::new(),
+            clips: crate::sounds::ClipCache::default(),
             project_root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             file_drag: None,
             os_file_hover: false,
@@ -1284,11 +1304,22 @@ impl Ui {
         if !self.raw.down {
             self.file_drag = None;
             if drag.active && self.play == PlayState::Editing {
+                let sound = automata_core::audio_source::is_audio_path(&drag.path);
                 match target {
+                    FileDrop::Scene(_) if sound => self.out.push(Intent::AddSound {
+                        path: drag.path,
+                        at: Some((x, y)),
+                    }),
                     FileDrop::Scene(_) => self.out.push(Intent::AddModel {
                         path: drag.path,
                         at: Some((x, y)),
                     }),
+                    FileDrop::Entity(id, _) if sound => {
+                        self.out.push(Intent::SetAudioClip {
+                            id,
+                            path: drag.path,
+                        });
+                    }
                     FileDrop::Entity(id, _) => self.out.push(Intent::SetModel {
                         id,
                         path: drag.path,
@@ -1306,11 +1337,18 @@ impl Ui {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
+        let sound = automata_core::audio_source::is_audio_path(&drag.path);
         match target {
+            FileDrop::Scene(r) if sound => draw_drop_zone(canvas, r, "Add a sound here"),
             FileDrop::Scene(r) => draw_drop_zone(canvas, r, "Add to scene"),
             FileDrop::Entity(id, r) => {
                 let who = doc.index_of(id).map_or("", |i| doc.entities[i].name());
-                draw_drop_zone(canvas, r, &format!("Use on {who}"));
+                let what = if sound {
+                    format!("Play from {who}")
+                } else {
+                    format!("Use on {who}")
+                };
+                draw_drop_zone(canvas, r, &what);
             }
             FileDrop::Nothing => self.cursor = CursorHint::Grabbing,
         }
@@ -2098,6 +2136,24 @@ impl Ui {
             }
         }
 
+        if d.audio_source.is_some() {
+            let kind = ComponentKind::AudioSource;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                y = self.audio_rows(canvas, doc, x, y, w, e);
+                y = self.float_row(canvas, x, y, w, e, "Volume", Field::AudioVolume);
+                y = self.float_row(canvas, x, y, w, e, "Pitch", Field::AudioPitch);
+                y = self.flag_row(canvas, x, y, w, e, "Loop", Flag::AudioLoop);
+                y = self.flag_row(canvas, x, y, w, e, "Play On Start", Flag::AudioPlayOnStart);
+                y = self.flag_row(canvas, x, y, w, e, "3D (fade)", Flag::AudioSpatial);
+                if e.data.audio_source.as_ref().is_some_and(|a| a.spatial) {
+                    y = self.float_row(canvas, x, y, w, e, "Range", Field::AudioRange);
+                }
+                y += 6.0;
+            }
+        }
+
         if d.character_controller.is_some() {
             let kind = ComponentKind::Character;
             let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
@@ -2596,6 +2652,136 @@ impl Ui {
                 } else {
                     Intent::AddComponent(e.id, ComponentKind::Collider)
                 });
+            }
+        }
+        y + 28.0
+    }
+
+    /// The Audio Source's clip: file, length and waveform, and buttons to
+    /// preview or change it.
+    fn audio_rows(
+        &mut self,
+        canvas: &mut Canvas,
+        doc: &Document,
+        x: f32,
+        mut y: f32,
+        w: f32,
+        e: &EntityEntry,
+    ) -> f32 {
+        let Some(source) = e.data.audio_source.as_ref() else {
+            return y;
+        };
+        let editing = self.play == PlayState::Editing;
+        let rel = source.clip.clone();
+        let file = doc.resolve(&rel);
+        let info = if rel.is_empty() {
+            Err("No clip: drop a sound here or choose one".to_string())
+        } else {
+            self.clips.get(&file).clone()
+        };
+        if self.row_visible(Rect::new(x, y, w, layout::FIELD_H)) {
+            self.row_label(canvas, x, y, "Clip");
+            let r = Rect::new(x + layout::LABEL_W, y, w - layout::LABEL_W, layout::FIELD_H);
+            canvas.fill_rounded(r.x, r.y, r.w, r.h, 3.0, color::field());
+            canvas.stroke_rounded(r.x, r.y, r.w, r.h, 3.0, color::border(), 1.0);
+            let shown = if rel.is_empty() { "None" } else { rel.as_str() };
+            canvas.text_clipped(
+                r.x + 6.0,
+                r.y + 3.0,
+                layout::FONT_SIZE,
+                shown,
+                if info.is_ok() {
+                    color::accent_soft()
+                } else {
+                    color::danger()
+                },
+                r.w - 12.0,
+            );
+            self.tip(
+                r,
+                "Double-click to show it in Files · drop a sound here to swap",
+            );
+            if self.hot(r) {
+                self.cursor = CursorHint::Pointer;
+                if self.p.double_click && file.exists() {
+                    self.reveal_in_files(&file);
+                }
+            }
+        }
+        y += layout::ROW_STEP;
+        let label_w = w - layout::LABEL_W;
+        match &info {
+            Ok(clip) => {
+                // The waveform: one bar per slice, mirrored about the middle.
+                let wave = Rect::new(x + layout::LABEL_W, y, label_w, 28.0);
+                if self.row_visible(wave) {
+                    canvas.fill_rounded(wave.x, wave.y, wave.w, wave.h, 3.0, color::field());
+                    let n = clip.peaks.len().max(1);
+                    #[allow(clippy::cast_precision_loss)]
+                    let step = (wave.w - 8.0) / n as f32;
+                    let mid = wave.y + wave.h / 2.0;
+                    for (i, peak) in clip.peaks.iter().enumerate() {
+                        #[allow(clippy::cast_precision_loss)]
+                        let bx = wave.x + 4.0 + i as f32 * step;
+                        let h = (peak * (wave.h - 8.0)).max(1.0);
+                        canvas.fill_rect(
+                            bx,
+                            mid - h / 2.0,
+                            (step - 0.6).max(0.6),
+                            h,
+                            color::accent_soft(),
+                        );
+                    }
+                }
+                y += 32.0;
+                if self.row_visible(Rect::new(x, y, w, 16.0)) {
+                    canvas.text(
+                        x + layout::LABEL_W,
+                        y,
+                        layout::SMALL_SIZE,
+                        &crate::sounds::describe(clip),
+                        color::text_dim(),
+                    );
+                }
+                y += 16.0;
+            }
+            Err(err) => {
+                for chunk in wrap_words(canvas, err, label_w).into_iter().take(3) {
+                    if self.row_visible(Rect::new(x, y, w, 16.0)) {
+                        canvas.text(
+                            x + layout::LABEL_W,
+                            y,
+                            layout::SMALL_SIZE,
+                            &chunk,
+                            color::danger(),
+                        );
+                    }
+                    y += 16.0;
+                }
+            }
+        }
+        y += 4.0;
+        let bw = (label_w - 6.0) / 2.0;
+        let preview = Rect::new(x + layout::LABEL_W, y, bw, 22.0);
+        if self.row_visible(preview) {
+            let ok = info.is_ok();
+            let style = if ok {
+                ButtonStyle::Normal
+            } else {
+                ButtonStyle::Disabled
+            };
+            self.tip(preview, "Hear the clip (click again to stop)");
+            if self.button(canvas, preview, "Preview", style) && ok {
+                self.out.push(Intent::PreviewSound(file.clone()));
+            }
+            let change = Rect::new(preview.x + bw + 6.0, y, bw, 22.0);
+            let style = if editing {
+                ButtonStyle::Normal
+            } else {
+                ButtonStyle::Disabled
+            };
+            if self.button(canvas, change, "Change…", style) && editing {
+                self.open_sound_picker(Some(e.id));
             }
         }
         y + 28.0

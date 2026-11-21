@@ -10,8 +10,14 @@
 
 #![forbid(unsafe_code)]
 
-use automata_renderer::{DrawList, RenderTarget, Renderer};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use automata_renderer::{DrawList, RenderTarget, Renderer, Sprite, Texture};
 use automata_scene::{Scene, SceneWorld};
+use glam::Vec2;
+
+use crate::bridge::{HudItem, HudKind};
 
 use crate::doc::Document;
 use crate::play::PlaySession;
@@ -36,6 +42,8 @@ pub struct ViewportRenderer {
     /// The camera preview's render target and pixels.
     preview_target: Option<(RenderTarget, (u32, u32))>,
     preview_frame: Vec<u8>,
+    /// HUD images scripts drew, loaded once per file (`None`: unreadable).
+    hud_textures: HashMap<PathBuf, Option<Texture>>,
 }
 
 impl Default for ViewportRenderer {
@@ -56,7 +64,49 @@ impl ViewportRenderer {
             meshes: 0,
             preview_target: None,
             preview_frame: Vec::new(),
+            hud_textures: HashMap::new(),
         }
+    }
+
+    /// Turns a script HUD into sprites (screen pixels, top-left origin).
+    /// Image paths are relative to `root`, the scene folder.
+    fn hud_sprites(&mut self, renderer: &Renderer, root: &Path, items: &[HudItem]) -> Vec<Sprite> {
+        items
+            .iter()
+            .filter_map(|item| {
+                let texture = match &item.kind {
+                    HudKind::Rect => renderer.white_texture(),
+                    HudKind::Image(rel) => {
+                        let path = if Path::new(rel).is_absolute() {
+                            PathBuf::from(rel)
+                        } else {
+                            rel.split('/')
+                                .fold(root.to_path_buf(), |p, part| p.join(part))
+                        };
+                        self.hud_textures
+                            .entry(path)
+                            .or_insert_with_key(|path| {
+                                let bytes = std::fs::read(path).ok()?;
+                                renderer.create_texture_from_bytes(&bytes).ok()
+                            })
+                            .clone()?
+                    }
+                };
+                let mut sprite = Sprite::new(texture)
+                    .position(Vec2::new(item.x, item.y))
+                    .color(item.color)
+                    .rotation(item.rotation);
+                if let Some([w, h]) = item.size {
+                    sprite = sprite.size(Vec2::new(w, h));
+                }
+                Some(sprite)
+            })
+            .collect()
+    }
+
+    /// Forgets loaded HUD images (a file changed, or Play stopped).
+    pub fn clear_hud_cache(&mut self) {
+        self.hud_textures.clear();
     }
 
     /// Meshes drawn by the last scene-view render (0 for the wireframe).
@@ -85,6 +135,7 @@ impl ViewportRenderer {
             self.scene.world(),
             Some(camera),
             size,
+            Vec::new(),
         );
         Some((self.preview_frame.as_slice(), size.0, size.1))
     }
@@ -136,6 +187,7 @@ impl ViewportRenderer {
                     self.scene.world(),
                     Some(cam.to_camera3d()),
                     (width, height),
+                    Vec::new(),
                 );
             }
             None => {
@@ -165,6 +217,8 @@ impl ViewportRenderer {
         match renderer {
             Some(renderer) => {
                 let editor_cam = session.scene_camera().is_none().then(|| cam.to_camera3d());
+                let root = session.doc.base_dir();
+                let hud = self.hud_sprites(renderer, &root, &session.hud);
                 let world = session.scene_mut().world_mut();
                 // Uploads only visuals not yet materialized (first frame).
                 automata_scene::materialize_visuals(world, renderer);
@@ -175,6 +229,7 @@ impl ViewportRenderer {
                     world,
                     editor_cam,
                     (width, height),
+                    hud,
                 );
             }
             None => {
@@ -194,6 +249,7 @@ impl ViewportRenderer {
         world: &SceneWorld,
         camera: Option<automata_renderer::Camera3D>,
         size: (u32, u32),
+        overlay: Vec<Sprite>,
     ) -> usize {
         // Reuse the render target across frames (recreate on resize).
         if target.as_ref().map(|(_, s)| *s) != Some(size) {
@@ -209,6 +265,10 @@ impl ViewportRenderer {
         // viewport is freely navigable regardless of scene contents.
         if let Some(camera) = camera {
             draw.set_camera_3d(camera);
+        }
+        // Script HUD sprites: screen pixels, drawn over the scene.
+        for sprite in overlay {
+            draw.sprite(sprite);
         }
         renderer.render_offscreen(&draw, texture);
         renderer.read_texture_rgba_into(texture, size, frame);

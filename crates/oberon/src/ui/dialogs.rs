@@ -63,6 +63,8 @@ impl FileDialog {
             DialogKind::AttachScript(_) => "Attach Script (pick or name a new .py)",
             DialogKind::ImportModel(None) => "Import Model (.glb, .gltf, .obj)",
             DialogKind::ImportModel(Some(_)) => "Choose Model (.glb, .gltf, .obj)",
+            DialogKind::ImportSound(None) => "Import Sound (.ogg, .wav, .mp3, .flac)",
+            DialogKind::ImportSound(Some(_)) => "Choose Sound (.ogg, .wav, .mp3, .flac)",
             DialogKind::Shortcuts | DialogKind::About => "",
         }
     }
@@ -72,6 +74,7 @@ impl FileDialog {
             DialogKind::SavePrefab(_) | DialogKind::InstantiatePrefab => "prefab",
             DialogKind::OpenScript | DialogKind::NewScript | DialogKind::AttachScript(_) => "py",
             DialogKind::ImportModel(_) => "glb",
+            DialogKind::ImportSound(_) => "ogg",
             _ => "ron",
         }
     }
@@ -80,6 +83,9 @@ impl FileDialog {
     fn shows(&self, name: &str) -> bool {
         if matches!(self.kind, DialogKind::ImportModel(_)) {
             return automata_assets::is_model_path(Path::new(name));
+        }
+        if matches!(self.kind, DialogKind::ImportSound(_)) {
+            return automata_core::audio_source::is_audio_path(Path::new(name));
         }
         Path::new(name)
             .extension()
@@ -99,8 +105,8 @@ impl FileDialog {
             DialogKind::InstantiatePrefab => "Instantiate",
             DialogKind::NewScript => "Create",
             DialogKind::AttachScript(_) => "Attach",
-            DialogKind::ImportModel(None) => "Import",
-            DialogKind::ImportModel(Some(_)) => "Use",
+            DialogKind::ImportModel(None) | DialogKind::ImportSound(None) => "Import",
+            DialogKind::ImportModel(Some(_)) | DialogKind::ImportSound(Some(_)) => "Use",
             _ => "Save",
         }
     }
@@ -223,6 +229,7 @@ impl Ui {
                     | DialogKind::OpenScript
                     | DialogKind::AttachScript(_) => Some("scripts"),
                     DialogKind::ImportModel(_) => Some(crate::models::MODELS_DIR),
+                    DialogKind::ImportSound(_) => Some(crate::sounds::SOUNDS_DIR),
                     _ => None,
                 };
                 if let Some(sub) = sub {
@@ -339,6 +346,7 @@ impl Ui {
                 | DialogKind::InstantiatePrefab
                 | DialogKind::OpenScript
                 | DialogKind::ImportModel(_)
+                | DialogKind::ImportSound(_)
         );
         if needs_existing && !exists {
             fd.error = Some(format!("{} not found", path.display()));
@@ -355,6 +363,8 @@ impl Ui {
             DialogKind::AttachScript(id) => Intent::AttachScript { id, path },
             DialogKind::ImportModel(None) => Intent::AddModel { path, at: None },
             DialogKind::ImportModel(Some(id)) => Intent::SetModel { id, path },
+            DialogKind::ImportSound(None) => Intent::AddSound { path, at: None },
+            DialogKind::ImportSound(Some(id)) => Intent::SetAudioClip { id, path },
             DialogKind::Shortcuts | DialogKind::About => return None,
         };
         self.dialog = None;

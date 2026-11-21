@@ -10,6 +10,7 @@
 //! full project specification.
 
 pub mod app;
+pub mod audio_source;
 pub mod config;
 mod driver;
 pub mod error;
@@ -19,6 +20,7 @@ pub mod time;
 pub mod window;
 
 pub use app::{AppContext, AppState, Application, SharedAudio, WorldState};
+pub use audio_source::{AudioCommand, AudioSource, AudioSourcePlayer};
 pub use config::EngineConfig;
 pub use error::{Error, Result};
 pub use scene_file::{

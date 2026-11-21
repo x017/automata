@@ -111,6 +111,7 @@ impl Texture {
         width: u32,
         height: u32,
         rgba: &[u8],
+        pixelated: bool,
     ) -> Self {
         assert_eq!(
             rgba.len(),
@@ -158,15 +159,22 @@ impl Texture {
                 (level, w, h) = downsample(&level, w, h);
             }
         }
+        // Pixelated textures (palette atlases, pixel art) keep hard texel
+        // edges up close. Anisotropic filtering requires linear filters
+        // everywhere, so it's only on for smooth textures.
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("model sampler"),
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,
             address_mode_w: wgpu::AddressMode::Repeat,
-            mag_filter: wgpu::FilterMode::Linear,
+            mag_filter: if pixelated {
+                wgpu::FilterMode::Nearest
+            } else {
+                wgpu::FilterMode::Linear
+            },
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::MipmapFilterMode::Linear,
-            anisotropy_clamp: 8,
+            anisotropy_clamp: if pixelated { 1 } else { 8 },
             ..wgpu::SamplerDescriptor::default()
         });
         Self {

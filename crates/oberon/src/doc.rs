@@ -162,11 +162,13 @@ pub enum ComponentKind {
     Collider,
     /// Character controller (player movement in Play mode).
     Character,
+    /// A sound the entity plays.
+    AudioSource,
 }
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Mesh,
         Self::Light,
         Self::Camera,
@@ -174,6 +176,7 @@ impl ComponentKind {
         Self::RigidBody,
         Self::Collider,
         Self::Character,
+        Self::AudioSource,
     ];
 
     /// The display name.
@@ -187,6 +190,7 @@ impl ComponentKind {
             Self::RigidBody => "Rigidbody",
             Self::Collider => "Collider",
             Self::Character => "Character Controller",
+            Self::AudioSource => "Audio Source",
         }
     }
 
@@ -201,6 +205,7 @@ impl ComponentKind {
             Self::RigidBody => data.rigid_body.is_some(),
             Self::Collider => data.collider_3d.is_some(),
             Self::Character => data.character_controller.is_some(),
+            Self::AudioSource => data.audio_source.is_some(),
         }
     }
 
@@ -254,6 +259,10 @@ impl ComponentKind {
                 data.character_velocity
                     .get_or_insert_with(automata_physics::CharacterVelocity::default);
             }
+            Self::AudioSource => {
+                data.audio_source
+                    .get_or_insert_with(automata_core::AudioSource::default);
+            }
         }
     }
 
@@ -272,6 +281,7 @@ impl ComponentKind {
                     .clone_from(&src.character_controller);
                 dst.character_velocity = src.character_velocity;
             }
+            Self::AudioSource => dst.audio_source.clone_from(&src.audio_source),
         }
     }
 
@@ -288,6 +298,7 @@ impl ComponentKind {
                 data.character_controller = None;
                 data.character_velocity = None;
             }
+            Self::AudioSource => data.audio_source = None,
         }
     }
 }
@@ -830,6 +841,43 @@ impl Document {
                 primitive: PrimitiveData::Model { path: rel.clone() },
                 color,
             });
+        })
+    }
+
+    /// Creates an entity at `at` with an Audio Source playing `rel` on start
+    /// (3D, so it fades with distance), named `name`, and selects it. One
+    /// undo step.
+    pub fn create_sound(&mut self, rel: &str, name: &str, at: [f32; 3]) -> u64 {
+        let data = EntityData {
+            name: Some(self.unique_name(name)),
+            transform: Some(TransformData {
+                position: at,
+                ..TransformData::default()
+            }),
+            audio_source: Some(automata_core::AudioSource {
+                play_on_start: true,
+                spatial: true,
+                ..automata_core::AudioSource::new(rel.replace('\\', "/"))
+            }),
+            ..Default::default()
+        };
+        self.push_undo();
+        let id = self.alloc_id();
+        self.entities.push(EntityEntry { id, data });
+        self.selected = Some(id);
+        self.touch();
+        id
+    }
+
+    /// Gives entity `id` an Audio Source playing `rel` (keeping the
+    /// source's other settings when it already has one).
+    pub fn set_audio_clip(&mut self, id: u64, rel: &str) -> bool {
+        let rel = rel.replace('\\', "/");
+        self.modify(id, false, |d| {
+            d.audio_source
+                .get_or_insert_with(automata_core::AudioSource::default)
+                .clip
+                .clone_from(&rel);
         })
     }
 

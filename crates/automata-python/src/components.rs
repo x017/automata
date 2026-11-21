@@ -591,7 +591,7 @@ impl PyMeshRenderer {
 
 /// When no asset root is set, uses the folder of the script being run
 /// (`__main__.__file__`), so `python game.py` finds `models/` beside it.
-fn default_asset_root(py: Python<'_>) {
+pub(crate) fn default_asset_root(py: Python<'_>) {
     if automata_assets::root().is_some() {
         return;
     }
@@ -650,6 +650,8 @@ pub enum StagedComponent {
     DirectionalLight(DirectionalLight),
     /// Scene look (ambient, fog, tone mapping).
     Environment(Environment),
+    /// A sound the entity plays.
+    AudioSource(automata_core::AudioSource),
 }
 
 /// Extracts a staged component from an arbitrary Python object, raising a
@@ -688,12 +690,142 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(e) = obj.cast::<PyEnvironment>() {
         return Ok(StagedComponent::Environment(e.get().inner()));
     }
+    if let Ok(a) = obj.cast::<PyAudioSource>() {
+        return Ok(StagedComponent::AudioSource(a.get().inner.clone()));
+    }
     let typename = obj.get_type().name()?.to_string();
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
-         MeshRenderer, DirectionalLight, or Environment"
+         MeshRenderer, DirectionalLight, Environment, or AudioSource"
     )))
+}
+
+/// A sound attached to an entity: what Oberon's Inspector calls an Audio
+/// Source. `clip` is a sound file (`.ogg`, `.wav`, `.mp3`, `.flac`),
+/// relative to the scene's folder. Behaviour scripts start it with
+/// `entity.audio.play()`; `play_on_start` starts it with the scene.
+/// `spatial` sources fade out with distance from the camera (silent at
+/// `range` metres) and pan left/right.
+///
+/// ```python
+/// at.Entity("Radio").add(at.Transform()).add(
+///     at.AudioSource("sounds/music.ogg", looping=True, play_on_start=True))
+/// ```
+#[pyclass(name = "AudioSource", module = "automata._core", frozen)]
+#[derive(Debug, Clone)]
+pub struct PyAudioSource {
+    inner: automata_core::AudioSource,
+}
+
+#[pymethods]
+impl PyAudioSource {
+    /// Creates an audio source.
+    #[new]
+    #[pyo3(signature = (clip, volume=1.0, pitch=1.0, looping=false, play_on_start=false, spatial=false, range=20.0))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        clip: &str,
+        volume: f32,
+        pitch: f32,
+        looping: bool,
+        play_on_start: bool,
+        spatial: bool,
+        range: f32,
+    ) -> PyResult<Self> {
+        if !(volume.is_finite() && volume >= 0.0) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "volume must be a non-negative number",
+            ));
+        }
+        if !(pitch.is_finite() && pitch > 0.0) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "pitch must be a positive number",
+            ));
+        }
+        Ok(Self {
+            inner: automata_core::AudioSource {
+                clip: clip.replace('\\', "/"),
+                volume,
+                pitch,
+                looping,
+                play_on_start,
+                spatial,
+                range: range.max(0.1),
+            },
+        })
+    }
+
+    /// The sound file.
+    #[getter]
+    fn clip(&self) -> String {
+        self.inner.clip.clone()
+    }
+
+    /// Linear volume (1.0 = as recorded).
+    #[getter]
+    fn volume(&self) -> f32 {
+        self.inner.volume
+    }
+
+    /// Speed and pitch multiplier.
+    #[getter]
+    fn pitch(&self) -> f32 {
+        self.inner.pitch
+    }
+
+    /// Whether it starts over at the end.
+    #[getter]
+    fn looping(&self) -> bool {
+        self.inner.looping
+    }
+
+    /// Whether it starts with the scene.
+    #[getter]
+    fn play_on_start(&self) -> bool {
+        self.inner.play_on_start
+    }
+
+    /// Whether it fades with distance from the camera.
+    #[getter]
+    fn spatial(&self) -> bool {
+        self.inner.spatial
+    }
+
+    /// The distance at which a spatial source falls silent.
+    #[getter]
+    fn range(&self) -> f32 {
+        self.inner.range
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "AudioSource({:?}, volume={:.2}, looping={}, play_on_start={}, spatial={})",
+            self.inner.clip,
+            self.inner.volume,
+            if self.inner.looping { "True" } else { "False" },
+            if self.inner.play_on_start {
+                "True"
+            } else {
+                "False"
+            },
+            if self.inner.spatial { "True" } else { "False" },
+        )
+    }
+}
+
+impl PyAudioSource {
+    /// Wraps an engine component.
+    #[must_use]
+    pub fn from_inner(inner: automata_core::AudioSource) -> Self {
+        Self { inner }
+    }
+
+    /// The engine component.
+    #[must_use]
+    pub fn inner(&self) -> automata_core::AudioSource {
+        self.inner.clone()
+    }
 }
 
 #[cfg(test)]

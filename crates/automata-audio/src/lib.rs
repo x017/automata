@@ -21,7 +21,8 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::time::Duration;
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
 
 use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
 use kira::sound::PlaybackState;
@@ -44,6 +45,50 @@ pub enum AudioError {
     /// A sound id was not found (it may have already been stopped).
     #[error("no such sound id: {0}")]
     UnknownSound(u64),
+}
+
+/// What a sound file contains, for editors (see [`probe`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClipInfo {
+    /// Length in seconds.
+    pub duration: f64,
+    /// Sample rate in Hz.
+    pub sample_rate: u32,
+    /// Peak level (0..=1) of each of `PEAK_BUCKETS` equal slices of the
+    /// clip: a waveform outline.
+    pub peaks: Vec<f32>,
+}
+
+/// How many slices [`ClipInfo::peaks`] has.
+pub const PEAK_BUCKETS: usize = 96;
+
+/// Decodes a sound file and summarizes it (length, rate, waveform).
+///
+/// # Errors
+///
+/// [`AudioError::Load`] if the file cannot be read or decoded.
+pub fn probe(path: &str) -> Result<ClipInfo, AudioError> {
+    let data = StaticSoundData::from_file(path).map_err(|source| AudioError::Load {
+        path: path.to_owned(),
+        source,
+    })?;
+    let frames = &data.frames;
+    let mut peaks = vec![0.0_f32; PEAK_BUCKETS];
+    if !frames.is_empty() {
+        let per = frames.len().div_ceil(PEAK_BUCKETS).max(1);
+        for (bucket, chunk) in frames.chunks(per).enumerate().take(PEAK_BUCKETS) {
+            peaks[bucket] = chunk
+                .iter()
+                .map(|f| f.left.abs().max(f.right.abs()))
+                .fold(0.0, f32::max)
+                .min(1.0);
+        }
+    }
+    Ok(ClipInfo {
+        duration: data.duration().as_secs_f64(),
+        sample_rate: data.sample_rate,
+        peaks,
+    })
 }
 
 /// How a sound is currently playing.
@@ -159,6 +204,9 @@ pub struct AudioEngine {
     next_id: u64,
     /// Sample rate the silent backend runs at; drives the frame pump.
     sample_rate: u32,
+    /// Decoded files, so repeated sounds (footsteps, gunfire) decode once.
+    /// Entries are re-read when the file's modification time changes.
+    cache: HashMap<PathBuf, (Option<SystemTime>, StaticSoundData)>,
 }
 
 /// The audio manager, over whichever backend is active.
@@ -212,6 +260,7 @@ impl AudioEngine {
             sounds: HashMap::new(),
             next_id: 1,
             sample_rate,
+            cache: HashMap::new(),
         }
     }
 
@@ -314,11 +363,11 @@ impl AudioEngine {
             playback_rate,
             panning,
         } = options;
-        let mut data = StaticSoundData::from_file(path)
-            .map_err(|source| AudioError::Load {
-                path: path.to_owned(),
-                source,
-            })?
+        // Finished sounds are forgotten, so one-shots don't pile up.
+        self.sounds
+            .retain(|_, h| h.state() != PlaybackState::Stopped);
+        let mut data = self
+            .load(path)?
             .volume(linear_to_decibels(volume))
             .playback_rate(playback_rate)
             .panning(clamp_panning(panning));
@@ -335,6 +384,33 @@ impl AudioEngine {
         self.next_id += 1;
         self.sounds.insert(id, handle);
         Ok(id)
+    }
+
+    /// Decodes `path` (or reuses the cached decode while the file is
+    /// unchanged).
+    fn load(&mut self, path: &str) -> Result<StaticSoundData, AudioError> {
+        let key = PathBuf::from(path);
+        let stamp = std::fs::metadata(&key).and_then(|m| m.modified()).ok();
+        if let Some((cached, data)) = self.cache.get(&key) {
+            if *cached == stamp {
+                return Ok(data.clone());
+            }
+        }
+        let data = StaticSoundData::from_file(path).map_err(|source| AudioError::Load {
+            path: path.to_owned(),
+            source,
+        })?;
+        self.cache.insert(key, (stamp, data.clone()));
+        Ok(data)
+    }
+
+    /// The length of a sound file in seconds (decoding it into the cache).
+    ///
+    /// # Errors
+    ///
+    /// [`AudioError::Load`] if the file cannot be read or decoded.
+    pub fn duration(&mut self, path: &str) -> Result<f64, AudioError> {
+        Ok(self.load(path)?.duration().as_secs_f64())
     }
 
     /// Returns a controller for a live sound.

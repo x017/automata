@@ -15,5 +15,7 @@ workspace = true
 automata-renderer.workspace = true
 glam.workspace = true
 image.workspace = true
+ron.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

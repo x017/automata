@@ -276,6 +276,7 @@ class Input:
 
     cursor: Optional[tuple[float, float]]
     scroll: tuple[float, float]
+    mouse_delta: tuple[float, float]
     modifiers: Modifiers
     gamepads: Gamepads
     def pressed(self, key: str) -> bool: ...
@@ -409,6 +410,8 @@ class EntityView:
     def attributes(self) -> Attributes: ...
     @property
     def script(self) -> Optional[str]: ...
+    @property
+    def audio_source(self) -> Optional[AudioSource]: ...
     def despawn(self) -> None: ...
 
 class SceneView:
@@ -451,11 +454,110 @@ class FrameContext:
     resources: Resources
     physics: Physics
     physics2d: Physics2D
+    audio: Audio
+    screen: Screen
     def quit(self) -> None: ...
+
+class AudioSource:
+    """A sound attached to an entity (Oberon's Audio Source component)."""
+
+    def __init__(
+        self,
+        clip: str,
+        volume: float = 1.0,
+        pitch: float = 1.0,
+        looping: bool = False,
+        play_on_start: bool = False,
+        spatial: bool = False,
+        range: float = 20.0,
+    ) -> None: ...
+    @property
+    def clip(self) -> str: ...
+    @property
+    def volume(self) -> float: ...
+    @property
+    def pitch(self) -> float: ...
+    @property
+    def looping(self) -> bool: ...
+    @property
+    def play_on_start(self) -> bool: ...
+    @property
+    def spatial(self) -> bool: ...
+    @property
+    def range(self) -> float: ...
+
+class Audio:
+    """Sound playback for the current frame (ctx.audio)."""
+
+    def play(
+        self,
+        path: str,
+        volume: float = 1.0,
+        loop_: bool = False,
+        playback_rate: float = 1.0,
+        panning: float = 0.0,
+    ) -> int: ...
+    def play_at(
+        self,
+        path: str,
+        volume: float = 1.0,
+        pitch: float = 1.0,
+        position: Optional[tuple[float, float, float]] = None,
+    ) -> None: ...
+    def play_source(self, entity: int | EntityView) -> None: ...
+    def stop_source(self, entity: int | EntityView) -> None: ...
+    def source_playing(self, entity: int | EntityView) -> bool: ...
+    def stop(self, id: int, fade_out: float = 0.0) -> None: ...
+    def stop_all(self, fade_out: float = 0.0) -> None: ...
+    def pause(self, id: int, fade: float = 0.0) -> None: ...
+    def resume(self, id: int, fade: float = 0.0) -> None: ...
+    def is_playing(self, id: int) -> bool: ...
+    def position(self, id: int) -> Optional[float]: ...
+    def seek_to(self, id: int, position: float) -> None: ...
+    def set_volume(self, id: int, volume: float, fade: float = 0.0) -> None: ...
+    def set_playback_rate(self, id: int, rate: float, fade: float = 0.0) -> None: ...
+    def set_panning(self, id: int, panning: float, fade: float = 0.0) -> None: ...
+    def set_master_volume(self, volume: float, fade: float = 0.0) -> None: ...
+    def sound_count(self) -> int: ...
+
+class Screen:
+    """Window size, HUD drawing and cursor lock (ctx.screen)."""
+
+    @property
+    def size(self) -> tuple[int, int]: ...
+    @property
+    def center(self) -> tuple[float, float]: ...
+    @property
+    def cursor_locked(self) -> bool: ...
+    def lock_cursor(self, locked: bool = True) -> None: ...
+    def image(
+        self,
+        path: str,
+        x: float,
+        y: float,
+        size: Optional[tuple[float, float]] = None,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        rotation: float = 0.0,
+    ) -> None: ...
+    def rect(
+        self,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+    ) -> None: ...
 
 class Physics:
     """3D physics queries for the current frame (ctx.physics)."""
 
+    def raycast(
+        self,
+        origin: tuple[float, float, float],
+        direction: tuple[float, float, float],
+        max_distance: float = 1000.0,
+        exclude: Optional[int | EntityView] = None,
+    ) -> Optional[tuple[int, tuple[float, float, float], tuple[float, float, float], float]]: ...
     def cast_ray(
         self,
         origin: tuple[float, float, float],

@@ -319,3 +319,132 @@ fn collider_offset_moves_the_shape_off_the_entity_origin() {
     // The box is centred at z = -3, so its near face is at z = -2.5.
     assert!((hit.distance - 2.5).abs() < 0.01, "hit at {}", hit.distance);
 }
+
+#[test]
+fn rotated_bodies_spawn_with_their_full_rotation() {
+    // A thin wall turned 90° about Y spans Z, not X. (Bodies used to spawn
+    // with the quaternion's vector part as the angle: about half the turn.)
+    let mut scene = SceneWorld::new();
+    let mut t = Transform::from_position(Vec3::ZERO);
+    t.rotation = glam::Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+    let wall = scene.spawn((t, RigidBody::fixed(), Collider3D::cuboid(10.0, 2.0, 0.2)));
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 1);
+    let filter = RayFilter::everything();
+    // Along X through the wall's thin side: hits at x ≈ -0.1.
+    let hit = physics
+        .cast_ray(Vec3::new(-5.0, 0.0, 0.0), Vec3::X, 20.0, &filter)
+        .expect("hits the wall");
+    assert_eq!(hit.entity, wall);
+    assert!((hit.point.x + 0.1).abs() < 0.02, "{:?}", hit.point);
+    // Along X but 3 m to the side: the wall reaches z = ±5, so it hits.
+    assert!(physics
+        .cast_ray(Vec3::new(-5.0, 0.0, 3.0), Vec3::X, 20.0, &filter)
+        .is_some());
+}
+
+#[test]
+fn collider_snapshots_answer_raycasts_and_list_world_shapes() {
+    let mut scene = SceneWorld::new();
+    let near = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 0.0, -3.0)),
+        RigidBody::fixed(),
+        Collider3D::ball(0.5),
+    ));
+    let far = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 0.0, -8.0)),
+        RigidBody::fixed(),
+        Collider3D::cuboid(2.0, 2.0, 2.0).offset([0.0, 1.0, 0.0]),
+    ));
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 1);
+    let snap = physics.collider_snapshot();
+    assert_eq!(snap.len(), 2);
+
+    let all = RayFilter::everything();
+    let hit = snap
+        .cast_ray(Vec3::ZERO, Vec3::new(0.0, 0.0, -2.0), 100.0, &all)
+        .unwrap();
+    assert_eq!(hit.entity, near);
+    assert!((hit.distance - 2.5).abs() < 1e-3, "{}", hit.distance);
+    assert!((hit.normal.z - 1.0).abs() < 1e-3);
+    let past = snap
+        .cast_ray(Vec3::ZERO, -Vec3::Z, 100.0, &all.clone().excluding(near))
+        .unwrap();
+    assert_eq!(past.entity, far);
+    assert!((past.distance - 7.0).abs() < 1e-3, "{}", past.distance);
+    assert!(snap.cast_ray(Vec3::ZERO, -Vec3::Z, 2.0, &all).is_none());
+    assert!(snap.cast_ray(Vec3::ZERO, Vec3::ZERO, 2.0, &all).is_none());
+
+    let shapes = snap.shapes();
+    let (_, cube, _) = shapes.iter().find(|(e, _, _)| *e == far).unwrap();
+    match cube {
+        WorldShape::Cuboid {
+            center,
+            half_extents,
+            ..
+        } => {
+            // The collider offset is part of the world centre.
+            assert!((*center - Vec3::new(0.0, 1.0, -8.0)).length() < 1e-4);
+            assert!((*half_extents - Vec3::ONE).length() < 1e-4);
+        }
+        other => panic!("expected a cuboid, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_collider_without_a_body_is_static_scenery_that_scripts_can_move() {
+    let mut scene = SceneWorld::new();
+    // A floor and a wall with colliders only (how editors place scenery).
+    let _floor = scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        Collider3D::cuboid(20.0, 1.0, 20.0),
+    ));
+    let wall = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 2.0, -5.0)),
+        Collider3D::cuboid(4.0, 4.0, 1.0),
+    ));
+    let ball = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 3.0, 0.0)),
+        RigidBody::dynamic(),
+        Collider3D::ball(0.5),
+    ));
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 120);
+    let y = position(&scene, ball).y;
+    assert!(y > 0.8 && y < 1.3, "the floor holds the ball, y = {y}");
+    // Static: never moved by physics.
+    assert_eq!(position(&scene, wall), Vec3::new(0.0, 2.0, -5.0));
+
+    let hit = physics
+        .collider_snapshot()
+        .cast_ray(
+            Vec3::new(0.0, 2.0, 0.0),
+            Vec3::NEG_Z,
+            50.0,
+            &RayFilter::everything(),
+        )
+        .expect("the wall blocks the ray");
+    assert_eq!(hit.entity, wall);
+    assert!((hit.distance - 4.5).abs() < 1e-3, "{}", hit.distance);
+
+    // A script moves the wall; the collider follows.
+    scene.get::<&mut Transform>(wall).unwrap().position = Vec3::new(0.0, 2.0, -9.0);
+    step_n(&mut physics, &mut scene, 1);
+    let hit = physics
+        .collider_snapshot()
+        .cast_ray(
+            Vec3::new(0.0, 2.0, 0.0),
+            Vec3::NEG_Z,
+            50.0,
+            &RayFilter::everything(),
+        )
+        .unwrap();
+    assert!((hit.distance - 8.5).abs() < 1e-3, "{}", hit.distance);
+
+    // Removing the collider removes the body.
+    let before = physics.body_count();
+    scene.remove_one::<Collider3D>(wall).unwrap();
+    step_n(&mut physics, &mut scene, 1);
+    assert_eq!(physics.body_count(), before - 1);
+}

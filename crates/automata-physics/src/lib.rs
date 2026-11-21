@@ -59,7 +59,7 @@ pub use components::{
 pub use events::{ContactForce, PhysicsEvent};
 pub use world::{CharacterMove, PhysicsTick, RayFilter, RayHit};
 pub use world2d_impl::PhysicsWorld2D;
-pub use world3d_impl::PhysicsWorld3D;
+pub use world3d_impl::{ColliderSnapshot, PhysicsWorld3D, WorldShape};
 
 /// Everything you need to use physics: `use automata_physics::prelude::*`.
 pub mod prelude {
@@ -70,5 +70,5 @@ pub mod prelude {
     pub use crate::events::{ContactForce, PhysicsEvent};
     pub use crate::world::{CharacterMove, PhysicsTick, RayFilter, RayHit};
     pub use crate::world2d_impl::PhysicsWorld2D;
-    pub use crate::world3d_impl::PhysicsWorld3D;
+    pub use crate::world3d_impl::{ColliderSnapshot, PhysicsWorld3D, WorldShape};
 }

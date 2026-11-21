@@ -172,6 +172,7 @@ pub struct PyPhysics {
     gravity: (f32, f32, f32),
     velocities: Rc<HashMap<u64, (f32, f32, f32)>>,
     grounded: Rc<HashSet<u64>>,
+    colliders: Rc<automata_physics::ColliderSnapshot>,
     queue: PhysicsQueue,
 }
 
@@ -209,6 +210,7 @@ impl PyPhysics {
             gravity: (g.x, g.y, g.z),
             velocities: Rc::new(velocities),
             grounded: Rc::new(grounded),
+            colliders: Rc::new(world.collider_snapshot()),
             queue,
         }
     }
@@ -216,6 +218,41 @@ impl PyPhysics {
 
 #[pymethods]
 impl PyPhysics {
+    /// Casts a ray right now and returns the closest hit as `(entity,
+    /// point, normal, distance)`, or `None`. Tests the colliders as they
+    /// were at the start of the frame (after the physics step); sensors
+    /// are skipped. `exclude` (an entity or id) ignores the caster itself.
+    #[pyo3(signature = (origin, direction, max_distance = 1000.0, exclude = None))]
+    #[allow(clippy::type_complexity)] // the tuple is the documented Python shape
+    fn raycast(
+        &self,
+        origin: (f32, f32, f32),
+        direction: (f32, f32, f32),
+        max_distance: f32,
+        exclude: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Option<(u64, (f32, f32, f32), (f32, f32, f32), f32)>> {
+        let mut filter = RayFilter::no_sensors();
+        if let Some(e) = exclude.map(entity_id).transpose()? {
+            filter = filter.excluding(e);
+        }
+        Ok(self
+            .colliders
+            .cast_ray(
+                Vec3::new(origin.0, origin.1, origin.2),
+                Vec3::new(direction.0, direction.1, direction.2),
+                max_distance,
+                &filter,
+            )
+            .map(|h| {
+                (
+                    h.entity.to_bits().get(),
+                    (h.point.x, h.point.y, h.point.z),
+                    (h.normal.x, h.normal.y, h.normal.z),
+                    h.distance,
+                )
+            }))
+    }
+
     /// Queue a raycast; returns a result key. The hit is readable **next
     /// frame** via [`ray_result`](Self::ray_result).
     ///

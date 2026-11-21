@@ -21,11 +21,14 @@ use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{
+    DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
-use winit::window::{CursorIcon, Window, WindowId};
+use winit::window::{CursorGrabMode, CursorIcon, Window, WindowId};
 
+use automata_audio::AudioEngine;
 use automata_renderer::Renderer;
 
 use crate::bridge::{self, BridgeMsg, ScriptBridge};
@@ -86,6 +89,11 @@ struct Input {
     modifiers: ModifiersState,
     /// Keys currently held (drives the player in play mode).
     held: HashSet<KeyCode>,
+    /// Mouse buttons scripts see as held (pressed over the game view, or
+    /// anywhere while the cursor is captured).
+    game_buttons: HashSet<&'static str>,
+    /// Mouse movement not yet sent to scripts (physical pixels).
+    mouse_delta: (f32, f32),
 }
 
 impl Input {
@@ -103,6 +111,7 @@ impl Input {
         self.middle = false;
         self.modifiers = ModifiersState::empty();
         self.held.clear();
+        self.game_buttons.clear();
     }
 
     fn held_any(&self, keys: &[KeyCode]) -> bool {
@@ -183,6 +192,14 @@ struct EditorApp {
     quit: bool,
     /// When model files were last checked for changes (hot reload).
     last_model_check: Instant,
+    /// The sound output (opened on first use: Play or a clip preview).
+    audio: Option<AudioEngine>,
+    /// A script asked for the mouse to be captured (mouse-look).
+    lock_wanted: bool,
+    /// The cursor is captured right now (Esc releases it).
+    lock_active: bool,
+    /// The clip preview playing from the Files panel / Inspector.
+    preview_sound: Option<(u64, PathBuf)>,
 }
 
 impl EditorApp {
@@ -234,7 +251,120 @@ impl EditorApp {
             build: None,
             quit: false,
             last_model_check: Instant::now(),
+            audio: None,
+            lock_wanted: false,
+            lock_active: false,
+            preview_sound: None,
         })
+    }
+
+    /// The sound output, opened on first use.
+    fn audio(&mut self) -> &mut AudioEngine {
+        self.audio.get_or_insert_with(AudioEngine::new)
+    }
+
+    /// Captures (hides and locks) or releases the cursor for mouse-look.
+    fn set_cursor_lock(&mut self, locked: bool) {
+        if self.lock_active == locked {
+            return;
+        }
+        self.lock_active = locked;
+        self.input.mouse_delta = (0.0, 0.0);
+        let Some(window) = &self.window else {
+            return;
+        };
+        if locked {
+            if window
+                .set_cursor_grab(CursorGrabMode::Locked)
+                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+                .is_err()
+            {
+                self.ui.log(
+                    LogLevel::Warn,
+                    "This system can't capture the mouse; mouse-look still works while the \
+                     cursor stays in the window.",
+                );
+            }
+            window.set_cursor_visible(false);
+        } else {
+            let _ = window.set_cursor_grab(CursorGrabMode::None);
+            window.set_cursor_visible(true);
+        }
+    }
+
+    /// The UI's logical-pixel scale (window DPI × UI scale preference).
+    fn ui_scale(&self) -> f32 {
+        let dpi = self
+            .window
+            .as_ref()
+            .map_or(1.0, |w| w.scale_factor() as f32);
+        dpi * self.ui.prefs.ui_scale.clamp(0.5, 3.0)
+    }
+
+    /// Whether the pointer is over the game view.
+    fn pointer_in_view(&self) -> bool {
+        let s = self.ui_scale().max(0.1);
+        let r = self.ui.viewport_rect();
+        let (x, y) = (self.input.cursor.0 / s, self.input.cursor.1 / s);
+        r.w > 0.0 && x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h
+    }
+
+    /// Mouse buttons for scripts, and click-to-capture. Returns whether the
+    /// click belongs to the game alone (the editor UI must not see it).
+    fn game_mouse_button(&mut self, button: MouseButton, down: bool) -> bool {
+        let name = match button {
+            MouseButton::Left => "left",
+            MouseButton::Right => "right",
+            MouseButton::Middle => "middle",
+            _ => return self.lock_active,
+        };
+        if !down {
+            self.input.game_buttons.remove(name);
+            return self.lock_active;
+        }
+        let playing = self.play.as_ref().is_some_and(|p| !p.paused) && self.bridge.is_some();
+        if self.lock_active {
+            self.input.game_buttons.insert(name);
+            return true;
+        }
+        if playing && self.pointer_in_view() && self.ui.scene_visible() {
+            self.input.game_buttons.insert(name);
+            if self.lock_wanted && button == MouseButton::Left {
+                // Click the view to capture the mouse again after Esc.
+                self.set_cursor_lock(true);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Plays a sound file as a preview (stops the previous preview). Playing
+    /// the same file again stops it instead.
+    pub(crate) fn preview_clip(&mut self, path: &std::path::Path) {
+        if let Some((id, current)) = self.preview_sound.take() {
+            self.audio().stop(id, 0.05);
+            if current == path {
+                return;
+            }
+        }
+        let text = path.to_string_lossy().into_owned();
+        match self.audio().play(automata_audio::PlayOptions::once(&text)) {
+            Ok(id) => {
+                let seconds = self.audio().duration(&text).unwrap_or(0.0);
+                self.ui.log(
+                    LogLevel::Info,
+                    format!(
+                        "Playing {} ({seconds:.1}s). Click again to stop.",
+                        path.file_name()
+                            .map_or_else(|| text.clone(), |n| n.to_string_lossy().into_owned())
+                    ),
+                );
+                self.preview_sound = Some((id, path.to_path_buf()));
+            }
+            Err(e) => self
+                .ui
+                .log(LogLevel::Error, format!("Can't play {text}: {e}")),
+        }
     }
 
     fn request_redraw(&self) {
@@ -501,6 +631,15 @@ impl EditorApp {
                     }
                 }
             }
+            Intent::AddSound { path, at } => self.add_sound(&path, at),
+            Intent::SetAudioClip { id, path } => {
+                if let Some(rel) = self.import_sound(&path) {
+                    if self.doc.set_audio_clip(id, &rel) {
+                        self.ui.log(LogLevel::Info, format!("Clip set to {rel}"));
+                    }
+                }
+            }
+            Intent::PreviewSound(path) => self.preview_clip(&path),
             Intent::FitCollider(id) => {
                 if self.doc.fit_collider(id) {
                     self.ui.log(LogLevel::Info, "Collider fitted to the mesh");
@@ -633,18 +772,20 @@ impl EditorApp {
     /// A file dropped on the window from the system file manager: models
     /// are imported and added where they were dropped.
     fn dropped_file(&mut self, path: &std::path::Path) {
-        if !automata_assets::is_model_path(path) {
+        let sound = automata_core::audio_source::is_audio_path(path);
+        if !sound && !automata_assets::is_model_path(path) {
             self.ui.log(
                 LogLevel::Warn,
                 format!(
-                    "Can't import {}: drop .glb, .gltf or .obj models",
+                    "Can't import {}: drop .glb, .gltf or .obj models, or .ogg, .wav, .mp3 \
+                     or .flac sounds",
                     path.display()
                 ),
             );
             return;
         }
         if self.ui.play != PlayState::Editing {
-            self.ui.log(LogLevel::Warn, "Stop play mode to add models");
+            self.ui.log(LogLevel::Warn, "Stop play mode to add files");
             return;
         }
         let scale = self
@@ -654,7 +795,64 @@ impl EditorApp {
             * self.ui.prefs.ui_scale.clamp(0.5, 3.0);
         let (x, y) = (self.input.cursor.0 / scale, self.input.cursor.1 / scale);
         let at = self.ui.viewport_rect().contains(x, y).then_some((x, y));
-        self.add_model(path, at);
+        if sound {
+            self.add_sound(path, at);
+        } else {
+            self.add_model(path, at);
+        }
+    }
+
+    /// Brings a sound into the project (copying it into `sounds/` when it
+    /// lives outside). Returns its scene-relative path, or `None` after
+    /// logging why not.
+    fn import_sound(&mut self, path: &std::path::Path) -> Option<String> {
+        let root = self.doc.base_dir();
+        let dest = match crate::sounds::import_sound(path, &root) {
+            Ok(dest) => dest,
+            Err(e) => {
+                self.ui.log(LogLevel::Error, format!("Import failed: {e}"));
+                self.ui.show_console();
+                return None;
+            }
+        };
+        if let Err(e) = self.ui.clips.get(&dest).clone() {
+            self.ui
+                .log(LogLevel::Warn, format!("{}: {e}", dest.display()));
+        }
+        let rel = self.doc.relative(&dest);
+        if dest != path {
+            self.ui.files_changed(Some(&dest));
+            self.ui.log(LogLevel::Info, format!("Imported {rel}"));
+        }
+        Some(rel)
+    }
+
+    /// Adds an entity whose Audio Source plays the sound at `path`, at the
+    /// drop point `at` (or where the scene camera looks).
+    fn add_sound(&mut self, path: &std::path::Path, at: Option<(f32, f32)>) {
+        let Some(rel) = self.import_sound(path) else {
+            return;
+        };
+        let target = glam::Vec3::from(self.ui.camera.target);
+        let spot = match at {
+            Some((x, y)) => {
+                let proj = crate::view::Projector::new(&self.ui.camera, self.ui.viewport_rect());
+                let fallback = (proj.eye() - target).length();
+                proj.ground_point(x, y, fallback)
+            }
+            None => target,
+        };
+        let name = crate::sounds::entity_name(path);
+        let id = self.doc.create_sound(&rel, &name, spot.to_array());
+        let name = self
+            .doc
+            .index_of(id)
+            .map(|i| self.doc.entities[i].name().to_string())
+            .unwrap_or_default();
+        self.ui.log(
+            LogLevel::Info,
+            format!("Added {name}: plays {rel} when the game starts"),
+        );
     }
 
     /// Brings a model into the project (copying it into `models/` when it
@@ -999,6 +1197,12 @@ impl EditorApp {
     }
 
     fn set_paused(&mut self, paused: bool) {
+        if self.play.is_some() && paused {
+            self.set_cursor_lock(false);
+        }
+        if let (Some(play), Some(audio)) = (&self.play, &mut self.audio) {
+            play.pause_audio(audio, paused);
+        }
         if let Some(play) = &mut self.play {
             play.paused = paused;
             self.ui.play = if paused {
@@ -1080,9 +1284,25 @@ impl EditorApp {
                 }
             }
             BridgeMsg::Reloaded(_) | BridgeMsg::Bye => {}
-            BridgeMsg::Frame(writes) => {
+            BridgeMsg::Frame(reply) => {
+                let mut lock = None;
                 if let Some(play) = &mut self.play {
-                    play.apply_script_writes(&writes);
+                    play.apply_frame(&reply);
+                    lock = play.lock_request.take();
+                }
+                if let Some(locked) = lock {
+                    self.lock_wanted = locked;
+                    let focused = self.window.as_ref().is_some_and(|w| w.has_focus());
+                    if !locked || focused {
+                        self.set_cursor_lock(locked);
+                    }
+                    if locked {
+                        self.ui.log(
+                            LogLevel::Info,
+                            "The game captured the mouse. Esc releases it; click the view to \
+                             capture it again.",
+                        );
+                    }
                 }
             }
             BridgeMsg::Exited(status) => {
@@ -1135,7 +1355,30 @@ impl EditorApp {
             .filter_map(|&k| bridge::key_name(k))
             .collect();
         keys.sort_unstable();
-        bridge.send_frame(dt, play.elapsed, &keys, &states);
+        let mut frame = play.frame_input();
+        let mut buttons: Vec<&'static str> = self.input.game_buttons.iter().copied().collect();
+        buttons.sort_unstable();
+        frame.mouse_buttons = buttons;
+        frame.mouse_delta = [self.input.mouse_delta.0, self.input.mouse_delta.1];
+        frame.mouse_locked = self.lock_active;
+        let s = {
+            let dpi = self
+                .window
+                .as_ref()
+                .map_or(1.0, |w| w.scale_factor() as f32);
+            dpi * self.ui.prefs.ui_scale.clamp(0.5, 3.0)
+        };
+        let view = self.ui.viewport_rect();
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        {
+            frame.screen = [
+                (view.w * s).round().max(1.0) as u32,
+                (view.h * s).round().max(1.0) as u32,
+            ];
+        }
+        if bridge.send_frame_with(dt, play.elapsed, &keys, &states, &frame) {
+            self.input.mouse_delta = (0.0, 0.0);
+        }
     }
 
     fn stop(&mut self) {
@@ -1144,12 +1387,19 @@ impl EditorApp {
                 self.handle_bridge_msg(msg);
             }
         }
-        if let Some(play) = self.play.take() {
+        if let Some(mut play) = self.play.take() {
+            if let Some(audio) = &mut self.audio {
+                play.stop_audio(audio);
+            }
             self.ui.log(
                 LogLevel::Info,
                 format!("Stopped after {:.1}s. Scene restored.", play.elapsed),
             );
         }
+        self.lock_wanted = false;
+        self.set_cursor_lock(false);
+        self.input.game_buttons.clear();
+        self.viewport.clear_hud_cache();
         self.ui.play = PlayState::Editing;
         if let Some(cam) = self.edit_camera.take() {
             self.ui.camera = cam;
@@ -1163,6 +1413,11 @@ impl EditorApp {
         let PhysicalKey::Code(code) = event.physical_key else {
             return;
         };
+        // Esc always gives a captured mouse back first.
+        if code == KeyCode::Escape && self.lock_active && event.state == ElementState::Pressed {
+            self.set_cursor_lock(false);
+            return;
+        }
         if event.state == ElementState::Released {
             self.input.held.remove(&code);
         } else if !cfg!(target_os = "macos") && self.input.modifiers.super_key() {
@@ -1525,6 +1780,22 @@ impl EditorApp {
             let yaw = scene_cam.map_or(self.ui.camera.yaw, |c| ViewCamera::from_camera3d(&c).yaw);
             play.input = self.input.play_input(yaw);
             play.update(dt);
+        }
+        if self.play.is_some() {
+            let root = self.doc.base_dir();
+            let engine = self.audio.get_or_insert_with(AudioEngine::new);
+            let messages = self
+                .play
+                .as_mut()
+                .map(|p| p.update_audio(engine, &root))
+                .unwrap_or_default();
+            engine.pump_frame(f64::from(dt));
+            for m in messages {
+                self.ui.log(LogLevel::Warn, m);
+            }
+        }
+        if let Some(play) = &mut self.play {
+            let scene_cam = play.scene_camera();
             // The camera follows the player (orbit/zoom stay under the
             // user's control).
             if let Some(pos) = play.player_position().filter(|_| scene_cam.is_none()) {
@@ -1780,6 +2051,9 @@ impl ApplicationHandler for EditorApp {
                 self.ui.code_commit_switch();
                 if !focused {
                     self.doc.end_gesture();
+                    // Never keep the mouse captured while another window
+                    // is in front; click the view to capture it again.
+                    self.set_cursor_lock(false);
                 }
             }
             WindowEvent::ModifiersChanged(modifiers) => {
@@ -1790,10 +2064,24 @@ impl ApplicationHandler for EditorApp {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.input.cursor = (position.x as f32, position.y as f32);
+                let at = (position.x as f32, position.y as f32);
+                if !self.lock_active && self.play.is_some() {
+                    // Uncaptured, scripts see the cursor's own movement
+                    // (captured, raw device motion arrives instead).
+                    self.input.mouse_delta.0 += at.0 - self.input.cursor.0;
+                    self.input.mouse_delta.1 += at.1 - self.input.cursor.1;
+                }
+                if !self.lock_active {
+                    self.input.cursor = at;
+                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let down = state == ElementState::Pressed;
+                if self.game_mouse_button(button, down) {
+                    // A captured mouse belongs to the game alone.
+                    self.request_redraw();
+                    return;
+                }
                 match button {
                     MouseButton::Left => {
                         self.input.left = down;
@@ -1855,6 +2143,15 @@ impl ApplicationHandler for EditorApp {
             _ => return,
         }
         self.request_redraw();
+    }
+
+    fn device_event(&mut self, _loop: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
+        if let DeviceEvent::MouseMotion { delta } = event {
+            if self.lock_active {
+                self.input.mouse_delta.0 += delta.0 as f32;
+                self.input.mouse_delta.1 += delta.1 as f32;
+            }
+        }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {

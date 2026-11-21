@@ -169,6 +169,8 @@ dependencies = [
  "automata-renderer",
  "glam 0.33.12",
  "image",
+ "ron",
+ "serde",
  "thiserror 2.0.21",
  "tracing",
 ]
@@ -1541,6 +1543,7 @@ version = "0.1.0"
 dependencies = [
  "ab_glyph",
  "automata-assets",
+ "automata-audio",
  "automata-core",
  "automata-export",
  "automata-physics",

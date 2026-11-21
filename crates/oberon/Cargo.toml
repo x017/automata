@@ -16,8 +16,16 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# Real sound output for Play mode and clip previews (ALSA on Linux needs
+# `libasound2-dev`; WASAPI / CoreAudio need nothing). Without it Oberon
+# still runs Audio Sources, silently: `--no-default-features`.
+default = ["audio-device"]
+audio-device = ["automata-audio/cpal"]
+
 [dependencies]
 automata-assets = { path = "../automata-assets" }
+automata-audio = { path = "../automata-audio" }
 automata-core = { path = "../automata-core" }
 automata-export = { path = "../automata-export" }
 automata-physics = { path = "../automata-physics" }

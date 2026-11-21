@@ -78,6 +78,12 @@ pub enum Field {
     ColliderRestitution,
     /// Character controller: steepest walkable slope, in degrees.
     CharacterSlope,
+    /// Audio source volume (1 = as recorded).
+    AudioVolume,
+    /// Audio source pitch / speed (1 = as recorded).
+    AudioPitch,
+    /// Distance at which a 3D audio source falls silent (metres).
+    AudioRange,
 }
 
 /// A boolean property of an entity (toggled by a checkbox).
@@ -93,6 +99,12 @@ pub enum Flag {
     ColliderEnabled,
     /// Environment distance fog on/off.
     EnvFog,
+    /// Audio source repeats.
+    AudioLoop,
+    /// Audio source starts when the game starts.
+    AudioPlayOnStart,
+    /// Audio source fades with distance from the camera.
+    AudioSpatial,
 }
 
 /// An enumerated property of an entity (cycled by a dropdown-style button).
@@ -165,6 +177,9 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
             .as_ref()?
             .max_slope_climb_angle
             .to_degrees(),
+        F::AudioVolume => data.audio_source.as_ref()?.volume,
+        F::AudioPitch => data.audio_source.as_ref()?.pitch,
+        F::AudioRange => data.audio_source.as_ref()?.range,
     })
 }
 
@@ -191,6 +206,9 @@ pub fn range(field: Field) -> (f32, f32) {
         }
         F::CameraFov => (1.0, 179.0),
         F::CharacterSlope => (0.0, 89.0),
+        F::AudioVolume => (0.0, 4.0),
+        F::AudioPitch => (0.05, 4.0),
+        F::AudioRange => (0.5, 10_000.0),
         F::CameraNear => (0.001, 1_000.0),
         F::CameraFar => (0.01, 1_000_000.0),
         F::BodyLinearDamping | F::BodyAngularDamping | F::ColliderDensity | F::ColliderFriction => {
@@ -217,7 +235,10 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::EnvGround(_)
         | F::EnvBackground(_)
         | F::EnvFogColor(_)
+        | F::AudioVolume
+        | F::AudioPitch
         | F::EnvExposure => 0.005,
+        F::AudioRange => 0.1,
         F::Scale(_) | F::LightDirection(_) => 0.01,
         _ => 0.02,
     }
@@ -354,6 +375,14 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
             Some(c) => c.max_slope_climb_angle = v.to_radians(),
             None => return false,
         },
+        F::AudioVolume | F::AudioPitch | F::AudioRange => match &mut data.audio_source {
+            Some(a) => match field {
+                F::AudioVolume => a.volume = v,
+                F::AudioPitch => a.pitch = v,
+                _ => a.range = v,
+            },
+            None => return false,
+        },
     }
     true
 }
@@ -367,6 +396,9 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::ColliderSensor => data.collider_3d.as_ref()?.sensor,
         Flag::ColliderEnabled => data.collider_3d.as_ref()?.enabled,
         Flag::EnvFog => data.environment?.fog,
+        Flag::AudioLoop => data.audio_source.as_ref()?.looping,
+        Flag::AudioPlayOnStart => data.audio_source.as_ref()?.play_on_start,
+        Flag::AudioSpatial => data.audio_source.as_ref()?.spatial,
     })
 }
 
@@ -393,6 +425,19 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
             Some(env) => env.fog = !env.fog,
             None => return false,
         },
+        Flag::AudioLoop | Flag::AudioPlayOnStart | Flag::AudioSpatial => {
+            match &mut data.audio_source {
+                Some(a) => {
+                    let slot = match flag {
+                        Flag::AudioLoop => &mut a.looping,
+                        Flag::AudioPlayOnStart => &mut a.play_on_start,
+                        _ => &mut a.spatial,
+                    };
+                    *slot = !*slot;
+                }
+                None => return false,
+            }
+        }
     }
     true
 }

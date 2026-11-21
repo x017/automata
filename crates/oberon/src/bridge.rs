@@ -63,6 +63,125 @@ pub struct EntityState {
     pub attributes: BTreeMap<String, AttributeValue>,
     /// The entity's camera as `[eye xyz, target xyz, fov°]`, if it has one.
     pub camera: Option<[f32; 7]>,
+    /// Whether the entity has an Audio Source.
+    pub has_audio: bool,
+}
+
+/// A collider as the runner sees it (for `ctx.physics.raycast`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ColliderShape {
+    /// A box: entity id, centre, rotation `[x, y, z, w]`, half extents.
+    Cuboid {
+        /// Document entity id.
+        id: u64,
+        /// World centre.
+        center: [f32; 3],
+        /// World rotation quaternion.
+        rotation: [f32; 4],
+        /// Half extents.
+        half: [f32; 3],
+    },
+    /// A sphere.
+    Ball {
+        /// Document entity id.
+        id: u64,
+        /// World centre.
+        center: [f32; 3],
+        /// Radius.
+        radius: f32,
+    },
+    /// A capsule along its local Y axis.
+    Capsule {
+        /// Document entity id.
+        id: u64,
+        /// World centre.
+        center: [f32; 3],
+        /// World rotation quaternion.
+        rotation: [f32; 4],
+        /// Half the straight part's length.
+        half_height: f32,
+        /// Radius.
+        radius: f32,
+    },
+}
+
+/// Everything besides entities that a frame tells scripts.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FrameInput {
+    /// Mouse buttons held (`"left"`, `"right"`, `"middle"`).
+    pub mouse_buttons: Vec<&'static str>,
+    /// Mouse movement since the last frame (pixels, +y down).
+    pub mouse_delta: [f32; 2],
+    /// Whether the cursor is captured for mouse-look.
+    pub mouse_locked: bool,
+    /// The game view's size in pixels (for the HUD).
+    pub screen: [u32; 2],
+    /// Solid colliders, for raycasts.
+    pub colliders: Vec<ColliderShape>,
+    /// Entities whose Audio Source is playing.
+    pub playing: Vec<u64>,
+}
+
+/// What a script asked of an entity's Audio Source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioWrite {
+    /// Start (or restart) it.
+    Play,
+    /// Stop it.
+    Stop,
+}
+
+/// A one-shot sound requested by `ctx.audio.play`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OneShot {
+    /// The file, relative to the scene folder.
+    pub path: String,
+    /// Volume (1 = as recorded).
+    pub volume: f32,
+    /// Pitch / speed (1 = as recorded).
+    pub pitch: f32,
+    /// Where it plays (fades with distance), or `None` for everywhere.
+    pub position: Option<[f32; 3]>,
+}
+
+/// What a HUD item draws.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HudKind {
+    /// An image file (relative to the scene folder).
+    Image(String),
+    /// A filled rectangle.
+    Rect,
+}
+
+/// One thing `ctx.hud` drew this frame (pixels, top-left origin, placed by
+/// its centre).
+#[derive(Debug, Clone, PartialEq)]
+pub struct HudItem {
+    /// Image or rectangle.
+    pub kind: HudKind,
+    /// Centre x.
+    pub x: f32,
+    /// Centre y.
+    pub y: f32,
+    /// Size; `None` for an image's own size.
+    pub size: Option<[f32; 2]>,
+    /// RGBA tint.
+    pub color: [f32; 4],
+    /// Rotation in radians.
+    pub rotation: f32,
+}
+
+/// The runner's reply to one frame.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FrameReply {
+    /// Entity changes.
+    pub writes: Vec<EntityWrite>,
+    /// One-shot sounds to start.
+    pub sounds: Vec<OneShot>,
+    /// The HUD to draw until the next reply.
+    pub hud: Vec<HudItem>,
+    /// A cursor lock request.
+    pub lock: Option<bool>,
 }
 
 /// What a script changed on one entity.
@@ -82,6 +201,10 @@ pub struct EntityWrite {
     pub attributes: Option<BTreeMap<String, AttributeValue>>,
     /// New camera `[eye xyz, target xyz, fov°]`.
     pub camera: Option<[f32; 7]>,
+    /// Play or stop the entity's Audio Source.
+    pub audio: Option<AudioWrite>,
+    /// Remove the entity from the running scene.
+    pub despawn: bool,
 }
 
 /// A message from the runner.
@@ -112,8 +235,8 @@ pub enum BridgeMsg {
     },
     /// A script file was hot-reloaded.
     Reloaded(PathBuf),
-    /// The scripts' writes for one frame.
-    Frame(Vec<EntityWrite>),
+    /// The scripts' writes (and sounds, HUD, cursor lock) for one frame.
+    Frame(FrameReply),
     /// The runner finished its stop hooks and is exiting.
     Bye,
     /// The runner exited (or could not be talked to).
@@ -237,12 +360,25 @@ impl ScriptBridge {
         keys: &[&str],
         entities: &[EntityState],
     ) -> bool {
+        self.send_frame_with(dt, time, keys, entities, &FrameInput::default())
+    }
+
+    /// [`send_frame`](Self::send_frame) with mouse, colliders, playing
+    /// sounds and the screen size.
+    pub fn send_frame_with(
+        &mut self,
+        dt: f32,
+        time: f32,
+        keys: &[&str],
+        entities: &[EntityState],
+        input: &FrameInput,
+    ) -> bool {
         if self.busy() || self.exited {
             return false;
         }
         self.frame += 1;
         #[allow(clippy::cast_possible_wrap)]
-        let msg = Json::obj([
+        let mut msg = Json::obj([
             ("op", Json::from("frame")),
             ("frame", Json::Int(self.frame as i64)),
             ("dt", Json::Float(f64::from(dt))),
@@ -256,6 +392,7 @@ impl ScriptBridge {
                 Json::Arr(entities.iter().map(state_json).collect()),
             ),
         ]);
+        frame_input_json(&mut msg, input);
         if self.send(&msg) {
             self.in_flight = Some(Instant::now());
             true
@@ -370,6 +507,90 @@ pub fn attr_from_json(value: &Json) -> Option<AttributeValue> {
     })
 }
 
+#[allow(clippy::cast_possible_wrap)]
+fn collider_json(c: &ColliderShape) -> Json {
+    let f = |v: f32| Json::Float(f64::from(v));
+    let mut out = Vec::with_capacity(12);
+    match *c {
+        ColliderShape::Cuboid {
+            id,
+            center,
+            rotation,
+            half,
+        } => {
+            out.push(Json::Int(id as i64));
+            out.push(Json::from("box"));
+            out.extend(center.into_iter().chain(rotation).chain(half).map(f));
+        }
+        ColliderShape::Ball { id, center, radius } => {
+            out.push(Json::Int(id as i64));
+            out.push(Json::from("ball"));
+            out.extend(center.into_iter().chain([radius]).map(f));
+        }
+        ColliderShape::Capsule {
+            id,
+            center,
+            rotation,
+            half_height,
+            radius,
+        } => {
+            out.push(Json::Int(id as i64));
+            out.push(Json::from("capsule"));
+            out.extend(
+                center
+                    .into_iter()
+                    .chain(rotation)
+                    .chain([half_height, radius])
+                    .map(f),
+            );
+        }
+    }
+    Json::Arr(out)
+}
+
+#[allow(clippy::cast_possible_wrap)]
+fn frame_input_json(msg: &mut Json, input: &FrameInput) {
+    msg.set(
+        "mouse",
+        Json::obj([
+            (
+                "buttons",
+                Json::Arr(input.mouse_buttons.iter().map(|b| Json::from(*b)).collect()),
+            ),
+            ("delta", Json::floats(&input.mouse_delta)),
+            ("locked", Json::Bool(input.mouse_locked)),
+        ]),
+    );
+    msg.set(
+        "screen",
+        Json::Arr(
+            input
+                .screen
+                .iter()
+                .map(|&v| Json::Int(i64::from(v)))
+                .collect(),
+        ),
+    );
+    if !input.colliders.is_empty() {
+        msg.set(
+            "cols",
+            Json::Arr(input.colliders.iter().map(collider_json).collect()),
+        );
+    }
+    if !input.playing.is_empty() {
+        msg.set(
+            "playing",
+            Json::Arr(
+                input
+                    .playing
+                    .iter()
+                    .map(|&id| Json::Int(id as i64))
+                    .collect(),
+            ),
+        );
+    }
+}
+
 fn state_json(e: &EntityState) -> Json {
     #[allow(clippy::cast_possible_wrap)]
     let mut obj = Json::obj([
@@ -398,6 +619,9 @@ fn state_json(e: &EntityState) -> Json {
     if let Some(script) = &e.script {
         obj.set("script", Json::from(script.display().to_string()));
     }
+    if e.has_audio {
+        obj.set("snd", Json::Bool(true));
+    }
     obj
 }
 
@@ -416,6 +640,51 @@ fn parse_write(w: &Json) -> Option<EntityWrite> {
                 .filter_map(|(k, v)| Some((k.clone(), attr_from_json(v)?)))
                 .collect()
         }),
+        audio: match w.get("audio").and_then(Json::as_str) {
+            Some("play") => Some(AudioWrite::Play),
+            Some("stop") => Some(AudioWrite::Stop),
+            _ => None,
+        },
+        despawn: matches!(w.get("despawn"), Some(Json::Bool(true))),
+    })
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn num(v: &Json) -> Option<f32> {
+    match v {
+        Json::Int(i) => Some(*i as f32),
+        Json::Float(f) => Some(*f as f32),
+        _ => None,
+    }
+}
+
+fn parse_sound(v: &Json) -> Option<OneShot> {
+    let a = v.as_arr()?;
+    Some(OneShot {
+        path: a.first()?.as_str()?.to_string(),
+        volume: a.get(1).and_then(num).unwrap_or(1.0).max(0.0),
+        pitch: a.get(2).and_then(num).unwrap_or(1.0).clamp(0.01, 16.0),
+        position: a.get(3).and_then(Json::as_floats::<3>),
+    })
+}
+
+fn parse_hud(v: &Json) -> Option<HudItem> {
+    let field = |k: &str| v.get(k).and_then(num);
+    let kind = match v.get("k")?.as_str()? {
+        "img" => HudKind::Image(v.get("path")?.as_str()?.to_string()),
+        "rect" => HudKind::Rect,
+        _ => return None,
+    };
+    Some(HudItem {
+        kind,
+        x: field("x")?,
+        y: field("y")?,
+        size: field("w").zip(field("h")).map(|(w, h)| [w, h]),
+        color: v
+            .get("c")
+            .and_then(Json::as_floats::<4>)
+            .unwrap_or([1.0; 4]),
+        rotation: field("rot").unwrap_or(0.0),
     })
 }
 
@@ -448,14 +717,18 @@ pub fn parse_msg(line: &str) -> Option<BridgeMsg> {
             traceback: text("traceback"),
         },
         "reloaded" => BridgeMsg::Reloaded(PathBuf::from(text("file"))),
-        "frame" => BridgeMsg::Frame(
-            v.get("writes")
-                .and_then(Json::as_arr)
-                .unwrap_or_default()
-                .iter()
-                .filter_map(parse_write)
-                .collect(),
-        ),
+        "frame" => {
+            let list = |key: &str| v.get(key).and_then(Json::as_arr).unwrap_or_default();
+            BridgeMsg::Frame(FrameReply {
+                writes: list("writes").iter().filter_map(parse_write).collect(),
+                sounds: list("sounds").iter().filter_map(parse_sound).collect(),
+                hud: list("hud").iter().filter_map(parse_hud).collect(),
+                lock: match v.get("lock") {
+                    Some(Json::Bool(b)) => Some(*b),
+                    _ => None,
+                },
+            })
+        }
         "bye" => BridgeMsg::Bye,
         _ => return None,
     })
@@ -549,7 +822,7 @@ mod tests {
         let frame = parse_msg(
             r#"{"op":"frame","frame":3,"writes":[{"id":7,"p":[1.0,2.0,3.0],"attrs":{"hp":2,"tint":[1.0,0.0,0.0,1.0]}}]}"#,
         );
-        let Some(BridgeMsg::Frame(writes)) = frame else {
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = frame else {
             panic!("{frame:?}");
         };
         assert_eq!(writes[0].id, 7);
@@ -576,7 +849,7 @@ mod tests {
         );
         let msg =
             parse_msg(r#"{"op":"frame","frame":1,"writes":[{"id":4,"cam":[1,2,3,4,5,6,50]}]}"#);
-        let Some(BridgeMsg::Frame(writes)) = msg else {
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
             panic!("frame expected");
         };
         assert_eq!(writes[0].camera, Some([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 50.0]));
@@ -698,7 +971,7 @@ mod tests {
         let writes = msgs
             .iter()
             .find_map(|m| match m {
-                BridgeMsg::Frame(w) => Some(w.clone()),
+                BridgeMsg::Frame(w) => Some(w.writes.clone()),
                 _ => None,
             })
             .unwrap();

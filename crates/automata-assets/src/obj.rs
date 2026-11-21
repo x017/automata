@@ -293,6 +293,7 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
             mesh.indices.extend(flat.indices.iter().map(|i| i + base));
         }
         parts.push(ModelPart {
+            pixelated: false,
             name,
             mesh,
             color: mtl.color,

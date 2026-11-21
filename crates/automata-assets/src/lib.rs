@@ -15,6 +15,7 @@
 //! scene file's folder), then the working directory.
 
 mod gltf;
+pub mod import;
 pub mod json;
 mod obj;
 
@@ -127,6 +128,9 @@ pub struct ModelPart {
     pub color: [f32; 4],
     /// Color texture, shared between parts that use the same image.
     pub texture: Option<Arc<Image>>,
+    /// Whether the texture is sampled without smoothing when magnified (the
+    /// file asked for nearest filtering: palette atlases, pixel art).
+    pub pixelated: bool,
 }
 
 /// A part's GPU resources (see [`Model::gpu`]).
@@ -210,17 +214,21 @@ impl Model {
     /// uploaded once.
     pub fn gpu(&self, renderer: &Renderer) -> &[GpuPart] {
         self.gpu.get_or_init(|| {
-            let mut uploaded: Vec<(*const Image, Texture)> = Vec::new();
+            let mut uploaded: Vec<((*const Image, bool), Texture)> = Vec::new();
             self.parts
                 .iter()
                 .map(|part| {
                     let texture = part.texture.as_ref().map(|img| {
-                        let key = Arc::as_ptr(img);
+                        let key = (Arc::as_ptr(img), part.pixelated);
                         if let Some((_, t)) = uploaded.iter().find(|(k, _)| *k == key) {
                             return t.clone();
                         }
-                        let t = renderer
-                            .create_texture_rgba_mipmapped(img.width, img.height, &img.rgba);
+                        let t = renderer.create_texture_rgba_mipmapped(
+                            img.width,
+                            img.height,
+                            &img.rgba,
+                            part.pixelated,
+                        );
                         uploaded.push((key, t.clone()));
                         t
                     });
@@ -274,14 +282,20 @@ fn load_uncached(path: &Path) -> Result<(Model, Vec<PathBuf>), ModelError> {
         path: shown.clone(),
         message,
     })?;
-    let model = Model::new(path.to_path_buf(), loaded.parts);
+    let mut parts = loaded.parts;
+    import::read_settings(path).apply(&mut parts);
+    let model = Model::new(path.to_path_buf(), parts);
     if model.parts.is_empty() {
         return Err(ModelError::Invalid {
             path: shown,
             message: "the file has no triangle meshes".into(),
         });
     }
-    Ok((model, loaded.deps))
+    // The settings file is watched even before it exists, so creating it
+    // reloads the model.
+    let mut deps = loaded.deps;
+    deps.push(import::settings_path(path));
+    Ok((model, deps))
 }
 
 /// The files a model reads besides itself (external buffers, textures, the
@@ -297,11 +311,16 @@ pub fn dependencies(path: &Path) -> Vec<PathBuf> {
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase)
         .unwrap_or_default();
-    match ext.as_str() {
+    let mut deps = match ext.as_str() {
         "gltf" | "glb" => gltf::references(path, &bytes),
         "obj" => obj::references(path, &bytes),
         _ => Vec::new(),
+    };
+    let settings = import::settings_path(path);
+    if settings.is_file() {
+        deps.push(settings);
     }
+    deps
 }
 
 // ---------------------------------------------------------------------------
