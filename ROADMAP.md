@@ -53,6 +53,20 @@ lights, Ultra and Beautiful the 4 nearest (six-face shadow cubes, 384 /
 (`glow_shadows=`, scene `Surface`, Oberon). Spotlight shadows move to A3,
 together with spotlights.
 
+**Performance fix (after A3).** A4–A3 had made every preset slower, Low
+and Medium included, because they all ran one forward shader carrying all
+the shadow code. The forward path now has one entry point per mix of
+shadows a frame samples (none, sun, point lights, both), picked per frame:
+Low and Medium never compile point shadow code, and High skips it when no
+shadowed light is in view. Point shadow cube faces are cached and redrawn
+only when their light or the casters they see change (still scenes redraw
+none). The lookup is branch-free and matrix-free, skipped where a light is
+too faint to show, and takes one bilinear compare on High (2x2 on Ultra,
+8 taps on Beautiful). Software-GPU timings (1280×720, best run, ms):
+Low back to its pre-A4 cost (Coin Run 315 before A4, 765 at A3, 340 now;
+Lagoon 876 → 1350 → 876), Night Lights High 851 → 777, Ultra 1117 → 854,
+Beautiful 1808 → 1432.
+
 ### A1. Shadows I: crisp sun shadows on High and Ultra ✅
 Sun shadows are split into cascades: 2 on High and 3 on Ultra (2048 px each), plus
 Beautiful's 4. Cascades cross-fade at their edges and fade out at the

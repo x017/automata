@@ -179,7 +179,7 @@ struct WaterShade {
     foam_noise: f32,
 };
 
-fn water_shade(in: VertexOutput, shadow: f32) -> WaterShade {
+fn water_shade(in: VertexOutput, shadow: f32, point_shadows: bool) -> WaterShade {
     var out: WaterShade;
     let world = in.world_position;
     let to_cam = camera.view_pos.xyz - world;
@@ -236,8 +236,9 @@ fn water_shade(in: VertexOutput, shadow: f32) -> WaterShade {
         if !any(p.radiance > vec3<f32>(0.0)) {
             continue;
         }
-        let blocked = point_shadow(i, world, vec3<f32>(0.0, 1.0, 0.0));
-        p.radiance = p.radiance * blocked;
+        if point_shadows && max(p.radiance.r, max(p.radiance.g, p.radiance.b)) > POINT_SHADOW_VISIBLE {
+            p.radiance = p.radiance * point_shadow(i, world, vec3<f32>(0.0, 1.0, 0.0));
+        }
         let pl = max(dot(n, p.l), 0.0);
         point_body = point_body + p.radiance * max(p.l.y, 0.0);
         if pl > 0.0 {
@@ -262,14 +263,38 @@ fn water_shade(in: VertexOutput, shadow: f32) -> WaterShade {
     return out;
 }
 
-// Forward path: blends over the scene; grazing views reflect fully.
-@fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let shadow = water_shadow(in.world_position);
-    let w = water_shade(in, shadow);
+// Forward path: blends over the scene; grazing views reflect fully. Like
+// the meshes, one entry point per mix of shadows sampled (the flags are
+// constants, so each compiles only its own lookups).
+fn forward(in: VertexOutput, sun_shadows: bool, point_shadows: bool) -> vec4<f32> {
+    var shadow = 1.0;
+    if sun_shadows {
+        shadow = water_shadow(in.world_position);
+    }
+    let w = water_shade(in, shadow, point_shadows);
     let color = mix(w.body, w.reflection, w.fresnel) + w.glint;
     let alpha = mix(0.8, 1.0, w.fresnel);
     return vec4<f32>(finish_forward(apply_fog(color, in.world_position)), alpha);
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return forward(in, true, true);
+}
+
+@fragment
+fn fs_sun_shadows(in: VertexOutput) -> @location(0) vec4<f32> {
+    return forward(in, true, false);
+}
+
+@fragment
+fn fs_point_shadows(in: VertexOutput) -> @location(0) vec4<f32> {
+    return forward(in, false, true);
+}
+
+@fragment
+fn fs_unshadowed(in: VertexOutput) -> @location(0) vec4<f32> {
+    return forward(in, false, false);
 }
 
 // Beautiful: refraction through the water column (from copies of the HDR
@@ -278,7 +303,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 fn fs_refract(in: VertexOutput) -> @location(0) vec4<f32> {
     let world = in.world_position;
     let shadow = water_shadow_soft(world, in.clip_position.xy);
-    let w = water_shade(in, shadow);
+    let w = water_shade(in, shadow, true);
     let n = w.n;
     let t = water.params.z;
     let size = light.screen.xy;

@@ -446,6 +446,9 @@ pub(crate) struct FrameView {
     pub time: f32,
     /// Beautiful preset: PBR lighting, soft shadows, HDR output.
     pub beautiful: bool,
+    /// Depth compares per pixel per shadowed point light (see
+    /// [`GraphicsQuality::point_shadow_taps`](crate::GraphicsQuality::point_shadow_taps)).
+    pub point_shadow_taps: u32,
 }
 
 impl Default for FrameView {
@@ -456,6 +459,7 @@ impl Default for FrameView {
             background: [0.0; 3],
             time: 0.0,
             beautiful: false,
+            point_shadow_taps: 4,
         }
     }
 }
@@ -523,7 +527,7 @@ impl LightUniform {
         let point_count = point_lights.len().min(MAX_POINT_LIGHTS) as f32;
         let point_shadow = [
             1.0 / point_map_size.max(1) as f32,
-            f32::from(u8::from(frame.beautiful)),
+            frame.point_shadow_taps as f32,
             (POINT_SHADOW_FOV_DEGREES * 0.5).to_radians().tan(),
             // Ambient occlusion strength (Beautiful only).
             if frame.beautiful {
@@ -729,6 +733,134 @@ mod tests {
             u.point_faces[6],
             PointShadow::for_light(&dark).faces[0].to_cols_array()
         );
+    }
+
+    /// common.wgsl's `point_shadow_coords` for a point light, without the
+    /// normal offset: the face's (ndc x, ndc y, depth) and layer offset.
+    fn shader_face_projection(d: Vec3, near: f32, far: f32) -> (Vec3, usize) {
+        let a = d.abs();
+        let (face, forward_axis, right, up) = if a.x >= a.y && a.x >= a.z {
+            let sx = d.x.signum();
+            (usize::from(d.x <= 0.0), Vec3::X * sx, Vec3::Z * sx, Vec3::Y)
+        } else if a.y >= a.z {
+            let sy = d.y.signum();
+            (
+                2 + usize::from(d.y <= 0.0),
+                Vec3::Y * sy,
+                Vec3::X * sy,
+                Vec3::Z,
+            )
+        } else {
+            let sz = d.z.signum();
+            (
+                4 + usize::from(d.z <= 0.0),
+                Vec3::Z * sz,
+                Vec3::X * -sz,
+                Vec3::Y,
+            )
+        };
+        let half_tan = (POINT_SHADOW_FOV_DEGREES * 0.5).to_radians().tan();
+        let forward = d.dot(forward_axis);
+        let x = d.dot(right) / (forward * half_tan);
+        let y = d.dot(up) / (forward * half_tan);
+        let depth = far * (forward - near) / ((far - near) * forward);
+        (Vec3::new(x, y, depth), face)
+    }
+
+    #[test]
+    fn shader_face_projection_matches_the_shadow_pass_matrices() {
+        let light = PointLight {
+            range: 12.0,
+            radius: 0.2,
+            ..PointLight::new(Vec3::new(1.0, 2.0, -3.0), [1.0; 3])
+        };
+        let s = PointShadow::for_light(&light);
+        let mut checked = 0;
+        for x in -3..=3 {
+            for y in -3..=3 {
+                for z in -3..=3 {
+                    #[allow(clippy::cast_precision_loss)] // small integers
+                    let d = Vec3::new(
+                        x as f32 * 0.7 + 0.11,
+                        y as f32 * 0.9 - 0.07,
+                        z as f32 * 1.1 + 0.03,
+                    );
+                    let (analytic, face) = shader_face_projection(d, s.near, s.far);
+                    let clip = s.faces[face] * (light.position + d).extend(1.0);
+                    let ndc = clip.truncate() / clip.w;
+                    assert!(
+                        (analytic - ndc).abs().max_element() < 1e-4,
+                        "{d:?} face {face}: {analytic:?} vs {ndc:?}"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert_eq!(checked, 343);
+    }
+
+    /// common.wgsl's spot view: tan of its half field of view from the
+    /// packed cone (no acos/tan), and its axes.
+    fn shader_spot_view(packed: &[f32; 16]) -> (f32, Vec3, Vec3, Vec3) {
+        let axis = Vec3::new(packed[12], packed[13], packed[14]);
+        let cos_edge = (-packed[11] / packed[15].max(1e-6)).clamp(0.05, 1.0);
+        let tan_edge = (1.0 - cos_edge * cos_edge).sqrt() / cos_edge;
+        let tan_margin = 0.069_926_8;
+        let denom = 1.0 - tan_edge * tan_margin;
+        let tan_max = 11.430_052;
+        let half_tan = if denom > 1e-3 {
+            ((tan_edge + tan_margin) / denom).min(tan_max)
+        } else {
+            tan_max
+        };
+        let up0 = if axis.y.abs() > 0.99 {
+            Vec3::Z
+        } else {
+            Vec3::Y
+        };
+        let right = axis.cross(up0).normalize();
+        (half_tan, axis, right, right.cross(axis))
+    }
+
+    #[test]
+    fn shader_spot_view_matches_the_shadow_pass_matrix() {
+        for (dir, outer) in [
+            (Vec3::NEG_Y, 30.0),
+            (Vec3::new(1.0, -0.5, 0.3), 55.0),
+            (Vec3::new(0.0, 0.2, -1.0), 80.0),
+            (Vec3::Y, 10.0),
+        ] {
+            let spot = PointLight {
+                range: 9.0,
+                ..PointLight::spot(Vec3::new(0.5, 3.0, -1.0), dir, [1.0; 3], outer)
+            };
+            let view = PointShadow::for_light(&spot);
+            let packed = spot.packed(Some((0, &view)));
+            let (half_tan, axis, right, up) = shader_spot_view(&packed);
+            let expected = spot.spot.unwrap().shadow_half_fov().tan();
+            assert!(
+                (half_tan - expected).abs() < 1e-4 * expected,
+                "{outer}: {half_tan} vs {expected}"
+            );
+            for d in [
+                axis * 2.0 + right * 0.3,
+                axis * 5.0 - up * 0.8 + right * 0.5,
+                axis * 0.7,
+            ] {
+                let forward = d.dot(axis);
+                let analytic = Vec3::new(
+                    d.dot(right) / (forward * half_tan),
+                    d.dot(up) / (forward * half_tan),
+                    view.far * (forward - view.near) / ((view.far - view.near) * forward),
+                );
+                let clip = view.faces[0] * (spot.position + d).extend(1.0);
+                let ndc = clip.truncate() / clip.w;
+                assert!(
+                    (analytic - ndc).abs().max_element() < 1e-3,
+                    "{outer} {d:?}: {analytic:?} vs {ndc:?}"
+                );
+            }
+        }
     }
 
     #[test]

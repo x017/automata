@@ -1,7 +1,12 @@
 // Mesh shader. Prepended at build time: tonemap.wgsl and common.wgsl (camera
 // and light bindings, shadows, sky, PBR, fog, tone mapping).
 //
-// Two fragment entry points: `fs_main` (forward path) and `fs_beautiful`.
+// Fragment entry points: four for the forward path, one per mix of the
+// shadows a frame samples (`fs_main` sun and point light shadows,
+// `fs_sun_shadows`, `fs_point_shadows`, `fs_unshadowed`), and
+// `fs_beautiful`. Shadow code that never runs still costs (registers, and
+// software rasterizers walk it for every pixel), so each variant compiles
+// only what it samples.
 //
 // Bind groups:
 //   0 — camera (common.wgsl)
@@ -152,7 +157,7 @@ fn surface(in: VertexOutput) -> Surface {
 // tightens and brightens as roughness drops (the default roughness gives
 // the engine's original pow-32 highlight), metals tinting it and losing
 // their diffuse, and sky reflections on metals and polished surfaces.
-fn shade_forward(s: Surface, shadow: f32) -> vec3<f32> {
+fn shade_forward(s: Surface, shadow: f32, point_shadows: bool) -> vec3<f32> {
     let h = normalize(s.l + s.v);
     let diffuse = max(dot(s.n, s.l), 0.0);
     let shininess = exp2(11.0 - 10.0 * s.roughness);
@@ -171,7 +176,13 @@ fn shade_forward(s: Surface, shadow: f32) -> vec3<f32> {
         if ndotl > 0.0 && any(p.radiance > vec3<f32>(0.0)) {
             let hp = normalize(p.l + s.v);
             let spec = pow(max(dot(s.n, hp), 1e-5), shininess) * spec_color;
-            lit = lit + (albedo + spec) * p.radiance * ndotl * point_shadow(i, s.p, s.n);
+            var light_in = (albedo + spec) * p.radiance * ndotl;
+            // Shadows only where the light shows: in its faint outer reach
+            // the lookup would cost more than it could change.
+            if point_shadows && max(light_in.r, max(light_in.g, light_in.b)) > POINT_SHADOW_VISIBLE {
+                light_in = light_in * point_shadow(i, s.p, s.n);
+            }
+            lit = lit + light_in;
         }
     }
     // Default (rough, non-metal) surfaces stay matte, as before.
@@ -184,14 +195,41 @@ fn shade_forward(s: Surface, shadow: f32) -> vec3<f32> {
     return lit + s.emissive;
 }
 
-// Forward path: Blinn-Phong sun and point lights, 3x3 PCF shadows, hemispheric ambient, fog,
-// tone mapping.
+// Forward path: Blinn-Phong sun and point lights, filtered shadows,
+// hemispheric ambient, fog, tone mapping. The flags are constants in each
+// entry point, so the compiler drops the shadow lookups a variant skips.
+fn forward(in: VertexOutput, sun_shadows: bool, point_shadows: bool) -> vec4<f32> {
+    let s = surface(in);
+    var shadow = 1.0;
+    if sun_shadows {
+        shadow = shadow_forward(in.world_position, s.n, s.l);
+    }
+    let lit = shade_forward(s, shadow, point_shadows);
+    return vec4<f32>(finish_forward(apply_fog(lit, in.world_position)), s.base.a);
+}
+
+// Sun and point light shadows (High and up, when both cast).
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let s = surface(in);
-    let shadow = shadow_forward(in.world_position, s.n, s.l);
-    let lit = shade_forward(s, shadow);
-    return vec4<f32>(finish_forward(apply_fog(lit, in.world_position)), s.base.a);
+    return forward(in, true, true);
+}
+
+// Sun shadows only (Medium; higher presets without shadowed point lights).
+@fragment
+fn fs_sun_shadows(in: VertexOutput) -> @location(0) vec4<f32> {
+    return forward(in, true, false);
+}
+
+// Point light shadows only (a sun without shadows, or none).
+@fragment
+fn fs_point_shadows(in: VertexOutput) -> @location(0) vec4<f32> {
+    return forward(in, false, true);
+}
+
+// No shadows (Low, or nothing casts any).
+@fragment
+fn fs_unshadowed(in: VertexOutput) -> @location(0) vec4<f32> {
+    return forward(in, false, false);
 }
 
 // Beautiful's screen-space occlusion (ssao.wgsl), half resolution: r

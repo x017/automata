@@ -63,6 +63,17 @@ struct PreparedFrame {
     water_binds: Vec<(wgpu::BindGroup, u32)>,
 }
 
+impl PreparedFrame {
+    /// The shadows the forward path samples this frame: the sun's when it
+    /// renders them, point lights' when any got a shadow slot.
+    fn forward_shadows(&self) -> pipeline::ForwardShadows {
+        pipeline::ForwardShadows {
+            sun: self.render_shadows,
+            points: self.points.iter().any(|p| p.shadow.is_some()),
+        }
+    }
+}
+
 /// A complete renderer: GPU context, pipelines, and resource factories.
 ///
 /// Construct with [`Renderer::new`] for windowed use; the application engine
@@ -72,7 +83,10 @@ pub struct Renderer {
     ctx: RenderContext,
     shared: PipelineShared,
     sprite_pipeline: wgpu::RenderPipeline,
-    mesh_pipeline: pipeline::PipelinePair,
+    /// Forward-path mesh pipelines by target format and the shadows they
+    /// sample: every mix the preset can use, so a frame switching between
+    /// them (a shadowed lamp coming into view) never waits on a compile.
+    forward_pipelines: Vec<ForwardPipelines>,
     shadow_pipeline: pipeline::PipelinePair,
     sprite_batch: SpriteBatch,
     white_texture: Texture,
@@ -96,11 +110,20 @@ pub struct Renderer {
     /// Point light shadow cubes: six layers per shadowed light (one 1×1
     /// stand-in layer when the preset shadows none).
     point_shadows: DepthArray,
+    /// What each point shadow layer last rendered (a hash of its view and
+    /// the casters it saw), so unchanged faces aren't drawn again.
+    point_shadow_keys: Vec<Option<u64>>,
     quality: GraphicsQuality,
     /// The unit grid water surfaces draw with (built on first use).
     water_mesh: Option<Mesh>,
-    /// Water pipelines by target format and refraction (Beautiful).
-    water_pipelines: Vec<(wgpu::TextureFormat, bool, wgpu::RenderPipeline)>,
+    /// Water pipelines by target format, refraction (Beautiful) and the
+    /// shadows they sample (forward path; refraction samples all).
+    water_pipelines: Vec<(
+        wgpu::TextureFormat,
+        bool,
+        pipeline::ForwardShadows,
+        wgpu::RenderPipeline,
+    )>,
     /// Sky dome pipelines per color format (built on first use).
     sky_pipelines: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
     /// Mesh pipelines targeting the HDR scene (Beautiful), built lazily.
@@ -117,10 +140,11 @@ pub struct Renderer {
     clock: std::time::Instant,
     /// Scratch buffer for CPU->surface frame blits (reused across frames).
     blit_scratch: Vec<u8>,
-    /// `(mesh, sprite)` pipelines targeting [`OFFSCREEN_FORMAT`], built lazily
-    /// when it differs from the surface format. Lets a windowed renderer also
-    /// draw into offscreen targets on the same device (Oberon's viewport).
-    offscreen_pipelines: Option<(pipeline::PipelinePair, wgpu::RenderPipeline)>,
+    /// The sprite pipeline targeting [`OFFSCREEN_FORMAT`], built lazily when
+    /// it differs from the surface format (meshes get theirs in
+    /// `forward_pipelines`). Lets a windowed renderer also draw into
+    /// offscreen targets on the same device (Oberon's viewport).
+    offscreen_sprite_pipeline: Option<wgpu::RenderPipeline>,
     /// Depth buffer for offscreen targets whose size differs from the
     /// surface's, cached by size.
     offscreen_depth: Option<((u32, u32), wgpu::Texture)>,
@@ -173,8 +197,8 @@ impl Renderer {
         let device = ctx.device();
         let shared = PipelineShared::new(device);
         let sprite_pipeline = pipeline::create_sprite_pipeline(device, &shared, ctx.format());
-        let mesh_pipeline =
-            pipeline::create_mesh_pipelines(device, &shared, ctx.format(), DEPTH_FORMAT);
+        let forward_pipelines =
+            create_forward_pipelines(device, &shared, ctx.format(), quality, &[]);
         let sprite_batch = SpriteBatch::new(device);
         let white_texture = Texture::from_rgba(
             device,
@@ -227,7 +251,7 @@ impl Renderer {
         Self {
             shared,
             sprite_pipeline,
-            mesh_pipeline,
+            forward_pipelines,
             shadow_pipeline,
             sprite_batch,
             white_texture,
@@ -243,6 +267,7 @@ impl Renderer {
             shadow_map_size: quality.shadow_map_size(),
             shadows_enabled: quality.shadows_enabled(),
             point_shadows,
+            point_shadow_keys: Vec::new(),
             quality,
             water_mesh: None,
             water_pipelines: Vec::new(),
@@ -254,7 +279,7 @@ impl Renderer {
             scene_placeholder,
             clock: std::time::Instant::now(),
             blit_scratch: Vec::new(),
-            offscreen_pipelines: None,
+            offscreen_sprite_pipeline: None,
             offscreen_depth: None,
             compositor,
             ctx,
@@ -291,7 +316,13 @@ impl Renderer {
             || self.point_shadows.views.len() != DepthArray::point_layers(quality)
         {
             self.point_shadows = DepthArray::for_point_shadows(self.ctx.device(), quality);
+            self.point_shadow_keys.clear();
         }
+        // Pipelines for shadow mixes the new preset never samples go.
+        let mixes = pipeline::ForwardShadows::for_quality(quality);
+        self.forward_pipelines.retain(|(_, s, _)| mixes.contains(s));
+        self.water_pipelines
+            .retain(|(_, refract, s, _)| *refract || mixes.contains(s));
         if !quality.is_beautiful() {
             self.post.release();
             self.ssao.release();
@@ -609,16 +640,10 @@ impl Renderer {
     /// format differs) and a depth buffer matching `size` (only when it
     /// differs from the surface size).
     fn ensure_offscreen_resources(&mut self, size: (u32, u32)) {
-        if self.ctx.format() != OFFSCREEN_FORMAT && self.offscreen_pipelines.is_none() {
-            let device = self.ctx.device();
-            let mesh = pipeline::create_mesh_pipelines(
-                device,
-                &self.shared,
-                OFFSCREEN_FORMAT,
-                DEPTH_FORMAT,
-            );
-            let sprite = pipeline::create_sprite_pipeline(device, &self.shared, OFFSCREEN_FORMAT);
-            self.offscreen_pipelines = Some((mesh, sprite));
+        if self.ctx.format() != OFFSCREEN_FORMAT && self.offscreen_sprite_pipeline.is_none() {
+            let sprite =
+                pipeline::create_sprite_pipeline(self.ctx.device(), &self.shared, OFFSCREEN_FORMAT);
+            self.offscreen_sprite_pipeline = Some(sprite);
         }
         let cached = self.offscreen_depth.as_ref().map(|(s, _)| *s);
         if size != self.ctx.size() && cached != Some(size) {
@@ -938,8 +963,9 @@ impl Renderer {
         if prepared.render_shadows {
             self.record_shadow_passes(&mut encoder, draw, &prepared);
         }
-        // --- and six per shadowed point light ---
-        self.record_point_shadow_passes(&mut encoder, draw, &prepared);
+        // --- and six per shadowed point light (those that changed) ---
+        let stale = self.stale_point_shadow_layers(draw, &prepared);
+        self.record_point_shadow_passes(&mut encoder, draw, &prepared, &stale);
 
         // The view borrows the surface texture only for the scope of the
         // passes; present() takes it by value afterwards.
@@ -1018,6 +1044,7 @@ impl Renderer {
                     &self.shared,
                     pipeline::HDR_FORMAT,
                     pipeline::HDR_DEPTH_FORMAT,
+                    pipeline::ForwardShadows::ALL,
                 ));
             }
         }
@@ -1032,25 +1059,47 @@ impl Renderer {
                 self.sky_pipelines.push((sky_format, p));
             }
         }
+        if !beautiful {
+            let missing = create_forward_pipelines(
+                device,
+                &self.shared,
+                format,
+                self.quality,
+                &self.forward_pipelines,
+            );
+            self.forward_pipelines.extend(missing);
+        }
         if !draw.waters.is_empty() {
-            let (water_format, depth) = if beautiful {
-                (pipeline::HDR_FORMAT, pipeline::HDR_DEPTH_FORMAT)
+            let (water_format, depth, mixes) = if beautiful {
+                (
+                    pipeline::HDR_FORMAT,
+                    pipeline::HDR_DEPTH_FORMAT,
+                    vec![pipeline::ForwardShadows::ALL],
+                )
             } else {
-                (format, DEPTH_FORMAT)
+                (
+                    format,
+                    DEPTH_FORMAT,
+                    pipeline::ForwardShadows::for_quality(self.quality),
+                )
             };
-            let exists = self
-                .water_pipelines
-                .iter()
-                .any(|(f, r, _)| *f == water_format && *r == beautiful);
-            if !exists {
-                let p = pipeline::create_water_pipeline(
-                    device,
-                    &self.shared,
-                    water_format,
-                    depth,
-                    beautiful,
-                );
-                self.water_pipelines.push((water_format, beautiful, p));
+            for shadows in mixes {
+                let exists = self
+                    .water_pipelines
+                    .iter()
+                    .any(|(f, r, s, _)| *f == water_format && *r == beautiful && *s == shadows);
+                if !exists {
+                    let p = pipeline::create_water_pipeline(
+                        device,
+                        &self.shared,
+                        water_format,
+                        depth,
+                        beautiful,
+                        shadows,
+                    );
+                    self.water_pipelines
+                        .push((water_format, beautiful, shadows, p));
+                }
             }
         }
     }
@@ -1080,10 +1129,23 @@ impl Renderer {
         &self,
         format: wgpu::TextureFormat,
         refract: bool,
+        shadows: pipeline::ForwardShadows,
     ) -> Option<&wgpu::RenderPipeline> {
         self.water_pipelines
             .iter()
-            .find(|(f, r, _)| *f == format && *r == refract)
+            .find(|(f, r, s, _)| *f == format && *r == refract && *s == shadows)
+            .map(|(_, _, _, p)| p)
+    }
+
+    /// The forward-path mesh pipelines for `format` sampling `shadows`.
+    fn forward_pipeline(
+        &self,
+        format: wgpu::TextureFormat,
+        shadows: pipeline::ForwardShadows,
+    ) -> Option<&pipeline::PipelinePair> {
+        self.forward_pipelines
+            .iter()
+            .find(|(f, s, _)| *f == format && *s == shadows)
             .map(|(_, _, p)| p)
     }
 
@@ -1100,10 +1162,13 @@ impl Renderer {
         format: wgpu::TextureFormat,
         offscreen: bool,
     ) {
-        // Offscreen targets use pipelines built for their color format.
-        let (mesh_pipeline, sprite_pipeline) = match &self.offscreen_pipelines {
-            Some((mesh, sprite)) if offscreen => (mesh, sprite),
-            _ => (&self.mesh_pipeline, &self.sprite_pipeline),
+        // Offscreen targets use pipelines built for their color format, and
+        // only the shadow lookups this frame needs.
+        let shadows = prepared.forward_shadows();
+        let mesh_pipeline = self.forward_pipeline(format, shadows);
+        let sprite_pipeline = match &self.offscreen_sprite_pipeline {
+            Some(sprite) if offscreen => sprite,
+            _ => &self.sprite_pipeline,
         };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("main"),
@@ -1126,17 +1191,19 @@ impl Renderer {
             }),
             ..wgpu::RenderPassDescriptor::default()
         });
-        Self::record_meshes(
-            &mut pass,
-            draw,
-            prepared,
-            mesh_pipeline,
-            &prepared.light_bind,
-        );
+        if let Some(mesh_pipeline) = mesh_pipeline {
+            Self::record_meshes(
+                &mut pass,
+                draw,
+                prepared,
+                mesh_pipeline,
+                &prepared.light_bind,
+            );
+        }
         if depth_view.is_some() {
             self.record_sky(&mut pass, draw, prepared, format);
         }
-        if let Some(water) = self.water_pipeline(format, false) {
+        if let Some(water) = self.water_pipeline(format, false, shadows) {
             self.record_waters(&mut pass, prepared, water, &self.scene_placeholder);
         }
         self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
@@ -1170,7 +1237,7 @@ impl Renderer {
             .depth
             .create_view(&wgpu::TextureViewDescriptor::default());
         let water = self
-            .water_pipeline(pipeline::HDR_FORMAT, true)
+            .water_pipeline(pipeline::HDR_FORMAT, true, pipeline::ForwardShadows::ALL)
             .filter(|_| !draw.waters.is_empty());
         self.record_occlusion(encoder, draw, prepared);
         {
@@ -1292,10 +1359,8 @@ impl Renderer {
         );
 
         // Final: FXAA into the target, then sprites on top.
-        let sprite_pipeline = match &self.offscreen_pipelines {
-            Some((_, sprite)) if format == OFFSCREEN_FORMAT && format != self.ctx.format() => {
-                sprite
-            }
+        let sprite_pipeline = match &self.offscreen_sprite_pipeline {
+            Some(sprite) if format == OFFSCREEN_FORMAT && format != self.ctx.format() => sprite,
             _ => &self.sprite_pipeline,
         };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1589,6 +1654,7 @@ impl Renderer {
             background,
             time,
             beautiful,
+            point_shadow_taps: self.quality.point_shadow_taps(),
         };
         let points = frame_point_lights(
             draw,
@@ -1748,20 +1814,57 @@ impl Renderer {
         }
     }
 
-    /// Records the point lights' shadow cubes: per shadowed light and face,
-    /// every mesh in range inside the face's view, except the one the light
-    /// glows from (its own surface would block all its light).
+    /// Which point shadow layers need drawing this frame: those whose view
+    /// or casters (meshes, their transforms and poses) differ from what the
+    /// layer holds. Lamps and glowing props mostly sit still among still
+    /// scenery, so most frames redraw none; something moving near a light
+    /// redraws only the faces that see it.
+    fn stale_point_shadow_layers(
+        &mut self,
+        draw: &DrawList,
+        prepared: &PreparedFrame,
+    ) -> Vec<bool> {
+        let layers = self.point_shadows.views.len();
+        self.point_shadow_keys.resize(layers, None);
+        let mut stale = vec![false; layers];
+        for point in &prepared.points {
+            let Some((first, view)) = &point.shadow else {
+                continue;
+            };
+            for (face, vp) in view.faces.iter().take(view.count).enumerate() {
+                let layer = first + face;
+                if layer >= layers {
+                    continue;
+                }
+                let key = point_face_key(draw, prepared, point, face, vp);
+                if self.point_shadow_keys[layer] != Some(key) {
+                    self.point_shadow_keys[layer] = Some(key);
+                    stale[layer] = true;
+                }
+            }
+        }
+        stale
+    }
+
+    /// Records the point lights' shadow cubes: per shadowed light and
+    /// `stale` face, every mesh in range inside the face's view, except the
+    /// one the light glows from (its own surface would block all its
+    /// light).
     fn record_point_shadow_passes(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         draw: &DrawList,
         prepared: &PreparedFrame,
+        stale: &[bool],
     ) {
         for point in &prepared.points {
             let Some((first, view)) = &point.shadow else {
                 continue;
             };
             for (face, vp) in view.faces.iter().take(view.count).enumerate() {
+                if !stale.get(first + face).copied().unwrap_or(false) {
+                    continue;
+                }
                 let Some(layer_view) = self.point_shadows.views.get(first + face) else {
                     continue;
                 };
@@ -1784,24 +1887,8 @@ impl Renderer {
                     ..wgpu::RenderPassDescriptor::default()
                 });
                 let mut current: Option<bool> = None;
-                let draws = draw
-                    .meshes
-                    .iter()
-                    .zip(&prepared.model_bind_groups)
-                    .zip(&prepared.mesh_spheres)
-                    .enumerate();
-                for (i, ((mesh_draw, model_bind), sphere)) in draws {
-                    if point.source == Some(i)
-                        || point.light.inside_fixture(sphere.center, sphere.radius)
-                        || !crate::light::PointShadow::light_face_sees(
-                            &point.light,
-                            face,
-                            sphere.center,
-                            sphere.radius,
-                        )
-                    {
-                        continue;
-                    }
+                for i in face_casters(prepared, point, face) {
+                    let (mesh_draw, model_bind) = (&draw.meshes[i], &prepared.model_bind_groups[i]);
                     let skinned = mesh_draw.joints.is_some();
                     if current != Some(skinned) {
                         pass.set_pipeline(self.shadow_pipeline.get(skinned));
@@ -1980,6 +2067,90 @@ impl ShadowResources {
             layer_views,
         }
     }
+}
+
+/// The meshes (by draw index) that point light `point`'s shadow face
+/// `face` draws: those its view sees, leaving out the light's own glowing
+/// body and fixtures wrapped around it.
+fn face_casters<'a>(
+    prepared: &'a PreparedFrame,
+    point: &'a crate::light::FramePoint,
+    face: usize,
+) -> impl Iterator<Item = usize> + 'a {
+    prepared
+        .mesh_spheres
+        .iter()
+        .enumerate()
+        .filter(move |(i, sphere)| {
+            point.source != Some(*i)
+                && !point.light.inside_fixture(sphere.center, sphere.radius)
+                && crate::light::PointShadow::light_face_sees(
+                    &point.light,
+                    face,
+                    sphere.center,
+                    sphere.radius,
+                )
+        })
+        .map(|(i, _)| i)
+}
+
+/// A hash of what a point shadow face renders: its view and every caster
+/// it draws (mesh, transform, pose). Equal keys draw identical depth.
+fn point_face_key(
+    draw: &DrawList,
+    prepared: &PreparedFrame,
+    point: &crate::light::FramePoint,
+    face: usize,
+    view_proj: &glam::Mat4,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let bits = |m: &glam::Mat4, h: &mut std::collections::hash_map::DefaultHasher| {
+        for v in m.to_cols_array() {
+            v.to_bits().hash(h);
+        }
+    };
+    bits(view_proj, &mut h);
+    for i in face_casters(prepared, point, face) {
+        let m = &draw.meshes[i];
+        i.hash(&mut h);
+        std::sync::Arc::as_ptr(&m.mesh.inner).hash(&mut h);
+        m.mesh.inner.index_count.hash(&mut h);
+        bits(&m.model, &mut h);
+        if let Some(joints) = &m.joints {
+            for j in joints.iter() {
+                bits(j, &mut h);
+            }
+        }
+    }
+    h.finish()
+}
+
+/// Forward-path mesh pipelines: their target format, the shadows they
+/// sample, and the plain and skinned pipelines.
+type ForwardPipelines = (
+    wgpu::TextureFormat,
+    pipeline::ForwardShadows,
+    pipeline::PipelinePair,
+);
+
+/// The forward-path mesh pipelines for `format` that `quality`'s frames can
+/// use and `existing` lacks.
+fn create_forward_pipelines(
+    device: &wgpu::Device,
+    shared: &PipelineShared,
+    format: wgpu::TextureFormat,
+    quality: GraphicsQuality,
+    existing: &[ForwardPipelines],
+) -> Vec<ForwardPipelines> {
+    pipeline::ForwardShadows::for_quality(quality)
+        .into_iter()
+        .filter(|s| !existing.iter().any(|(f, e, _)| *f == format && e == s))
+        .map(|s| {
+            let pair = pipeline::create_mesh_pipelines(device, shared, format, DEPTH_FORMAT, s);
+            (format, s, pair)
+        })
+        .collect()
 }
 
 /// The scene bindings forward-path water uses: 1x1 stand-ins (blended
@@ -3213,6 +3384,108 @@ mod tests {
         }
         renderer.render_offscreen(&draw, &target);
         center_pixel(&read_pixels(renderer, &target, size), size)
+    }
+
+    /// A glowing lamp beside a cube, with another cube at `blocker`.
+    fn lamp_scene(renderer: &Renderer, blocker: glam::Vec3) -> DrawList {
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let grey = renderer.create_pbr_material(
+            &crate::MaterialParams::with_color([0.5, 0.5, 0.5, 1.0]),
+            crate::MaterialTextures::default(),
+        );
+        let lamp = renderer.create_pbr_material(
+            &crate::MaterialParams {
+                emissive: [6.0, 0.0, 0.0],
+                ..crate::MaterialParams::with_color([0.0, 0.0, 0.0, 1.0])
+            },
+            crate::MaterialTextures::default(),
+        );
+        let small = |at: glam::Vec3| {
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::splat(0.15),
+                glam::Quat::IDENTITY,
+                at,
+            )
+        };
+        let mut draw = DrawList::new();
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 0.0, 1.6),
+            glam::Vec3::ZERO,
+        ));
+        draw.set_sun(crate::Sun {
+            shadows: true,
+            ..crate::Sun::new(glam::Vec3::new(0.3, -1.0, -0.2))
+        });
+        draw.mesh(&cube, glam::Mat4::IDENTITY, &grey);
+        draw.mesh(&cube, small(glam::Vec3::new(0.5, 0.0, 1.1)), &lamp);
+        draw.mesh(&cube, small(blocker), &grey);
+        draw
+    }
+
+    #[test]
+    fn forward_frames_compile_only_the_shadows_they_sample() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping forward variant test");
+            return;
+        };
+        let draw = lamp_scene(&renderer, glam::Vec3::new(0.25, 0.0, 0.8));
+        let none = pipeline::ForwardShadows {
+            sun: false,
+            points: false,
+        };
+        let sun = pipeline::ForwardShadows {
+            sun: true,
+            points: false,
+        };
+        for (quality, expected) in [
+            (GraphicsQuality::Low, none),
+            (GraphicsQuality::Medium, sun),
+            (GraphicsQuality::High, pipeline::ForwardShadows::ALL),
+            (GraphicsQuality::Ultra, pipeline::ForwardShadows::ALL),
+        ] {
+            renderer.set_quality(quality);
+            let prepared = renderer.prepare_frame(&draw, (64, 64), false);
+            assert_eq!(prepared.forward_shadows(), expected, "{quality:?}");
+            // Low and Medium never build (or run) point shadow code.
+            let mixes = pipeline::ForwardShadows::for_quality(quality);
+            assert_eq!(mixes.iter().any(|m| m.points), quality.point_shadows() > 0);
+            assert_eq!(mixes.iter().any(|m| m.sun), quality.shadows_enabled());
+        }
+        // Without shadowed point lights in view, High skips their code too.
+        renderer.set_quality(GraphicsQuality::High);
+        let mut unlit = lamp_scene(&renderer, glam::Vec3::new(0.25, 0.0, 0.8));
+        unlit.meshes.truncate(1);
+        let prepared = renderer.prepare_frame(&unlit, (64, 64), false);
+        assert_eq!(prepared.forward_shadows(), sun);
+    }
+
+    #[test]
+    fn point_shadow_faces_redraw_only_when_what_they_see_changes() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping point shadow cache test");
+            return;
+        };
+        renderer.set_quality(GraphicsQuality::High);
+        let stale = |renderer: &mut Renderer, draw: &DrawList| {
+            let prepared = renderer.prepare_frame(draw, (64, 64), false);
+            renderer
+                .stale_point_shadow_layers(draw, &prepared)
+                .iter()
+                .filter(|s| **s)
+                .count()
+        };
+        let draw = lamp_scene(&renderer, glam::Vec3::new(0.25, 0.0, 0.8));
+        assert_eq!(stale(&mut renderer, &draw), 6, "first frame draws the cube");
+        assert_eq!(stale(&mut renderer, &draw), 0, "a still scene draws none");
+        // The blocker moves (still on the lamp's -X side, toward the
+        // camera): only the faces that see it before or after redraw.
+        let moved = lamp_scene(&renderer, glam::Vec3::new(0.25, 0.05, 0.85));
+        let redrawn = stale(&mut renderer, &moved);
+        assert!((1..6).contains(&redrawn), "{redrawn} faces redrawn");
+        assert_eq!(stale(&mut renderer, &moved), 0);
+        // A new preset's maps start empty: everything draws again.
+        renderer.set_quality(GraphicsQuality::Ultra);
+        assert_eq!(stale(&mut renderer, &moved), 6);
     }
 
     #[test]

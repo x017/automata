@@ -53,7 +53,7 @@ struct LightUniform {
     points: array<PointLightData, MAX_POINT_LIGHTS>,
     // Six views (+X, -X, +Y, -Y, +Z, -Z) per shadowed point light.
     point_faces: array<mat4x4<f32>, 24>,
-    point_shadow: vec4<f32>,   // x: texel (uv), y: soft (Beautiful), z: tan(face fov / 2), w: AO strength
+    point_shadow: vec4<f32>,   // x: texel (uv), y: taps (1, 4 or 8), z: tan(face fov / 2), w: AO strength
 };
 @group(3) @binding(0) var<uniform> light: LightUniform;
 @group(3) @binding(1) var shadow_map: texture_depth_2d_array;
@@ -304,61 +304,124 @@ fn point_light(i: u32, world: vec3<f32>) -> PointSample {
     return out;
 }
 
-// How much of point light `i` reaches `world` past the objects between
-// (1 lit, 0 blocked). Each shadowed point light renders six slightly wider
-// than 90° views; the direction's major axis picks one. A spotlight renders
-// one view down its cone. A normal offset of about a texel at that distance
-// keeps surfaces from shadowing themselves.
-fn point_shadow(i: u32, world: vec3<f32>, n: vec3<f32>) -> f32 {
+// Below this much light (about one 8-bit step), the forward path doesn't
+// look up a point light's shadow: it couldn't visibly change the pixel.
+const POINT_SHADOW_VISIBLE: f32 = 0.004;
+
+// tan(SPOT_SHADOW_MARGIN), and of the widest a spot's shadow view gets
+// (85°).
+const TAN_SPOT_SHADOW_MARGIN: f32 = 0.0699268;
+const TAN_SPOT_SHADOW_MAX: f32 = 11.430052;
+
+// Where `world` lands in point light `i`'s shadow map: (uv, layer, compare
+// depth), or layer < 0 when the light casts none. Each shadowed point light
+// renders six slightly wider than 90° views; the direction's major axis
+// picks one. A spotlight renders one view down its cone. A normal offset of
+// about a texel at that distance keeps surfaces from shadowing themselves.
+//
+// The view is worked out here rather than read from `point_faces`, and
+// without branches: which face a pixel picks varies across the screen, a
+// matrix fetched by a per-pixel index is a slow gather, and divergent
+// branches run both sides on many GPUs and software rasterizers. It must
+// match `PointShadow::for_light`.
+fn point_shadow_coords(i: u32, world: vec3<f32>, n: vec3<f32>) -> vec4<f32> {
     let p = light.points[i];
     let first = i32(p.shadow.x);
     if first < 0 {
-        return 1.0;
+        return vec4<f32>(0.0, 0.0, -1.0, 0.0);
     }
     let to_frag = world - p.position_range.xyz;
-    var face = 0;
-    var major = 0.0;
+    // A point light's face: along the major axis, looking with up +Y (+Z
+    // for the ±Y faces).
+    let a = abs(to_frag);
+    let s = select(vec3<f32>(-1.0), vec3<f32>(1.0), to_frag > vec3<f32>(0.0));
+    let on_x = a.x >= a.y && a.x >= a.z;
+    let on_y = !on_x && a.y >= a.z;
+    var forward_axis = select(
+        select(vec3<f32>(0.0, 0.0, s.z), vec3<f32>(0.0, s.y, 0.0), on_y),
+        vec3<f32>(s.x, 0.0, 0.0),
+        on_x,
+    );
+    var right = select(
+        select(vec3<f32>(-s.z, 0.0, 0.0), vec3<f32>(s.y, 0.0, 0.0), on_y),
+        vec3<f32>(0.0, 0.0, s.x),
+        on_x,
+    );
+    var up = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), on_y);
+    // +X, -X, +Y, -Y, +Z, -Z: the negative side is the odd layer.
+    let negative = dot(forward_axis, vec3<f32>(1.0)) < 0.0;
+    var face = select(select(4, 2, on_y), 0, on_x) + select(0, 1, negative);
     var half_tan = light.point_shadow.z;
-    if p.cone.w > 0.0 {
-        // The cone's edge is where cos * scale + offset = 0.
-        let edge = acos(clamp(-p.shadow.w / p.cone.w, -1.0, 1.0));
-        half_tan = tan(min(edge + SPOT_SHADOW_MARGIN, 1.4835));
-        major = max(dot(to_frag, p.cone.xyz), 0.0);
-    } else {
-        let a = abs(to_frag);
-        if a.x >= a.y && a.x >= a.z {
-            face = select(1, 0, to_frag.x > 0.0);
-        } else if a.y >= a.z {
-            face = select(3, 2, to_frag.y > 0.0);
-        } else {
-            face = select(5, 4, to_frag.z > 0.0);
-        }
-        major = max(a.x, max(a.y, a.z));
-    }
-    let texel_world = 2.0 * major * half_tan * light.point_shadow.x;
+    // A spotlight's one view, down its axis (up +Y, or +Z when it points
+    // nearly straight up or down); its half field of view is the cone's
+    // edge plus a margin: tan(a + b) from the cone's cosine.
+    let spot = p.cone.w > 0.0;
+    let axis = p.cone.xyz;
+    let spot_up0 = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), abs(axis.y) > 0.99);
+    let spot_side = cross(axis, spot_up0); // zero for point lights
+    let spot_right = spot_side * inverseSqrt(max(dot(spot_side, spot_side), 1e-12));
+    let cos_edge = clamp(-p.shadow.w / max(p.cone.w, 1e-6), 0.05, 1.0);
+    let tan_edge = sqrt(1.0 - cos_edge * cos_edge) / cos_edge;
+    let denom = 1.0 - tan_edge * TAN_SPOT_SHADOW_MARGIN;
+    let spot_tan = select(
+        TAN_SPOT_SHADOW_MAX,
+        min((tan_edge + TAN_SPOT_SHADOW_MARGIN) / denom, TAN_SPOT_SHADOW_MAX),
+        denom > 1e-3,
+    );
+    forward_axis = select(forward_axis, axis, spot);
+    right = select(right, spot_right, spot);
+    up = select(up, cross(spot_right, axis), spot);
+    face = select(face, 0, spot);
+    half_tan = select(half_tan, spot_tan, spot);
+
     let l = -to_frag * inverseSqrt(max(dot(to_frag, to_frag), 1e-8));
-    let offset = world + n * (texel_world * 1.5) + l * texel_world;
-    let layer = first + face;
-    let clip = light.point_faces[layer] * vec4<f32>(offset, 1.0);
-    let ndc = clip.xyz / clip.w;
-    let uv = clamp(ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
-    let texel = light.point_shadow.x;
-    if light.point_shadow.y > 0.5 {
-        // Beautiful: 8 filtered taps over ~3 texels.
-        var lit = 0.0;
-        for (var t = 0; t < 8; t = t + 1) {
-            lit = lit + textureSampleCompareLevel(point_shadow_map, shadow_sampler,
-                uv + POISSON[t] * texel * 1.5, layer, ndc.z);
-        }
-        return lit / 8.0;
+    let texel_world = 2.0 * max(dot(to_frag, forward_axis), 0.0) * half_tan * light.point_shadow.x;
+    let d = to_frag + n * (texel_world * 1.5) + l * texel_world;
+    let forward = max(dot(d, forward_axis), 1e-6);
+    let ndc = vec2<f32>(dot(d, right), dot(d, up)) / (forward * half_tan);
+    let uv = clamp(ndc * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
+    // Depth as the view's perspective (D3D-style, 0 at near) writes it.
+    let near = p.shadow.y;
+    let far = p.shadow.z;
+    let depth = far * (forward - near) / ((far - near) * forward);
+    return vec4<f32>(uv, f32(first + face), depth);
+}
+
+// Forward path: how much of point light `i` reaches `world` past the
+// objects between (1 lit, 0 blocked). High takes one bilinear compare,
+// Ultra a 2x2 box of them. (No constant-array lookups here: those copy the
+// whole array per call on some compilers, and this runs per light per
+// pixel.)
+fn point_shadow(i: u32, world: vec3<f32>, n: vec3<f32>) -> f32 {
+    let c = point_shadow_coords(i, world, n);
+    let layer = i32(c.z);
+    if layer < 0 {
+        return 1.0;
     }
-    // Forward path: 2x2 PCF.
+    if light.point_shadow.y < 1.5 {
+        return textureSampleCompareLevel(point_shadow_map, shadow_sampler, c.xy, layer, c.w);
+    }
+    let h = light.point_shadow.x * 0.5;
+    return (textureSampleCompareLevel(point_shadow_map, shadow_sampler, c.xy + vec2<f32>(-h, -h), layer, c.w)
+        + textureSampleCompareLevel(point_shadow_map, shadow_sampler, c.xy + vec2<f32>(h, -h), layer, c.w)
+        + textureSampleCompareLevel(point_shadow_map, shadow_sampler, c.xy + vec2<f32>(-h, h), layer, c.w)
+        + textureSampleCompareLevel(point_shadow_map, shadow_sampler, c.xy + vec2<f32>(h, h), layer, c.w)) * 0.25;
+}
+
+// Beautiful: 8 filtered taps over ~3 texels.
+fn point_shadow_soft(i: u32, world: vec3<f32>, n: vec3<f32>) -> f32 {
+    let c = point_shadow_coords(i, world, n);
+    let layer = i32(c.z);
+    if layer < 0 {
+        return 1.0;
+    }
+    let spread = light.point_shadow.x * 1.5;
     var lit = 0.0;
-    for (var t = 0; t < 4; t = t + 1) {
-        let o = vec2<f32>(f32(t & 1) - 0.5, f32(t >> 1u) - 0.5) * texel;
-        lit = lit + textureSampleCompareLevel(point_shadow_map, shadow_sampler, uv + o, layer, ndc.z);
+    for (var t = 0; t < 8; t = t + 1) {
+        lit = lit + textureSampleCompareLevel(point_shadow_map, shadow_sampler,
+            c.xy + POISSON[t] * spread, layer, c.w);
     }
-    return lit * 0.25;
+    return lit / 8.0;
 }
 
 // Hemispheric ambient: sky from above, ground from below.
@@ -521,7 +584,7 @@ fn points_pbr(
         let p = point_light(i, world);
         if dot(n, p.l) > 0.0 && any(p.radiance > vec3<f32>(0.0)) {
             sum = sum + brdf_direct(albedo, n, v, p.l, roughness, f0) * p.radiance
-                * point_shadow(i, world, n);
+                * point_shadow_soft(i, world, n);
         }
     }
     return sum;

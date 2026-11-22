@@ -74,6 +74,20 @@ impl GraphicsQuality {
         }
     }
 
+    /// Depth compares (each a bilinear 2x2) a pixel takes per shadowed
+    /// point light: one on High, a 2x2 box on Ultra, 8 Poisson taps on
+    /// Beautiful (none without point shadows). Point shadows are lit
+    /// across a lot of the screen, so this is most of their cost.
+    #[must_use]
+    pub fn point_shadow_taps(self) -> u32 {
+        match self {
+            Self::Low | Self::Medium => 0,
+            Self::High => 1,
+            Self::Ultra => 4,
+            Self::Beautiful => 8,
+        }
+    }
+
     /// Texels per side of each face of a point light's shadow cube.
     #[must_use]
     pub fn point_shadow_size(self) -> u32 {

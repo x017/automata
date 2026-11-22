@@ -4,6 +4,7 @@
 //! layout invariants are testable without a GPU device.
 
 use crate::mesh::{SkinVertex, Vertex};
+use crate::GraphicsQuality;
 use crate::SPRITE_VERTEX_CAPACITY;
 
 /// WGSL source of the 2D sprite shader.
@@ -452,28 +453,81 @@ impl PipelinePair {
     }
 }
 
-/// Both 3D mesh pipelines for the given color and depth formats.
+/// Which shadows a forward-path frame samples. Each mix has its own
+/// fragment entry point (in the mesh and water shaders) that compiles only
+/// those lookups: shadow code a frame never runs still costs registers on
+/// GPUs and per-pixel work on software rasterizers, so Low and Medium (and
+/// High scenes without shadowed point lights) skip it entirely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ForwardShadows {
+    /// The sun's cascaded shadow maps.
+    pub sun: bool,
+    /// Point light and spotlight shadow maps.
+    pub points: bool,
+}
+
+impl ForwardShadows {
+    /// Everything (and what Beautiful's pipelines always sample).
+    pub(crate) const ALL: Self = Self {
+        sun: true,
+        points: true,
+    };
+
+    /// The fragment entry point sampling these shadows.
+    pub(crate) fn entry_point(self) -> &'static str {
+        match (self.sun, self.points) {
+            (true, true) => "fs_main",
+            (true, false) => "fs_sun_shadows",
+            (false, true) => "fs_point_shadows",
+            (false, false) => "fs_unshadowed",
+        }
+    }
+
+    /// Every mix a preset's frames can ask for: sun shadows only where the
+    /// preset has them, point light shadows likewise.
+    pub(crate) fn for_quality(quality: GraphicsQuality) -> Vec<Self> {
+        let sun: &[bool] = if quality.shadows_enabled() {
+            &[false, true]
+        } else {
+            &[false]
+        };
+        let points: &[bool] = if quality.point_shadows() > 0 {
+            &[false, true]
+        } else {
+            &[false]
+        };
+        sun.iter()
+            .flat_map(|&sun| points.iter().map(move |&points| Self { sun, points }))
+            .collect()
+    }
+}
+
+/// Both 3D mesh pipelines for the given color and depth formats. HDR
+/// (Beautiful) pipelines ignore `shadows`.
 pub(crate) fn create_mesh_pipelines(
     device: &wgpu::Device,
     shared: &PipelineShared,
     format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
+    shadows: ForwardShadows,
 ) -> PipelinePair {
     PipelinePair {
-        plain: create_mesh_pipeline(device, shared, format, depth_format, false),
-        skinned: create_mesh_pipeline(device, shared, format, depth_format, true),
+        plain: create_mesh_pipeline(device, shared, format, depth_format, false, shadows),
+        skinned: create_mesh_pipeline(device, shared, format, depth_format, true, shadows),
     }
 }
 
 /// The water pipeline. `refract` (the Beautiful path) writes opaquely —
 /// the shader composes the refracted scene itself; otherwise the surface
-/// alpha-blends over the scene. Depth-tested, never depth-written.
+/// alpha-blends over the scene, sampling `shadows`. Depth-tested, never
+/// depth-written.
 pub(crate) fn create_water_pipeline(
     device: &wgpu::Device,
     shared: &PipelineShared,
     format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
     refract: bool,
+    shadows: ForwardShadows,
 ) -> wgpu::RenderPipeline {
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("water"),
@@ -514,7 +568,11 @@ pub(crate) fn create_water_pipeline(
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: &shared.water_shader,
-            entry_point: Some(if refract { "fs_refract" } else { "fs_main" }),
+            entry_point: Some(if refract {
+                "fs_refract"
+            } else {
+                shadows.entry_point()
+            }),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &targets,
         }),
@@ -595,6 +653,7 @@ fn create_mesh_pipeline(
     format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
     skinned: bool,
+    shadows: ForwardShadows,
 ) -> wgpu::RenderPipeline {
     let model_layout = if skinned {
         &shared.skinned_model_layout
@@ -647,7 +706,7 @@ fn create_mesh_pipeline(
             entry_point: Some(if format == HDR_FORMAT {
                 "fs_beautiful"
             } else {
-                "fs_main"
+                shadows.entry_point()
             }),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &if format == HDR_FORMAT {
@@ -861,7 +920,27 @@ mod tests {
     #[test]
     fn water_and_post_wgsl_validate() {
         for (source, entries) in [
-            (WATER_SHADER, &["vs_main", "fs_main"][..]),
+            (
+                WATER_SHADER,
+                &[
+                    "vs_main",
+                    "fs_main",
+                    "fs_sun_shadows",
+                    "fs_point_shadows",
+                    "fs_unshadowed",
+                    "fs_refract",
+                ][..],
+            ),
+            (
+                MESH_SHADER,
+                &[
+                    "fs_main",
+                    "fs_sun_shadows",
+                    "fs_point_shadows",
+                    "fs_unshadowed",
+                    "fs_beautiful",
+                ][..],
+            ),
             (SKY_SHADER, &["vs_sky", "fs_sky", "fs_sky_hdr"][..]),
             (
                 POST_SHADER,
