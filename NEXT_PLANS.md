@@ -7,6 +7,10 @@ re-discussing settled points.
 
 Status: ✅ done · 🟢 decided · 🟡 under discussion · ⚪ not discussed yet
 
+The full phased list of everything still to build, and the order it's built
+in, is [`ROADMAP.md`](ROADMAP.md). This file keeps the detailed designs a few
+of those phases point to.
+
 ---
 
 ## 1. Android export 🟢 decided (not started)
