@@ -583,6 +583,7 @@ impl<'a> Doc<'a> {
         } else {
             self.texture_image(mat.get("emissiveTexture"))
         };
+        let emissive_coverage = emissive_map.as_ref().map_or(1.0, |m| m.mean_linear());
         PartSurface {
             roughness: roughness.clamp(0.0, 1.0),
             metallic: metallic.clamp(0.0, 1.0),
@@ -591,6 +592,7 @@ impl<'a> Doc<'a> {
             normal_map,
             metallic_roughness_map,
             emissive_map,
+            emissive_coverage,
         }
     }
 }

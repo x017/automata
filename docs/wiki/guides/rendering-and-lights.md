@@ -41,6 +41,7 @@ lamp = at.MeshRenderer.quad(emissive=(1.0, 0.8, 0.5), emissive_strength=4.0)
 | `metallic` | 0 or 1 (in between for dusty / painted metal) | Metals have no diffuse colour: they reflect the sky and sun tinted by `color`. Default 0 |
 | `emissive` | (r, g, b), ≥ 0 | Light the surface gives off itself, unaffected by sun, shadow or fog darkness |
 | `emissive_strength` | ≥ 0 | Multiplies `emissive`. Above about 1 it blooms on Ultra and Beautiful |
+| `glow_light` | ≥ 0 | How much the glow lights nearby surfaces (see below). 1 by default, 0 turns it off |
 
 Tips:
 
@@ -49,8 +50,6 @@ Tips:
   They need a sky to reflect, so pair them with an Environment.
 - Shiny surfaces show their shape best on round things. A glossy cube
   only lights up when a face catches the sun.
-- Glow does not light up its surroundings (there are no point lights yet).
-  Fake it with a warm ambient or a coloured sun nearby.
 - Models keep their own materials: glTF base colour, roughness, metallic,
   normal maps, emission (`KHR_materials_emissive_strength` too) and texture
   maps are all imported. Passing `roughness` / `metallic` / `emissive`
@@ -58,6 +57,34 @@ Tips:
 
 Every quality level shades surfaces; Beautiful uses the full physically
 based model, Low to Ultra a cheaper approximation that looks close.
+
+### Glowing objects light their surroundings
+
+Anything that glows also lights the things around it, in its own colour:
+a lamp sphere throws a warm pool on the floor and the wall behind it,
+glowing coins light the ground under them, a neon sign tints the street.
+Nothing to set up: the engine turns every glowing mesh into a light at its
+center.
+
+```python
+lamp = at.MeshRenderer.sphere(0.4, color=(0.1, 0.1, 0.1, 1),
+                              emissive=(1.0, 0.55, 0.2), emissive_strength=5.0)
+```
+
+- **How bright:** as bright as a real glowing object of that size and
+  brightness. A bigger or brighter glow lights more, and farther. The light
+  fades with the square of the distance and stops where it's too dim to see.
+- **`glow_light`** scales it: `0` glows without lighting anything (screens,
+  UI-like signs, distant windows), `2`–`5` for small things that should
+  still throw a visible pool, like the coins in Coin Run.
+- **Night and dusk** show it best. In daylight the sun outshines all but the
+  brightest glows.
+- **Models:** glowing parts of a model light too. An emissive texture lights
+  in proportion to how much of it is lit (a few windows light less than a
+  whole glowing wall).
+- **Limits:** the light passes through walls (it casts no shadows), and a
+  frame shades at most 4 (Low), 8 (Medium), 16 (High) or 32 (Ultra,
+  Beautiful) glow lights; with more, the ones nearest the camera win.
 
 ## Cameras
 

@@ -89,13 +89,15 @@ at.MeshRenderer.sphere(size=<span class="tok-n">1.0</span>, color=(<span class="
 at.MeshRenderer.quad(size=<span class="tok-n">1.0</span>, color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>))
 at.MeshRenderer.model(path, color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>))   <span class="tok-c"># .glb / .gltf / .obj</span>
 <span class="tok-c"># every constructor also takes the keyword-only surface arguments:</span>
-<span class="tok-c">#   roughness=None, metallic=None, emissive=(0, 0, 0), emissive_strength=1.0</span>
+<span class="tok-c">#   roughness=None, metallic=None, emissive=(0, 0, 0), emissive_strength=1.0,</span>
+<span class="tok-c">#   glow_light=1.0</span>
 m.kind                      <span class="tok-c"># &quot;cube&quot;, &quot;sphere&quot;, &quot;quad&quot; or &quot;model&quot;</span>
 m.color                     <span class="tok-c"># (r, g, b, a); tints a model</span>
 m.roughness                 <span class="tok-c"># 0 = mirror .. 1 = chalk, or None (default)</span>
 m.metallic                  <span class="tok-c"># 0 = plastic/wood/stone, 1 = metal, or None</span>
 m.emissive                  <span class="tok-c"># (r, g, b) glow colour, (0, 0, 0) = none</span>
 m.emissive_strength         <span class="tok-c"># glow multiplier</span>
+m.glow_light                <span class="tok-c"># how much the glow lights its surroundings</span>
 m.path                      <span class="tok-c"># the model file, or None</span>
 m.bounds                    <span class="tok-c"># ((min x, y, z), (max x, y, z)) or None</span>
 
@@ -107,7 +109,9 @@ at.asset_root()             <span class="tok-c"># the current root, or None</spa
 0.6 / 0 for primitives and the file's own material values for models.
 Setting them overrides every part of a model. Roughness and metallic must be
 in <code>0..=1</code>, and emissive values must not be negative, or <code>ValueError</code> is
-raised. The glow added is <code>emissive × emissive_strength</code>; above 1 it blooms
+raised. A glowing mesh also lights the surfaces around it like a real
+glowing object of its size; <code>glow_light</code> scales that (0 = off, no shadows).
+The glow added is <code>emissive × emissive_strength</code>; above 1 it blooms
 on Ultra and Beautiful. Guide: <a href="guides/rendering-and-lights.html#surfaces">Rendering &amp; Lights</a>.</p>
 <p><code>model</code> loads the file right away, so a missing file raises
 <code>FileNotFoundError</code> and a broken one raises <code>ValueError</code> where you create the

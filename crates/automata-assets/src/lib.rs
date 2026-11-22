@@ -85,6 +85,39 @@ pub struct Image {
     pub rgba: Vec<u8>,
 }
 
+impl Image {
+    /// The mean linear brightness of the pixels, reading them as sRGB:
+    /// 0 for black, 1 for white. Large images are sampled on a grid.
+    #[must_use]
+    pub fn mean_linear(&self) -> f32 {
+        let pixels = self.rgba.len() / 4;
+        if pixels == 0 {
+            return 0.0;
+        }
+        // About 64k samples at most.
+        let step = (pixels / 65_536).max(1);
+        let mut lut = [0.0_f32; 256];
+        for (i, v) in lut.iter_mut().enumerate() {
+            let c = f32::from(u8::try_from(i).unwrap_or(u8::MAX)) / 255.0;
+            *v = if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            };
+        }
+        let (mut sum, mut count) = (0.0_f64, 0_u32);
+        for px in self.rgba.chunks_exact(4).step_by(step) {
+            let v =
+                (lut[usize::from(px[0])] + lut[usize::from(px[1])] + lut[usize::from(px[2])]) / 3.0;
+            sum += f64::from(v);
+            count += 1;
+        }
+        #[allow(clippy::cast_possible_truncation)] // a mean of 0..1 values
+        let mean = (sum / f64::from(count.max(1))) as f32;
+        mean
+    }
+}
+
 impl std::fmt::Debug for Image {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Image({}x{})", self.width, self.height)
@@ -163,6 +196,11 @@ pub struct PartSurface {
     pub metallic_roughness_map: Option<Arc<Image>>,
     /// Emissive color map (sRGB).
     pub emissive_map: Option<Arc<Image>>,
+    /// How much of the emissive map glows: its mean linear brightness, 0
+    /// (black) to 1 (white), and 1 without a map. Scales the light a
+    /// glowing part throws on its surroundings (a few lit windows light
+    /// less than a whole glowing wall).
+    pub emissive_coverage: f32,
 }
 
 impl Default for PartSurface {
@@ -175,6 +213,7 @@ impl Default for PartSurface {
             normal_map: None,
             metallic_roughness_map: None,
             emissive_map: None,
+            emissive_coverage: 1.0,
         }
     }
 }

@@ -202,6 +202,9 @@ pub(crate) struct MeshInner {
     /// Radius of the sphere around the origin containing all vertices;
     /// used to fit the shadow map around the scene.
     pub bounding_radius: f32,
+    /// The vertices' bounding box `(min, max)` in model space (the bind
+    /// pose for skinned meshes): where a glowing mesh's light sits.
+    pub bounds: (glam::Vec3, glam::Vec3),
 }
 
 #[cfg(test)]

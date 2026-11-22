@@ -718,11 +718,14 @@ impl PyMeshRenderer {
     /// The keyword-only surface arguments are shared by every constructor:
     /// `roughness` (0 = mirror-smooth, 1 = chalky; default 0.6),
     /// `metallic` (0 = plastic/wood/stone, 1 = bare metal; default 0),
-    /// `emissive` (RGB light the surface gives off) and
-    /// `emissive_strength` (its multiplier; above 1 it glows and blooms).
+    /// `emissive` (RGB light the surface gives off),
+    /// `emissive_strength` (its multiplier; above 1 it glows and blooms) and
+    /// `glow_light` (how much the glow lights nearby surfaces: 1 like a
+    /// real glowing object of that size, 0 not at all).
     #[classmethod]
     #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
-                        emissive=(0.0, 0.0, 0.0), emissive_strength=1.0))]
+                        emissive=(0.0, 0.0, 0.0), emissive_strength=1.0, glow_light=1.0))]
+    #[allow(clippy::too_many_arguments)] // Python keyword arguments
     fn cube(
         _cls: &Bound<'_, pyo3::types::PyType>,
         size: f32,
@@ -731,8 +734,9 @@ impl PyMeshRenderer {
         metallic: Option<f32>,
         emissive: (f32, f32, f32),
         emissive_strength: f32,
+        glow_light: f32,
     ) -> PyResult<Self> {
-        let surface = surface_from(roughness, metallic, emissive, emissive_strength)?;
+        let surface = surface_from(roughness, metallic, emissive, emissive_strength, glow_light)?;
         Ok(Self {
             inner: automata_scene::MeshVisual::cube(size, color.into()).with_surface(surface),
             kind: "cube",
@@ -743,7 +747,8 @@ impl PyMeshRenderer {
     /// scaling. Surface arguments as for `cube`.
     #[classmethod]
     #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
-                        emissive=(0.0, 0.0, 0.0), emissive_strength=1.0))]
+                        emissive=(0.0, 0.0, 0.0), emissive_strength=1.0, glow_light=1.0))]
+    #[allow(clippy::too_many_arguments)] // Python keyword arguments
     fn sphere(
         _cls: &Bound<'_, pyo3::types::PyType>,
         size: f32,
@@ -752,8 +757,9 @@ impl PyMeshRenderer {
         metallic: Option<f32>,
         emissive: (f32, f32, f32),
         emissive_strength: f32,
+        glow_light: f32,
     ) -> PyResult<Self> {
-        let surface = surface_from(roughness, metallic, emissive, emissive_strength)?;
+        let surface = surface_from(roughness, metallic, emissive, emissive_strength, glow_light)?;
         Ok(Self {
             inner: automata_scene::MeshVisual::sphere(size, color.into()).with_surface(surface),
             kind: "sphere",
@@ -764,7 +770,8 @@ impl PyMeshRenderer {
     /// before scaling. Surface arguments as for `cube`.
     #[classmethod]
     #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
-                        emissive=(0.0, 0.0, 0.0), emissive_strength=1.0))]
+                        emissive=(0.0, 0.0, 0.0), emissive_strength=1.0, glow_light=1.0))]
+    #[allow(clippy::too_many_arguments)] // Python keyword arguments
     fn quad(
         _cls: &Bound<'_, pyo3::types::PyType>,
         size: f32,
@@ -773,8 +780,9 @@ impl PyMeshRenderer {
         metallic: Option<f32>,
         emissive: (f32, f32, f32),
         emissive_strength: f32,
+        glow_light: f32,
     ) -> PyResult<Self> {
-        let surface = surface_from(roughness, metallic, emissive, emissive_strength)?;
+        let surface = surface_from(roughness, metallic, emissive, emissive_strength, glow_light)?;
         Ok(Self {
             inner: automata_scene::MeshVisual::quad(size, color.into()).with_surface(surface),
             kind: "quad",
@@ -797,7 +805,8 @@ impl PyMeshRenderer {
     /// when it isn't a readable model.
     #[classmethod]
     #[pyo3(signature = (path, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
-                        emissive=(0.0, 0.0, 0.0), emissive_strength=1.0))]
+                        emissive=(0.0, 0.0, 0.0), emissive_strength=1.0, glow_light=1.0))]
+    #[allow(clippy::too_many_arguments)] // Python keyword arguments
     fn model(
         cls: &Bound<'_, pyo3::types::PyType>,
         path: &str,
@@ -806,8 +815,9 @@ impl PyMeshRenderer {
         metallic: Option<f32>,
         emissive: (f32, f32, f32),
         emissive_strength: f32,
+        glow_light: f32,
     ) -> PyResult<Self> {
-        let surface = surface_from(roughness, metallic, emissive, emissive_strength)?;
+        let surface = surface_from(roughness, metallic, emissive, emissive_strength, glow_light)?;
         default_asset_root(cls.py());
         let inner =
             automata_scene::MeshVisual::try_model(path, color.into()).map_err(|e| match e {
@@ -858,6 +868,13 @@ impl PyMeshRenderer {
     #[getter]
     fn emissive_strength(&self) -> f32 {
         self.inner.surface.emissive_strength
+    }
+
+    /// How much the glow lights nearby surfaces (1 = like a real glowing
+    /// object of this size).
+    #[getter]
+    fn glow_light(&self) -> f32 {
+        self.inner.surface.glow_light
     }
 
     /// The model file, for `MeshRenderer.model`; otherwise `None`.
@@ -917,6 +934,7 @@ fn surface_from(
     metallic: Option<f32>,
     emissive: (f32, f32, f32),
     emissive_strength: f32,
+    glow_light: f32,
 ) -> PyResult<automata_scene::Surface> {
     for (name, v) in [("roughness", roughness), ("metallic", metallic)] {
         if let Some(v) = v {
@@ -928,9 +946,9 @@ fn surface_from(
         }
     }
     let emissive: [f32; 3] = emissive.into();
-    if emissive.iter().any(|c| *c < 0.0) || emissive_strength < 0.0 {
+    if emissive.iter().any(|c| *c < 0.0) || emissive_strength < 0.0 || glow_light < 0.0 {
         return Err(pyo3::exceptions::PyValueError::new_err(
-            "emissive and emissive_strength can't be negative",
+            "emissive, emissive_strength and glow_light can't be negative",
         ));
     }
     Ok(automata_scene::Surface {
@@ -938,6 +956,7 @@ fn surface_from(
         metallic,
         emissive,
         emissive_strength,
+        glow_light,
     })
 }
 

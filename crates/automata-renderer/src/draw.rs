@@ -33,6 +33,7 @@ pub struct DrawList {
     pub(crate) sprites: Vec<Sprite>,
     pub(crate) meshes: Vec<MeshDraw>,
     pub(crate) waters: Vec<crate::water::WaterDraw>,
+    pub(crate) point_lights: Vec<crate::PointLight>,
     pub(crate) time: Option<f32>,
 }
 
@@ -118,6 +119,19 @@ impl DrawList {
         self.waters.push(crate::water::WaterDraw { water, model });
     }
 
+    /// Adds a point light. Glowing meshes add their own; when a frame has
+    /// more lights than the quality preset shades, the ones that matter
+    /// most to the camera win.
+    pub fn point_light(&mut self, light: crate::PointLight) {
+        self.point_lights.push(light);
+    }
+
+    /// The point lights added this frame (not counting glowing meshes).
+    #[must_use]
+    pub fn point_lights(&self) -> &[crate::PointLight] {
+        &self.point_lights
+    }
+
     /// Sets the animation time (seconds) for time-driven effects such as
     /// water waves. Without one, the renderer uses its own clock.
     pub fn set_time(&mut self, seconds: f32) {
@@ -182,6 +196,7 @@ impl DrawList {
         self.sprites.clear();
         self.meshes.clear();
         self.waters.clear();
+        self.point_lights.clear();
         self.time = None;
         // The clear color intentionally persists across frames.
     }
@@ -203,6 +218,7 @@ impl Default for DrawList {
             sprites: Vec::new(),
             meshes: Vec::new(),
             waters: Vec::new(),
+            point_lights: Vec::new(),
             time: None,
         }
     }

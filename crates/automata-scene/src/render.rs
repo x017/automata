@@ -264,6 +264,11 @@ pub struct Surface {
     /// Beautiful).
     #[serde(skip_serializing_if = "is_one")]
     pub emissive_strength: f32,
+    /// How much the glow lights the surroundings: 1 as a real glowing
+    /// object of this size and brightness would, 0 not at all, 2 twice as
+    /// much. Applies to a model's own glow too.
+    #[serde(skip_serializing_if = "is_one")]
+    pub glow_light: f32,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref, clippy::float_cmp)] // serde's signature
@@ -300,6 +305,7 @@ impl Surface {
             metallic: self.metallic.unwrap_or(0.0),
             emissive: self.glow(),
             normal_scale: 1.0,
+            glow_light: self.glow_light.max(0.0),
         }
     }
 
@@ -319,6 +325,9 @@ impl Surface {
             metallic: self.metallic.unwrap_or(own.metallic),
             emissive: std::array::from_fn(|i| own.emissive[i] + glow[i]),
             normal_scale: own.normal_scale,
+            // The shader multiplies all the glow by the emissive map, so
+            // the light follows how much of the map is lit.
+            glow_light: self.glow_light.max(0.0) * own.emissive_coverage,
         }
     }
 }
@@ -330,6 +339,7 @@ impl Default for Surface {
             metallic: None,
             emissive: [0.0; 3],
             emissive_strength: 1.0,
+            glow_light: 1.0,
         }
     }
 }

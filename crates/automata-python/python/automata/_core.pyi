@@ -103,6 +103,9 @@ class MeshRenderer:
     emissive: tuple[float, float, float]
     """RGB light the surface gives off (times emissive_strength)."""
     emissive_strength: float
+    """How much the glow lights nearby surfaces (1 = like a real glowing
+    object of this size, 0 = not at all)."""
+    glow_light: float
     @classmethod
     def model(
         cls,
@@ -113,6 +116,7 @@ class MeshRenderer:
         metallic: float | None = None,
         emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
         emissive_strength: float = 1.0,
+        glow_light: float = 1.0,
     ) -> MeshRenderer:
         """A glTF 2.0 (.glb / .gltf) or .obj model, tinted by `color`.
 
@@ -132,9 +136,11 @@ class MeshRenderer:
         metallic: float | None = None,
         emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
         emissive_strength: float = 1.0,
+        glow_light: float = 1.0,
     ) -> MeshRenderer:
         """A cube `size` units a side. `roughness`/`metallic` 0..1; `emissive`
-        with `emissive_strength` above 1 glows (and blooms on BEAUTIFUL)."""
+        with `emissive_strength` above 1 glows (and blooms on BEAUTIFUL), and
+        lights its surroundings (scaled by `glow_light`; 0 turns that off)."""
         ...
     @classmethod
     def sphere(
@@ -146,6 +152,7 @@ class MeshRenderer:
         metallic: float | None = None,
         emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
         emissive_strength: float = 1.0,
+        glow_light: float = 1.0,
     ) -> MeshRenderer:
         """A smooth sphere `size` units across."""
         ...
@@ -159,6 +166,7 @@ class MeshRenderer:
         metallic: float | None = None,
         emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
         emissive_strength: float = 1.0,
+        glow_light: float = 1.0,
     ) -> MeshRenderer: ...
 
 class DirectionalLight:

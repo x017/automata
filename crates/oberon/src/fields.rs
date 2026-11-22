@@ -32,6 +32,8 @@ pub enum Field {
     MeshEmissive(u8),
     /// Multiplier on the emitted color.
     MeshEmissiveStrength,
+    /// How much the glow lights the surroundings.
+    MeshGlowLight,
     /// Light direction, axis 0..3.
     LightDirection(u8),
     /// Light color channel 0..3 (RGB, 0..1).
@@ -197,6 +199,7 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::MeshMetallic => data.mesh_visual.as_ref()?.surface.metallic.unwrap_or(0.0),
         F::MeshEmissive(i) => data.mesh_visual.as_ref()?.surface.emissive[axis(i)],
         F::MeshEmissiveStrength => data.mesh_visual.as_ref()?.surface.emissive_strength,
+        F::MeshGlowLight => data.mesh_visual.as_ref()?.surface.glow_light,
         F::LightDirection(i) => data.directional_light?.direction.to_array()[axis(i)],
         F::LightColor(i) => data.directional_light?.color[axis(i)],
         F::LightAmbient => data.directional_light?.ambient,
@@ -292,6 +295,7 @@ pub fn range(field: Field) -> (f32, f32) {
         F::LightTimeOfDay => (5.0, 19.0),
         F::EnvExposure => (0.0, 16.0),
         F::MeshEmissiveStrength => (0.0, 100.0),
+        F::MeshGlowLight => (0.0, 10.0),
         F::EnvFogDensity => (0.0, 2.0),
         F::EnvFogStart => (0.0, 100_000.0),
         F::MeshSize | F::ColliderRadius | F::ColliderExtents(_) | F::ColliderHalfHeight => {
@@ -385,7 +389,11 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
             Some(m) => m.color[usize::from(i.min(3))] = v,
             None => return false,
         },
-        F::MeshRoughness | F::MeshMetallic | F::MeshEmissive(_) | F::MeshEmissiveStrength => {
+        F::MeshRoughness
+        | F::MeshMetallic
+        | F::MeshEmissive(_)
+        | F::MeshEmissiveStrength
+        | F::MeshGlowLight => {
             let Some(m) = &mut data.mesh_visual else {
                 return false;
             };
@@ -394,6 +402,7 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
                 F::MeshRoughness => surface.roughness = Some(v),
                 F::MeshMetallic => surface.metallic = Some(v),
                 F::MeshEmissive(i) => surface.emissive[axis(i)] = v,
+                F::MeshGlowLight => surface.glow_light = v,
                 _ => surface.emissive_strength = v,
             }
         }
@@ -1022,6 +1031,9 @@ mod tests {
         assert!(set_choice(&mut d, Choice::MeshSurface, "Glowing"));
         let m = d.mesh_visual.as_ref().unwrap();
         assert_eq!(m.surface.emissive, [m.color[0], m.color[1], m.color[2]]);
+        assert!((get(&d, Field::MeshGlowLight).unwrap() - 1.0).abs() < 1e-6);
+        assert!(set(&mut d, Field::MeshGlowLight, 50.0));
+        assert!((get(&d, Field::MeshGlowLight).unwrap() - 10.0).abs() < 1e-6);
         assert!(set(&mut d, Field::MeshEmissiveStrength, 500.0));
         assert!((get(&d, Field::MeshEmissiveStrength).unwrap() - 100.0).abs() < 1e-6);
         assert!(set(&mut d, Field::MeshMetallic, 2.0));

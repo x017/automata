@@ -63,6 +63,18 @@ impl GraphicsQuality {
         }
     }
 
+    /// How many point lights a frame shades (glowing meshes included);
+    /// the ones nearest the camera and brightest win.
+    #[must_use]
+    pub fn max_point_lights(self) -> usize {
+        match self {
+            Self::Low => 4,
+            Self::Medium => 8,
+            Self::High => 16,
+            Self::Ultra | Self::Beautiful => crate::MAX_POINT_LIGHTS,
+        }
+    }
+
     /// Shadow cascades: `1` is a single map fit around the whole scene;
     /// more split the camera's view so nearby shadows get the most texels.
     #[must_use]

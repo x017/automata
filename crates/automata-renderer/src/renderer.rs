@@ -376,6 +376,7 @@ impl Renderer {
                     .iter()
                     .map(|v| glam::Vec3::from(v.position).length())
                     .fold(0.0_f32, f32::max),
+                bounds: mesh_bounds(data),
             }),
         }
     }
@@ -1488,7 +1489,9 @@ impl Renderer {
             time,
             beautiful,
         };
-        let light_bind = self.light_bind_group(&sun, &env, &shadows, render_shadows, &frame);
+        let points = frame_point_lights(draw, &camera_3d, self.quality.max_point_lights());
+        let light_bind =
+            self.light_bind_group(&sun, &env, &shadows, render_shadows, &frame, &points);
         let water_binds = self.water_bind_groups(draw, beautiful, time);
 
         PreparedFrame {
@@ -1514,6 +1517,7 @@ impl Renderer {
         shadows: &ShadowCascades,
         render_shadows: bool,
         frame: &FrameView,
+        points: &[crate::PointLight],
     ) -> wgpu::BindGroup {
         let device = self.ctx.device();
         let light_uniform = LightUniform::new(
@@ -1525,6 +1529,7 @@ impl Renderer {
             shadows,
             self.shadow_map_size,
             frame,
+            points,
         );
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("light"),
@@ -1727,6 +1732,73 @@ impl ShadowResources {
 
 /// The scene bindings forward-path water uses: 1x1 stand-ins (blended
 /// water never samples the scene behind it).
+/// The light a glowing mesh draw gives off: a [`crate::PointLight`] at the
+/// center of its world-space box, as bright as its emission over its
+/// surface area. `None` for draws that don't glow (or don't light).
+fn glow_light(m: &MeshDraw) -> Option<crate::PointLight> {
+    let p = &m.material.inner.params;
+    let strength = p.glow_light.max(0.0) * p.color[3].clamp(0.0, 1.0);
+    let radiance = p.emissive.map(|c| c.max(0.0) * strength);
+    if radiance.iter().all(|c| *c <= 1e-4) {
+        return None;
+    }
+    let (lo, hi) = m.mesh.inner.bounds;
+    let center = m.model.transform_point3((lo + hi) * 0.5);
+    // The box's half size in world space: each world axis gathers the
+    // model axes' contributions.
+    let half = (hi - lo) * 0.5;
+    let cols = [
+        m.model.x_axis.truncate(),
+        m.model.y_axis.truncate(),
+        m.model.z_axis.truncate(),
+    ];
+    let world_half = cols[0].abs() * half.x + cols[1].abs() * half.y + cols[2].abs() * half.z;
+    Some(crate::PointLight::from_glow(center, world_half, radiance))
+}
+
+/// The point lights a frame shades: the draw list's plus one per glowing
+/// mesh, at most `max` of them. When there are more, the ones that light
+/// the camera's surroundings most win: brightest over distance squared
+/// from the camera, counting lights the camera is inside as at full
+/// strength.
+fn frame_point_lights(
+    draw: &DrawList,
+    camera: &crate::Camera3D,
+    max: usize,
+) -> Vec<crate::PointLight> {
+    let mut lights: Vec<crate::PointLight> = draw
+        .point_lights
+        .iter()
+        .copied()
+        .filter(|l| l.peak() > 0.0)
+        .chain(draw.meshes.iter().filter_map(glow_light))
+        .collect();
+    let max = max.min(crate::MAX_POINT_LIGHTS);
+    if lights.len() > max {
+        let score = |l: &crate::PointLight| {
+            let d = (l.position.distance(camera.position) - l.effective_range()).max(0.0);
+            l.peak() / (1.0 + d * d)
+        };
+        lights.sort_by(|a, b| score(b).total_cmp(&score(a)));
+        lights.truncate(max);
+    }
+    lights
+}
+
+/// The bounding box `(min, max)` of a mesh's vertices (zero when empty).
+fn mesh_bounds(data: &MeshData) -> (glam::Vec3, glam::Vec3) {
+    if data.vertices.is_empty() {
+        return (glam::Vec3::ZERO, glam::Vec3::ZERO);
+    }
+    data.vertices.iter().fold(
+        (glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN)),
+        |(lo, hi), v| {
+            let p = glam::Vec3::from(v.position);
+            (lo.min(p), hi.max(p))
+        },
+    )
+}
+
 /// A bind group entry for a texture's view.
 fn view_entry(binding: u32, t: &Texture) -> wgpu::BindGroupEntry<'_> {
     wgpu::BindGroupEntry {
@@ -2616,6 +2688,98 @@ mod tests {
                 "{quality:?}: normal-mapped {bent:?} vs flat {flat:?}"
             );
         }
+    }
+
+    /// The center of a dark wall (lit by neither sun nor ambient) with a
+    /// small red-glowing cube floating off to the side in front of it.
+    fn wall_beside_glow(renderer: &mut Renderer, glow_light: f32) -> [u8; 4] {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let wall = renderer.create_pbr_material(
+            &crate::MaterialParams::with_color([0.5, 0.5, 0.5, 1.0]),
+            crate::MaterialTextures::default(),
+        );
+        let lamp = renderer.create_pbr_material(
+            &crate::MaterialParams {
+                emissive: [6.0, 0.0, 0.0],
+                glow_light,
+                ..crate::MaterialParams::with_color([0.0, 0.0, 0.0, 1.0])
+            },
+            crate::MaterialTextures::default(),
+        );
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 0.0, 1.6),
+            glam::Vec3::ZERO,
+        ));
+        // The sun shines at the camera: the wall's face is in its own
+        // shade, and there's no ambient fill.
+        draw.set_sun(crate::Sun {
+            ambient: 0.0,
+            ..crate::Sun::new(glam::Vec3::Z)
+        });
+        draw.mesh(&cube, glam::Mat4::IDENTITY, &wall);
+        let lamp_at = glam::Mat4::from_scale_rotation_translation(
+            glam::Vec3::splat(0.15),
+            glam::Quat::IDENTITY,
+            glam::Vec3::new(0.35, 0.0, 0.8),
+        );
+        draw.mesh(&cube, lamp_at, &lamp);
+        renderer.render_offscreen(&draw, &target);
+        center_pixel(&read_pixels(renderer, &target, size), size)
+    }
+
+    #[test]
+    fn offscreen_glowing_meshes_light_their_surroundings_on_every_preset() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping glow light test");
+            return;
+        };
+        for quality in [
+            GraphicsQuality::Low,
+            GraphicsQuality::High,
+            GraphicsQuality::Beautiful,
+        ] {
+            renderer.set_quality(quality);
+            let dark = wall_beside_glow(&mut renderer, 0.0);
+            let lit = wall_beside_glow(&mut renderer, 1.0);
+            // (Beautiful's bloom spills a little of the glow itself.)
+            assert!(
+                dark[0] < 60 && dark[1] < 10,
+                "{quality:?}: unlit wall {dark:?}"
+            );
+            assert!(
+                lit[0] > dark[0] + 40 && lit[0] > lit[1] + 30,
+                "{quality:?}: the red glow should light the wall red: {lit:?} vs {dark:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn point_lights_beyond_the_preset_cap_keep_the_ones_near_the_camera() {
+        let mut draw = DrawList::new();
+        let camera = Camera3D::new(glam::Vec3::ZERO, glam::Vec3::NEG_Z);
+        for i in 0..40 {
+            #[allow(clippy::cast_precision_loss)] // small counter
+            let x = i as f32 * 10.0;
+            draw.point_light(crate::PointLight {
+                range: 2.0,
+                ..crate::PointLight::new(glam::Vec3::new(x, 0.0, 0.0), [1.0; 3])
+            });
+        }
+        // An unlit light is dropped outright.
+        draw.point_light(crate::PointLight::new(glam::Vec3::ZERO, [0.0; 3]));
+        let kept = frame_point_lights(&draw, &camera, 4);
+        assert_eq!(kept.len(), 4);
+        let mut xs: Vec<f32> = kept.iter().map(|l| l.position.x).collect();
+        xs.sort_by(f32::total_cmp);
+        assert_eq!(xs, [0.0, 10.0, 20.0, 30.0]);
+        assert_eq!(
+            frame_point_lights(&draw, &camera, 100).len(),
+            crate::MAX_POINT_LIGHTS
+        );
     }
 
     #[test]

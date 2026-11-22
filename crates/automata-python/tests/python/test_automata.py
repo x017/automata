@@ -834,6 +834,12 @@ def test_mesh_renderer_surfaces():
     assert "Sphere(" in at.Scene().add(at.Entity("b").add(ball)).to_ron()
     lamp = at.MeshRenderer.quad(emissive=(1.0, 0.8, 0.5), emissive_strength=4.0)
     assert lamp.emissive == pytest.approx((1.0, 0.8, 0.5)) and lamp.emissive_strength == 4.0
+    assert lamp.glow_light == 1.0
+    sign = at.MeshRenderer.quad(emissive=(0.2, 1.0, 0.4), glow_light=0.0)
+    assert sign.glow_light == 0.0
+    assert "glow_light: 0.0" in at.Scene().add(at.Entity("s").add(sign)).to_ron()
+    with pytest.raises(ValueError):
+        at.MeshRenderer.cube(glow_light=-1.0)
     with pytest.raises(ValueError):
         at.MeshRenderer.cube(roughness=1.5)
     with pytest.raises(ValueError):

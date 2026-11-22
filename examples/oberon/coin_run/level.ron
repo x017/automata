@@ -155,6 +155,7 @@
                     metallic: Some(1.0),
                     emissive: (1.0, 0.62, 0.12),
                     emissive_strength: 0.35,
+                    glow_light: 4.0,
                 ),
             )),
             attributes: {
@@ -181,6 +182,7 @@
                     metallic: Some(1.0),
                     emissive: (1.0, 0.62, 0.12),
                     emissive_strength: 0.35,
+                    glow_light: 4.0,
                 ),
             )),
             attributes: {
@@ -207,6 +209,7 @@
                     metallic: Some(1.0),
                     emissive: (1.0, 0.62, 0.12),
                     emissive_strength: 0.35,
+                    glow_light: 4.0,
                 ),
             )),
             attributes: {
@@ -233,6 +236,7 @@
                     metallic: Some(1.0),
                     emissive: (1.0, 0.62, 0.12),
                     emissive_strength: 0.35,
+                    glow_light: 4.0,
                 ),
             )),
             attributes: {
@@ -259,6 +263,7 @@
                     metallic: Some(1.0),
                     emissive: (1.0, 0.62, 0.12),
                     emissive_strength: 0.35,
+                    glow_light: 4.0,
                 ),
             )),
             attributes: {
@@ -285,6 +290,7 @@
                     metallic: Some(1.0),
                     emissive: (1.0, 0.62, 0.12),
                     emissive_strength: 0.35,
+                    glow_light: 4.0,
                 ),
             )),
             attributes: {

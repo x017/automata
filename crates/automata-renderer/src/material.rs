@@ -53,6 +53,11 @@ pub struct MaterialParams {
     pub emissive: [f32; 3],
     /// How strongly the normal map bends the surface (glTF `scale`).
     pub normal_scale: f32,
+    /// How much the glow lights the surroundings: 1 lights them as a real
+    /// glowing body of the mesh's size and brightness would, 0 glows
+    /// without lighting anything. Each glowing draw becomes a
+    /// [`PointLight`](crate::PointLight) at its center.
+    pub glow_light: f32,
 }
 
 impl Default for MaterialParams {
@@ -63,6 +68,7 @@ impl Default for MaterialParams {
             metallic: 0.0,
             emissive: [0.0; 3],
             normal_scale: 1.0,
+            glow_light: 1.0,
         }
     }
 }

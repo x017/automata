@@ -14,6 +14,15 @@ struct CameraUniform {
 };
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
 
+// A point light (`PointLight` in Rust). Glowing meshes become these too.
+struct PointLightData {
+    position_range: vec4<f32>,   // xyz: position, w: where it fades out (m)
+    intensity_radius: vec4<f32>, // rgb: intensity, w: glowing body radius (m)
+};
+
+// Must match `MAX_POINT_LIGHTS` in Rust.
+const MAX_POINT_LIGHTS: u32 = 32u;
+
 struct LightUniform {
     direction: vec4<f32>,      // xyz: direction the light travels, w: soft shadow radius (m)
     color_ambient: vec4<f32>,  // rgb: light color, a: ambient fraction
@@ -25,13 +34,14 @@ struct LightUniform {
     sky_exposure: vec4<f32>,   // rgb: sky ambient, a: exposure
     ground_tonemap: vec4<f32>, // rgb: ground ambient, a: tone mapping mode
     fog: vec4<f32>,            // rgb: fog color, a: density (0 = off)
-    fog_params: vec4<f32>,     // x: fog start distance, y: time (s)
+    fog_params: vec4<f32>,     // x: fog start distance, y: time (s), z: point lights
     camera_forward: vec4<f32>, // xyz: camera forward
     background: vec4<f32>,     // rgb: clear color (the horizon in reflections)
     screen: vec4<f32>,         // xy: viewport size (px), z: near, w: far
     inv_view_proj: mat4x4<f32>, // clip -> world (the sky's view rays)
     sky_zenith: vec4<f32>,     // rgb: sky color straight up, a: sky dome on
     sky_sun: vec4<f32>,        // x: cos(sun radius), y: glow, z: clouds, w: lens flare
+    points: array<PointLightData, MAX_POINT_LIGHTS>,
 };
 @group(3) @binding(0) var<uniform> light: LightUniform;
 @group(3) @binding(1) var shadow_map: texture_depth_2d_array;
@@ -159,6 +169,39 @@ fn shadow_soft(world: vec3<f32>, n: vec3<f32>, l: vec3<f32>, frag: vec2<f32>) ->
     return sample_cascade(i, world, n, ndotl, frag);
 }
 
+// --- Point lights -----------------------------------------------------------
+// Inverse-square falloff, held flat inside the glowing body (no hot spot)
+// and windowed to reach exactly zero at the light's range (Karis's
+// (1 - (d/R)^4)^2), so lights can be skipped past it. No shadows.
+
+struct PointSample {
+    l: vec3<f32>,        // direction to the light
+    radiance: vec3<f32>, // light arriving (before the cosine term)
+};
+
+fn point_count() -> u32 {
+    return min(u32(light.fog_params.z), MAX_POINT_LIGHTS);
+}
+
+// What light `i` delivers at `world`; zero radiance beyond its range.
+fn point_light(i: u32, world: vec3<f32>) -> PointSample {
+    var out: PointSample;
+    let p = light.points[i];
+    let to_light = p.position_range.xyz - world;
+    let d2 = dot(to_light, to_light);
+    let range2 = p.position_range.w * p.position_range.w;
+    out.l = to_light * inverseSqrt(max(d2, 1e-8));
+    out.radiance = vec3<f32>(0.0);
+    if d2 >= range2 {
+        return out;
+    }
+    let x = d2 / range2;
+    let window = clamp(1.0 - x * x, 0.0, 1.0);
+    let r = p.intensity_radius.w;
+    out.radiance = p.intensity_radius.rgb * (window * window / max(d2, r * r));
+    return out;
+}
+
 // Hemispheric ambient: sky from above, ground from below.
 fn hemi(n: vec3<f32>) -> vec3<f32> {
     return mix(light.ground_tonemap.rgb, light.sky_exposure.rgb, n.y * 0.5 + 0.5);
@@ -280,6 +323,50 @@ fn env_brdf(f0: vec3<f32>, roughness: f32, ndotv: f32) -> vec3<f32> {
     return f0 * ab.x + vec3<f32>(ab.y);
 }
 
+// GGX specular + energy-conserving diffuse for one light from `l`, times
+// the cosine term (multiply by the light's radiance).
+fn brdf_direct(
+    albedo: vec3<f32>,
+    n: vec3<f32>,
+    v: vec3<f32>,
+    l: vec3<f32>,
+    roughness: f32,
+    f0: vec3<f32>,
+) -> vec3<f32> {
+    let ndotl = max(dot(n, l), 0.0);
+    if ndotl <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let h = normalize(l + v);
+    let ndotv = max(dot(n, v), 1e-4);
+    let ndoth = max(dot(n, h), 0.0);
+    let vdoth = max(dot(v, h), 0.0);
+    let f = fresnel_schlick(vdoth, f0);
+    let spec = d_ggx(ndoth, roughness) * g_smith(ndotv, ndotl, roughness) * f
+        / max(4.0 * ndotv * ndotl, 1e-4);
+    let kd = vec3<f32>(1.0) - f;
+    return (kd * albedo + spec * PI) * ndotl;
+}
+
+// Every point light on a surface, physically based (Beautiful).
+fn points_pbr(
+    world: vec3<f32>,
+    albedo: vec3<f32>,
+    n: vec3<f32>,
+    v: vec3<f32>,
+    roughness: f32,
+    f0: vec3<f32>,
+) -> vec3<f32> {
+    var sum = vec3<f32>(0.0);
+    for (var i = 0u; i < point_count(); i = i + 1u) {
+        let p = point_light(i, world);
+        if dot(n, p.l) > 0.0 && any(p.radiance > vec3<f32>(0.0)) {
+            sum = sum + brdf_direct(albedo, n, v, p.l, roughness, f0) * p.radiance;
+        }
+    }
+    return sum;
+}
+
 // Physically based sun + ambient shading (Beautiful): GGX specular with
 // Fresnel, energy-conserving diffuse, hemispheric diffuse ambient and sky
 // reflections. Light intensities follow the forward path's convention (a
@@ -293,16 +380,8 @@ fn shade_pbr(
     roughness: f32,
     f0: vec3<f32>,
 ) -> vec3<f32> {
-    let h = normalize(l + v);
-    let ndotl = max(dot(n, l), 0.0);
     let ndotv = max(dot(n, v), 1e-4);
-    let ndoth = max(dot(n, h), 0.0);
-    let vdoth = max(dot(v, h), 0.0);
-    let f = fresnel_schlick(vdoth, f0);
-    let spec = d_ggx(ndoth, roughness) * g_smith(ndotv, ndotl, roughness) * f
-        / max(4.0 * ndotv * ndotl, 1e-4);
-    let kd = vec3<f32>(1.0) - f;
-    let direct = (kd * albedo + spec * PI) * light.color_ambient.rgb * ndotl * shadow;
+    let direct = brdf_direct(albedo, n, v, l, roughness, f0) * light.color_ambient.rgb * shadow;
 
     // Ambient: diffuse from the hemisphere, specular from the sky, weighted
     // by the environment BRDF so rough surfaces don't turn into mirrors.

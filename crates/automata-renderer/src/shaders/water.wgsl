@@ -213,12 +213,31 @@ fn water_shade(in: VertexOutput, shadow: f32) -> WaterShade {
             / max(4.0 * ndotv * ndotl, 1e-4);
         out.glint = sun * spec * PI * ndotl * shadow;
     }
+    // Point lights (glowing things): a looser glint so their reflections
+    // streak across the waves, and light on the water body below.
+    var point_body = vec3<f32>(0.0);
+    for (var i = 0u; i < point_count(); i = i + 1u) {
+        let p = point_light(i, world);
+        if !any(p.radiance > vec3<f32>(0.0)) {
+            continue;
+        }
+        let pl = max(dot(n, p.l), 0.0);
+        point_body = point_body + p.radiance * max(p.l.y, 0.0);
+        if pl > 0.0 {
+            let h = normalize(p.l + v);
+            let rough = 0.18;
+            let spec = d_ggx(max(dot(n, h), 0.0), rough) * g_smith(ndotv, pl, rough)
+                * (0.02 + 0.98 * pow5(1.0 - max(dot(v, h), 0.0)))
+                / max(4.0 * ndotv * pl, 1e-4);
+            out.glint = out.glint + p.radiance * spec * PI * pl;
+        }
+    }
 
     // The water body: deep color lit by sky and sun, glowing where light
     // passes through crests toward the viewer.
     out.ambient = hemi(vec3<f32>(0.0, 1.0, 0.0)) * light.color_ambient.a;
     out.sunlit = sun * max(l.y, 0.0) * mix(0.35, 1.0, shadow);
-    var body = water.deep.rgb * (out.ambient + out.sunlit * 0.6);
+    var body = water.deep.rgb * (out.ambient + out.sunlit * 0.6 + point_body * 0.6);
     let back_dot = max(dot(-v, l), 0.0);
     let back = back_dot * back_dot * back_dot * 0.5 + 0.15;
     body = body + water.shallow.rgb * out.sunlit * clamp(in.crest, 0.0, 1.0) * back * 0.6;

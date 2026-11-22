@@ -89,6 +89,7 @@ fn vs_skinned(in: VertexInput, skin: SkinInput) -> VertexOutput {
 
 // What both variants know about a fragment.
 struct Surface {
+    p: vec3<f32>,
     n: vec3<f32>,
     l: vec3<f32>,
     v: vec3<f32>,
@@ -128,6 +129,7 @@ fn surface(in: VertexOutput) -> Surface {
         ts = vec3<f32>(ts.xy * vec2<f32>(material.params.z, -material.params.z), ts.z);
         n = perturb_normal(n, in.world_position, in.uv, ts);
     }
+    out.p = in.world_position;
     out.n = n;
     out.l = normalize(-light.direction.xyz);
     out.v = normalize(camera.view_pos.xyz - in.world_position);
@@ -162,6 +164,16 @@ fn shade_forward(s: Surface, shadow: f32) -> vec3<f32> {
     let albedo = s.base.rgb * (1.0 - s.metallic);
     var lit = albedo * hemi(s.n) * light.color_ambient.a
         + (albedo * diffuse + specular) * light.color_ambient.rgb * shadow;
+    // Point lights (and glowing meshes): the same diffuse + highlight.
+    for (var i = 0u; i < point_count(); i = i + 1u) {
+        let p = point_light(i, s.p);
+        let ndotl = dot(s.n, p.l);
+        if ndotl > 0.0 && any(p.radiance > vec3<f32>(0.0)) {
+            let hp = normalize(p.l + s.v);
+            let spec = pow(max(dot(s.n, hp), 1e-5), shininess) * spec_color;
+            lit = lit + (albedo + spec) * p.radiance * ndotl;
+        }
+    }
     // Default (rough, non-metal) surfaces stay matte, as before.
     let gloss = max(s.metallic, clamp(1.0 - 2.0 * s.roughness, 0.0, 1.0));
     if gloss > 0.0 {
@@ -172,7 +184,7 @@ fn shade_forward(s: Surface, shadow: f32) -> vec3<f32> {
     return lit + s.emissive;
 }
 
-// Forward path: Blinn-Phong sun, 3x3 PCF shadows, hemispheric ambient, fog,
+// Forward path: Blinn-Phong sun and point lights, 3x3 PCF shadows, hemispheric ambient, fog,
 // tone mapping.
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -190,6 +202,8 @@ fn fs_beautiful(in: VertexOutput) -> @location(0) vec4<f32> {
     let shadow = shadow_soft(in.world_position, s.n, s.l, in.clip_position.xy);
     let albedo = s.base.rgb * (1.0 - s.metallic);
     let f0 = mix(vec3<f32>(0.04), s.base.rgb, s.metallic);
-    let lit = shade_pbr(albedo, s.n, s.v, s.l, shadow, s.roughness, f0) + s.emissive;
+    let lit = shade_pbr(albedo, s.n, s.v, s.l, shadow, s.roughness, f0)
+        + points_pbr(s.p, albedo, s.n, s.v, s.roughness, f0)
+        + s.emissive;
     return vec4<f32>(apply_fog_scatter(lit, in.world_position), s.base.a);
 }

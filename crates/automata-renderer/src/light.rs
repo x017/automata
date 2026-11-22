@@ -1,5 +1,5 @@
-//! Directional sunlight: data shared by the draw list, the scene bridge,
-//! and the mesh shader's lighting model.
+//! Directional sunlight and point lights: data shared by the draw list,
+//! the scene bridge, and the lit shaders' lighting model.
 
 use glam::Vec3;
 
@@ -61,6 +61,103 @@ impl Default for Sun {
     }
 }
 
+/// The most point lights a frame shades (the size of the shaders' light
+/// array). Quality presets shade fewer: see
+/// [`GraphicsQuality::max_point_lights`](crate::GraphicsQuality::max_point_lights).
+pub const MAX_POINT_LIGHTS: usize = 32;
+
+/// Irradiance below which a point light counts as gone: sets the automatic
+/// range (a white light of intensity 1 reaches about 16 m).
+const POINT_CUTOFF: f32 = 0.004;
+
+/// The longest automatic point light range (m).
+const MAX_AUTO_RANGE: f32 = 80.0;
+
+/// Light radiating from a point (or a small glowing body) in every
+/// direction, fading with the square of the distance. It casts no shadows.
+///
+/// Added to a frame with [`DrawList::point_light`](crate::DrawList::point_light).
+/// Glowing meshes (a material with `emissive` and `glow_light` above zero)
+/// add one automatically.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointLight {
+    /// Where the light sits (world space).
+    pub position: Vec3,
+    /// Linear RGB intensity. A white light of intensity 1 lights a surface
+    /// facing it 1 m away as brightly as a white sun shining straight on.
+    pub intensity: [f32; 3],
+    /// The size of the glowing body (m). Closer than this the light stops
+    /// getting brighter, so there is no burning hot spot.
+    pub radius: f32,
+    /// Where the light has faded out completely (m), smoothly. 0 picks it
+    /// from the intensity (where it would be too dim to see).
+    pub range: f32,
+}
+
+impl PointLight {
+    /// A small white-intensity light at `position` with an automatic range.
+    #[must_use]
+    pub fn new(position: Vec3, intensity: [f32; 3]) -> Self {
+        Self {
+            position,
+            intensity,
+            radius: 0.05,
+            range: 0.0,
+        }
+    }
+
+    /// The brightest channel of the intensity.
+    #[must_use]
+    pub fn peak(&self) -> f32 {
+        self.intensity.iter().copied().fold(0.0, f32::max)
+    }
+
+    /// The distance where the light ends: `range`, or where it would fall
+    /// below a visible level.
+    #[must_use]
+    pub fn effective_range(&self) -> f32 {
+        if self.range > 0.0 {
+            return self.range;
+        }
+        (self.peak().max(0.0) / POINT_CUTOFF)
+            .sqrt()
+            .clamp(self.radius.max(0.1), MAX_AUTO_RANGE)
+    }
+
+    /// The light of a glowing body: an object `half_extents` across (half
+    /// sizes of its world-space box) centered on `center`, whose surface
+    /// emits `radiance` (linear RGB). Lights its surroundings as a glowing
+    /// body of that surface area would (intensity = radiance × area / 4,
+    /// exact for a sphere).
+    #[must_use]
+    pub fn from_glow(center: Vec3, half_extents: Vec3, radiance: [f32; 3]) -> Self {
+        let e = half_extents.abs();
+        let area = 8.0 * (e.x * e.y + e.y * e.z + e.z * e.x);
+        Self {
+            position: center,
+            intensity: radiance.map(|c| c.max(0.0) * area * 0.25),
+            radius: (area / (4.0 * std::f32::consts::PI)).sqrt(),
+            range: 0.0,
+        }
+    }
+
+    /// The shaders' layout: position + range, intensity + radius.
+    pub(crate) fn packed(&self) -> [f32; 8] {
+        let [r, g, b] = self.intensity.map(|c| c.max(0.0));
+        let p = self.position;
+        [
+            p.x,
+            p.y,
+            p.z,
+            self.effective_range(),
+            r,
+            g,
+            b,
+            self.radius.max(0.01),
+        ]
+    }
+}
+
 /// GPU mirror of the light bind group's uniform buffer.
 ///
 /// Layout (WGSL): a `vec4` direction, a `vec4` color (alpha = ambient),
@@ -115,12 +212,15 @@ pub(crate) struct LightUniform {
     pub inv_view_proj: [f32; 16],
     pub sky_zenith: [f32; 4],
     pub sky_sun: [f32; 4],
+    /// Point lights (`PointLightData` in common.wgsl); the first
+    /// `fog_params.z` are used.
+    pub points: [[f32; 8]; MAX_POINT_LIGHTS],
 }
 
 impl LightUniform {
     /// Packs the sun (`sun.shadows` gates shadow sampling), the
-    /// environment, the shadow cascades (`map_size` texels per side) and
-    /// the frame.
+    /// environment, the shadow cascades (`map_size` texels per side), the
+    /// frame and its point lights (the first [`MAX_POINT_LIGHTS`]).
     #[must_use]
     pub fn new(
         sun: &Sun,
@@ -128,7 +228,13 @@ impl LightUniform {
         shadows: &ShadowCascades,
         map_size: u32,
         frame: &FrameView,
+        point_lights: &[PointLight],
     ) -> Self {
+        let mut points = [[0.0; 8]; MAX_POINT_LIGHTS];
+        for (slot, p) in points.iter_mut().zip(point_lights) {
+            *slot = p.packed();
+        }
+        let point_count = point_lights.len().min(MAX_POINT_LIGHTS) as f32;
         let direction = sun.normalized_direction();
         let density = if env.fog {
             env.fog_density.max(0.0)
@@ -173,7 +279,7 @@ impl LightUniform {
             sky_exposure: [sr, sg, sb, env.exposure.max(0.0)],
             ground_tonemap: [gr, gg, gb, env.tonemapping.index()],
             fog: [fr, fg, fb, density],
-            fog_params: [env.fog_start.max(0.0), frame.time, 0.0, 0.0],
+            fog_params: [env.fog_start.max(0.0), frame.time, point_count, 0.0],
             camera_forward: [forward.x, forward.y, forward.z, 0.0],
             background: [br, bg, bb, 1.0],
             screen: [
@@ -190,6 +296,7 @@ impl LightUniform {
                 env.clouds.clamp(0.0, 1.0),
                 env.lens_flare.max(0.0),
             ],
+            points,
         }
     }
 }
@@ -236,6 +343,7 @@ mod tests {
             &scene_shadows(),
             2048,
             &FrameView::default(),
+            &[],
         );
         assert_eq!(u.params[0], 1.0);
         assert!((u.params[1] - 1.0 / 2048.0).abs() < f32::EPSILON);
@@ -243,6 +351,41 @@ mod tests {
         assert_eq!(u.params[3], 0.0, "forward path");
         assert_eq!(u.direction[1], -1.0);
         assert!(u.cascade_texel[0] > 0.0 && u.cascade_bias[0] > 0.0);
+    }
+
+    #[test]
+    fn glowing_bodies_become_matching_point_lights() {
+        // A unit sphere's worth of area (a 1 m cube is close enough to
+        // check the packing) glowing at 2.
+        let light = PointLight::from_glow(Vec3::Y, Vec3::splat(0.5), [2.0, 1.0, 0.0]);
+        // Area 6 m², so intensity = radiance × 1.5.
+        assert!((light.intensity[0] - 3.0).abs() < 1e-5);
+        assert!((light.intensity[1] - 1.5).abs() < 1e-5);
+        assert!((light.radius - (6.0 / (4.0 * std::f32::consts::PI)).sqrt()).abs() < 1e-5);
+        // The automatic range ends where the brightest channel is too dim.
+        let range = light.effective_range();
+        assert!((range - (3.0_f32 / POINT_CUTOFF).sqrt()).abs() < 1e-3);
+        let fixed = PointLight {
+            range: 2.0,
+            ..light
+        };
+        assert!((fixed.effective_range() - 2.0).abs() < f32::EPSILON);
+        let packed = light.packed();
+        assert_eq!(&packed[..3], &[0.0, 1.0, 0.0]);
+        assert!((packed[3] - range).abs() < 1e-5);
+        // A dark body has no reach worth shading.
+        let dark = PointLight::from_glow(Vec3::ZERO, Vec3::ONE, [0.0; 3]);
+        assert!(dark.peak() <= 0.0);
+        let u = LightUniform::new(
+            &Sun::default(),
+            &Environment::default(),
+            &scene_shadows(),
+            2048,
+            &FrameView::default(),
+            &[light, dark],
+        );
+        assert_eq!(u.fog_params[2], 2.0);
+        assert_eq!(u.points[0], packed);
     }
 
     #[test]
@@ -265,7 +408,7 @@ mod tests {
             beautiful: true,
             ..FrameView::default()
         };
-        let u = LightUniform::new(&Sun::default(), &env, &scene_shadows(), 2048, &frame);
+        let u = LightUniform::new(&Sun::default(), &env, &scene_shadows(), 2048, &frame, &[]);
         assert!((u.fog[3] - 0.5).abs() < f32::EPSILON);
         assert!((u.sky_exposure[3] - 2.0).abs() < f32::EPSILON);
         assert!((u.ground_tonemap[3] - 2.0).abs() < f32::EPSILON);
@@ -278,6 +421,7 @@ mod tests {
             &scene_shadows(),
             2048,
             &FrameView::default(),
+            &[],
         );
         assert!(
             off.fog[3].abs() < f32::EPSILON,

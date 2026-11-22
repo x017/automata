@@ -539,6 +539,7 @@ mod tests {
             roughness: Some(0.2),
             emissive: [1.0, 0.5, 0.0],
             emissive_strength: 3.0,
+            glow_light: 0.5,
         });
         let text = shiny.to_ron().unwrap();
         assert!(
