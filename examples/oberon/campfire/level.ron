@@ -85,9 +85,9 @@
         (
             name: Some("Stone 2"),
             transform: Some((
-                position: (0.76856613, 0.08, 0.558396),
+                position: (0.7686, 0.08, 0.5584),
                 rotation_euler: (0.0, 0.0, 0.0),
-                scale: (1.0, 0.6, 0.96185577),
+                scale: (1.0, 0.6, 0.9619),
             )),
             mesh_visual: Some((
                 primitive: Sphere(
@@ -102,9 +102,9 @@
         (
             name: Some("Stone 3"),
             transform: Some((
-                position: (0.29356614, 0.08, 0.9035037),
+                position: (0.2936, 0.08, 0.9035),
                 rotation_euler: (0.0, 0.0, 0.0),
-                scale: (1.0, 0.6, 0.70094633),
+                scale: (1.0, 0.6, 0.7009),
             )),
             mesh_visual: Some((
                 primitive: Sphere(
@@ -119,9 +119,9 @@
         (
             name: Some("Stone 4"),
             transform: Some((
-                position: (-0.29356614, 0.08, 0.9035037),
+                position: (-0.2936, 0.08, 0.9035),
                 rotation_euler: (0.0, 0.0, 0.0),
-                scale: (1.0, 0.6, 0.93676597),
+                scale: (1.0, 0.6, 0.9368),
             )),
             mesh_visual: Some((
                 primitive: Sphere(
@@ -136,9 +136,9 @@
         (
             name: Some("Stone 5"),
             transform: Some((
-                position: (-0.76856613, 0.08, 0.558396),
+                position: (-0.7686, 0.08, 0.5584),
                 rotation_euler: (0.0, 0.0, 0.0),
-                scale: (1.0, 0.6, 0.88343346),
+                scale: (1.0, 0.6, 0.8834),
             )),
             mesh_visual: Some((
                 primitive: Sphere(
@@ -153,9 +153,9 @@
         (
             name: Some("Stone 6"),
             transform: Some((
-                position: (-0.95, 0.08, 0.00000000000000011634144),
+                position: (-0.95, 0.08, 0.0),
                 rotation_euler: (0.0, 0.0, 0.0),
-                scale: (1.0, 0.6, 0.71868217),
+                scale: (1.0, 0.6, 0.7187),
             )),
             mesh_visual: Some((
                 primitive: Sphere(
@@ -170,9 +170,9 @@
         (
             name: Some("Stone 7"),
             transform: Some((
-                position: (-0.76856613, 0.08, -0.558396),
+                position: (-0.7686, 0.08, -0.5584),
                 rotation_euler: (0.0, 0.0, 0.0),
-                scale: (1.0, 0.6, 0.9915544),
+                scale: (1.0, 0.6, 0.9916),
             )),
             mesh_visual: Some((
                 primitive: Sphere(
@@ -187,9 +187,9 @@
         (
             name: Some("Stone 8"),
             transform: Some((
-                position: (-0.29356614, 0.08, -0.9035037),
+                position: (-0.2936, 0.08, -0.9035),
                 rotation_euler: (0.0, 0.0, 0.0),
-                scale: (1.0, 0.6, 0.79268926),
+                scale: (1.0, 0.6, 0.7927),
             )),
             mesh_visual: Some((
                 primitive: Sphere(
@@ -204,9 +204,9 @@
         (
             name: Some("Stone 9"),
             transform: Some((
-                position: (0.29356614, 0.08, -0.9035037),
+                position: (0.2936, 0.08, -0.9035),
                 rotation_euler: (0.0, 0.0, 0.0),
-                scale: (1.0, 0.6, 0.78481513),
+                scale: (1.0, 0.6, 0.7848),
             )),
             mesh_visual: Some((
                 primitive: Sphere(
@@ -221,9 +221,9 @@
         (
             name: Some("Stone 10"),
             transform: Some((
-                position: (0.76856613, 0.08, -0.558396),
+                position: (0.7686, 0.08, -0.5584),
                 rotation_euler: (0.0, 0.0, 0.0),
-                scale: (1.0, 0.6, 0.99417293),
+                scale: (1.0, 0.6, 0.9942),
             )),
             mesh_visual: Some((
                 primitive: Sphere(
@@ -238,8 +238,8 @@
         (
             name: Some("Log 1"),
             transform: Some((
-                position: (0.25789708, 0.28, 0.10903714),
-                rotation_euler: (-0.21418011, 0.0, 0.5065836),
+                position: (0.2579, 0.28, 0.109),
+                rotation_euler: (-0.21419999, 0.0, 0.5066),
                 scale: (0.12, 0.7, 0.12),
             )),
             mesh_visual: Some((
@@ -255,8 +255,8 @@
         (
             name: Some("Log 2"),
             transform: Some((
-                position: (-0.10903714, 0.28, 0.25789708),
-                rotation_euler: (-0.5065836, 0.0, -0.21418011),
+                position: (-0.109, 0.28, 0.2579),
+                rotation_euler: (-0.5066, 0.0, -0.21419999),
                 scale: (0.12, 0.7, 0.12),
             )),
             mesh_visual: Some((
@@ -272,8 +272,8 @@
         (
             name: Some("Log 3"),
             transform: Some((
-                position: (-0.25789708, 0.28, -0.10903714),
-                rotation_euler: (0.21418011, 0.0, -0.5065836),
+                position: (-0.2579, 0.28, -0.109),
+                rotation_euler: (0.21419999, 0.0, -0.5066),
                 scale: (0.12, 0.7, 0.12),
             )),
             mesh_visual: Some((
@@ -289,8 +289,8 @@
         (
             name: Some("Log 4"),
             transform: Some((
-                position: (0.10903714, 0.28, -0.25789708),
-                rotation_euler: (0.5065836, 0.0, 0.21418011),
+                position: (0.109, 0.28, -0.2579),
+                rotation_euler: (0.5066, 0.0, 0.21419999),
                 scale: (0.12, 0.7, 0.12),
             )),
             mesh_visual: Some((

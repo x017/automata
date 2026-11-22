@@ -30,6 +30,12 @@ LEAVES = (0.1, 0.22, 0.12, 1.0)
 FIRE = (0.0, 0.0, 0.0)  # the middle of the fire pit, on the ground
 
 
+def r4(v):
+    """Rounded, so the saved level is the same on every platform's maths
+    library."""
+    return round(v, 4)
+
+
 def box(name, position, scale, color, rotation=(0.0, 0.0, 0.0), **surface):
     return (
         at.Entity(name)
@@ -68,17 +74,18 @@ def build():
         a = i / 10 * math.tau
         r = 0.95
         scene.add(
-            ball(f"Stone {i + 1}", (math.cos(a) * r, 0.08, math.sin(a) * r), 0.34, STONE,
-                 scale=(1.0, 0.6, 0.85 + 0.15 * math.sin(i * 2.3)), roughness=0.9)
+            ball(f"Stone {i + 1}", (r4(math.cos(a) * r), 0.08, r4(math.sin(a) * r)), 0.34,
+                 STONE, scale=(1.0, 0.6, r4(0.85 + 0.15 * math.sin(i * 2.3))), roughness=0.9)
         )
 
     # The log pile: a teepee of four logs leaning in, charred at the core.
     for i in range(4):
         a = i / 4 * math.tau + 0.4
-        x, z = math.cos(a) * 0.28, math.sin(a) * 0.28
+        x, z = r4(math.cos(a) * 0.28), r4(math.sin(a) * 0.28)
         scene.add(
             box(f"Log {i + 1}", (x, 0.28, z), (0.12, 0.7, 0.12), WOOD,
-                rotation=(math.sin(a) * -0.55, 0.0, math.cos(a) * 0.55), roughness=0.85)
+                rotation=(r4(math.sin(a) * -0.55), 0.0, r4(math.cos(a) * 0.55)),
+                roughness=0.85)
         )
     scene.add(ball("Embers Bed", (0, 0.03, 0), 0.6, CHARRED, scale=(1.0, 0.25, 1.0),
                    emissive=(1.0, 0.3, 0.05), emissive_strength=1.5, glow_light=0.0))
