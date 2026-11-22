@@ -1,0 +1,662 @@
+(
+    version: 1,
+    entities: [
+        (
+            name: Some("Moon"),
+            directional_light: Some((
+                direction: (-0.4, -1.0, 0.3),
+                color: (0.16, 0.2, 0.34),
+                ambient: 0.08,
+                shadows: true,
+            )),
+        ),
+        (
+            name: Some("Environment"),
+            environment: Some((
+                sky_color: (0.25, 0.3, 0.5),
+                ground_color: (0.05, 0.05, 0.08),
+                background: (0.008, 0.01, 0.02),
+                exposure: 1.0,
+                tonemapping: Aces,
+                fog: true,
+                fog_color: (0.008, 0.01, 0.02),
+                fog_density: 0.05,
+                fog_start: 2.0,
+                sky: true,
+                zenith_color: (0.002, 0.003, 0.01),
+                sun_size: 1.6,
+                sun_glow: 0.3,
+                clouds: 0.0,
+                lens_flare: 0.0,
+                ambient_occlusion: 1.0,
+            )),
+        ),
+        (
+            name: Some("Ground"),
+            transform: Some((
+                position: (0.0, -0.1, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (40.0, 0.2, 40.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.16, 0.2, 0.12, 1.0),
+                surface: (
+                    roughness: Some(0.95),
+                ),
+            )),
+        ),
+        (
+            name: Some("Fire Pit"),
+            transform: Some((
+                position: (0.0, 0.005, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 0.01, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 2.2,
+                ),
+                color: (0.22, 0.17, 0.12, 1.0),
+                surface: (
+                    roughness: Some(1.0),
+                ),
+            )),
+        ),
+        (
+            name: Some("Stone 1"),
+            transform: Some((
+                position: (0.95, 0.08, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 0.6, 0.85),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.34,
+                ),
+                color: (0.42, 0.4, 0.38, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Stone 2"),
+            transform: Some((
+                position: (0.76856613, 0.08, 0.558396),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 0.6, 0.96185577),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.34,
+                ),
+                color: (0.42, 0.4, 0.38, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Stone 3"),
+            transform: Some((
+                position: (0.29356614, 0.08, 0.9035037),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 0.6, 0.70094633),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.34,
+                ),
+                color: (0.42, 0.4, 0.38, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Stone 4"),
+            transform: Some((
+                position: (-0.29356614, 0.08, 0.9035037),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 0.6, 0.93676597),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.34,
+                ),
+                color: (0.42, 0.4, 0.38, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Stone 5"),
+            transform: Some((
+                position: (-0.76856613, 0.08, 0.558396),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 0.6, 0.88343346),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.34,
+                ),
+                color: (0.42, 0.4, 0.38, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Stone 6"),
+            transform: Some((
+                position: (-0.95, 0.08, 0.00000000000000011634144),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 0.6, 0.71868217),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.34,
+                ),
+                color: (0.42, 0.4, 0.38, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Stone 7"),
+            transform: Some((
+                position: (-0.76856613, 0.08, -0.558396),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 0.6, 0.9915544),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.34,
+                ),
+                color: (0.42, 0.4, 0.38, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Stone 8"),
+            transform: Some((
+                position: (-0.29356614, 0.08, -0.9035037),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 0.6, 0.79268926),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.34,
+                ),
+                color: (0.42, 0.4, 0.38, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Stone 9"),
+            transform: Some((
+                position: (0.29356614, 0.08, -0.9035037),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 0.6, 0.78481513),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.34,
+                ),
+                color: (0.42, 0.4, 0.38, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Stone 10"),
+            transform: Some((
+                position: (0.76856613, 0.08, -0.558396),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 0.6, 0.99417293),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.34,
+                ),
+                color: (0.42, 0.4, 0.38, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Log 1"),
+            transform: Some((
+                position: (0.25789708, 0.28, 0.10903714),
+                rotation_euler: (-0.21418011, 0.0, 0.5065836),
+                scale: (0.12, 0.7, 0.12),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.33, 0.21, 0.12, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+        ),
+        (
+            name: Some("Log 2"),
+            transform: Some((
+                position: (-0.10903714, 0.28, 0.25789708),
+                rotation_euler: (-0.5065836, 0.0, -0.21418011),
+                scale: (0.12, 0.7, 0.12),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.33, 0.21, 0.12, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+        ),
+        (
+            name: Some("Log 3"),
+            transform: Some((
+                position: (-0.25789708, 0.28, -0.10903714),
+                rotation_euler: (0.21418011, 0.0, -0.5065836),
+                scale: (0.12, 0.7, 0.12),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.33, 0.21, 0.12, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+        ),
+        (
+            name: Some("Log 4"),
+            transform: Some((
+                position: (0.10903714, 0.28, -0.25789708),
+                rotation_euler: (0.5065836, 0.0, 0.21418011),
+                scale: (0.12, 0.7, 0.12),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.33, 0.21, 0.12, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+        ),
+        (
+            name: Some("Embers Bed"),
+            transform: Some((
+                position: (0.0, 0.03, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 0.25, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.6,
+                ),
+                color: (0.07, 0.05, 0.04, 1.0),
+                surface: (
+                    emissive: (1.0, 0.3, 0.05),
+                    emissive_strength: 1.5,
+                    glow_light: 0.0,
+                ),
+            )),
+        ),
+        (
+            name: Some("Flames"),
+            transform: Some((
+                position: (0.0, 0.1, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            particle_emitter: Some((
+                emitting: true,
+                rate: 45.0,
+                burst: 0,
+                duration: 0.0,
+                one_shot: false,
+                max_particles: 200,
+                lifetime: (0.6, 1.1),
+                shape: Cone,
+                shape_size: (0.25, 0.1, 0.25),
+                cone_angle: 12.0,
+                speed: (0.6, 1.4),
+                gravity: -1.8,
+                drag: 0.8,
+                size: (0.6, 0.15),
+                size_spread: 0.35,
+                color: (2.0, 1.15, 0.4, 1.0),
+                color_end: (1.2, 0.18, 0.03, 1.0),
+                fade_in: 0.12,
+                fade_out: 0.5,
+                spin: 1.2,
+                stretch: 0.0,
+                blend: Additive,
+                lit: false,
+                soft: 0.3,
+                sprite: Flame,
+                texture: "",
+                sheet: (1, 1),
+                world_space: true,
+            )),
+        ),
+        (
+            name: Some("Smoke"),
+            transform: Some((
+                position: (0.0, 1.1, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            particle_emitter: Some((
+                emitting: true,
+                rate: 7.0,
+                burst: 0,
+                duration: 0.0,
+                one_shot: false,
+                max_particles: 100,
+                lifetime: (3.5, 5.5),
+                shape: Cone,
+                shape_size: (0.2, 0.1, 0.2),
+                cone_angle: 10.0,
+                speed: (0.5, 0.9),
+                gravity: -0.25,
+                drag: 0.3,
+                size: (0.5, 2.6),
+                size_spread: 0.3,
+                color: (0.1, 0.095, 0.09, 0.55),
+                color_end: (0.22, 0.22, 0.24, 0.0),
+                fade_in: 0.15,
+                fade_out: 0.5,
+                spin: 0.4,
+                stretch: 0.0,
+                blend: Alpha,
+                lit: true,
+                soft: 0.8,
+                sprite: Puff,
+                texture: "",
+                sheet: (1, 1),
+                world_space: true,
+            )),
+        ),
+        (
+            name: Some("Embers"),
+            transform: Some((
+                position: (0.0, 0.25, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            particle_emitter: Some((
+                emitting: true,
+                rate: 5.0,
+                burst: 0,
+                duration: 0.0,
+                one_shot: false,
+                max_particles: 200,
+                lifetime: (1.2, 2.4),
+                shape: Point,
+                shape_size: (0.1, 0.1, 0.1),
+                cone_angle: 25.0,
+                speed: (1.0, 2.6),
+                gravity: -0.6,
+                drag: 0.6,
+                size: (0.035, 0.015),
+                size_spread: 0.3,
+                color: (8.0, 4.0, 1.2, 1.0),
+                color_end: (4.0, 0.9, 0.1, 1.0),
+                fade_in: 0.0,
+                fade_out: 0.4,
+                spin: 0.0,
+                stretch: 0.03,
+                blend: Additive,
+                lit: false,
+                soft: 0.0,
+                sprite: Spark,
+                texture: "",
+                sheet: (1, 1),
+                world_space: true,
+            )),
+            script: Some((
+                path: "scripts/crackle.py",
+            )),
+        ),
+        (
+            name: Some("Firelight"),
+            transform: Some((
+                position: (0.0, 0.95, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            point_light: Some((
+                color: (1.0, 0.55, 0.22),
+                intensity: 4.0,
+                range: 12.0,
+                radius: 0.25,
+            )),
+        ),
+        (
+            name: Some("Bench Log"),
+            transform: Some((
+                position: (-2.3, 0.22, 0.4),
+                rotation_euler: (-0.0, 0.25, -0.0),
+                scale: (0.45, 0.45, 2.2),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.24, 0.17, 0.11, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Stump"),
+            transform: Some((
+                position: (1.9, 0.25, -1.4),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.6, 0.5, 0.6),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.24, 0.17, 0.11, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Trunk 1"),
+            transform: Some((
+                position: (-4.5, 1.35, -4.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.35, 2.7, 0.35),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.24, 0.17, 0.11, 1.0),
+            )),
+        ),
+        (
+            name: Some("Crown 1"),
+            transform: Some((
+                position: (-4.5, 3.375, -4.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 2.025,
+                ),
+                color: (0.1, 0.22, 0.12, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Trunk 2"),
+            transform: Some((
+                position: (3.8, 1.65, -5.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.35, 3.3, 0.35),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.24, 0.17, 0.11, 1.0),
+            )),
+        ),
+        (
+            name: Some("Crown 2"),
+            transform: Some((
+                position: (3.8, 4.125, -5.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 2.475,
+                ),
+                color: (0.1, 0.22, 0.12, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Trunk 3"),
+            transform: Some((
+                position: (-6.0, 1.2, 2.5),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.35, 2.4, 0.35),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.24, 0.17, 0.11, 1.0),
+            )),
+        ),
+        (
+            name: Some("Crown 3"),
+            transform: Some((
+                position: (-6.0, 3.0, 2.5),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 1.8,
+                ),
+                color: (0.1, 0.22, 0.12, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Trunk 4"),
+            transform: Some((
+                position: (6.5, 1.5, -2.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.35, 3.0, 0.35),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.24, 0.17, 0.11, 1.0),
+            )),
+        ),
+        (
+            name: Some("Crown 4"),
+            transform: Some((
+                position: (6.5, 3.75, -2.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 2.25,
+                ),
+                color: (0.1, 0.22, 0.12, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Trunk 5"),
+            transform: Some((
+                position: (0.5, 1.8, -7.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.35, 3.6, 0.35),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.24, 0.17, 0.11, 1.0),
+            )),
+        ),
+        (
+            name: Some("Crown 5"),
+            transform: Some((
+                position: (0.5, 4.5, -7.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 2.7,
+                ),
+                color: (0.1, 0.22, 0.12, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Main Camera"),
+            transform: Some((
+                position: (3.6, 1.9, 4.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            camera_3d: Some((
+                position: (3.6, 1.9, 4.6),
+                target: (0.0, 0.7, 0.0),
+                up: (0.0, 1.0, 0.0),
+                fov_y_degrees: 60.0,
+                near: 0.1,
+                far: 1000.0,
+            )),
+        ),
+    ],
+)

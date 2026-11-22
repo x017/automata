@@ -61,6 +61,10 @@ struct PreparedFrame {
     points: Vec<crate::light::FramePoint>,
     /// One bind group per water draw.
     water_binds: Vec<(wgpu::BindGroup, u32)>,
+    /// The particle batches, uploaded in draw order.
+    particle_runs: Vec<crate::particles::ParticleRun>,
+    /// The frame's 3D camera.
+    camera_3d: crate::Camera3D,
 }
 
 impl PreparedFrame {
@@ -156,6 +160,8 @@ pub struct Renderer {
     offscreen_depth: Option<((u32, u32), wgpu::Texture)>,
     /// Overlay-over-scene compositing for CPU-drawn UIs.
     compositor: Compositor,
+    /// Particle pipelines, sprite sheet and instances.
+    particles: crate::particles::Particles,
 }
 
 impl Renderer {
@@ -257,6 +263,7 @@ impl Renderer {
         let post = crate::post::Post::new(device);
         let ssao = crate::ssao::Ssao::new(device);
         let scene_placeholder = placeholder_scene_bind_group(device, &shared);
+        let particles = crate::particles::Particles::new(device, ctx.queue());
         Self {
             shared,
             sprite_pipeline,
@@ -294,6 +301,7 @@ impl Renderer {
             offscreen_sprite_pipeline: None,
             offscreen_depth: None,
             compositor,
+            particles,
             ctx,
         }
     }
@@ -1081,6 +1089,19 @@ impl Renderer {
             );
             self.forward_pipelines.extend(missing);
         }
+        if !draw.particles.is_empty() {
+            let particle_format = if beautiful {
+                pipeline::HDR_FORMAT
+            } else {
+                format
+            };
+            self.particles.ensure(
+                device,
+                &self.shared.camera_layout,
+                &self.shared.light_layout,
+                particle_format,
+            );
+        }
         if !draw.waters.is_empty() {
             let (water_format, depth, mixes) = if beautiful {
                 (
@@ -1182,6 +1203,9 @@ impl Renderer {
             Some(sprite) if offscreen => sprite,
             _ => &self.sprite_pipeline,
         };
+        // Particles get a pass of their own after the scene's, reading its
+        // depth (kept for them).
+        let particle_depth = depth_view.filter(|_| !prepared.particle_runs.is_empty());
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("main"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1197,7 +1221,11 @@ impl Renderer {
                 view: dv,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Discard,
+                    store: if particle_depth.is_some() {
+                        wgpu::StoreOp::Store
+                    } else {
+                        wgpu::StoreOp::Discard
+                    },
                 }),
                 stencil_ops: None,
             }),
@@ -1218,7 +1246,63 @@ impl Renderer {
         if let Some(water) = self.water_pipeline(format, false, shadows) {
             self.record_waters(&mut pass, prepared, water, &self.scene_placeholder);
         }
-        self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
+        if let Some(depth) = particle_depth {
+            drop(pass);
+            let mut pass = self.particle_pass(encoder, view, depth);
+            self.record_particles(&mut pass, prepared, format, depth);
+            self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
+        } else {
+            self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
+        }
+    }
+
+    /// A pass drawing over `view` with `depth` attached read-only, so the
+    /// particles drawn in it can read the depth too.
+    #[allow(clippy::unused_self)] // a method like the other passes
+    fn particle_pass<'e>(
+        &self,
+        encoder: &'e mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        depth: &wgpu::TextureView,
+    ) -> wgpu::RenderPass<'e> {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("particles"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth,
+                depth_ops: None,
+                stencil_ops: None,
+            }),
+            ..wgpu::RenderPassDescriptor::default()
+        })
+    }
+
+    /// Records the frame's particles into a pass drawing into `format`.
+    fn record_particles(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        prepared: &PreparedFrame,
+        format: wgpu::TextureFormat,
+        depth: &wgpu::TextureView,
+    ) {
+        self.particles.record(
+            self.ctx.device(),
+            pass,
+            &prepared.particle_runs,
+            format,
+            &prepared.camera_3d,
+            &prepared.camera_3d_bind,
+            &prepared.light_bind,
+            depth,
+        );
     }
 
     /// The Beautiful path: the scene in HDR, water refracting through a copy
@@ -1251,6 +1335,14 @@ impl Renderer {
         let water = self
             .water_pipeline(pipeline::HDR_FORMAT, true, pipeline::ForwardShadows::ALL)
             .filter(|_| !draw.waters.is_empty());
+        let particles = !prepared.particle_runs.is_empty();
+        let keep_depth = |keep: bool| {
+            if keep {
+                wgpu::StoreOp::Store
+            } else {
+                wgpu::StoreOp::Discard
+            }
+        };
         self.record_occlusion(encoder, draw, prepared);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1272,11 +1364,7 @@ impl Renderer {
                     view: &hdr_depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
-                        store: if water.is_some() {
-                            wgpu::StoreOp::Store
-                        } else {
-                            wgpu::StoreOp::Discard
-                        },
+                        store: keep_depth(water.is_some() || particles),
                     }),
                     stencil_ops: None,
                 }),
@@ -1341,13 +1429,17 @@ impl Renderer {
                     view: &hdr_depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Discard,
+                        store: keep_depth(particles),
                     }),
                     stencil_ops: None,
                 }),
                 ..wgpu::RenderPassDescriptor::default()
             });
             self.record_waters(&mut pass, prepared, water, &scene_bind);
+        }
+        if particles {
+            let mut pass = self.particle_pass(encoder, &hdr_view, &hdr_depth);
+            self.record_particles(&mut pass, prepared, pipeline::HDR_FORMAT, &hdr_depth);
         }
 
         let env = draw.environment.unwrap_or_default();
@@ -1716,6 +1808,14 @@ impl Renderer {
             self.light_bind_group(&sun, &env, &shadows, render_shadows, &frame, &points);
         self.upload_ripples(draw.ripples.as_ref());
         let water_binds = self.water_bind_groups(draw, beautiful, time);
+        let forward = (camera_3d.target - camera_3d.position).normalize_or(glam::Vec3::NEG_Z);
+        let particle_runs = self.particles.upload(
+            self.ctx.device(),
+            self.ctx.queue(),
+            &draw.particles,
+            camera_3d.position,
+            forward,
+        );
 
         PreparedFrame {
             camera_2d_bind,
@@ -1729,6 +1829,8 @@ impl Renderer {
             render_shadows,
             points,
             water_binds,
+            particle_runs,
+            camera_3d,
         }
     }
 
@@ -2017,7 +2119,8 @@ fn create_depth_texture(device: &wgpu::Device, size: (u32, u32)) -> wgpu::Textur
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: DEPTH_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        // Sampled by soft particles, attached read-only in the same pass.
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     })
 }
@@ -3797,6 +3900,117 @@ mod tests {
         assert_eq!(key, Some((ripples.texels.as_ptr() as usize, 9)));
         renderer.upload_ripples(Some(&ripples.clone()));
         assert_eq!(renderer.ripple_field_key, key);
+    }
+
+    /// A dark wall at z = -1 seen from z = 5, plus `batches`.
+    fn particle_frame(renderer: &mut Renderer, batches: &[crate::ParticleBatch]) -> Vec<u8> {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let wall = renderer.create_material([0.05, 0.05, 0.05, 1.0], None);
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 0.0, 5.0),
+            glam::Vec3::ZERO,
+        ));
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::new(20.0, 20.0, 0.2),
+                glam::Quat::IDENTITY,
+                glam::Vec3::new(0.0, 0.0, -1.1),
+            ),
+            &wall,
+        );
+        for batch in batches {
+            draw.particles(batch.clone());
+        }
+        renderer.render_offscreen(&draw, &target);
+        read_pixels(renderer, &target, size)
+    }
+
+    fn one_particle(
+        position: [f32; 3],
+        color: [f32; 4],
+        blend: crate::ParticleBlend,
+        soft: f32,
+    ) -> crate::ParticleBatch {
+        crate::ParticleBatch {
+            instances: vec![crate::ParticleInstance {
+                position,
+                size: 2.0,
+                color,
+                uv: crate::ParticleSprite::Dot.uv(0),
+                ..crate::ParticleInstance::default()
+            }],
+            blend,
+            soft,
+            ..crate::ParticleBatch::default()
+        }
+    }
+
+    #[test]
+    fn particles_glow_cover_hide_behind_walls_fade_softly_and_streak() {
+        use crate::ParticleBlend::{Additive, Alpha};
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping particle test");
+            return;
+        };
+        let size = renderer.size();
+        let sum = |p: [u8; 4]| u32::from(p[0]) + u32::from(p[1]) + u32::from(p[2]);
+        for quality in [GraphicsQuality::Low, GraphicsQuality::Beautiful] {
+            renderer.set_quality(quality);
+            let wall = center_pixel(&particle_frame(&mut renderer, &[]), size);
+            // Additive: brighter, in its colour.
+            let fire = one_particle([0.0; 3], [1.0, 0.5, 0.1, 1.0], Additive, 0.0);
+            let glow = center_pixel(&particle_frame(&mut renderer, &[fire]), size);
+            assert!(
+                glow[0] > wall[0] + 80 && glow[0] > glow[1] && glow[1] > glow[2],
+                "{quality:?}: fire should glow orange, {glow:?} over {wall:?}"
+            );
+            // Alpha: covers the wall in its colour.
+            let blue = one_particle([0.0; 3], [0.1, 0.2, 1.0, 1.0], Alpha, 0.0);
+            let cover = center_pixel(&particle_frame(&mut renderer, &[blue]), size);
+            assert!(
+                cover[2] > wall[2] + 80 && cover[2] > cover[0],
+                "{quality:?}: smoke should cover, {cover:?}"
+            );
+            // Behind the wall: hidden.
+            let hidden = one_particle([0.0, 0.0, -3.0], [1.0; 4], Additive, 0.0);
+            let behind = center_pixel(&particle_frame(&mut renderer, &[hidden]), size);
+            assert!(sum(behind) <= sum(wall) + 3, "{quality:?}: {behind:?}");
+            // Just in front of the wall: soft ones fade into it.
+            let near = |soft| one_particle([0.0, 0.0, -0.9], [1.0; 4], Additive, soft);
+            let hard = sum(center_pixel(
+                &particle_frame(&mut renderer, &[near(0.0)]),
+                size,
+            ));
+            let soft = sum(center_pixel(
+                &particle_frame(&mut renderer, &[near(1.0)]),
+                size,
+            ));
+            assert!(
+                soft + 100 < hard && soft > sum(wall),
+                "{quality:?}: soft {soft} vs hard {hard} (wall {})",
+                sum(wall)
+            );
+            // A streak stretches a small particle sideways.
+            let mut spark = one_particle([0.0; 3], [1.0; 4], Additive, 0.0);
+            spark.instances[0].size = 0.2;
+            let off_center = |pixels: &[u8]| {
+                let (w, h) = (size.0 as usize, size.1 as usize);
+                let i = ((h / 2) * w + w / 2 - 12) * 4;
+                u32::from(pixels[i]) + u32::from(pixels[i + 1]) + u32::from(pixels[i + 2])
+            };
+            let dot = off_center(&particle_frame(&mut renderer, &[spark.clone()]));
+            spark.instances[0].streak = [2.0, 0.0, 0.0];
+            let streak = off_center(&particle_frame(&mut renderer, &[spark]));
+            assert!(
+                streak > dot + 100,
+                "{quality:?}: the streak should reach left, {streak} vs {dot}"
+            );
+        }
     }
 
     #[test]

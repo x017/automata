@@ -281,11 +281,20 @@ class FakeScene:
         return iter(list(self.entities.values()))
 
 
+class FakeParticles:
+    def __init__(self):
+        self.bursts = []
+
+    def burst(self, effect, position, direction=None, count=None, **fields):
+        self.bursts.append((effect, tuple(position), direction, count, fields))
+
+
 class FakeCtx:
     def __init__(self, scene, inp=None, physics=None):
         self.scene = scene
         self.input = inp or FakeInput()
         self.physics = physics or FakePhysics()
+        self.particles = FakeParticles()
         self.audio = FakeAudio()
         self.hud = FakeHud()
         self.time = FakeTime()
@@ -327,6 +336,11 @@ def test_shooting_a_drone_lowers_its_health_and_plays_the_blaster():
     assert drone.attributes["health"] == 100 - blaster["shots"] * blaster["damage"]
     assert blaster["sound"] in ctx.audio.played
     assert ("sprites/hit.png", 640.0, 360.0) in ctx.hud.images
+    # Every pellet throws sparks off the drone, back along the hit normal.
+    assert len(ctx.particles.bursts) == blaster["shots"]
+    for effect, position, normal, count, fields in ctx.particles.bursts:
+        assert effect == "sparks" and position == (0.0, 0.0, -5.0)
+        assert normal == (0.0, 0.0, 1.0) and count > 0 and "color" in fields
     # The cooldown stops the next frame from firing again.
     player_script.update(player, ctx)
     assert len(physics.rays) == blaster["shots"]

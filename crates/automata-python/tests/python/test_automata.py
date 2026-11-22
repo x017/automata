@@ -1601,3 +1601,109 @@ def test_audio_master_volume_and_loop(tmp_path):
     game.run(update, max_frames=5)
     assert seen["playing"] is True
     assert seen["count"] == 0
+
+
+def test_particle_emitter_presets_fields_and_errors():
+    fire = at.ParticleEmitter.preset("fire")
+    assert fire.preset_name == "fire"
+    assert fire == at.ParticleEmitter.preset("FIRE")
+    assert repr(fire) == 'ParticleEmitter.preset("fire")'
+    assert fire.blend == "additive" and fire.sprite == "flame" and fire.shape == "cone"
+    assert fire.color[0] > 1.0, "fire glows"
+    assert at.ParticleEmitter.presets() == ["fire", "smoke", "sparks", "dust", "splash", "magic"]
+    calm = fire.replace(rate=10, color=(1, 0.5, 0.2))
+    assert calm.preset_name is None and calm.rate == 10.0
+    assert calm.color == pytest.approx((1.0, 0.5, 0.2, 1.0))
+    assert fire.rate == 45.0, "replace copies"
+    custom = at.ParticleEmitter(rate=4, sprite="puff", lit=True, size=1.5, texture=None)
+    assert custom.size == (1.5, 1.5) and custom.lit and custom.texture == ""
+    assert at.ParticleEmitter(rate=-3).rate == 0.0
+    assert "cone_angle" in dir(fire)
+    with pytest.raises(ValueError):
+        at.ParticleEmitter.preset("lava")
+    with pytest.raises(ValueError):
+        at.ParticleEmitter(shape="donut")
+    with pytest.raises(ValueError):
+        at.ParticleEmitter(rate="fast")
+    with pytest.raises(KeyError):
+        at.ParticleEmitter(colour=(1, 0, 0))
+    with pytest.raises(AttributeError):
+        fire.colour  # noqa: B018
+
+
+def test_particle_emitters_round_trip_through_scene_files():
+    scene = at.Scene()
+    scene.add(at.Entity("fire").add(at.Transform()).add(at.ParticleEmitter.preset("fire")))
+    scene.add(
+        at.Entity("mist").add(at.Transform()).add(at.ParticleEmitter(rate=3, shape="box"))
+    )
+    text = scene.to_ron()
+    assert "particle_emitter: Some(" in text
+    loaded = at.Scene.from_ron(text)
+    emitters = {
+        e.name: c
+        for e in loaded.entities()
+        for c in e.components()
+        if isinstance(c, at.ParticleEmitter)
+    }
+    assert emitters["fire"] == at.ParticleEmitter.preset("fire")
+    assert emitters["mist"].shape == "box" and emitters["mist"].rate == 3.0
+    assert loaded.to_ron() == text
+
+
+def test_engine_particles_burst_and_clean_up():
+    game = at.Game(headless=True, fixed_delta=1 / 60)
+    game.load_scene(
+        at.Scene().add(
+            at.Entity("torch").add(at.Transform()).add(at.ParticleEmitter.preset("fire", rate=0))
+        )
+    )
+    counts = []
+
+    def update(ctx):
+        if ctx.time.frame == 1:
+            ctx.scene.burst("sparks", (0.0, 1.0, 0.0), direction=(0.0, 0.0, 1.0), count=10)
+            ctx.scene.burst(at.ParticleEmitter.preset("splash"), (2.0, 0.0, 0.0))
+            ctx.scene.burst_emitter(ctx.scene["torch"].id, 5)
+            with pytest.raises(ValueError):
+                ctx.scene.burst("lava", (0.0, 0.0, 0.0))
+        counts.append(ctx.scene.entity_count)
+
+    game.run(update, max_frames=150)
+    # Two burst entities appear, then despawn once their particles are gone.
+    assert max(counts) == 3
+    assert counts[-1] == 1
+
+
+def test_scene_scripts_burst_particles(tmp_path):
+    (tmp_path / "gun.py").write_text(
+        "def update(entity, ctx):\n"
+        "    if ctx.time.frame == 1:\n"
+        "        ctx.particles.burst('sparks', entity, direction=(0, 0, 1), count=8)\n"
+        "        ctx.particles.burst('dust', (1, 0, 1), color=(1, 0, 0, 1))\n"
+        "        ctx.particles.emit(entity, 4)\n"
+        "        for bad in ('lava', 'shape'):\n"
+        "            try:\n"
+        "                if bad == 'lava':\n"
+        "                    ctx.particles.burst('lava', (0, 0, 0))\n"
+        "                else:\n"
+        "                    ctx.particles.burst('fire', (0, 0, 0), shap='box')\n"
+        "            except (ValueError, KeyError):\n"
+        "                entity.attributes['bad_' + bad] = True\n"
+        "    entity.attributes['n'] = len(list(ctx.scene))\n"
+    )
+    scene = at.Scene()
+    gun = at.Entity("gun").add(at.Transform()).add(at.ParticleEmitter.preset("fire", rate=0))
+    gun.script = "gun.py"
+    scene.add(gun)
+    (tmp_path / "level.ron").write_text(scene.to_ron())
+    seen = []
+    attrs = {}
+
+    def after(ctx):
+        seen.append(ctx.scene.entity_count)
+        attrs.update(ctx.scene["gun"].attributes)
+
+    at.run_scene(str(tmp_path / "level.ron"), headless=True, max_frames=6, update=after)
+    assert max(seen) == 3, seen
+    assert attrs.get("bad_lava") and attrs.get("bad_shape"), attrs

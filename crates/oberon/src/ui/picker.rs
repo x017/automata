@@ -38,6 +38,10 @@ pub enum ColorTarget {
     WaterDeep,
     /// Water shallow color (RGB).
     WaterShallow,
+    /// Particle color at birth (RGBA, before its glow).
+    ParticleColor,
+    /// Particle color at death (RGBA, before its glow).
+    ParticleEndColor,
     /// A custom `Color` attribute, by key index in sorted order.
     Attribute(usize),
 }
@@ -59,6 +63,8 @@ impl ColorTarget {
             Self::EnvZenith => (0..3).map(Field::EnvZenith).collect(),
             Self::WaterDeep => (0..3).map(Field::WaterDeep).collect(),
             Self::WaterShallow => (0..3).map(Field::WaterShallow).collect(),
+            Self::ParticleColor => (0..4).map(Field::ParticleColor).collect(),
+            Self::ParticleEndColor => (0..4).map(Field::ParticleEndColor).collect(),
             Self::Attribute(_) => Vec::new(),
         }
     }
@@ -66,7 +72,10 @@ impl ColorTarget {
     /// Whether the color has an alpha channel.
     #[must_use]
     pub fn has_alpha(self) -> bool {
-        matches!(self, Self::Mesh | Self::Attribute(_))
+        matches!(
+            self,
+            Self::Mesh | Self::Attribute(_) | Self::ParticleColor | Self::ParticleEndColor
+        )
     }
 
     /// Reads the current RGBA (alpha 1 for RGB colors).

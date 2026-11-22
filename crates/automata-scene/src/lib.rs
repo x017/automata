@@ -14,6 +14,7 @@
 //! - [`MeshRenderer`] / [`SpriteRenderer`] and [`record_draw_list`] — the
 //!   scene-to-renderer bridge.
 //! - [`Animator`] and [`animate`] — clip playback for animated models.
+//! - [`ParticleEmitter`] and [`simulate_particles`] — CPU particles.
 //!
 //! All ECS types needed for common game code (`Entity`, queries) are
 //! re-exported; `hecs` remains available for advanced use.
@@ -21,14 +22,21 @@
 mod animation;
 mod events;
 mod handle;
+mod particles;
 mod render;
 mod resources;
 mod scene;
 mod transform;
 
 pub use animation::{animate, Animator};
+pub use automata_renderer::{ParticleBlend, ParticleSprite};
 pub use events::Events;
 pub use handle::{Assets, Handle};
+pub use particles::{
+    blend_label, burst, load_particle_textures, preview_particles, simulate_particles, spawn_burst,
+    EmitterShape, FieldValue as ParticleField, ParticleEmitter, ParticleState, ParticleTexture,
+    PRESETS as PARTICLE_PRESETS,
+};
 pub use render::{
     materialize_visuals, record_draw_list, DirectionalLight, MeshRenderer, MeshVisual,
     MeshVisualKind, PointLight, SpotLight, SpriteRenderer, Surface,

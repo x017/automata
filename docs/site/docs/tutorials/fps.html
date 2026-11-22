@@ -158,7 +158,8 @@ starts it when you begin walking and stops it when you stop:</p>
 <h3 id="shooting">Shooting<a class="anchor" href="#shooting" aria-label="Link to this section">#</a></h3>
 <p>A shot is a ray cast from the eye. Whatever it hits first, if that entity
 has a <code>health</code> attribute, loses some. The Blaster fires three slightly
-spread rays (a small shotgun). The Repeater fires one ray, but faster:</p>
+spread rays (a small shotgun). The Repeater fires one ray, but faster.
+Every hit throws sparks:</p>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># scripts/player.py</span>
     <span class="tok-k">for</span> _ <span class="tok-k">in</span> <span class="tok-b">range</span>(weapon[<span class="tok-s">&quot;shots&quot;</span>]):
         jitter = (random.uniform(-spread, spread), random.uniform(-spread, spread))
@@ -166,11 +167,22 @@ spread rays (a small shotgun). The Repeater fires one ray, but faster:</p>
         hit = ctx.physics.raycast(eye, direction, RANGE, ignore=entity)
         <span class="tok-k">if</span> hit <span class="tok-k">is</span> <span class="tok-b">None</span> <span class="tok-k">or</span> hit.entity <span class="tok-k">is</span> <span class="tok-b">None</span>:
             <span class="tok-k">continue</span>
+        <span class="tok-c"># Sparks fly off whatever it hit, back along the surface&#x27;s normal.</span>
+        count = <span class="tok-n">24</span> // weapon[&quot;shots&quot;]
         health = hit.entity.attributes.get(<span class="tok-s">&quot;health&quot;</span>)
         <span class="tok-k">if</span> health <span class="tok-k">is</span> <span class="tok-k">not</span> <span class="tok-b">None</span> <span class="tok-k">and</span> hit.entity.name != entity.name:
             hit.entity.attributes[<span class="tok-s">&quot;health&quot;</span>] = health - weapon[<span class="tok-s">&quot;damage&quot;</span>]
-            s[<span class="tok-s">&quot;marker&quot;</span>] = <span class="tok-n">0.15</span></code></pre></div>
-<p><code>ignore=entity</code> keeps the ray from hitting your own capsule. The <code>WEAPONS</code>
+            s[<span class="tok-s">&quot;marker&quot;</span>] = <span class="tok-n">0.15</span>
+            <span class="tok-c"># Drones spit hot red-orange sparks.</span>
+            ctx.particles.burst(<span class="tok-s">&quot;sparks&quot;</span>, hit.point, hit.normal, count * <span class="tok-n">2</span>,
+                                color=(<span class="tok-n">12.0</span>, <span class="tok-n">2.8</span>, <span class="tok-n">0.6</span>, <span class="tok-n">1.0</span>))
+        <span class="tok-k">else</span>:
+            ctx.particles.burst(<span class="tok-s">&quot;sparks&quot;</span>, hit.point, hit.normal, count)</code></pre></div>
+<p><code>ignore=entity</code> keeps the ray from hitting your own capsule.
+<code>ctx.particles.burst</code> plays a one-off effect that cleans up after itself.
+Here it's the <code>sparks</code> preset, aimed along the hit's <code>normal</code> so the sparks
+fly back off the wall. A colour above 1 glows. See
+<a href="../guides/rendering-and-lights.html#particles">Particles</a>. The <code>WEAPONS</code>
 list at the top of the file holds each blaster's cooldown, damage, spread,
 sound and crosshair. Press E to switch between them. Try changing the
 numbers while the game runs; scripts hot-reload when you save.</p>

@@ -30,6 +30,7 @@ pub fn staged_to_entity_data(entity: &StagedEntity) -> EntityData {
             StagedComponent::Environment(e) => data.environment = Some(*e),
             StagedComponent::Water(w) => data.water = Some(*w),
             StagedComponent::AudioSource(a) => data.audio_source = Some(a.clone()),
+            StagedComponent::ParticleEmitter(e) => data.particle_emitter = Some(e.clone()),
             StagedComponent::MeshVisual(v) => data.mesh_visual = Some(MeshVisualData::from(v)),
             StagedComponent::RigidBody(b) => data.rigid_body = Some(b.clone()),
             StagedComponent::Collider3D(c) => data.collider_3d = Some(c.clone()),
@@ -65,6 +66,9 @@ pub fn entity_data_to_staged(data: &EntityData) -> StagedEntity {
     }
     if let Some(l) = &data.spot_light {
         components.push(StagedComponent::SpotLight(*l));
+    }
+    if let Some(e) = &data.particle_emitter {
+        components.push(StagedComponent::ParticleEmitter(e.clone()));
     }
     if let Some(e) = &data.environment {
         components.push(StagedComponent::Environment(*e));

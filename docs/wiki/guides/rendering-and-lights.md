@@ -386,6 +386,89 @@ Water is also physics: dynamic bodies float in it and ride its waves (see
 [Physics → Water](physics.md#water)). The surface isn't a solid collider,
 so give the water a floor if sinking things should stop.
 
+## Particles
+
+Fire, smoke, sparks, dust, splashes and magic come from a
+**`ParticleEmitter`**. Start from a preset and change what you like:
+
+```python
+scene.add(at.Entity("campfire")
+          .add(at.Transform(position=(0, 0.1, 0)))
+          .add(at.ParticleEmitter.preset("fire")))
+scene.add(at.Entity("smoke")
+          .add(at.Transform(position=(0, 1.1, 0)))
+          .add(at.ParticleEmitter.preset("smoke", rate=10)))
+# From scratch: any field by keyword, the rest default.
+mist = at.ParticleEmitter(rate=4, sprite="puff", lit=True, size=(1, 3),
+                          color=(1, 1, 1, 0.3), color_end=(1, 1, 1, 0))
+```
+
+| Preset | Look |
+|---|---|
+| `"fire"` | Glowing flames rising from a small disc, 45 a second |
+| `"smoke"` | Lit grey puffs that rise, spread and fade over about 5 s |
+| `"sparks"` | A one-off burst of 24 glowing streaks that fall. It removes its entity when it's done |
+| `"dust"` | Motes drifting slowly in an 8 × 3 × 8 m box, lit |
+| `"splash"` | A one-off burst of 40 water droplets thrown up and out |
+| `"magic"` | Purple-blue stars swirling up, glowing |
+
+Particles leave the entity within `cone_angle` of its up (+Y) axis, so
+rotate the entity to aim them. Over each particle's life its size goes from
+`size[0]` to `size[1]` and its colour from `color` to `color_end`.
+
+| Setting | Values | What it does |
+|---|---|---|
+| `rate` | per second | New particles every second |
+| `burst` | count | Particles made all at once when it starts |
+| `duration` | s, 0 = forever | How long it makes particles |
+| `one_shot` | `True` / `False` | Removes the entity once it's done and the last particle is gone |
+| `lifetime` | (min, max) s | How long each particle lives (picked at random between the two) |
+| `shape`, `shape_size` | `"point"`, `"sphere"`, `"box"`, `"cone"`; m | Where particles start. `shape_size` is a sphere's or cone's radius (x), or a box's half extents. Sphere particles fly outward |
+| `cone_angle` | degrees | How far from straight up they may leave (180 = any way) |
+| `speed` | (min, max) m/s | Starting speed |
+| `gravity`, `drag` | m/s², per second | Gravity pulls them down (negative rises, like smoke or flames). Drag slows them |
+| `size` | (birth, death) m | Size over life. A single number sets both |
+| `color`, `color_end` | RGBA | Colour at birth and death. Over 1 glows: fire and sparks bloom on Beautiful |
+| `fade_in`, `fade_out` | share of life | Fades at the start and end of each life |
+| `spin` | rad/s | Spins the sprite |
+| `stretch` | s | Streaks particles back along their motion (sparks, rain) |
+| `blend` | `"alpha"` / `"additive"` | Additive adds light, for fire, sparks and magic. Alpha covers what's behind, for smoke and dust |
+| `lit` | `True` / `False` | Lit by the sun and placed lights, like smoke a fire colours. Unlit particles show their colour as-is |
+| `soft` | m | Fades particles out where they meet the scene, so smoke doesn't show a hard line on the ground |
+| `sprite` | `"dot"`, `"spark"`, `"star"`, `"flame"`, `"puff"` | The built-in picture |
+| `texture`, `sheet` | image path; (columns, rows) | Your own image instead. A sprite sheet's frames play over each particle's life |
+| `world_space` | `True` / `False` | On by default: particles stay where they were made when the entity moves, so a moving torch leaves a trail. Off, they move with the entity |
+| `max_particles` | count | Most alive at once (default 500). Thousands are fine |
+
+**One-off effects from scripts.** `ctx.particles.burst` plays an effect
+once at a point and cleans up after itself. `ctx.particles.emit` adds
+particles to an entity's own emitter:
+
+```python
+hit = ctx.physics.raycast(eye, forward, 100, ignore=entity)
+if hit:
+    # Sparks off the wall, flying back along its normal.
+    ctx.particles.burst("sparks", hit.point, hit.normal)
+ctx.particles.burst("dust", entity, count=20, color=(0.6, 0.5, 0.4, 0.8))
+ctx.particles.emit(ctx.scene["Embers"], 15)   # the fire pops
+```
+
+![Sparks off a drone hit in the FPS example](../../assets/rendering/particles_sparks.jpg)
+
+![The campfire example on Beautiful: fire, lit smoke and embers](../../assets/rendering/particles_campfire.jpg)
+
+- **Every preset draws particles.** Particles are drawn after the scene
+  (and water), each emitter in one instanced draw. They're simulated on the
+  CPU, so thousands are cheap but hundreds of thousands are not.
+- **Particles don't light the scene.** Put a Point Light in a fire for
+  the firelight, as the campfire example does.
+- **Oberon:** **Create → Particles** adds a fire. Pick another look from
+  the Inspector's **Preset** menu. The scene view plays the particles while
+  you edit: one-off effects replay every couple of seconds. **Start Glow**
+  and **End Glow** set how far over 1 the colours go.
+- **Example:** `examples/oberon/campfire` has a fire that burns, smokes and
+  crackles. In `examples/oberon/fps`, shots throw sparks where they hit.
+
 ## Mood recipes
 
 Without an Environment, these recipes use the plain look. Add a preset on

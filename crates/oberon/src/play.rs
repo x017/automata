@@ -296,6 +296,25 @@ impl PlaySession {
         for &(position, strength) in &reply.splashes {
             self.physics.splash(Vec3::from(position), strength);
         }
+        for b in &reply.bursts {
+            automata_scene::spawn_burst(
+                self.scene.world_mut(),
+                b.emitter.clone(),
+                Vec3::from(b.position),
+                b.direction.map(Vec3::from),
+                b.count,
+            );
+        }
+        for &(id, count) in &reply.emits {
+            let entity = self
+                .map
+                .iter()
+                .find(|(i, _)| self.doc.entities.get(*i).is_some_and(|e| e.id == id))
+                .map(|&(_, entity)| entity);
+            if let Some(entity) = entity {
+                automata_scene::burst(self.scene.world_mut(), entity, count);
+            }
+        }
         self.hud.clone_from(&reply.hud);
         if reply.lock.is_some() {
             self.lock_request = reply.lock;
@@ -550,7 +569,20 @@ impl PlaySession {
         }
         if steps > 0 {
             self.write_back();
+            #[allow(clippy::cast_precision_loss)] // a handful of steps
+            automata_scene::simulate_particles(self.scene.world_mut(), steps as f32 * TIMESTEP);
         }
+    }
+
+    /// Live particles in the play world (every emitter's, bursts included).
+    #[must_use]
+    pub fn particle_count(&self) -> usize {
+        self.scene
+            .world()
+            .query::<&automata_scene::ParticleState>()
+            .iter()
+            .map(automata_scene::ParticleState::len)
+            .sum()
     }
 
     /// Runs exactly one physics step (used by tests and frame stepping).
@@ -1390,6 +1422,7 @@ mod tests {
         let mut lock = None;
         let mut most_voices = 0;
         let mut drone_health = 100;
+        let mut most_sparks = 0;
         let mut frames = 0;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         while bridge.answered < 40 && std::time::Instant::now() < deadline {
@@ -1408,6 +1441,7 @@ mod tests {
             let problems = play.update_audio(&mut engine, &game);
             assert!(problems.is_empty(), "{problems:?}");
             most_voices = most_voices.max(play.voice_count());
+            most_sparks = most_sparks.max(play.particle_count());
             if let Some(e) = play.doc.entities.iter().find(|e| e.name() == "Enemy 1") {
                 if let Some(A::Int(h)) = e.data.attributes.get("health") {
                     drone_health = drone_health.min(*h);
@@ -1440,6 +1474,7 @@ mod tests {
         assert_eq!(lock, Some(true), "the player captures the mouse");
         assert!(most_voices >= 1, "the blaster sounded");
         assert!(drone_health < 100, "a volley hit Enemy 1");
+        assert!(most_sparks >= 10, "hits throw sparks: {most_sparks}");
         let images: Vec<&str> = play
             .hud
             .iter()

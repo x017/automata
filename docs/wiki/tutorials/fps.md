@@ -188,7 +188,8 @@ starts it when you begin walking and stops it when you stop:
 
 A shot is a ray cast from the eye. Whatever it hits first, if that entity
 has a `health` attribute, loses some. The Blaster fires three slightly
-spread rays (a small shotgun). The Repeater fires one ray, but faster:
+spread rays (a small shotgun). The Repeater fires one ray, but faster.
+Every hit throws sparks:
 
 ```python
 # scripts/player.py
@@ -198,13 +199,24 @@ spread rays (a small shotgun). The Repeater fires one ray, but faster:
         hit = ctx.physics.raycast(eye, direction, RANGE, ignore=entity)
         if hit is None or hit.entity is None:
             continue
+        # Sparks fly off whatever it hit, back along the surface's normal.
+        count = 24 // weapon["shots"]
         health = hit.entity.attributes.get("health")
         if health is not None and hit.entity.name != entity.name:
             hit.entity.attributes["health"] = health - weapon["damage"]
             s["marker"] = 0.15
+            # Drones spit hot red-orange sparks.
+            ctx.particles.burst("sparks", hit.point, hit.normal, count * 2,
+                                color=(12.0, 2.8, 0.6, 1.0))
+        else:
+            ctx.particles.burst("sparks", hit.point, hit.normal, count)
 ```
 
-`ignore=entity` keeps the ray from hitting your own capsule. The `WEAPONS`
+`ignore=entity` keeps the ray from hitting your own capsule.
+`ctx.particles.burst` plays a one-off effect that cleans up after itself.
+Here it's the `sparks` preset, aimed along the hit's `normal` so the sparks
+fly back off the wall. A colour above 1 glows. See
+[Particles](../guides/rendering-and-lights.md#particles). The `WEAPONS`
 list at the top of the file holds each blaster's cooldown, damage, spread,
 sound and crosshair. Press E to switch between them. Try changing the
 numbers while the game runs; scripts hot-reload when you save.

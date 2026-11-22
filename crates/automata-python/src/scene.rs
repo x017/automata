@@ -170,6 +170,11 @@ impl PyEntity {
                         Py::new(py, crate::components::PyAudioSource::from_inner(v.clone()))?
                             .into_any()
                     }
+                    StagedComponent::ParticleEmitter(v) => Py::new(
+                        py,
+                        crate::particles::PyParticleEmitter::from_inner(v.clone()),
+                    )?
+                    .into_any(),
                 })
             })
             .collect()
@@ -401,6 +406,9 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
             StagedComponent::SpotLight(c) => {
                 let _ = scene.world_mut().insert_one(id, *c);
             }
+            StagedComponent::ParticleEmitter(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
             StagedComponent::Environment(c) => {
                 let _ = scene.world_mut().insert_one(id, *c);
             }
@@ -448,6 +456,16 @@ pub struct FrameWrites {
     /// spawns are applied; writes aimed at the old scene's entities are
     /// dropped.
     pub load: Option<Vec<StagedEntity>>,
+    /// One-off particle effects to spawn: emitter, position, direction,
+    /// particle count.
+    pub bursts: Vec<(
+        automata_scene::ParticleEmitter,
+        glam::Vec3,
+        Option<glam::Vec3>,
+        Option<u32>,
+    )>,
+    /// Extra particles from entities' own emitters.
+    pub emitter_bursts: Vec<(EntityId, u32)>,
 }
 
 /// Shared write buffer between the per-frame views and the game loop.
@@ -492,6 +510,12 @@ pub fn apply_writes(scene: &mut Scene, writes: &WriteQueue) {
     }
     for staged in drained.spawns {
         spawn_staged(scene, &staged);
+    }
+    for (emitter, position, direction, count) in drained.bursts {
+        automata_scene::spawn_burst(scene.world_mut(), emitter, position, direction, count);
+    }
+    for (entity, count) in drained.emitter_bursts {
+        automata_scene::burst(scene.world_mut(), entity, count);
     }
     for entity in drained.despawns {
         if scene.world().contains(entity) {
@@ -609,6 +633,41 @@ impl SceneView {
     fn spawn(&self, entity: &Bound<'_, PyAny>, position: Option<(f32, f32, f32)>) -> PyResult<()> {
         let staged = staged_from_py(entity, position)?;
         self.writes.borrow_mut().spawns.extend(staged);
+        Ok(())
+    }
+
+    /// A one-off particle effect at `position` (applied after the
+    /// callback returns): `emitter` is a preset name ("sparks") or an
+    /// `at.ParticleEmitter`, its up axis turned to `direction`, making
+    /// `count` particles (default: its own `burst`, or a second of its
+    /// `rate`). It cleans up after
+    /// itself.
+    #[pyo3(signature = (emitter, position, direction=None, count=None))]
+    fn burst(
+        &self,
+        emitter: &Bound<'_, PyAny>,
+        position: (f32, f32, f32),
+        direction: Option<(f32, f32, f32)>,
+        count: Option<u32>,
+    ) -> PyResult<()> {
+        let emitter = crate::particles::emitter_from(emitter)?;
+        self.writes.borrow_mut().bursts.push((
+            emitter,
+            position.into(),
+            direction.map(Into::into),
+            count,
+        ));
+        Ok(())
+    }
+
+    /// Makes `count` extra particles from entity `id`'s own emitter next
+    /// frame (nothing if it has none).
+    fn burst_emitter(&self, id: u64, count: u32) -> PyResult<()> {
+        let entity = entity_from_bits(id)?;
+        self.writes
+            .borrow_mut()
+            .emitter_bursts
+            .push((entity, count));
         Ok(())
     }
 

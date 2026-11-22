@@ -249,10 +249,17 @@ def shoot(entity, ctx, eye, axes):
         hit = ctx.physics.raycast(eye, direction, RANGE, ignore=entity)
         if hit is None or hit.entity is None:
             continue
+        # Sparks fly off whatever it hit, back along the surface's normal.
+        count = 24 // weapon["shots"]
         health = hit.entity.attributes.get("health")
         if health is not None and hit.entity.name != entity.name:
             hit.entity.attributes["health"] = health - weapon["damage"]
             s["marker"] = 0.15
+            # Drones spit hot red-orange sparks.
+            ctx.particles.burst("sparks", hit.point, hit.normal, count * 2,
+                                color=(12.0, 2.8, 0.6, 1.0))
+        else:
+            ctx.particles.burst("sparks", hit.point, hit.normal, count)
 
 
 def hold_weapons(entity, ctx, eye, yaw, pitch):

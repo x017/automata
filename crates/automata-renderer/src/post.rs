@@ -90,7 +90,7 @@ pub(crate) struct PostTargets {
     pub size: (u32, u32),
     /// The scene's HDR color.
     pub hdr: wgpu::Texture,
-    /// The scene's depth (copyable, for water).
+    /// The scene's depth (copyable, for water; sampled by soft particles).
     pub depth: wgpu::Texture,
     /// Copies water reads while drawing over `hdr` / `depth`.
     pub scene_copy: wgpu::Texture,
@@ -136,7 +136,7 @@ impl PostTargets {
             depth: texture(
                 "hdr depth",
                 HDR_DEPTH_FORMAT,
-                U::RENDER_ATTACHMENT | U::COPY_SRC,
+                U::RENDER_ATTACHMENT | U::COPY_SRC | U::TEXTURE_BINDING,
                 (w, h),
                 1,
             ),

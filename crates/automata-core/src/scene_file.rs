@@ -16,8 +16,8 @@ use automata_renderer::{Camera2D, Camera3D, Environment, MeshData, Water};
 /// A mesh's roughness / metalness / glow overrides (saved with its visual).
 pub use automata_scene::Surface;
 use automata_scene::{
-    DirectionalLight, MeshVisual, MeshVisualKind, Name, PointLight, SceneWorld, SpotLight,
-    Transform,
+    DirectionalLight, MeshVisual, MeshVisualKind, Name, ParticleEmitter, PointLight, SceneWorld,
+    SpotLight, Transform,
 };
 use glam::EulerRot;
 use serde::{Deserialize, Serialize};
@@ -75,6 +75,10 @@ pub struct EntityData {
     /// A light shining in a cone along the entity's forward (-Z) axis.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spot_light: Option<SpotLight>,
+    /// Makes particles: fire, smoke, sparks (missing fields take their
+    /// defaults).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub particle_emitter: Option<ParticleEmitter>,
     /// Scene look: ambient, fog, exposure, tone mapping, background.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<Environment>,
@@ -309,6 +313,9 @@ impl SceneFile {
             if let Some(light) = eref.get::<&SpotLight>() {
                 data.spot_light = Some(*light);
             }
+            if let Some(emitter) = eref.get::<&ParticleEmitter>() {
+                data.particle_emitter = Some(ParticleEmitter::clone(&emitter));
+            }
             if let Some(env) = eref.get::<&Environment>() {
                 data.environment = Some(*env);
             }
@@ -383,6 +390,9 @@ impl SceneFile {
             }
             if let Some(light) = &data.spot_light {
                 let _ = world.insert_one(entity, *light);
+            }
+            if let Some(emitter) = &data.particle_emitter {
+                let _ = world.insert_one(entity, emitter.clone());
             }
             if let Some(env) = &data.environment {
                 let _ = world.insert_one(entity, *env);
@@ -711,6 +721,39 @@ mod tests {
         let water = partial.entities[0].water.unwrap();
         assert!((water.wave_height - 0.5).abs() < f32::EPSILON);
         assert_eq!(water.size, Water::default().size);
+    }
+
+    #[test]
+    fn particle_emitters_round_trip_and_simulate_once_loaded() {
+        let mut world = SceneWorld::new();
+        let fire = ParticleEmitter::preset("fire").unwrap();
+        world.spawn((Name("campfire".into()), Transform::IDENTITY, fire.clone()));
+        let file = SceneFile::from_world(&world);
+        let text = file.to_ron().unwrap();
+        let back = SceneFile::from_ron(&text).unwrap();
+        assert_eq!(back, file);
+        assert_eq!(back.entities[0].particle_emitter, Some(fire));
+        // Hand-written files may set only a few fields.
+        let partial = SceneFile::from_ron(
+            "(version: 1, entities: [(particle_emitter: Some((rate: 5.0, \
+             blend: Additive, sprite: Puff)))])",
+        )
+        .unwrap();
+        let emitter = partial.entities[0].particle_emitter.clone().unwrap();
+        assert!((emitter.rate - 5.0).abs() < f32::EPSILON);
+        assert_eq!(emitter.sprite, automata_scene::ParticleSprite::Puff);
+        assert_eq!(emitter.lifetime, ParticleEmitter::default().lifetime);
+        // Loaded, it makes particles that reach the draw list.
+        let mut live = SceneWorld::new();
+        back.apply_to_world(&mut live);
+        automata_scene::propagate_transforms(&mut live);
+        for _ in 0..30 {
+            automata_scene::simulate_particles(&mut live, 1.0 / 60.0);
+        }
+        let mut draw = automata_renderer::DrawList::new();
+        automata_scene::record_draw_list(&live, &mut draw);
+        assert_eq!(draw.particle_batches().len(), 1);
+        assert!(draw.particle_count() > 10, "{}", draw.particle_count());
     }
 
     #[test]

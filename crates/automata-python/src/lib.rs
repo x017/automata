@@ -25,6 +25,7 @@ mod events;
 mod game;
 mod gamepads;
 mod keys;
+mod particles;
 mod physics;
 mod physics_components;
 mod scene;
@@ -77,6 +78,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<components::PyDirectionalLight>()?;
     m.add_class::<components::PyPointLight>()?;
     m.add_class::<components::PySpotLight>()?;
+    m.add_class::<particles::PyParticleEmitter>()?;
     m.add_class::<components::PyEnvironment>()?;
     m.add_class::<components::PyWater>()?;
     m.add_class::<components::PyAudioSource>()?;

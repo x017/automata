@@ -235,9 +235,27 @@ pub struct FrameReply {
     pub lock: Option<bool>,
     /// Splashes in the water (`ctx.water.splash`): position and strength.
     pub splashes: Vec<([f32; 3], f32)>,
+    /// One-off particle effects (`ctx.particles.burst`).
+    pub bursts: Vec<BurstRequest>,
+    /// Extra particles from entities' own emitters (`ctx.particles.emit`):
+    /// document entity id and count.
+    pub emits: Vec<(u64, u32)>,
     /// How long the scripts took to run this frame, in milliseconds (as
     /// the runner measured it, without the trip over the pipe).
     pub script_ms: Option<f32>,
+}
+
+/// A one-off particle effect a script asked for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BurstRequest {
+    /// The effect, preset and changed fields applied.
+    pub emitter: automata_scene::ParticleEmitter,
+    /// Where (world space).
+    pub position: [f32; 3],
+    /// Which way it flies instead of the effect's up, if given.
+    pub direction: Option<[f32; 3]>,
+    /// How many particles, if not the effect's own burst.
+    pub count: Option<u32>,
 }
 
 /// What a script changed on one entity.
@@ -812,6 +830,47 @@ fn parse_splash(v: &Json) -> Option<([f32; 3], f32)> {
     Some(([n(0)?, n(1)?, n(2)?], n(3)?.clamp(0.0, 10.0)))
 }
 
+/// `{"e": preset or null, "f": {field: value}, "p": [x, y, z], "d": [x, y, z] or null, "n": count or null}`.
+/// Unknown presets or bad fields drop the burst.
+fn parse_burst(v: &Json) -> Option<BurstRequest> {
+    use automata_scene::{ParticleEmitter, ParticleField};
+    let mut emitter = match v.get("e").and_then(Json::as_str) {
+        Some(name) => ParticleEmitter::preset(name)?,
+        None => ParticleEmitter::default(),
+    };
+    for (key, value) in v.get("f").and_then(Json::as_obj).unwrap_or_default() {
+        #[allow(clippy::cast_possible_truncation)]
+        let field = match value {
+            Json::Bool(b) => ParticleField::Bool(*b),
+            Json::Str(s) => ParticleField::Text(s.clone()),
+            Json::Null => ParticleField::Text(String::new()),
+            Json::Arr(items) => {
+                ParticleField::Numbers(items.iter().map(|x| num(x).unwrap_or(f32::NAN)).collect())
+            }
+            other => ParticleField::Number(other.as_f64()? as f32),
+        };
+        emitter.set_field(key, &field).ok()?;
+    }
+    let finite = |a: [f32; 3]| a.iter().all(|x| x.is_finite()).then_some(a);
+    Some(BurstRequest {
+        emitter,
+        position: finite(v.get("p")?.as_floats::<3>()?)?,
+        direction: v.get("d").and_then(Json::as_floats::<3>).and_then(finite),
+        count: v
+            .get("n")
+            .and_then(Json::as_i64)
+            .map(|n| u32::try_from(n.clamp(0, 100_000)).unwrap_or(0)),
+    })
+}
+
+/// `[entity id, count]`.
+fn parse_emit(v: &Json) -> Option<(u64, u32)> {
+    let a = v.as_arr()?;
+    let id = u64::try_from(a.first()?.as_i64()?).ok()?;
+    let n = u32::try_from(a.get(1)?.as_i64()?.clamp(0, 100_000)).ok()?;
+    Some((id, n))
+}
+
 fn parse_hud(v: &Json) -> Option<HudItem> {
     let field = |k: &str| v.get(k).and_then(num);
     let kind = match v.get("k")?.as_str()? {
@@ -879,6 +938,8 @@ pub fn parse_msg(line: &str) -> Option<BridgeMsg> {
                 sounds: list("sounds").iter().filter_map(parse_sound).collect(),
                 hud: list("hud").iter().filter_map(parse_hud).collect(),
                 splashes: list("splashes").iter().filter_map(parse_splash).collect(),
+                bursts: list("bursts").iter().filter_map(parse_burst).collect(),
+                emits: list("emits").iter().filter_map(parse_emit).collect(),
                 lock: match v.get("lock") {
                     Some(Json::Bool(b)) => Some(*b),
                     _ => None,
@@ -1003,6 +1064,38 @@ mod tests {
         };
         // Strength is clamped to 0..10; malformed entries are skipped.
         assert_eq!(splashes, vec![([1.0, 0.5, -2.0], 2.0), ([0.0; 3], 10.0)]);
+    }
+
+    #[test]
+    fn particle_bursts_cross_the_bridge() {
+        let msg = parse_msg(concat!(
+            r#"{"op":"frame","frame":1,"writes":[],"bursts":["#,
+            r#"{"e":"sparks","f":{"color":[6,1.6,0.4,1]},"p":[1,2,3],"d":[0,0,1],"n":12},"#,
+            r#"{"e":null,"f":{"rate":5,"sprite":"puff","lit":true},"p":[0,0,0],"d":null,"n":null},"#,
+            r#"{"e":"lava","f":{},"p":[0,0,0]},"#,
+            r#"{"e":"fire","f":{"shape":"donut"},"p":[0,0,0]},"#,
+            r#"{"e":"fire","f":{},"p":[0,"x",0]}],"#,
+            r#""emits":[[7,5],[-1,2],[8,"x"]]}"#
+        ));
+        let Some(BridgeMsg::Frame(FrameReply { bursts, emits, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        // Unknown presets, bad fields and bad positions drop the burst.
+        assert_eq!(bursts.len(), 2, "{bursts:?}");
+        let mut sparks = automata_scene::ParticleEmitter::preset("sparks").unwrap();
+        sparks.color = [6.0, 1.6, 0.4, 1.0];
+        assert_eq!(bursts[0].emitter, sparks);
+        assert_eq!(bursts[0].position, [1.0, 2.0, 3.0]);
+        assert_eq!(bursts[0].direction, Some([0.0, 0.0, 1.0]));
+        assert_eq!(bursts[0].count, Some(12));
+        assert_eq!(
+            bursts[1].emitter.sprite,
+            automata_scene::ParticleSprite::Puff
+        );
+        assert!(bursts[1].emitter.lit);
+        assert_eq!(bursts[1].direction, None);
+        assert_eq!(bursts[1].count, None);
+        assert_eq!(emits, vec![(7, 5)]);
     }
 
     #[test]

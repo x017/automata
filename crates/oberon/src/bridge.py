@@ -396,6 +396,8 @@ class BridgeBackend(api.Backend):
         self.index = None
         self.water = []
         self.splashes = []  # sent back with the frame's reply
+        self.bursts = []
+        self.emits = []
 
     def set_shapes(self, shapes):
         self.shapes = shapes
@@ -420,6 +422,15 @@ class BridgeBackend(api.Backend):
 
     def splash(self, position, strength):
         self.splashes.append([*position, strength])
+
+    def burst(self, preset, fields, position, direction, count):
+        self.bursts.append(
+            {"e": preset, "f": fields, "p": list(position),
+             "d": None if direction is None else list(direction), "n": count}
+        )
+
+    def burst_emitter(self, entity_id, count):
+        self.emits.append([entity_id, count])
 
     def log(self, level, message):
         send({"op": "log", "level": level, "msg": message})
@@ -493,6 +504,12 @@ class Runner:
         if self.backend.splashes:
             reply["splashes"] = self.backend.splashes
             self.backend.splashes = []
+        if self.backend.bursts:
+            reply["bursts"] = self.backend.bursts
+            self.backend.bursts = []
+        if self.backend.emits:
+            reply["emits"] = self.backend.emits
+            self.backend.emits = []
         send(reply)
 
     def stop(self):

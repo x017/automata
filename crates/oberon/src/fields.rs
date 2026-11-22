@@ -155,6 +155,42 @@ pub enum Field {
     AudioPitch,
     /// Distance at which a 3D audio source falls silent (metres).
     AudioRange,
+    /// Particles made per second.
+    ParticleRate,
+    /// Particles made at once when the emitter starts.
+    ParticleBurst,
+    /// Seconds the emitter runs (0 = forever).
+    ParticleDuration,
+    /// Most particles alive at once.
+    ParticleMax,
+    /// Particle lifetime, shortest (0) / longest (1), seconds.
+    ParticleLifetime(u8),
+    /// Emitter shape size: radius (0) or box half extents (0..3), metres.
+    ParticleShapeSize(u8),
+    /// How far from straight up particles may leave (degrees).
+    ParticleConeAngle,
+    /// Starting speed, slowest (0) / fastest (1), m/s.
+    ParticleSpeed(u8),
+    /// Downward acceleration (negative rises), m/s².
+    ParticleGravity,
+    /// How fast particles slow down.
+    ParticleDrag,
+    /// Particle size at birth (0) / death (1), metres.
+    ParticleSize(u8),
+    /// Birth color channel 0..4 (RGB 0..1 before the glow, then alpha).
+    ParticleColor(u8),
+    /// Birth color brightness (1 = plain; above glows).
+    ParticleGlow,
+    /// Death color channel 0..4 (as for `ParticleColor`).
+    ParticleEndColor(u8),
+    /// Death color brightness.
+    ParticleEndGlow,
+    /// Sprite spin, radians per second.
+    ParticleSpin,
+    /// Streaks particles along their motion (seconds of travel).
+    ParticleStretch,
+    /// Fades particles where they meet the scene (metres; 0 = hard).
+    ParticleSoft,
 }
 
 /// A boolean property of an entity (toggled by a checkbox).
@@ -182,6 +218,14 @@ pub enum Flag {
     WaterEndless,
     /// Audio source repeats.
     AudioLoop,
+    /// The emitter makes new particles.
+    ParticleEmitting,
+    /// The emitter's entity goes away once its particles are done.
+    ParticleOneShot,
+    /// Particles are lit by the scene's lights (smoke) rather than glowing.
+    ParticleLit,
+    /// Particles stay where they were made when the emitter moves.
+    ParticleWorldSpace,
     /// Audio source starts when the game starts.
     AudioPlayOnStart,
     /// Audio source fades with distance from the camera.
@@ -201,6 +245,14 @@ pub enum Choice {
     ColliderShape,
     /// Environment tone mapping curve.
     Tonemapping,
+    /// A built-in particle look (Fire, Smoke …; Custom once changed).
+    ParticlePreset,
+    /// Where particles start: Point, Sphere, Box, Cone.
+    ParticleShape,
+    /// How particles mix with what's behind: Alpha or Additive (glowing).
+    ParticleBlend,
+    /// The built-in particle picture: Dot, Spark, Star, Flame, Puff.
+    ParticleSprite,
 }
 
 fn axis(i: u8) -> usize {
@@ -264,6 +316,24 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::WaterFoam => data.water?.foam,
         F::WaterDensity => data.water?.density,
         F::WaterDrag => data.water?.drag,
+        F::ParticleRate
+        | F::ParticleBurst
+        | F::ParticleDuration
+        | F::ParticleMax
+        | F::ParticleLifetime(_)
+        | F::ParticleShapeSize(_)
+        | F::ParticleConeAngle
+        | F::ParticleSpeed(_)
+        | F::ParticleGravity
+        | F::ParticleDrag
+        | F::ParticleSize(_)
+        | F::ParticleColor(_)
+        | F::ParticleGlow
+        | F::ParticleEndColor(_)
+        | F::ParticleEndGlow
+        | F::ParticleSpin
+        | F::ParticleStretch
+        | F::ParticleSoft => particle_get(data.particle_emitter.as_ref()?, field)?,
         F::PointColor(i) => data.point_light?.color[axis(i)],
         F::PointIntensity => data.point_light?.intensity,
         F::PointRange => data.point_light?.range,
@@ -313,7 +383,10 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
 pub fn range(field: Field) -> (f32, f32) {
     use Field as F;
     match field {
-        F::MeshColor(_)
+        F::ParticleColor(_)
+        | F::ParticleEndColor(_)
+        | F::ParticleStretch
+        | F::MeshColor(_)
         | F::MeshRoughness
         | F::MeshMetallic
         | F::MeshEmissive(_)
@@ -339,6 +412,11 @@ pub fn range(field: Field) -> (f32, f32) {
         F::WaterClarity => (0.05, 100.0),
         F::WaterWaveHeight | F::WaterWaveSpeed => (0.0, 20.0),
         F::WaterWaveLength => (0.1, 1_000.0),
+        F::ParticleGlow | F::ParticleEndGlow => (1.0, 50.0),
+        F::ParticleLifetime(_) => (0.01, 600.0),
+        F::ParticleConeAngle => (0.0, 180.0),
+        F::ParticleSpeed(_) | F::ParticleGravity | F::ParticleSpin => (-1_000.0, 1_000.0),
+        F::ParticleMax => (1.0, 100_000.0),
         F::WaterDensity
         | F::WaterDrag
         | F::PointIntensity
@@ -365,9 +443,17 @@ pub fn range(field: Field) -> (f32, f32) {
         F::AudioRange => (0.5, 10_000.0),
         F::CameraNear => (0.001, 1_000.0),
         F::CameraFar => (0.01, 1_000_000.0),
-        F::BodyLinearDamping | F::BodyAngularDamping | F::ColliderDensity | F::ColliderFriction => {
-            (0.0, 10_000.0)
-        }
+        F::BodyLinearDamping
+        | F::BodyAngularDamping
+        | F::ColliderDensity
+        | F::ColliderFriction
+        | F::ParticleRate
+        | F::ParticleBurst
+        | F::ParticleDuration
+        | F::ParticleShapeSize(_)
+        | F::ParticleDrag
+        | F::ParticleSize(_)
+        | F::ParticleSoft => (0.0, 10_000.0),
         _ => (-1_000_000.0, 1_000_000.0),
     }
 }
@@ -384,9 +470,19 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::LightElevation
         | F::SpotInner
         | F::SpotOuter
+        | F::ParticleConeAngle
+        | F::ParticleRate
+        | F::ParticleBurst
         | F::WaterWaveDirection => 0.5,
+        F::ParticleMax => 2.0,
         F::EnvFogDensity => 0.0005,
-        F::MeshColor(_)
+        F::ParticleColor(_)
+        | F::ParticleEndColor(_)
+        | F::ParticleStretch
+        | F::ParticleSize(_)
+        | F::ParticleShapeSize(_)
+        | F::ParticleLifetime(_)
+        | F::MeshColor(_)
         | F::MeshRoughness
         | F::MeshMetallic
         | F::MeshEmissive(_)
@@ -597,6 +693,27 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
             },
             None => return false,
         },
+        F::ParticleRate
+        | F::ParticleBurst
+        | F::ParticleDuration
+        | F::ParticleMax
+        | F::ParticleLifetime(_)
+        | F::ParticleShapeSize(_)
+        | F::ParticleConeAngle
+        | F::ParticleSpeed(_)
+        | F::ParticleGravity
+        | F::ParticleDrag
+        | F::ParticleSize(_)
+        | F::ParticleColor(_)
+        | F::ParticleGlow
+        | F::ParticleEndColor(_)
+        | F::ParticleEndGlow
+        | F::ParticleSpin
+        | F::ParticleStretch
+        | F::ParticleSoft => match &mut data.particle_emitter {
+            Some(e) => particle_set(e, field, v),
+            None => return false,
+        },
         F::CameraPosition(i) => match &mut data.camera_3d {
             Some(c) => c.position[axis(i)] = v,
             None => return false,
@@ -684,6 +801,10 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::EnvSkyDome => data.environment?.sky,
         Flag::WaterEndless => data.water?.endless,
         Flag::AudioLoop => data.audio_source.as_ref()?.looping,
+        Flag::ParticleEmitting => data.particle_emitter.as_ref()?.emitting,
+        Flag::ParticleOneShot => data.particle_emitter.as_ref()?.one_shot,
+        Flag::ParticleLit => data.particle_emitter.as_ref()?.lit,
+        Flag::ParticleWorldSpace => data.particle_emitter.as_ref()?.world_space,
         Flag::AudioPlayOnStart => data.audio_source.as_ref()?.play_on_start,
         Flag::AudioSpatial => data.audio_source.as_ref()?.spatial,
     })
@@ -730,6 +851,21 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
         },
         Flag::WaterEndless => match &mut data.water {
             Some(w) => w.endless = !w.endless,
+            None => return false,
+        },
+        Flag::ParticleEmitting
+        | Flag::ParticleOneShot
+        | Flag::ParticleLit
+        | Flag::ParticleWorldSpace => match &mut data.particle_emitter {
+            Some(e) => {
+                let slot = match flag {
+                    Flag::ParticleEmitting => &mut e.emitting,
+                    Flag::ParticleOneShot => &mut e.one_shot,
+                    Flag::ParticleLit => &mut e.lit,
+                    _ => &mut e.world_space,
+                };
+                *slot = !*slot;
+            }
             None => return false,
         },
         Flag::AudioLoop | Flag::AudioPlayOnStart | Flag::AudioSpatial => {
@@ -781,6 +917,14 @@ pub fn choice_label(data: &EntityData, choice: Choice) -> Option<&'static str> {
         },
         Choice::ColliderShape => data.collider_3d.as_ref()?.shape.label(),
         Choice::Tonemapping => data.environment?.tonemapping.label(),
+        Choice::ParticlePreset => data
+            .particle_emitter
+            .as_ref()?
+            .preset_name()
+            .unwrap_or(CUSTOM_PARTICLES),
+        Choice::ParticleShape => data.particle_emitter.as_ref()?.shape.label(),
+        Choice::ParticleBlend => automata_scene::blend_label(data.particle_emitter.as_ref()?.blend),
+        Choice::ParticleSprite => data.particle_emitter.as_ref()?.sprite.label(),
     })
 }
 
@@ -897,8 +1041,139 @@ pub fn cycle(data: &mut EntityData, choice: Choice) -> bool {
             }
             None => return false,
         },
+        Choice::ParticlePreset
+        | Choice::ParticleShape
+        | Choice::ParticleBlend
+        | Choice::ParticleSprite => {
+            let Some(e) = &mut data.particle_emitter else {
+                return false;
+            };
+            let next = |i: Option<usize>, n: usize| i.map_or(0, |i| (i + 1) % n);
+            match choice {
+                // Custom → Fire → Smoke → … → Magic → Fire.
+                Choice::ParticlePreset => {
+                    let all = automata_scene::PARTICLE_PRESETS;
+                    let i = e
+                        .preset_name()
+                        .and_then(|p| all.iter().position(|n| *n == p));
+                    if let Some(p) =
+                        automata_scene::ParticleEmitter::preset(all[next(i, all.len())])
+                    {
+                        *e = p;
+                    }
+                }
+                Choice::ParticleShape => {
+                    let all = automata_scene::EmitterShape::ALL;
+                    e.shape = all[next(all.iter().position(|s| *s == e.shape), all.len())];
+                }
+                Choice::ParticleBlend => {
+                    e.blend = match e.blend {
+                        automata_scene::ParticleBlend::Alpha => {
+                            automata_scene::ParticleBlend::Additive
+                        }
+                        automata_scene::ParticleBlend::Additive => {
+                            automata_scene::ParticleBlend::Alpha
+                        }
+                    };
+                }
+                _ => {
+                    let all = automata_scene::ParticleSprite::ALL;
+                    e.sprite = all[next(all.iter().position(|s| *s == e.sprite), all.len())];
+                }
+            }
+        }
     }
     true
+}
+
+/// Label of a particle emitter that matches no preset.
+const CUSTOM_PARTICLES: &str = "Custom";
+
+/// A particle color's brightness: its brightest channel when that's over
+/// 1 (it glows), else 1.
+fn glow_of(c: [f32; 4]) -> f32 {
+    c[0].max(c[1]).max(c[2]).max(1.0)
+}
+
+/// Sets a color's brightness to `glow`: at most 1, the plain color; above,
+/// its brightest channel becomes `glow`.
+fn set_glow(c: &mut [f32; 4], glow: f32) {
+    let old = glow_of(*c);
+    let plain = [c[0] / old, c[1] / old, c[2] / old];
+    let peak = plain[0].max(plain[1]).max(plain[2]);
+    let scale = if glow <= 1.0 || peak <= 1e-6 {
+        1.0
+    } else {
+        glow / peak
+    };
+    for (slot, p) in c.iter_mut().zip(plain) {
+        *slot = p * scale;
+    }
+}
+
+/// A particle emitter field's value (see [`get`]).
+fn particle_get(e: &automata_scene::ParticleEmitter, field: Field) -> Option<f32> {
+    use Field as F;
+    #[allow(clippy::cast_precision_loss)] // counts shown as numbers
+    Some(match field {
+        F::ParticleRate => e.rate,
+        F::ParticleBurst => e.burst as f32,
+        F::ParticleDuration => e.duration,
+        F::ParticleMax => e.max_particles as f32,
+        F::ParticleLifetime(i) => e.lifetime[usize::from(i.min(1))],
+        F::ParticleShapeSize(i) => e.shape_size[axis(i)],
+        F::ParticleConeAngle => e.cone_angle,
+        F::ParticleSpeed(i) => e.speed[usize::from(i.min(1))],
+        F::ParticleGravity => e.gravity,
+        F::ParticleDrag => e.drag,
+        F::ParticleSize(i) => e.size[usize::from(i.min(1))],
+        F::ParticleColor(3) => e.color[3],
+        F::ParticleColor(i) => e.color[axis(i)] / glow_of(e.color),
+        F::ParticleGlow => glow_of(e.color),
+        F::ParticleEndColor(3) => e.color_end[3],
+        F::ParticleEndColor(i) => e.color_end[axis(i)] / glow_of(e.color_end),
+        F::ParticleEndGlow => glow_of(e.color_end),
+        F::ParticleSpin => e.spin,
+        F::ParticleStretch => e.stretch,
+        F::ParticleSoft => e.soft,
+        _ => return None,
+    })
+}
+
+/// Writes a particle emitter field (`v` already clamped to its range).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // counts
+fn particle_set(e: &mut automata_scene::ParticleEmitter, field: Field, v: f32) {
+    use Field as F;
+    match field {
+        F::ParticleRate => e.rate = v,
+        F::ParticleBurst => e.burst = v.round() as u32,
+        F::ParticleDuration => e.duration = v,
+        F::ParticleMax => e.max_particles = v.round() as u32,
+        // The shortest stays at most the longest, and the other way round.
+        F::ParticleLifetime(0) => {
+            e.lifetime[0] = v;
+            e.lifetime[1] = e.lifetime[1].max(v);
+        }
+        F::ParticleLifetime(_) => {
+            e.lifetime[1] = v;
+            e.lifetime[0] = e.lifetime[0].min(v);
+        }
+        F::ParticleShapeSize(i) => e.shape_size[axis(i)] = v,
+        F::ParticleConeAngle => e.cone_angle = v,
+        F::ParticleSpeed(i) => e.speed[usize::from(i.min(1))] = v,
+        F::ParticleGravity => e.gravity = v,
+        F::ParticleDrag => e.drag = v,
+        F::ParticleSize(i) => e.size[usize::from(i.min(1))] = v,
+        F::ParticleColor(3) => e.color[3] = v,
+        F::ParticleColor(i) => e.color[axis(i)] = v * glow_of(e.color),
+        F::ParticleGlow => set_glow(&mut e.color, v),
+        F::ParticleEndColor(3) => e.color_end[3] = v,
+        F::ParticleEndColor(i) => e.color_end[axis(i)] = v * glow_of(e.color_end),
+        F::ParticleEndGlow => set_glow(&mut e.color_end, v),
+        F::ParticleSpin => e.spin = v,
+        F::ParticleStretch => e.stretch = v,
+        _ => e.soft = v,
+    }
 }
 
 /// Writes a color property (RGB colors ignore alpha). Returns true if the
@@ -919,6 +1194,22 @@ pub fn set_color(data: &mut EntityData, target: crate::ui::ColorTarget, rgba: [f
             };
             data.attributes
                 .insert(key, automata_core::AttributeValue::Color(c));
+            true
+        }
+        // Particle colors keep their glow: the picked color is scaled by
+        // it as a whole (channel by channel would shift the brightest).
+        ColorTarget::ParticleColor | ColorTarget::ParticleEndColor => {
+            let Some(e) = &mut data.particle_emitter else {
+                return false;
+            };
+            let slot = if target == ColorTarget::ParticleColor {
+                &mut e.color
+            } else {
+                &mut e.color_end
+            };
+            let glow = glow_of(*slot);
+            *slot = [c[0], c[1], c[2], c[3]];
+            set_glow(slot, glow);
             true
         }
         _ => {
@@ -1260,6 +1551,76 @@ mod tests {
         );
         assert_eq!(choice_options(&d, Choice::Tonemapping).len(), 4);
         assert!(set_choice(&mut d, Choice::Tonemapping, "AgX"));
+    }
+
+    #[test]
+    fn particle_fields_presets_and_glowing_colors() {
+        use crate::ui::ColorTarget;
+        let mut d = EntityData::default();
+        assert_eq!(get(&d, Field::ParticleRate), None);
+        assert!(!set(&mut d, Field::ParticleRate, 5.0));
+        crate::doc::ComponentKind::Particles.add_to(&mut d);
+        assert_eq!(choice_label(&d, Choice::ParticlePreset), Some("Fire"));
+        assert_eq!(
+            choice_options(&d, Choice::ParticlePreset),
+            vec!["Fire", "Smoke", "Sparks", "Dust", "Splash", "Magic"]
+        );
+        // Any change makes it Custom; picking a preset replaces it whole.
+        assert!(set(&mut d, Field::ParticleRate, 80.0));
+        assert_eq!(choice_label(&d, Choice::ParticlePreset), Some("Custom"));
+        assert!(set_choice(&mut d, Choice::ParticlePreset, "Smoke"));
+        let smoke = automata_scene::ParticleEmitter::preset("smoke");
+        assert_eq!(d.particle_emitter, smoke);
+        assert!(set_choice(&mut d, Choice::ParticleSprite, "Star"));
+        assert!(set_choice(&mut d, Choice::ParticleBlend, "Additive"));
+        assert!(set_choice(&mut d, Choice::ParticleShape, "Box"));
+        assert!(!set_choice(&mut d, Choice::ParticleShape, "Donut"));
+        let e = d.particle_emitter.clone().unwrap();
+        assert_eq!(e.sprite, automata_scene::ParticleSprite::Star);
+        assert_eq!(e.blend, automata_scene::ParticleBlend::Additive);
+        assert_eq!(e.shape, automata_scene::EmitterShape::Box);
+        assert_eq!(get_flag(&d, Flag::ParticleLit), Some(true));
+        assert!(toggle(&mut d, Flag::ParticleLit));
+        assert_eq!(get_flag(&d, Flag::ParticleLit), Some(false));
+        // Lifetimes stay ordered; counts round.
+        assert!(set(&mut d, Field::ParticleLifetime(1), 0.5));
+        assert!(get(&d, Field::ParticleLifetime(0)).unwrap() <= 0.5);
+        assert!(set(&mut d, Field::ParticleBurst, 7.6));
+        assert_eq!(d.particle_emitter.as_ref().unwrap().burst, 8);
+
+        // Fire's start color glows (2.0): the picker shows the plain color
+        // and picking keeps the glow.
+        assert!(set_choice(&mut d, Choice::ParticlePreset, "Fire"));
+        let glow = get(&d, Field::ParticleGlow).unwrap();
+        assert!((glow - 2.0).abs() < 1e-5, "{glow}");
+        let shown = ColorTarget::ParticleColor.read(&d).unwrap();
+        assert!(
+            shown[..3].iter().all(|c| (0.0..=1.0).contains(c)),
+            "{shown:?}"
+        );
+        assert!(set_color(
+            &mut d,
+            ColorTarget::ParticleColor,
+            [0.0, 0.5, 1.0, 0.8]
+        ));
+        let c = d.particle_emitter.as_ref().unwrap().color;
+        assert!(
+            (c[2] - 2.0).abs() < 1e-5 && (c[1] - 1.0).abs() < 1e-5,
+            "{c:?}"
+        );
+        assert!((c[3] - 0.8).abs() < 1e-6, "alpha is not scaled");
+        assert!(set(&mut d, Field::ParticleGlow, 1.0));
+        let c = d.particle_emitter.as_ref().unwrap().color;
+        assert!(
+            (c[2] - 1.0).abs() < 1e-5 && (c[3] - 0.8).abs() < 1e-6,
+            "{c:?}"
+        );
+        assert!(set(&mut d, Field::ParticleGlow, 4.0));
+        let c = d.particle_emitter.as_ref().unwrap().color;
+        assert!(
+            (c[2] - 4.0).abs() < 1e-5 && (c[1] - 2.0).abs() < 1e-5,
+            "{c:?}"
+        );
     }
 
     #[test]

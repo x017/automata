@@ -94,6 +94,7 @@ from ._core import (
     Input,
     MeshRenderer,
     Modifiers,
+    ParticleEmitter,
     Physics,
     Physics2D,
     PointLight,
@@ -128,6 +129,7 @@ Component = Union[
     CharacterController,
     CharacterVelocity,
     AudioSource,
+    ParticleEmitter,
     Water,
 ]
 
@@ -240,6 +242,7 @@ __all__ = [
     "MeshRenderer",
     "MouseButton",
     "Modifiers",
+    "ParticleEmitter",
     "Physics",
     "Physics2D",
     "PointLight",

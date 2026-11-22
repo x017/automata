@@ -151,21 +151,48 @@ Beautiful.
 - **Done when:** dropping a crate in the Lagoon sends rings outward, and
   the boat leaves a wake. ✅
 
-### A6. Particles ⬜ L
-Needed for splashes, dust, fire and smoke, and for NieR's dust motes.
-- Renderer: an instanced billboard pipeline (the renderer has no
-  instancing yet): soft edges against depth, additive or alpha blending,
-  sprite-sheet animation, and lit or unlit particles.
-- A `ParticleEmitter` component: rate and bursts, lifetime, shape (point,
-  sphere, box, cone), velocity, gravity, drag, size/colour/alpha over
-  life, world or local space. Simulated on the CPU (thousands of
-  particles), or in a compute shader later if needed.
-- Built-in presets: Fire, Smoke, Sparks, Dust, Splash, Magic.
-- Python `at.ParticleEmitter.preset("fire")` and `ctx` burst calls.
-  Oberon: Inspector, live preview in the viewport while editing, Create →
-  Particles.
+### A6. Particles ✅ L
+Done. `automata_scene::ParticleEmitter` (28 fields: rate, burst,
+duration, one-shot, lifetime, shape point/sphere/box/cone, cone angle,
+speed, gravity, drag, size/colour over life with HDR colours, fades, spin,
+stretch, blend, lit, soft, sprite or texture + sprite sheet, world or
+local space) with six presets (Fire, Smoke, Sparks, Dust, Splash, Magic)
+and `set_field` by name, shared by Python and the Oberon bridge.
+`simulate_particles` runs every emitter on the CPU (a `ParticleState` per
+entity; one-shot emitters despawn when done) in both engine drivers and
+Oberon Play; `preview_particles` replays finished effects instead, for the
+editor's live preview. `spawn_burst` / `burst` make one-off effects and
+extra particles. Renderer (`particles.rs`, `particles.wgsl`): instanced
+camera-facing quads, one draw per emitter, in their own pass after the
+scene and water with the depth attached read-only, so they fade softly
+where they meet it; alpha and additive pipelines; a procedural 5-sprite
+sheet (dot, spark, star, flame, puff) or a loaded texture with frame
+animation; lit particles take the sun, ambient and placed lights (per
+particle, no shadows); stretched sparks along their velocity; HDR colours bloom on
+Beautiful. Every preset draws them. Python: `at.ParticleEmitter(**fields)`,
+`.preset(name, **fields)`, `.replace`, scene files, `ctx.scene.burst` /
+`burst_emitter`; the shared script API has `ctx.particles.burst(effect,
+position, direction, count, **fields)` and `ctx.particles.emit(entity,
+n)`, over the bridge as `bursts` / `emits`. Oberon: Create → Particles,
+Add Component → Particle Emitter, an Inspector section (preset, shape,
+sprite and blend menus; glow fields keep HDR colours editable with the
+colour picker), a flame icon, live preview while editing (particles carry
+over edits). The FPS player's shots burst sparks along the hit normal
+(hotter ones on drones); `examples/oberon/campfire` has fire, lit smoke,
+embers and a crackle script. `render_still` gained `SHOOT` and `AIM`.
+Tests: emission, bursts, one-shot cleanup, preview replay, shapes,
+over-life curves, sprite sheets, fields by name, scene-file round trips,
+GPU drawing (blend, soft edges, lit), Python, the bridge, the Inspector,
+and the FPS example played in Oberon throwing sparks.
+- Spec was: an instanced billboard pipeline with soft edges, additive or
+  alpha blending, sprite-sheet animation and lit or unlit particles; a
+  `ParticleEmitter` (rate, bursts, lifetime, shapes, velocity, gravity,
+  drag, size/colour/alpha over life, world or local space) simulated on
+  the CPU; Fire, Smoke, Sparks, Dust, Splash, Magic presets; Python
+  `at.ParticleEmitter.preset("fire")` and `ctx` bursts; Oberon Inspector,
+  live preview and Create → Particles.
 - **Done when:** the FPS blaster throws sparks on hit, and a campfire
-  example burns and smokes.
+  example burns and smokes. ✅
 
 ### A7. Water interaction II: splashes, underwater, caustics ⬜ M
 - Splash bursts (A6) sized by the entry speed, plus droplets and spray on
@@ -436,8 +463,8 @@ per effort. Reorder any time by telling me.
 | 5 | A1 Crisp shadows on High/Ultra | M | ✅ |
 | 6 | A2 Contact-hardening shadows + AO | M | ✅ |
 | 7 | A3 Point lights and spotlights (+ spot shadows) | S | ✅ |
-| 8 | A5 Water ripples and wakes | M | ⬜ |
-| 9 | A6 Particles | L | ⬜ |
+| 8 | A5 Water ripples and wakes | M | ✅ |
+| 9 | A6 Particles | L | ✅ |
 | 10 | A7 Splashes, underwater, caustics | M | ⬜ |
 | 11 | A8 Post chain + colour grading | M | ⬜ |
 | 12 | A9 Height fog, god rays, DoF, dust | M | ⬜ |

@@ -1,7 +1,7 @@
 """Type stubs for the native automata._core extension module."""
 
 import os
-from typing import Any, Callable, Iterator, Optional, Union
+from typing import Any, Callable, Iterator, Literal, Optional, Union
 
 #: A custom attribute value: bool, int, float, str, a Vec3 or an RGBA color.
 AttributeValue = Union[
@@ -227,6 +227,73 @@ class PointLight:
         radius: float = 0.05,
         shadows: bool = True,
     ) -> None: ...
+
+ParticleShape = Literal["point", "sphere", "box", "cone"]
+ParticleSprite = Literal["dot", "spark", "star", "flame", "puff"]
+ParticlePreset = Literal["fire", "smoke", "sparks", "dust", "splash", "magic"]
+
+class ParticleEmitter:
+    """Makes particles: fire, smoke, sparks, dust, splashes, magic.
+
+    Start from a preset and change what you like
+    (``ParticleEmitter.preset("fire", rate=60)``), or set fields by keyword
+    (the rest default: 20 white dots a second rising in a 25° cone).
+    Particles leave within `cone_angle` of the entity's up (+Y) axis
+    (spheres fly outward), slow by `drag`, fall by `gravity` (negative
+    rises), and over their life go from `size[0]` to `size[1]` and from
+    `color` to `color_end`.
+    """
+
+    emitting: bool
+    rate: float
+    """New particles per second."""
+    burst: int
+    """Particles made all at once when it starts."""
+    duration: float
+    """Seconds it makes particles for; 0 = forever."""
+    one_shot: bool
+    """Despawns the entity once it's done and the last particle is gone."""
+    max_particles: int
+    lifetime: tuple[float, float]
+    shape: ParticleShape
+    shape_size: tuple[float, float, float]
+    """A sphere's or cone's radius (x), a box's half extents (m)."""
+    cone_angle: float
+    """How far from straight up they may leave (degrees; 180 = any way)."""
+    speed: tuple[float, float]
+    gravity: float
+    """Downward acceleration (m/s²; negative rises)."""
+    drag: float
+    size: tuple[float, float]
+    """Size at birth and at death (m)."""
+    size_spread: float
+    color: tuple[float, float, float, float]
+    """Linear RGBA at birth; over 1 glows on Beautiful."""
+    color_end: tuple[float, float, float, float]
+    fade_in: float
+    fade_out: float
+    spin: float
+    stretch: float
+    """Streaks particles back along their motion (seconds of travel)."""
+    blend: Literal["alpha", "additive"]
+    lit: bool
+    soft: float
+    """Fade over this many metres where they meet the scene (0 = hard)."""
+    sprite: ParticleSprite
+    texture: str
+    """An image file instead of the built-in sprite (empty = none)."""
+    sheet: tuple[int, int]
+    """The image's frames, columns by rows; played over each life."""
+    world_space: bool
+    preset_name: Optional[str]
+    """The preset this is exactly, or None."""
+    def __init__(self, **fields: Any) -> None: ...
+    @staticmethod
+    def preset(name: ParticlePreset, **fields: Any) -> ParticleEmitter: ...
+    @staticmethod
+    def presets() -> list[str]: ...
+    def replace(self, **fields: Any) -> ParticleEmitter:
+        """A copy with `fields` changed."""
 
 class SpotLight:
     """A placed light shining in a cone along its entity's forward (-Z) axis.
@@ -608,6 +675,16 @@ class SceneView:
     def names(self) -> list[str]: ...
     def spawn(self, entity: Union[Entity, Prefab], position: Optional[Vec3] = None) -> None: ...
     def despawn(self, id: int) -> None: ...
+    def burst(
+        self,
+        emitter: Union[str, ParticleEmitter],
+        position: Vec3,
+        direction: Optional[Vec3] = None,
+        count: Optional[int] = None,
+    ) -> None:
+        """A one-off particle effect at `position` that cleans up after itself."""
+    def burst_emitter(self, id: int, count: int) -> None:
+        """Extra particles from an entity's own emitter next frame."""
     def load(self, scene: Scene) -> None: ...
     def __getitem__(self, name: str) -> EntityView: ...
     def __iter__(self) -> Iterator[EntityView]: ...

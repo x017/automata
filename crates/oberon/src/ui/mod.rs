@@ -2314,6 +2314,80 @@ impl Ui {
                 y += 6.0;
             }
         }
+        if let Some(emitter) = &d.particle_emitter {
+            let kind = ComponentKind::Particles;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                let shape = emitter.shape;
+                y = self.choice_row(canvas, x, y, w, e, "Preset", Choice::ParticlePreset);
+                y = self.flag_row(canvas, x, y, w, e, "Emitting", Flag::ParticleEmitting);
+                y = self.float_row(canvas, x, y, w, e, "Rate", Field::ParticleRate);
+                y = self.float_row(canvas, x, y, w, e, "Burst", Field::ParticleBurst);
+                y = self.float_row(canvas, x, y, w, e, "Duration", Field::ParticleDuration);
+                y = self.flag_row(canvas, x, y, w, e, "One Shot", Flag::ParticleOneShot);
+                y = self.float_row(canvas, x, y, w, e, "Life Min", Field::ParticleLifetime(0));
+                y = self.float_row(canvas, x, y, w, e, "Life Max", Field::ParticleLifetime(1));
+                y = self.choice_row(canvas, x, y, w, e, "Shape", Choice::ParticleShape);
+                match shape {
+                    automata_scene::EmitterShape::Point => {}
+                    automata_scene::EmitterShape::Box => {
+                        for (i, label) in ["Half X", "Half Y", "Half Z"].into_iter().enumerate() {
+                            #[allow(clippy::cast_possible_truncation)] // 0..3
+                            let field = Field::ParticleShapeSize(i as u8);
+                            y = self.float_row(canvas, x, y, w, e, label, field);
+                        }
+                    }
+                    _ => {
+                        y = self.float_row(
+                            canvas,
+                            x,
+                            y,
+                            w,
+                            e,
+                            "Radius",
+                            Field::ParticleShapeSize(0),
+                        );
+                    }
+                }
+                y = self.float_row(canvas, x, y, w, e, "Spread", Field::ParticleConeAngle);
+                y = self.float_row(canvas, x, y, w, e, "Speed Min", Field::ParticleSpeed(0));
+                y = self.float_row(canvas, x, y, w, e, "Speed Max", Field::ParticleSpeed(1));
+                y = self.float_row(canvas, x, y, w, e, "Gravity", Field::ParticleGravity);
+                y = self.float_row(canvas, x, y, w, e, "Drag", Field::ParticleDrag);
+                y = self.float_row(canvas, x, y, w, e, "Start Size", Field::ParticleSize(0));
+                y = self.float_row(canvas, x, y, w, e, "End Size", Field::ParticleSize(1));
+                y = self.color_row(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    e,
+                    "Start Color",
+                    ColorTarget::ParticleColor,
+                );
+                y = self.float_row(canvas, x, y, w, e, "Start Glow", Field::ParticleGlow);
+                y = self.color_row(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    e,
+                    "End Color",
+                    ColorTarget::ParticleEndColor,
+                );
+                y = self.float_row(canvas, x, y, w, e, "End Glow", Field::ParticleEndGlow);
+                y = self.choice_row(canvas, x, y, w, e, "Sprite", Choice::ParticleSprite);
+                y = self.choice_row(canvas, x, y, w, e, "Blend", Choice::ParticleBlend);
+                y = self.flag_row(canvas, x, y, w, e, "Lit", Flag::ParticleLit);
+                y = self.float_row(canvas, x, y, w, e, "Soft Edges", Field::ParticleSoft);
+                y = self.float_row(canvas, x, y, w, e, "Stretch", Field::ParticleStretch);
+                y = self.float_row(canvas, x, y, w, e, "Spin", Field::ParticleSpin);
+                y = self.float_row(canvas, x, y, w, e, "Max Alive", Field::ParticleMax);
+                y = self.flag_row(canvas, x, y, w, e, "World Space", Flag::ParticleWorldSpace);
+                y += 6.0;
+            }
+        }
         if d.rigid_body.is_some() {
             let kind = ComponentKind::RigidBody;
             let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
@@ -4093,6 +4167,22 @@ fn entity_icon(canvas: &mut Canvas, cx: f32, cy: f32, d: &EntityData) {
                 1.2,
             );
         }
+    } else if let Some(emitter) = &d.particle_emitter {
+        // A flame with sparks flying off it, in the particles' color.
+        let [r, g, b, _] = emitter.color;
+        let c = light_color([r, g, b]);
+        canvas.fill_polygon(
+            &[
+                (cx, cy - 8.0),
+                (cx + 5.0, cy + 1.0),
+                (cx + 3.5, cy + 6.0),
+                (cx - 3.5, cy + 6.0),
+                (cx - 5.0, cy + 1.0),
+            ],
+            c,
+        );
+        canvas.fill_circle(cx + 6.5, cy - 5.0, 1.3, c);
+        canvas.fill_circle(cx - 6.5, cy - 3.0, 1.1, c);
     } else if let Some(spot) = d.spot_light {
         // A lamp head with its beam spreading out.
         let c = light_color(spot.color);

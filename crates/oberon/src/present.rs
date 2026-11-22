@@ -2002,6 +2002,7 @@ impl EditorApp {
                     }
                 },
                 None => {
+                    viewport.tick_particles(dt);
                     // The selected camera's preview first (same world).
                     let preview = ui.camera_preview_request(doc, lw, lh, s);
                     match (preview, renderer.as_mut()) {

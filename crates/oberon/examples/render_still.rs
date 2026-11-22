@@ -12,7 +12,10 @@
 //! With `PLAY=seconds` in the environment it plays the scene that long
 //! first (physics and scripts, through the real script runner) and renders
 //! that moment of Play: through the scene's camera, or the given view when
-//! the camera arguments are present.
+//! the camera arguments are present. `SHOOT=seconds` also holds the left
+//! mouse button (with the cursor captured) from that moment of Play on, for
+//! scenes whose scripts fire on a click (the FPS example); `AIM=dx,dy`
+//! moves the mouse that many pixels on the first frame.
 
 #![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 
@@ -119,10 +122,27 @@ fn render_play(
         })
         .and_then(Result::ok);
     let steps = (seconds / TIMESTEP).round() as usize;
-    for _ in 0..steps {
+    let shoot_at = std::env::var("SHOOT")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok());
+    let aim = std::env::var("AIM").ok().and_then(|s| {
+        let (x, y) = s.split_once(',')?;
+        Some([x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?])
+    });
+    for step in 0..steps {
         if let Some(b) = bridge.as_mut() {
             // One script frame per physics step: send, then wait for it.
-            let input = play.frame_input();
+            let mut input = play.frame_input();
+            if let Some(at) = shoot_at {
+                input.screen = [w, h];
+                input.mouse_locked = true;
+                if play.elapsed >= at {
+                    input.mouse_buttons = vec!["left"];
+                }
+            }
+            if let (0, Some(delta)) = (step, aim) {
+                input.mouse_delta = delta;
+            }
             let states = play.script_states(|rel| doc.resolve(rel));
             let answered = b.answered;
             if b.send_frame_with(TIMESTEP, play.elapsed, &[], &states, &input) {

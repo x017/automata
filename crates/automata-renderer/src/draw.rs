@@ -6,8 +6,8 @@
 //! record frames without a GPU.
 //!
 //! Render order within a frame: the frame is cleared to the clear color, 3D
-//! meshes are drawn (with depth testing), then water surfaces, then 2D
-//! sprites on top.
+//! meshes are drawn (with depth testing), then water surfaces, then
+//! particles, then 2D sprites on top.
 
 use std::sync::Arc;
 
@@ -36,6 +36,7 @@ pub struct DrawList {
     pub(crate) point_lights: Vec<crate::PointLight>,
     pub(crate) time: Option<f32>,
     pub(crate) ripples: Option<crate::RippleMap>,
+    pub(crate) particles: Vec<crate::ParticleBatch>,
 }
 
 impl DrawList {
@@ -145,6 +146,26 @@ impl DrawList {
         self.ripples = Some(ripples);
     }
 
+    /// Draws a batch of particles (see [`crate::ParticleBatch`]). They
+    /// draw after meshes and water, before sprites.
+    pub fn particles(&mut self, batch: crate::ParticleBatch) {
+        if !batch.instances.is_empty() {
+            self.particles.push(batch);
+        }
+    }
+
+    /// The particle batches recorded so far.
+    #[must_use]
+    pub fn particle_batches(&self) -> &[crate::ParticleBatch] {
+        &self.particles
+    }
+
+    /// The number of particles recorded so far, over every batch.
+    #[must_use]
+    pub fn particle_count(&self) -> usize {
+        self.particles.iter().map(|b| b.instances.len()).sum()
+    }
+
     /// The number of water surfaces recorded so far.
     #[must_use]
     pub fn water_count(&self) -> usize {
@@ -206,6 +227,7 @@ impl DrawList {
         self.point_lights.clear();
         self.time = None;
         self.ripples = None;
+        self.particles.clear();
         // The clear color intentionally persists across frames.
     }
 }
@@ -229,6 +251,7 @@ impl Default for DrawList {
             point_lights: Vec::new(),
             time: None,
             ripples: None,
+            particles: Vec::new(),
         }
     }
 }

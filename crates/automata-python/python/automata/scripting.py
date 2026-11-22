@@ -247,6 +247,16 @@ class _EngineBackend(api.Backend):
     def splash(self, position: Any, strength: float) -> None:
         self.ctx.physics.splash(tuple(position), strength)
 
+    def burst(self, preset: Any, fields: Any, position: Any, direction: Any, count: Any) -> None:
+        if preset:
+            emitter = _core.ParticleEmitter.preset(preset, **fields)
+        else:
+            emitter = _core.ParticleEmitter(**fields)
+        self.ctx.scene.burst(emitter, position, direction, count)
+
+    def burst_emitter(self, entity_id: Any, count: int) -> None:
+        self.ctx.scene.burst_emitter(int(entity_id), count)
+
     def grounded(self, entity: Any) -> bool:
         try:
             return bool(self.ctx.physics.grounded(_unwrap(entity)))

@@ -18,6 +18,7 @@ mod error;
 mod light;
 mod material;
 mod mesh;
+mod particles;
 mod pipeline;
 mod post;
 mod quality;
@@ -38,6 +39,10 @@ pub use light::{
 };
 pub use material::{Material, MaterialParams, MaterialTextures, DEFAULT_ROUGHNESS};
 pub use mesh::{Mesh, MeshData, SkinVertex, Vertex};
+pub use particles::{
+    sheet_cell, ParticleBatch, ParticleBlend, ParticleInstance, ParticleSprite,
+    MAX_PARTICLES_PER_FRAME,
+};
 pub use quality::GraphicsQuality;
 pub use renderer::Renderer;
 pub use text::{TextAlign, TextAtlas, TextStyle};

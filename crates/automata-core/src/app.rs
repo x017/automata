@@ -560,6 +560,7 @@ impl Application {
             ));
             self.world.scene.update();
             automata_scene::animate(self.world.scene.world_mut(), delta.as_secs_f32());
+            automata_scene::simulate_particles(self.world.scene.world_mut(), delta.as_secs_f32());
             // Record the scene into the throwaway draw list: headless frames
             // exercise the same scene-to-renderer bridge as windowed ones.
             automata_scene::record_draw_list(self.world.scene.world(), &mut draw);

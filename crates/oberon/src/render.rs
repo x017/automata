@@ -190,10 +190,54 @@ impl ViewportRenderer {
         let counter = doc.change_counter();
         if self.built_counter != Some(counter) {
             let file = doc.to_scene_file();
+            // Edits rebuild the world; live particles carry over (by
+            // entity name) so a fire keeps burning while it's tweaked.
+            let live: std::collections::HashMap<String, automata_scene::ParticleState> = self
+                .scene
+                .world()
+                .query::<(&automata_scene::Name, &automata_scene::ParticleState)>()
+                .iter()
+                .map(|(n, s)| (n.0.clone(), s.clone()))
+                .collect();
             file.apply_to_world(self.scene.world_mut());
+            if !live.is_empty() {
+                let world = self.scene.world_mut();
+                let restore: Vec<_> = world
+                    .query::<(
+                        automata_scene::Entity,
+                        &automata_scene::Name,
+                        &automata_scene::ParticleEmitter,
+                    )>()
+                    .iter()
+                    .filter_map(|(e, n, _)| live.get(&n.0).map(|s| (e, s.clone())))
+                    .collect();
+                for (entity, state) in restore {
+                    let _ = world.insert_one(entity, state);
+                }
+            }
             automata_scene::materialize_visuals(self.scene.world_mut(), renderer);
+            automata_scene::load_particle_textures(self.scene.world_mut(), renderer);
             self.built_counter = Some(counter);
         }
+    }
+
+    /// Advances the edit-time world's particle emitters by `dt` seconds,
+    /// so fire burns and smoke rises in the scene view while editing.
+    pub fn tick_particles(&mut self, dt: f32) {
+        if self.built_counter.is_some() {
+            automata_scene::preview_particles(self.scene.world_mut(), dt.clamp(0.0, 0.1));
+        }
+    }
+
+    /// Live particles in the edit-time world.
+    #[must_use]
+    pub fn particle_count(&self) -> usize {
+        self.scene
+            .world()
+            .query::<&automata_scene::ParticleState>()
+            .iter()
+            .map(automata_scene::ParticleState::len)
+            .sum()
     }
 
     /// Forces the next render to rebuild the GPU world (call when the whole
@@ -267,6 +311,7 @@ impl ViewportRenderer {
                 let world = session.scene_mut().world_mut();
                 // Uploads only visuals not yet materialized (first frame).
                 automata_scene::materialize_visuals(world, renderer);
+                automata_scene::load_particle_textures(world, renderer);
                 self.meshes = Self::draw_world(
                     renderer,
                     &mut self.target,
@@ -325,6 +370,7 @@ impl ViewportRenderer {
         let water = Some(Self::water_frame(session, editor_cam));
         let world = session.scene_mut().world_mut();
         automata_scene::materialize_visuals(world, renderer);
+        automata_scene::load_particle_textures(world, renderer);
         self.meshes = Self::draw_scene(
             renderer,
             &mut self.target,

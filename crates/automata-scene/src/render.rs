@@ -393,6 +393,8 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
         draw.water(*water, global.matrix());
     }
 
+    crate::particles::record_particles(world, draw);
+
     for (renderer, global) in &mut world.query::<(&SpriteRenderer, &GlobalTransform)>() {
         let (scale, rotation, translation) = global.matrix().to_scale_rotation_translation();
         let (z_rotation, _, _) = rotation.to_euler(EulerRot::ZYX);

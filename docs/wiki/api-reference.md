@@ -219,6 +219,26 @@ All arguments are readable as properties, and it's saved in scene files.
 Guides: [Rendering & Lights](guides/rendering-and-lights.md#water),
 [Physics](guides/physics.md#water).
 
+### ParticleEmitter
+
+```python
+at.ParticleEmitter(**fields)                 # any field below by keyword
+at.ParticleEmitter.preset("fire" | "smoke" | "sparks" | "dust" | "splash" | "magic", **fields)
+at.ParticleEmitter.presets() -> list[str]
+emitter.replace(**fields) -> ParticleEmitter # a changed copy
+emitter.preset_name                          # "fire" … or None once changed
+```
+
+Fields (all readable as properties): `emitting`, `rate`, `burst`,
+`duration`, `one_shot`, `max_particles`, `lifetime` (min, max),
+`shape` (`"point"`, `"sphere"`, `"box"`, `"cone"`), `shape_size`,
+`cone_angle`, `speed` (min, max), `gravity`, `drag`, `size` (birth, death),
+`size_spread`, `color`, `color_end` (RGBA, over 1 glows), `fade_in`,
+`fade_out`, `spin`, `stretch`, `blend` (`"alpha"`, `"additive"`), `lit`,
+`soft`, `sprite` (`"dot"`, `"spark"`, `"star"`, `"flame"`, `"puff"`),
+`texture`, `sheet` (columns, rows), `world_space`. Pairs also take one number for both, and colours take RGB or RGBA. A bad name raises `KeyError`. A bad value raises `ValueError`. Saved in scene
+files. Guide: [Rendering & Lights](guides/rendering-and-lights.md#particles).
+
 ### Physics components
 
 ```text
@@ -274,6 +294,10 @@ for view in ctx.scene: ...
 ctx.scene.spawn(entity)              # appears next frame
 ctx.scene.despawn(id)
 ctx.scene.load(scene)                # switch levels; the next frame sees only `scene`
+ctx.scene.burst(effect, position, direction=None, count=None)
+                                     # a one-off particle effect (a preset name or
+                                     # ParticleEmitter) that cleans up after itself
+ctx.scene.burst_emitter(id, count)   # extra particles from an entity's own emitter
 ```
 
 ```text
@@ -429,6 +453,7 @@ returns the number of frames run.
 | `input` | Keys with the aliases `"shift"`, `"ctrl"`, `"alt"` (either side) and `"left"`/`"right"`/`"up"`/`"down"`; `axis(neg, pos)`; mouse buttons, `mouse_delta`, `lock_mouse` |
 | `physics` | `grounded`, `raycast`, `water_height(x, z)`; the rest of the engine's physics, which also accepts script entities |
 | `water` | `height(x, z)` (same as `physics.water_height`), `splash(position_or_entity, strength=1.0)`: rings and foam at that point (strength 0–10; 1 is about a crate dropped from a couple of metres) |
+| `particles` | `burst(effect, position_or_entity, direction=None, count=None, **fields)`: a one-off effect (a preset name or `at.ParticleEmitter`, with fields changed) that cleans up after itself; `emit(entity, count)`: extra particles from the entity's own emitter |
 | `audio`, `hud` | One-shot sounds; HUD images, rectangles and text (`hud.text(text, x, y, size=24, color, align, shadow, outline)`) |
 | `camera` | The first `Camera3D` in the scene as a `ScriptCamera` |
 | `events`, `resources`, `screen`, `raw`, `quit()` | Engine extras (`run_scene` only). `screen.measure_text(text, size)` gives text's pixel size |

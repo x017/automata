@@ -104,7 +104,8 @@ fn light_entries(occlusion: bool) -> Vec<wgpu::BindGroupLayoutEntry> {
         count: None,
     };
     let mut entries = vec![
-        uniform_entry(0, wgpu::ShaderStages::FRAGMENT),
+        // Particles light themselves per vertex.
+        uniform_entry(0, wgpu::ShaderStages::VERTEX_FRAGMENT),
         depth_array(1),
         wgpu::BindGroupLayoutEntry {
             binding: 2,

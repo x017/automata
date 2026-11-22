@@ -625,6 +625,89 @@ class Water:
         return self._host.backend.extra("water", name)
 
 
+PARTICLE_PRESETS = ("fire", "smoke", "sparks", "dust", "splash", "magic")
+
+PARTICLE_FIELDS = (
+    "emitting", "rate", "burst", "duration", "one_shot", "max_particles",
+    "lifetime", "shape", "shape_size", "cone_angle", "speed", "gravity",
+    "drag", "size", "size_spread", "color", "color_end", "fade_in",
+    "fade_out", "spin", "stretch", "blend", "lit", "soft", "sprite",
+    "texture", "sheet", "world_space",
+)
+
+
+def _particle_value(v):
+    if isinstance(v, (bool, str)) or v is None:
+        return v
+    if isinstance(v, (int, float)):
+        return float(v)
+    return [float(x) for x in v]
+
+
+class Particles:
+    """``ctx.particles``: one-off particle effects."""
+
+    def __init__(self, host):
+        self._host = host
+
+    def burst(self, effect, position, direction=None, count=None, **fields):
+        """A one-off effect at ``position`` (a point or an entity) that
+        cleans up after itself: sparks where a shot hits, a puff of dust
+        where something lands.
+
+        ``effect`` is a preset name (``"fire"``, ``"smoke"``, ``"sparks"``,
+        ``"dust"``, ``"splash"``, ``"magic"``) or an ``at.ParticleEmitter``;
+        ``fields`` change it (``color=(0.3, 1, 0.4, 1)``). ``direction``
+        turns it to fly that way (a hit's normal) instead of up. ``count``
+        is how many particles (default: the effect's own burst, or a second's
+        worth of a continuous one like fire).
+        """
+        if hasattr(position, "transform"):
+            position = position.transform.position
+        pos = _vec(tuple(position)[:3], 3)
+        d = None
+        if direction is not None:
+            d = _vec(tuple(direction)[:3], 3)
+            if d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < 1e-12:
+                d = None
+        name, base = self._effect(effect)
+        base.update({k: _particle_value(v) for k, v in fields.items()})
+        for k in base:
+            if k not in PARTICLE_FIELDS:
+                raise KeyError(f"ParticleEmitter has no field {k!r}")
+        n = None if count is None else max(0, int(count))
+        if n == 0:
+            return
+        self._host.backend.burst(name, base, pos, d, n)
+
+    def emit(self, entity, count):
+        """``count`` extra particles from ``entity``'s own emitter (its
+        Particle Emitter component), on top of its rate."""
+        n = max(0, int(count))
+        if n:
+            self._host.backend.burst_emitter(getattr(entity, "id", entity), n)
+
+    @staticmethod
+    def _effect(effect):
+        if isinstance(effect, str):
+            name = effect.lower()
+            if name not in PARTICLE_PRESETS:
+                raise ValueError(
+                    f"unknown particle preset {effect!r}; expected one of "
+                    + ", ".join(PARTICLE_PRESETS)
+                )
+            return name, {}
+        preset = getattr(effect, "preset_name", None)
+        if preset:
+            return preset, {}
+        if hasattr(effect, "rate"):
+            return None, {k: _particle_value(getattr(effect, k)) for k in PARTICLE_FIELDS}
+        raise TypeError("burst() wants a preset name or an at.ParticleEmitter")
+
+    def __getattr__(self, name):
+        return self._host.backend.extra("particles", name)
+
+
 class Audio:
     """``ctx.audio``: one-shot sounds by file name."""
 
@@ -748,6 +831,7 @@ class Context:
         self.time = Time()
         self.physics = Physics(host)
         self.water = Water(host)
+        self.particles = Particles(host)
         self.scene = SceneView(host)
         self.audio = Audio(host)
         self.hud = Hud()
@@ -814,6 +898,15 @@ class Backend:
     def splash(self, position, strength):
         """A splash in the water at ``position`` (x, y, z); ``strength``
         is 0..10. Drivers without water ignore it."""
+
+    def burst(self, preset, fields, position, direction, count):
+        """A one-off particle effect: ``preset`` (a name or None for
+        defaults) with ``fields`` changed, at ``position``, flying along
+        ``direction`` (or None: the effect's own up), ``count`` particles
+        (or None). Drivers without particles ignore it."""
+
+    def burst_emitter(self, entity_id, count):
+        """``count`` extra particles from an entity's own emitter."""
 
     def source_playing(self, entity):
         return False

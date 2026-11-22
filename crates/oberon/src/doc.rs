@@ -144,6 +144,8 @@ pub enum CreateKind {
     Environment,
     /// An animated water surface.
     Water,
+    /// A particle emitter (a campfire's flames to start with).
+    Particles,
     /// A cube with a dynamic rigid body and a box collider.
     PhysicsCube,
     /// A 1 m sphere.
@@ -155,7 +157,7 @@ pub enum CreateKind {
 
 impl CreateKind {
     /// Every kind, in menu order.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Empty,
         Self::Cube,
         Self::Sphere,
@@ -166,6 +168,7 @@ impl CreateKind {
         Self::Camera,
         Self::Environment,
         Self::Water,
+        Self::Particles,
         Self::PhysicsCube,
         Self::Player,
     ];
@@ -184,6 +187,7 @@ impl CreateKind {
             Self::Camera => "Camera",
             Self::Environment => "Environment",
             Self::Water => "Water",
+            Self::Particles => "Particles",
             Self::PhysicsCube => "Physics Cube",
             Self::Player => "Player",
         }
@@ -207,6 +211,8 @@ pub enum ComponentKind {
     Environment,
     /// Animated water surface.
     Water,
+    /// Particle emitter: fire, smoke, sparks, dust …
+    Particles,
     /// Rigid body.
     RigidBody,
     /// 3D collider.
@@ -219,7 +225,7 @@ pub enum ComponentKind {
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Mesh,
         Self::Light,
         Self::PointLight,
@@ -227,6 +233,7 @@ impl ComponentKind {
         Self::Camera,
         Self::Environment,
         Self::Water,
+        Self::Particles,
         Self::RigidBody,
         Self::Collider,
         Self::Character,
@@ -244,6 +251,7 @@ impl ComponentKind {
             Self::Camera => "Camera",
             Self::Environment => "Environment",
             Self::Water => "Water",
+            Self::Particles => "Particle Emitter",
             Self::RigidBody => "Rigidbody",
             Self::Collider => "Collider",
             Self::Character => "Character Controller",
@@ -262,6 +270,7 @@ impl ComponentKind {
             Self::Camera => data.camera_3d.is_some(),
             Self::Environment => data.environment.is_some(),
             Self::Water => data.water.is_some(),
+            Self::Particles => data.particle_emitter.is_some(),
             Self::RigidBody => data.rigid_body.is_some(),
             Self::Collider => data.collider_3d.is_some(),
             Self::Character => data.character_controller.is_some(),
@@ -307,6 +316,11 @@ impl ComponentKind {
                 data.water
                     .get_or_insert_with(automata_renderer::Water::pond);
             }
+            Self::Particles => {
+                data.particle_emitter.get_or_insert_with(|| {
+                    automata_scene::ParticleEmitter::preset("fire").unwrap_or_default()
+                });
+            }
             Self::RigidBody => {
                 data.rigid_body
                     .get_or_insert_with(automata_physics::RigidBody::default);
@@ -350,6 +364,7 @@ impl ComponentKind {
             Self::Camera => dst.camera_3d = src.camera_3d,
             Self::Environment => dst.environment = src.environment,
             Self::Water => dst.water = src.water,
+            Self::Particles => dst.particle_emitter.clone_from(&src.particle_emitter),
             Self::RigidBody => dst.rigid_body.clone_from(&src.rigid_body),
             Self::Collider => dst.collider_3d.clone_from(&src.collider_3d),
             Self::Character => {
@@ -371,6 +386,7 @@ impl ComponentKind {
             Self::Camera => data.camera_3d = None,
             Self::Environment => data.environment = None,
             Self::Water => data.water = None,
+            Self::Particles => data.particle_emitter = None,
             Self::RigidBody => data.rigid_body = None,
             Self::Collider => data.collider_3d = None,
             Self::Character => {
@@ -1157,6 +1173,9 @@ impl Document {
             CreateKind::Water => {
                 ComponentKind::Water.add_to(&mut data);
             }
+            CreateKind::Particles => {
+                ComponentKind::Particles.add_to(&mut data);
+            }
             CreateKind::PhysicsCube => {
                 if let Some(t) = &mut data.transform {
                     t.position = [0.0, 4.0, 0.0];
@@ -1902,6 +1921,37 @@ pub(crate) mod tests {
         assert_eq!(bare.spot_light, data(spot).spot_light);
         ComponentKind::SpotLight.remove_from(&mut bare);
         assert!(bare.spot_light.is_none());
+    }
+
+    #[test]
+    fn created_particles_burn_in_the_world() {
+        let mut doc = Document::new();
+        let id = doc.create(CreateKind::Particles);
+        let data = doc.entities[doc.index_of(id).unwrap()].data.clone();
+        assert!(ComponentKind::Particles.present_in(&data));
+        assert_eq!(data.name.as_deref(), Some("Particles"));
+        assert_eq!(
+            data.particle_emitter
+                .as_ref()
+                .and_then(automata_scene::ParticleEmitter::preset_name),
+            Some("Fire")
+        );
+        let mut world = automata_scene::SceneWorld::new();
+        doc.to_scene_file().apply_to_world(&mut world);
+        for _ in 0..30 {
+            automata_scene::simulate_particles(&mut world, 1.0 / 30.0);
+        }
+        let live: usize = world
+            .query::<&automata_scene::ParticleState>()
+            .iter()
+            .map(automata_scene::ParticleState::len)
+            .sum();
+        assert!(live > 10, "a second of fire: {live}");
+        let mut bare = EntityData::default();
+        ComponentKind::Particles.copy_between(&data, &mut bare);
+        assert_eq!(bare.particle_emitter, data.particle_emitter);
+        ComponentKind::Particles.remove_from(&mut bare);
+        assert!(bare.particle_emitter.is_none());
     }
 
     #[test]
