@@ -322,8 +322,9 @@ impl PlaySession {
     }
 
     /// Runs the scene's audio for this frame: `play_on_start` sources,
-    /// script requests and distance fading. `root` is the scene folder.
-    /// Returns problems for the Console (missing clips, once each).
+    /// script requests and distance fading, all muffled while the scene
+    /// camera is under water. `root` is the scene folder. Returns problems
+    /// for the Console (missing clips, once each).
     pub fn update_audio(
         &mut self,
         engine: &mut AudioEngine,
@@ -332,15 +333,27 @@ impl PlaySession {
         if self.paused {
             return Vec::new();
         }
+        engine.set_underwater(self.camera_under_water());
         let commands = std::mem::take(&mut self.audio_commands);
         self.sources
             .update(self.scene.world(), engine, Some(root), commands)
     }
 
-    /// Stops every sound this session started (Stop / pause).
+    /// Whether the scene camera is below the water surface over it.
+    #[must_use]
+    pub fn camera_under_water(&self) -> bool {
+        self.scene_camera().is_some_and(|cam| {
+            let p = cam.position;
+            self.physics.water_height(p.x, p.z).is_some_and(|h| p.y < h)
+        })
+    }
+
+    /// Stops every sound this session started (Stop / pause), and lifts
+    /// the underwater muffle.
     pub fn stop_audio(&mut self, engine: &mut AudioEngine) {
         self.audio_commands.clear();
         self.sources.stop_all(engine);
+        engine.set_underwater(false);
     }
 
     /// Pauses or resumes this session's sounds.
@@ -1262,6 +1275,37 @@ mod tests {
         );
         // The slope's normal leans 45° and faces up, toward the ray.
         assert!((float("an") - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-3);
+    }
+
+    /// A scene camera under the water muffles the sound; Stop lifts it.
+    #[test]
+    fn sound_is_muffled_while_the_scene_camera_is_under_water() {
+        let mut doc = Document::starter();
+        let i = doc.add_entity_named("Sea");
+        let sea = doc.entities[i].id;
+        doc.modify(sea, false, |d| {
+            d.water = Some(automata_renderer::Water {
+                size: [20.0, 20.0],
+                wave_height: 0.0,
+                ..automata_renderer::Water::default()
+            });
+        });
+        let i = doc.add_entity_named("Eye");
+        let eye = doc.entities[i].id;
+        let mut engine = AudioEngine::new();
+        let root = std::env::temp_dir();
+        for (y, under) in [(-1.0, true), (2.0, false)] {
+            doc.modify(eye, false, |d| {
+                d.camera_3d = Some(Camera3D::new(Vec3::new(1.0, y, 1.0), Vec3::ZERO));
+            });
+            let mut play = PlaySession::start(&doc);
+            play.update(TIMESTEP);
+            assert_eq!(play.camera_under_water(), under, "camera at y = {y}");
+            play.update_audio(&mut engine, &root);
+            assert_eq!(engine.is_underwater(), under, "camera at y = {y}");
+            play.stop_audio(&mut engine);
+            assert!(!engine.is_underwater());
+        }
     }
 
     /// Water in play mode: a crate floats at the surface, and scripts read

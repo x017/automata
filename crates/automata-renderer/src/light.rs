@@ -449,6 +449,8 @@ pub(crate) struct FrameView {
     /// Depth compares per pixel per shadowed point light (see
     /// [`GraphicsQuality::point_shadow_taps`](crate::GraphicsQuality::point_shadow_taps)).
     pub point_shadow_taps: u32,
+    /// The water around the camera and the waters throwing caustics.
+    pub water: crate::water::WaterView,
 }
 
 impl Default for FrameView {
@@ -460,6 +462,7 @@ impl Default for FrameView {
             time: 0.0,
             beautiful: false,
             point_shadow_taps: 4,
+            water: crate::water::WaterView::default(),
         }
     }
 }
@@ -485,6 +488,16 @@ pub(crate) struct LightUniform {
     pub inv_view_proj: [f32; 16],
     pub sky_zenith: [f32; 4],
     pub sky_sun: [f32; 4],
+    /// rgb: the water around the camera's colour, a: its extinction per
+    /// metre (0 = the camera isn't in water).
+    pub underwater: [f32; 4],
+    /// x: surface height above the camera, y: near-plane half height,
+    /// z: waters throwing caustics.
+    pub water_eye: [f32; 4],
+    /// Caustic waters' world XZ min and max.
+    pub water_rects: [[f32; 4]; crate::water::MAX_CAUSTIC_WATERS],
+    /// Caustic waters' rest height, strength and clarity.
+    pub water_levels: [[f32; 4]; crate::water::MAX_CAUSTIC_WATERS],
     /// Point lights and spotlights (`PointLightData` in common.wgsl); the
     /// first `fog_params.z` are used.
     pub points: [[f32; 16]; MAX_POINT_LIGHTS],
@@ -602,6 +615,10 @@ impl LightUniform {
                 env.clouds.clamp(0.0, 1.0),
                 env.lens_flare.max(0.0),
             ],
+            underwater: frame.water.underwater,
+            water_eye: frame.water.eye,
+            water_rects: frame.water.rects,
+            water_levels: frame.water.levels,
             points,
             point_faces,
             point_shadow,

@@ -238,3 +238,136 @@ fn scripts_can_splash_the_water() {
     step_n(&mut physics, &mut dry, 1);
     assert!(physics.ripples().is_none());
 }
+
+/// Steps until a body splashes (or `n` steps pass): the splashes, and the
+/// particle bursts in the scene afterwards.
+fn step_until_splash(
+    physics: &mut PhysicsWorld3D,
+    scene: &mut SceneWorld,
+    n: usize,
+) -> Vec<WaterSplash> {
+    for _ in 0..n {
+        physics.sync_from_scene(scene);
+        physics.move_characters(scene, DT);
+        let tick = physics.step(scene, DT);
+        if !tick.splashes.is_empty() {
+            return tick.splashes;
+        }
+    }
+    Vec::new()
+}
+
+fn bursts(scene: &SceneWorld) -> Vec<automata_scene::ParticleEmitter> {
+    scene
+        .query::<&automata_scene::ParticleEmitter>()
+        .iter()
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn hitting_the_water_hard_throws_droplets_sized_by_speed() {
+    let drop = |height: f32| {
+        let mut scene = SceneWorld::new();
+        calm_pool(&mut scene);
+        crate_at(&mut scene, Vec3::new(1.0, height, 2.0), 1.0);
+        let mut physics = PhysicsWorld3D::new();
+        let splashes = step_until_splash(&mut physics, &mut scene, 240);
+        (splashes, bursts(&scene))
+    };
+    let (low, low_bursts) = drop(1.2);
+    let (high, high_bursts) = drop(6.0);
+    assert_eq!(low.len(), 1, "{low:?}");
+    assert_eq!(high.len(), 1, "{high:?}");
+    // On the surface, where it went in.
+    let s = high[0];
+    assert!(
+        s.position.y.abs() < 1e-3 && (s.position.x - 1.0).abs() < 0.1,
+        "{s:?}"
+    );
+    assert!((s.position.z - 2.0).abs() < 0.1, "{s:?}");
+    assert!(high[0].speed > low[0].speed + 3.0, "{low:?} {high:?}");
+    // One burst each; the harder hit throws more, faster.
+    assert_eq!((low_bursts.len(), high_bursts.len()), (1, 1));
+    let (a, b) = (&low_bursts[0], &high_bursts[0]);
+    assert!(b.burst > a.burst * 2, "{} vs {}", a.burst, b.burst);
+    assert!(b.speed[1] > a.speed[1], "{:?} vs {:?}", a.speed, b.speed);
+    assert!(b.one_shot && a.one_shot);
+}
+
+#[test]
+fn easing_into_the_water_makes_no_splash() {
+    let mut scene = SceneWorld::new();
+    calm_pool(&mut scene);
+    // Starts just above the surface: in at well under the splash speed.
+    crate_at(&mut scene, Vec3::new(0.0, 0.52, 0.0), 1.0);
+    let mut physics = PhysicsWorld3D::new();
+    assert_eq!(step_until_splash(&mut physics, &mut scene, 120).len(), 0);
+    assert_eq!(bursts(&scene).len(), 0);
+}
+
+#[test]
+fn a_character_jumping_in_splashes() {
+    let mut scene = SceneWorld::new();
+    calm_pool(&mut scene);
+    scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 3.0, 0.0)),
+        RigidBody::kinematic_position(),
+        Collider3D::capsule(0.5, 0.3),
+        CharacterController::new(),
+        CharacterVelocity::new(Vec3::new(0.0, -6.0, 0.0)),
+    ));
+    let mut physics = PhysicsWorld3D::new();
+    let splashes = step_until_splash(&mut physics, &mut scene, 120);
+    assert_eq!(splashes.len(), 1, "{splashes:?}");
+    assert!(splashes[0].speed > 4.0, "{splashes:?}");
+    assert_eq!(bursts(&scene).len(), 1);
+}
+
+#[test]
+fn water_particles_can_be_turned_off() {
+    let mut scene = SceneWorld::new();
+    calm_pool(&mut scene);
+    crate_at(&mut scene, Vec3::new(0.0, 4.0, 0.0), 1.0);
+    let mut physics = PhysicsWorld3D::new();
+    physics.set_water_particles(false);
+    assert_eq!(step_until_splash(&mut physics, &mut scene, 240).len(), 1);
+    assert_eq!(bursts(&scene).len(), 0);
+}
+
+#[test]
+fn strong_wind_blows_spray_off_the_crests() {
+    let spray = |wind: f32| {
+        let mut scene = SceneWorld::new();
+        scene.spawn((
+            Transform::from_position(Vec3::ZERO),
+            Water {
+                size: [80.0, 80.0],
+                wave_height: 0.6,
+                wave_length: 10.0,
+                wind,
+                ..Water::default()
+            },
+        ));
+        let mut physics = PhysicsWorld3D::new();
+        let mut seen = 0;
+        let mut on_crests = true;
+        for _ in 0..120 {
+            physics.sync_from_scene(&mut scene);
+            physics.step(&mut scene, DT);
+            for (t, e) in &mut scene.query::<(&Transform, &automata_scene::ParticleEmitter)>() {
+                if e.burst > 0 {
+                    // Up on a crest: above the rest height.
+                    on_crests &= t.position.y > 0.1;
+                }
+            }
+            seen = seen.max(bursts(&scene).len());
+        }
+        (seen, on_crests)
+    };
+    assert_eq!(spray(0.0).0, 0, "calm air: no spray");
+    assert_eq!(spray(0.45).0, 0, "a breeze: no spray");
+    let (strong, on_crests) = spray(1.0);
+    assert!(strong >= 5, "a gale throws spray, saw {strong}");
+    assert!(on_crests);
+}

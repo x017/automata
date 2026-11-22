@@ -24,9 +24,11 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
+use kira::effect::filter::{FilterBuilder, FilterHandle};
 use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
 use kira::sound::PlaybackState;
-use kira::{AudioManager, AudioManagerSettings, Decibels, Tween};
+use kira::track::MainTrackBuilder;
+use kira::{AudioManager, AudioManagerSettings, Decibels, Mix, Tween};
 
 /// Errors raised by the audio engine.
 #[derive(Debug, thiserror::Error)]
@@ -207,6 +209,21 @@ pub struct AudioEngine {
     /// Decoded files, so repeated sounds (footsteps, gunfire) decode once.
     /// Entries are re-read when the file's modification time changes.
     cache: HashMap<PathBuf, (Option<SystemTime>, StaticSoundData)>,
+    /// The low-pass filter on everything (the main track), dry while off.
+    filter: FilterHandle,
+    /// Its cutoff while on (Hz).
+    low_pass: Option<f64>,
+}
+
+/// The low-pass cutoff (Hz) for hearing from under water: muffled, the
+/// highs gone, the thumps and rumbles left.
+pub const UNDERWATER_CUTOFF_HZ: f64 = 650.0;
+
+/// A main track with a low-pass filter (off: all dry) and its handle.
+fn filtered_main_track() -> (MainTrackBuilder, FilterHandle) {
+    let mut track = MainTrackBuilder::new();
+    let filter = track.add_effect(FilterBuilder::new().cutoff(20_000.0).mix(Mix::DRY));
+    (track, filter)
 }
 
 /// The audio manager, over whichever backend is active.
@@ -255,12 +272,15 @@ impl AudioEngine {
     /// device backend cannot be created the engine silently falls back.
     #[must_use]
     pub fn with_sample_rate(sample_rate: u32) -> Self {
+        let (manager, filter) = Self::manager(sample_rate);
         Self {
-            manager: Self::manager(sample_rate),
+            manager,
             sounds: HashMap::new(),
             next_id: 1,
             sample_rate,
             cache: HashMap::new(),
+            filter,
+            low_pass: None,
         }
     }
 
@@ -275,12 +295,16 @@ impl AudioEngine {
     }
 
     /// Builds the manager: real device when possible, silent otherwise.
-    fn manager(sample_rate: u32) -> Manager {
+    fn manager(sample_rate: u32) -> (Manager, FilterHandle) {
         #[cfg(feature = "cpal")]
         {
-            let settings = AudioManagerSettings::default();
+            let (main_track_builder, filter) = filtered_main_track();
+            let settings = AudioManagerSettings {
+                main_track_builder,
+                ..AudioManagerSettings::default()
+            };
             match AudioManager::<kira::backend::cpal::CpalBackend>::new(settings) {
-                Ok(manager) => return Manager::Device(Box::new(manager)),
+                Ok(manager) => return (Manager::Device(Box::new(manager)), filter),
                 Err(err) => {
                     tracing::warn!(
                         error = %err,
@@ -289,19 +313,26 @@ impl AudioEngine {
                 }
             }
         }
-        Manager::Silent(Self::silent_manager(sample_rate))
+        let (manager, filter) = Self::silent_manager(sample_rate);
+        (Manager::Silent(manager), filter)
     }
 
-    fn silent_manager(sample_rate: u32) -> Box<AudioManager<kira::backend::mock::MockBackend>> {
+    fn silent_manager(
+        sample_rate: u32,
+    ) -> (
+        Box<AudioManager<kira::backend::mock::MockBackend>>,
+        FilterHandle,
+    ) {
+        let (main_track_builder, filter) = filtered_main_track();
         let settings = AudioManagerSettings {
             backend_settings: kira::backend::mock::MockBackendSettings { sample_rate },
+            main_track_builder,
             ..AudioManagerSettings::default()
         };
         // The mock backend cannot fail to initialize.
-        Box::new(
-            AudioManager::<kira::backend::mock::MockBackend>::new(settings)
-                .expect("failed to create the silent audio manager"),
-        )
+        let manager = AudioManager::<kira::backend::mock::MockBackend>::new(settings)
+            .expect("failed to create the silent audio manager");
+        (Box::new(manager), filter)
     }
 
     /// The silent manager, when the silent backend is active.
@@ -454,6 +485,50 @@ impl AudioEngine {
             Manager::Device(manager) => manager.main_track().set_volume(db, tween),
             Manager::Silent(manager) => manager.main_track().set_volume(db, tween),
         }
+    }
+
+    /// Muffles everything through a low-pass filter at `cutoff_hz` (20 to
+    /// 20 000), or lifts it (`None`), over `fade_seconds`.
+    pub fn set_low_pass(&mut self, cutoff_hz: Option<f64>, fade_seconds: f64) {
+        let tween = tween_of(fade_seconds);
+        if let Some(hz) = cutoff_hz {
+            let hz = if hz.is_finite() {
+                hz.clamp(20.0, 20_000.0)
+            } else {
+                20_000.0
+            };
+            self.filter.set_cutoff(hz, tween);
+            self.filter.set_mix(Mix::WET, tween);
+            self.low_pass = Some(hz);
+        } else {
+            self.filter.set_mix(Mix::DRY, tween);
+            self.filter.set_cutoff(20_000.0, tween);
+            self.low_pass = None;
+        }
+    }
+
+    /// The low-pass cutoff in Hz while everything is muffled, else `None`.
+    #[must_use]
+    pub fn low_pass(&self) -> Option<f64> {
+        self.low_pass
+    }
+
+    /// Hears from under water (a quick fade to [`UNDERWATER_CUTOFF_HZ`]) or
+    /// not. The engine calls it each frame with whether its 3D camera is
+    /// under water; a no-op when nothing changes.
+    pub fn set_underwater(&mut self, under: bool) {
+        let muffled = self.low_pass == Some(UNDERWATER_CUTOFF_HZ);
+        if under && !muffled {
+            self.set_low_pass(Some(UNDERWATER_CUTOFF_HZ), 0.15);
+        } else if !under && muffled {
+            self.set_low_pass(None, 0.25);
+        }
+    }
+
+    /// Whether [`Self::set_underwater`] has the sound muffled.
+    #[must_use]
+    pub fn is_underwater(&self) -> bool {
+        self.low_pass == Some(UNDERWATER_CUTOFF_HZ)
     }
 
     /// Stops every live sound and clears the registry.
@@ -639,5 +714,34 @@ mod tests {
         assert_eq!(engine.sound_count(), 2);
         engine.stop_all(0.0);
         assert_eq!(engine.sound_count(), 0);
+    }
+
+    #[test]
+    fn low_pass_muffles_and_lifts() {
+        let mut audio = engine();
+        assert_eq!(audio.low_pass(), None);
+        audio.set_low_pass(Some(1000.0), 0.0);
+        assert_eq!(audio.low_pass(), Some(1000.0));
+        audio.set_low_pass(Some(5.0), 0.0);
+        assert_eq!(audio.low_pass(), Some(20.0), "clamped to what's audible");
+        audio.set_low_pass(None, 0.1);
+        assert_eq!(audio.low_pass(), None);
+        audio.pump_frame(0.2);
+    }
+
+    #[test]
+    fn underwater_muffles_until_surfacing() {
+        let mut audio = engine();
+        audio.set_underwater(true);
+        assert!(audio.is_underwater());
+        assert_eq!(audio.low_pass(), Some(UNDERWATER_CUTOFF_HZ));
+        audio.set_underwater(true); // no change
+        audio.set_underwater(false);
+        assert!(!audio.is_underwater());
+        assert_eq!(audio.low_pass(), None);
+        // A game's own low-pass isn't undone by staying dry.
+        audio.set_low_pass(Some(3000.0), 0.0);
+        audio.set_underwater(false);
+        assert_eq!(audio.low_pass(), Some(3000.0));
     }
 }

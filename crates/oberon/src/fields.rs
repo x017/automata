@@ -95,6 +95,10 @@ pub enum Field {
     WaterDensity,
     /// How much the water slows bodies in it.
     WaterDrag,
+    /// Caustics strength under the water (0..2).
+    WaterCaustics,
+    /// Wind over the water (0..1; spray off the crests from 0.5).
+    WaterWind,
     /// Point light color channel 0..3 (RGB, 0..1).
     PointColor(u8),
     /// Point light brightness.
@@ -316,6 +320,8 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::WaterFoam => data.water?.foam,
         F::WaterDensity => data.water?.density,
         F::WaterDrag => data.water?.drag,
+        F::WaterCaustics => data.water?.caustics,
+        F::WaterWind => data.water?.wind,
         F::ParticleRate
         | F::ParticleBurst
         | F::ParticleDuration
@@ -403,7 +409,8 @@ pub fn range(field: Field) -> (f32, f32) {
         | F::EnvClouds
         | F::WaterDeep(_)
         | F::WaterShallow(_)
-        | F::WaterFoam => (0.0, 1.0),
+        | F::WaterFoam
+        | F::WaterWind => (0.0, 1.0),
         F::PointRadius | F::SpotRadius => (0.01, 5.0),
         F::SpotInner => (0.0, automata_renderer::SpotCone::MAX_ANGLE),
         F::SpotOuter => (1.0, automata_renderer::SpotCone::MAX_ANGLE),
@@ -431,7 +438,7 @@ pub fn range(field: Field) -> (f32, f32) {
         F::EnvExposure => (0.0, 16.0),
         F::MeshEmissiveStrength => (0.0, 100.0),
         F::MeshGlowLight => (0.0, 10.0),
-        F::EnvFogDensity | F::EnvAmbientOcclusion => (0.0, 2.0),
+        F::EnvFogDensity | F::EnvAmbientOcclusion | F::WaterCaustics => (0.0, 2.0),
         F::EnvFogStart => (0.0, 100_000.0),
         F::MeshSize | F::ColliderRadius | F::ColliderExtents(_) | F::ColliderHalfHeight => {
             (0.001, 10_000.0)
@@ -503,6 +510,8 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::WaterDeep(_)
         | F::WaterShallow(_)
         | F::WaterFoam
+        | F::WaterWind
+        | F::WaterCaustics
         | F::WaterWaveHeight
         | F::AudioVolume
         | F::AudioPitch
@@ -642,6 +651,8 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
         | F::WaterWaveDirection
         | F::WaterDensity
         | F::WaterDrag
+        | F::WaterCaustics
+        | F::WaterWind
         | F::WaterFoam => match &mut data.water {
             Some(water) => match field {
                 F::WaterSize(i) => water.size[usize::from(i.min(1))] = v,
@@ -654,6 +665,8 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
                 F::WaterWaveDirection => water.wave_direction = v,
                 F::WaterDensity => water.density = v,
                 F::WaterDrag => water.drag = v,
+                F::WaterCaustics => water.caustics = v,
+                F::WaterWind => water.wind = v,
                 _ => water.foam = v,
             },
             None => return false,

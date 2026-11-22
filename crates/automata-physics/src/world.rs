@@ -73,6 +73,19 @@ pub struct PhysicsTick {
     pub collisions: Vec<PhysicsEvent>,
     /// Contact-force events (forces over the configured threshold).
     pub contact_forces: Vec<ContactForce>,
+    /// Bodies that hit water hard enough to splash this step.
+    pub splashes: Vec<WaterSplash>,
+}
+
+/// Something hitting water hard enough to splash.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WaterSplash {
+    /// Where, on the surface.
+    pub position: glam::Vec3,
+    /// How fast it was going down (m/s).
+    pub speed: f32,
+    /// The radius of its footprint in the water (m).
+    pub radius: f32,
 }
 
 pub(crate) fn entity_to_user_data(entity: Entity) -> u128 {

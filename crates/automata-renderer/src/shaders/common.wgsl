@@ -50,6 +50,10 @@ struct LightUniform {
     inv_view_proj: mat4x4<f32>, // clip -> world (the sky's view rays)
     sky_zenith: vec4<f32>,     // rgb: sky color straight up, a: sky dome on
     sky_sun: vec4<f32>,        // x: cos(sun radius), y: glow, z: clouds, w: lens flare
+    underwater: vec4<f32>,     // rgb: the water around the camera, a: extinction /m (0 = dry)
+    water_eye: vec4<f32>,      // x: surface height over the camera, y: near half height, z: caustic waters
+    water_rects: array<vec4<f32>, 4>,  // caustic waters' world XZ min (xy), max (zw)
+    water_levels: array<vec4<f32>, 4>, // x: rest height, y: caustic strength, z: clarity (m)
     points: array<PointLightData, MAX_POINT_LIGHTS>,
     // Six views (+X, -X, +Y, -Y, +Z, -Z) per shadowed point light.
     point_faces: array<mat4x4<f32>, 24>,
@@ -613,14 +617,127 @@ fn shade_pbr(
     let env = sky_radiance(reflect(-v, n));
     // Reflections of the sky are partly blocked in shadowed creases, and
     // all ambient light by nearby geometry (`ao`, 1 = open).
-    let occlusion = mix(0.6, 1.0, shadow) * ao;
+    let occlusion = mix(0.6, 1.0, min(shadow, 1.0)) * ao;
     let ambient = (albedo * hemi(n) * (vec3<f32>(1.0) - fr) * ao + env * fr * occlusion)
         * light.color_ambient.a;
     return direct + ambient;
 }
 
-// Exponential distance fog (before tone mapping, like real scattering).
-fn apply_fog(lit: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
+// --- Under water -------------------------------------------------------------
+// When the camera dips into water (`underwater.a` > 0), pixels whose bit of
+// the lens is below the surface see through water instead of air: light
+// is absorbed (red first) and scattered toward the water's colour with
+// distance. The surface cuts across the lens in a gently wobbling
+// waterline. Below any water's rest height, the sun dances in caustics.
+
+// The world point on the near plane under pixel `frag`.
+fn near_point(frag: vec2<f32>) -> vec3<f32> {
+    let ndc = vec2<f32>(frag.x / light.screen.x * 2.0 - 1.0, 1.0 - frag.y / light.screen.y * 2.0);
+    let h = light.inv_view_proj * vec4<f32>(ndc, 0.0, 1.0);
+    return h.xyz / h.w;
+}
+
+// Whether pixel `frag` looks out from under the water.
+fn eye_under_water(frag: vec2<f32>) -> bool {
+    if light.underwater.a <= 0.0 {
+        return false;
+    }
+    let u = frag.x / light.screen.x;
+    let t = light.fog_params.y;
+    let wobble = light.water_eye.y * (0.14 * sin(u * 7.0 + t * 1.9) + 0.06 * sin(u * 19.0 - t * 3.1));
+    return near_point(frag).y < light.water_eye.x + wobble;
+}
+
+// The water's own colour around the camera: lit from above, darker the
+// deeper the camera is.
+fn water_fog_color() -> vec3<f32> {
+    let l = sun_dir();
+    let lit = hemi(vec3<f32>(0.0, 1.0, 0.0)) * light.color_ambient.a
+        + light.color_ambient.rgb * max(l.y, 0.0) * 0.6;
+    let depth = max(light.water_eye.x - camera.view_pos.y, 0.0);
+    return light.underwater.rgb * lit * exp(-depth * light.underwater.a * 0.5);
+}
+
+// How much of `dist` metres of water lets through, per channel.
+fn water_transmission(dist: f32) -> vec3<f32> {
+    return exp(-light.underwater.a * vec3<f32>(2.2, 1.0, 0.8) * max(dist, 0.0));
+}
+
+// `lit` seen through `dist` metres of water.
+fn water_fog(lit: vec3<f32>, dist: f32) -> vec3<f32> {
+    let t = water_transmission(dist);
+    return lit * t + water_fog_color() * (vec3<f32>(1.0) - t);
+}
+
+// How far the view ray to `world` runs under water, the camera being in
+// it: all the way, or up to the surface for things above it.
+fn water_path(world: vec3<f32>) -> f32 {
+    let eye = camera.view_pos.xyz;
+    let dist = length(world - eye);
+    let level = light.water_eye.x;
+    let rise = world.y - eye.y;
+    if world.y <= level || rise <= 1e-4 {
+        return dist;
+    }
+    return dist * clamp((level - eye.y) / rise, 0.0, 1.0);
+}
+
+// The tileable caustic net (after Dave Hoskins' "Tileable Water Caustic"):
+// thin bright lines that drift and re-form, about 0 to 1 (mostly dark).
+fn caustic_pattern(uv: vec2<f32>, time: f32) -> f32 {
+    let p = fract(uv) * 6.2831853 - vec2<f32>(250.0);
+    var i = p;
+    var c = 1.0;
+    let inten = 0.005;
+    for (var n = 0; n < 4; n = n + 1) {
+        let t = time * (1.0 - 3.5 / f32(n + 1));
+        i = p + vec2<f32>(cos(t - i.x) + sin(t + i.y), sin(t - i.y) + cos(t + i.x));
+        c = c + 1.0 / length(vec2<f32>(p.x / (sin(i.x + t) / inten), p.y / (cos(i.y + t) / inten)));
+    }
+    c = 1.17 - pow(c * 0.25, 1.4);
+    let c2 = c * c;
+    let c4 = c2 * c2;
+    return clamp(c4 * c4, 0.0, 4.0);
+}
+
+// Light reaching `world` through any water above it: rgb tints all of it
+// (the water swallows red first, then green, with depth), a scales the
+// sun's: a moving net of brighter and darker light (caustics, about 1 on
+// average) fading with depth. (1, 1, 1, 1) in the dry.
+fn water_light(world: vec3<f32>) -> vec4<f32> {
+    let count = u32(light.water_eye.z);
+    for (var i = 0u; i < count; i = i + 1u) {
+        let r = light.water_rects[i];
+        if world.x < r.x || world.z < r.y || world.x > r.z || world.z > r.w {
+            continue;
+        }
+        let w = light.water_levels[i];
+        let depth = w.x - world.y;
+        if depth <= 0.0 {
+            continue;
+        }
+        let tint = exp(-(0.35 / w.z) * vec3<f32>(2.2, 1.0, 0.8) * depth);
+        let l = sun_dir();
+        if l.y <= 0.02 {
+            return vec4<f32>(tint, 1.0);
+        }
+        // Where the sunbeam reaching this point came through the surface.
+        let d = refract(-l, vec3<f32>(0.0, 1.0, 0.0), 0.75);
+        let entry = world.xz + d.xz * (depth / max(-d.y, 0.1));
+        let net = caustic_pattern(entry * 0.45, light.fog_params.y * 0.55);
+        let fade = smoothstep(0.0, 0.3, depth) * exp(-depth / (w.z * 3.0)) * w.y;
+        // Strength over 1 deepens the contrast.
+        return vec4<f32>(tint, max(1.0 + (0.35 + 3.2 * net - 1.0) * fade, 0.0));
+    }
+    return vec4<f32>(1.0);
+}
+
+// Exponential distance fog (before tone mapping, like real scattering),
+// or the water's when pixel `frag` looks out from under it.
+fn apply_fog(lit: vec3<f32>, world: vec3<f32>, frag: vec2<f32>) -> vec3<f32> {
+    if eye_under_water(frag) {
+        return water_fog(lit, water_path(world));
+    }
     let density = light.fog.a;
     if density <= 0.0 {
         return lit;
@@ -632,7 +749,10 @@ fn apply_fog(lit: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
 }
 
 // Beautiful's fog adds sun scattering: it glows toward the sun.
-fn apply_fog_scatter(lit: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
+fn apply_fog_scatter(lit: vec3<f32>, world: vec3<f32>, frag: vec2<f32>) -> vec3<f32> {
+    if eye_under_water(frag) {
+        return water_fog(lit, water_path(world));
+    }
     let density = light.fog.a;
     if density <= 0.0 {
         return lit;

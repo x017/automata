@@ -740,6 +740,7 @@ impl PyEnvironment {
 /// An animated water surface, centred on its entity's transform: Gerstner
 /// waves, sky reflections and sun glints on every preset; refraction,
 /// depth-based color and shoreline foam on ``"beautiful"`` graphics.
+/// Under it: caustics, and a blue-green view when the camera dives in.
 ///
 /// ```python
 /// scene.add(at.Entity("lake").add(at.Transform(position=(0, -0.5, 0)))
@@ -770,6 +771,8 @@ impl PyWater {
         density=None,
         drag=None,
         endless=None,
+        caustics=None,
+        wind=None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -785,6 +788,8 @@ impl PyWater {
         density: Option<f32>,
         drag: Option<f32>,
         endless: Option<bool>,
+        caustics: Option<f32>,
+        wind: Option<f32>,
     ) -> Self {
         let d = Water::default();
         let rgb = |c: (f32, f32, f32)| [c.0, c.1, c.2];
@@ -802,6 +807,8 @@ impl PyWater {
                 density: density.unwrap_or(d.density),
                 drag: drag.unwrap_or(d.drag),
                 endless: endless.unwrap_or(d.endless),
+                caustics: caustics.unwrap_or(d.caustics),
+                wind: wind.unwrap_or(d.wind),
             },
         }
     }
@@ -897,6 +904,20 @@ impl PyWater {
     #[getter]
     fn endless(&self) -> bool {
         self.inner.endless
+    }
+
+    /// How strongly sunlight through the waves dances on what's under the
+    /// water (caustics), 0..2 (default 1; Medium graphics and up).
+    #[getter]
+    fn caustics(&self) -> f32 {
+        self.inner.caustics
+    }
+
+    /// Wind over the water, 0..1 (default 0): from 0.5 up it blows spray
+    /// off the wave crests.
+    #[getter]
+    fn wind(&self) -> f32 {
+        self.inner.wind
     }
 
     fn __repr__(&self) -> String {

@@ -307,10 +307,38 @@ fn water_shade(in: VertexOutput, shadow: f32, point_shadows: bool) -> WaterShade
     return out;
 }
 
+// From under the water, the surface seen from below. Within Snell's window
+// (about 48 degrees around straight up) the world above shows through,
+// bent by the waves; outside it, the surface mirrors the water below
+// (total internal reflection): the water's own colour. Returns the bent
+// view ray into the air (xyz) and how much of the window shows (w).
+fn underside(in: VertexOutput) -> vec4<f32> {
+    let footprint = length(fwidth(in.base_xz));
+    let field = ripple_at(in.base_xz);
+    let n = normalize(wave_slope(in.base_xz, footprint)
+        - vec3<f32>(field.y, 0.0, field.z) * RIPPLE_NORMAL_GAIN);
+    let up = normalize(in.world_position - camera.view_pos.xyz);
+    let cos_i = dot(up, n);
+    // Total internal reflection past cos 0.66 (1 / 1.33 = sin of the edge).
+    let window = smoothstep(0.64, 0.72, cos_i);
+    var t = refract(up, -n, 1.33);
+    if dot(t, t) < 1e-6 {
+        t = n;
+    }
+    // A little less than all of it gets through, even straight up.
+    return vec4<f32>(t, window * 0.92);
+}
+
 // Forward path: blends over the scene; grazing views reflect fully. Like
 // the meshes, one entry point per mix of shadows sampled (the flags are
 // constants, so each compiles only its own lookups).
 fn forward(in: VertexOutput, sun_shadows: bool, point_shadows: bool) -> vec4<f32> {
+    let frag = in.clip_position.xy;
+    if eye_under_water(frag) {
+        let u = underside(in);
+        let color = mix(water_fog_color(), sky_radiance(u.xyz), u.w);
+        return vec4<f32>(finish_forward(apply_fog(color, in.world_position, frag)), 1.0);
+    }
     var shadow = 1.0;
     if sun_shadows {
         shadow = water_shadow(in.world_position);
@@ -319,7 +347,7 @@ fn forward(in: VertexOutput, sun_shadows: bool, point_shadows: bool) -> vec4<f32
     var color = mix(w.body, w.reflection, w.fresnel) + w.glint;
     color = mix(color, vec3<f32>(0.95) * (w.ambient + w.sunlit), w.ripple_foam);
     let alpha = mix(mix(0.8, 1.0, w.fresnel), 1.0, w.ripple_foam);
-    return vec4<f32>(finish_forward(apply_fog(color, in.world_position)), alpha);
+    return vec4<f32>(finish_forward(apply_fog(color, in.world_position, frag)), alpha);
 }
 
 @fragment
@@ -347,6 +375,15 @@ fn fs_unshadowed(in: VertexOutput) -> @location(0) vec4<f32> {
 @fragment
 fn fs_refract(in: VertexOutput) -> @location(0) vec4<f32> {
     let world = in.world_position;
+    if eye_under_water(in.clip_position.xy) {
+        // The scene copy above the surface was drawn through the water
+        // already (fogged up to the surface), so it needs no more fog.
+        let u = underside(in);
+        let size = light.screen.xy;
+        let uv = clamp(in.clip_position.xy / size + u.xz * 0.06, vec2<f32>(0.0), vec2<f32>(1.0));
+        let above = textureSampleLevel(scene_color, scene_sampler, uv, 0.0).rgb;
+        return vec4<f32>(mix(water_fog_color(), above, u.w), 1.0);
+    }
     let shadow = water_shadow_soft(world, in.clip_position.xy);
     let w = water_shade(in, shadow, true);
     let n = w.n;
@@ -386,5 +423,5 @@ fn fs_refract(in: VertexOutput) -> @location(0) vec4<f32> {
     // Soft edge where the water meets the shore.
     let edge = smoothstep(0.0, 0.06, column);
     color = mix(below, color, edge);
-    return vec4<f32>(apply_fog_scatter(color, world), 1.0);
+    return vec4<f32>(apply_fog_scatter(color, world, in.clip_position.xy), 1.0);
 }

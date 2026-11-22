@@ -272,7 +272,26 @@ the way to the horizon, so a sea doesn't end in a visible edge. Waves,
 foam and buoyancy stay within <code>size</code>; put the action there.</p>
 <p>Things that cross the surface leave rings and wakes in it, with foam on
 their crests, on every preset (see
-<a href="physics.html#ripples-and-wakes">Physics → Ripples and wakes</a>).</p>
+<a href="physics.html#ripples-and-wakes">Physics → Ripples and wakes</a>). Hit it hard
+and it <strong>splashes</strong>: a burst of droplets as big as the impact. Set <code>wind</code>
+above 0.5 and <strong>spray</strong> blows off the wave crests near the camera, more
+the stronger it is (see <a href="physics.html#splashes-and-spray">Physics → Splashes and spray</a>).</p>
+<h3 id="under-the-surface">Under the surface<a class="anchor" href="#under-the-surface" aria-label="Link to this section">#</a></h3>
+<p>Dive the camera under the water and the view changes, on every preset:</p>
+<ul><li><strong>Fog and colour absorption.</strong> Everything fades into the water's
+<code>shallow_color</code>, darkening toward <code>deep_color</code> with depth. Red goes
+first and blue-green lasts, so the deep turns blue-green. <code>clarity</code> is
+how far you can see.</li><li><strong>The surface from below</strong> shimmers with the sky through it. Seen at a
+low angle, it turns into a mirror (total internal reflection).</li><li><strong>A wobbling waterline</strong> when the camera sits right at the surface:
+the frame splits at the waves, with air above and water below.</li><li><strong>Muffled sound.</strong> Everything you hear goes through a low-pass filter
+(650 Hz) while the camera is under, and clears again when it comes up.
+The engine and Oberon's Play mode do this themselves.</li></ul>
+<p><strong>Caustics</strong> are the moving net of light that waves focus onto whatever is
+under them: the sea floor, a reef, the posts of a pier. They're drawn on
+Medium graphics and up, on the nearest four waters, and they're there
+whether the camera is above the water or below it. <code>caustics</code> sets their
+strength from 0 (none) to 2 (default 1). They fade out with depth.</p>
+<p><img src="../../../assets/rendering/water_underwater.jpg" alt="Diving off the pier in the Lagoon: blue-green fog, caustics on the reef and the pier posts, and the splash seen from below" loading="lazy" decoding="async"></p>
 <p>Water is also physics: dynamic bodies float in it and ride its waves (see
 <a href="physics.html#water">Physics → Water</a>). The surface isn't a solid collider,
 so give the water a floor if sinking things should stop.</p>
@@ -322,7 +341,7 @@ top to get fog and tone mapping too.</p>
     <footer class="pager"><a class="prev" href="scenes-and-entities.html"><small>Previous</small>Scenes &amp; entities</a><a class="next" href="cameras.html"><small>Next</small>Cameras</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/rendering-and-lights.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#drawing-primitives">Drawing primitives</a></li><li class="l2"><a href="#surfaces">Surfaces</a></li><li class="l3"><a href="#glowing-objects-light-their-surroundings">Glowing objects light their surroundings</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#the-sun">The sun</a></li><li class="l2"><a href="#point-lights-and-spotlights">Point lights and spotlights</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#sky-and-quality">Sky and quality</a></li><li class="l3"><a href="#beautiful">Beautiful</a></li><li class="l2"><a href="#water">Water</a></li><li class="l2"><a href="#particles">Particles</a></li><li class="l2"><a href="#mood-recipes">Mood recipes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#drawing-primitives">Drawing primitives</a></li><li class="l2"><a href="#surfaces">Surfaces</a></li><li class="l3"><a href="#glowing-objects-light-their-surroundings">Glowing objects light their surroundings</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#the-sun">The sun</a></li><li class="l2"><a href="#point-lights-and-spotlights">Point lights and spotlights</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#sky-and-quality">Sky and quality</a></li><li class="l3"><a href="#beautiful">Beautiful</a></li><li class="l2"><a href="#water">Water</a></li><li class="l3"><a href="#under-the-surface">Under the surface</a></li><li class="l2"><a href="#particles">Particles</a></li><li class="l2"><a href="#mood-recipes">Mood recipes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

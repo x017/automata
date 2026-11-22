@@ -249,4 +249,25 @@ impl PyAudio {
     fn sound_count(&self) -> usize {
         self.engine.borrow().sound_count()
     }
+
+    /// Muffles every sound through a low-pass filter at `cutoff_hz` (20 to
+    /// 20 000), or lifts it (`None`), fading over `fade` seconds. The
+    /// engine muffles everything by itself while the camera is under
+    /// water.
+    #[pyo3(signature = (cutoff_hz=None, fade=0.0))]
+    fn set_low_pass(&self, cutoff_hz: Option<f64>, fade: f64) {
+        self.engine.borrow_mut().set_low_pass(cutoff_hz, fade);
+    }
+
+    /// The low-pass cutoff (Hz) while sound is muffled, else None.
+    #[getter]
+    fn low_pass(&self) -> Option<f64> {
+        self.engine.borrow().low_pass()
+    }
+
+    /// True while the camera is under water (and sound muffled).
+    #[getter]
+    fn underwater(&self) -> bool {
+        self.engine.borrow().is_underwater()
+    }
 }

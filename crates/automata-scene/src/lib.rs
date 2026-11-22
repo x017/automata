@@ -34,8 +34,8 @@ pub use events::Events;
 pub use handle::{Assets, Handle};
 pub use particles::{
     blend_label, burst, load_particle_textures, preview_particles, simulate_particles, spawn_burst,
-    EmitterShape, FieldValue as ParticleField, ParticleEmitter, ParticleState, ParticleTexture,
-    PRESETS as PARTICLE_PRESETS,
+    splash_emitter, spray_emitter, EmitterShape, FieldValue as ParticleField, ParticleEmitter,
+    ParticleState, ParticleTexture, PRESETS as PARTICLE_PRESETS,
 };
 pub use render::{
     materialize_visuals, record_draw_list, DirectionalLight, MeshRenderer, MeshVisual,

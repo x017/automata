@@ -140,6 +140,19 @@ scripts, Oberon included) or <code>ctx.physics.splash((x, y, z), strength)</code
 <p>Ripples are only drawn; they don't move bodies (those ride the waves).
 They fade over about ten seconds. Beyond the 64 m around the view there are
 none, and the field fades out toward its edges so it never ends in a seam.</p>
+<h3 id="splashes-and-spray">Splashes and spray<a class="anchor" href="#splashes-and-spray" aria-label="Link to this section">#</a></h3>
+<p>A body that hits the water faster than 1.5 m/s also throws up a <strong>splash</strong>:
+a burst of droplets (the <code>&quot;splash&quot;</code> particle preset) where it went in.
+Its size follows the entry speed. A crate dropped from a metre makes a
+few droplets; a dive off a pier sends up a white crown. Characters splash
+too, although they're moved by teleporting rather than by velocity.</p>
+<p>On a <code>Water</code> with <code>wind</code> above 0.5, <strong>spray</strong> blows off the wave crests
+within 25 m of the camera, carried downwind (<code>wave_direction</code>). It gets
+more frequent and denser as <code>wind</code> goes up to 1. Calm water never sprays.</p>
+<p>Both are ordinary particle entities that remove themselves once they're
+done. In Rust, <code>PhysicsTick::splashes</code> lists each step's splashes (where,
+how fast and how big), and <code>set_water_particles(false)</code> stops the
+particles but keeps the rings.</p>
 <p>It costs nothing until something disturbs the water and nothing again once
 it calms down. While it runs, about 0.25 ms per physics step in a release
 build. The engine and Oberon point it at the camera that draws the frame;
@@ -181,7 +194,7 @@ try <code>friction(0.2)</code> on the wall or clamp velocity yourself.</li></ul>
     <footer class="pager"><a class="prev" href="input.html"><small>Previous</small>Input</a><a class="next" href="events-and-resources.html"><small>Next</small>Events &amp; resources</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/physics.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#bodies">Bodies</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l3"><a href="#colliders-from-models">Colliders from models</a></li><li class="l2"><a href="#the-per-frame-toolbox">The per-frame toolbox</a></li><li class="l2"><a href="#water">Water</a></li><li class="l3"><a href="#ripples-and-wakes">Ripples and wakes</a></li><li class="l2"><a href="#the-character-controller">The character controller</a></li><li class="l2"><a href="#common-pitfalls">Common pitfalls</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#bodies">Bodies</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l3"><a href="#colliders-from-models">Colliders from models</a></li><li class="l2"><a href="#the-per-frame-toolbox">The per-frame toolbox</a></li><li class="l2"><a href="#water">Water</a></li><li class="l3"><a href="#ripples-and-wakes">Ripples and wakes</a></li><li class="l3"><a href="#splashes-and-spray">Splashes and spray</a></li><li class="l2"><a href="#the-character-controller">The character controller</a></li><li class="l2"><a href="#common-pitfalls">Common pitfalls</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

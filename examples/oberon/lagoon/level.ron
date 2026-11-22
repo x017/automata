@@ -51,6 +51,8 @@
                 density: 2.0,
                 drag: 1.0,
                 endless: true,
+                caustics: 1.0,
+                wind: 0.0,
             )),
         ),
         (
@@ -73,6 +75,8 @@
                 density: 2.0,
                 drag: 1.0,
                 endless: false,
+                caustics: 1.0,
+                wind: 0.0,
             )),
         ),
         (
@@ -1116,6 +1120,52 @@
             )),
         ),
         (
+            name: Some("Swimmer"),
+            transform: Some((
+                position: (-8.5, 2.13, 20.5),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.5, 1.7, 0.5),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.95, 0.75, 0.1, 1.0),
+            )),
+            rigid_body: Some((
+                body_type: KinematicPosition,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (0.5, 1.7, 0.5),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+            character_controller: Some((
+                mode: Normal,
+                max_slope_climb_angle: 0.7853982,
+                min_slope_slide_angle: 0.5235988,
+                autostep_height: None,
+                snap_to_ground: Some(0.2),
+                offset: 0.05,
+                slide: true,
+            )),
+            character_velocity: Some((
+                velocity: (0.0, 0.0, 0.0),
+            )),
+            script: Some((
+                path: "scripts/swimmer.py",
+            )),
+        ),
+        (
             name: Some("Boat"),
             transform: Some((
                 position: (-7.092485, 0.15, 25.883411),
@@ -1173,6 +1223,8 @@
             )),
             attributes: {
                 "distance": Float(32.0),
+                "follow": Text("Swimmer"),
+                "follow_distance": Float(6.0),
                 "pitch": Float(0.33),
                 "spin": Float(0.05),
                 "target": Vec3((0.0, 0.5, 4.0)),

@@ -38,6 +38,7 @@ use rapier3d::math::Vector;
 
 use super::PhysicsWorld3D;
 use crate::ripples::Dent;
+use crate::world::WaterSplash;
 
 /// Bodies whose bounding box is smaller than this (metres, largest side)
 /// are sampled at their centre only.
@@ -49,6 +50,13 @@ const DRAG_RATE: f32 = 4.0;
 
 /// How fast (m/s) a body must hit the water to splash.
 const SPLASH_SPEED: f32 = 1.5;
+
+/// Wind (`Water::wind`) above which spray blows off the crests.
+const SPRAY_WIND: f32 = 0.5;
+/// Spray bursts per second at full wind.
+const SPRAY_RATE: f32 = 45.0;
+/// How far from the ripple field's centre spray appears (m).
+const SPRAY_REACH: f32 = 25.0;
 
 /// A collider's bounding box in the world: centre, rotated axes, half size.
 struct Bounds {
@@ -120,6 +128,7 @@ impl PhysicsWorld3D {
     /// Reads the scene's water surfaces at the current simulation time.
     pub(super) fn collect_water(&mut self, scene: &SceneWorld) {
         self.water.clear();
+        self.winds.clear();
         let time = self.water_time();
         for (water, global, local) in
             &mut scene.query::<(&Water, Option<&GlobalTransform>, Option<&Transform>)>()
@@ -131,7 +140,25 @@ impl PhysicsWorld3D {
                 GlobalTransform::matrix,
             );
             self.water.push(WaterSurface::new(water, model, time));
+            self.winds.push((
+                water.wind.clamp(0.0, 1.0),
+                water.wave_direction.to_radians(),
+            ));
         }
+    }
+
+    /// Awake bodies, and characters (moved by teleporting, they may not
+    /// count as awake). Forgets characters that are gone.
+    fn bodies_in_motion(&mut self) -> Vec<RigidBodyHandle> {
+        let mut handles: Vec<RigidBodyHandle> = self.islands.active_bodies().collect();
+        for handle in self.character_sinking.keys() {
+            if !handles.contains(handle) {
+                handles.push(*handle);
+            }
+        }
+        let bodies = &self.bodies;
+        self.character_sinking.retain(|h, _| bodies.contains(*h));
+        handles
     }
 
     /// Applies buoyancy and drag for one step of `dt` seconds.
@@ -140,12 +167,13 @@ impl PhysicsWorld3D {
         if self.water.is_empty() || gravity <= 0.0 {
             return;
         }
+        let handles = self.bodies_in_motion();
         let water = &self.water;
         // Each awake body's dent in the ripples this step (None: it's not
         // crossing the surface), and how fast it's moving down into it.
         let mut dents = Vec::new();
-        for handle in self.islands.active_bodies() {
-            dents.push((handle, None, 0.0));
+        for handle in handles {
+            dents.push((handle, None, 0.0, 0.0));
             let Some(body) = self.bodies.get_mut(handle) else {
                 continue;
             };
@@ -200,7 +228,13 @@ impl PhysicsWorld3D {
             if lo.y < level && hi.y > level {
                 if let Some(last) = dents.last_mut() {
                     last.1 = Some(Dent::of_body(world_center, world_half, level));
-                    last.2 = -body.linvel().y;
+                    // Kinematic bodies (characters) move to where they were
+                    // told to be next; their velocity is that move.
+                    last.2 = match self.character_sinking.get(&handle) {
+                        Some(sinking) => *sinking,
+                        None => -body.linvel().y,
+                    };
+                    last.3 = level;
                 }
             }
             if !dynamic {
@@ -245,8 +279,8 @@ impl PhysicsWorld3D {
     /// Moves each body's ripple dent to where it is now (`None`: out of
     /// the water). Bodies that just hit the water faster than
     /// `SPLASH_SPEED` (`sinking`, m/s downward) splash too.
-    fn dig_dents(&mut self, dents: Vec<(RigidBodyHandle, Option<Dent>, f32)>) {
-        for (handle, dent, sinking) in dents {
+    fn dig_dents(&mut self, dents: Vec<(RigidBodyHandle, Option<Dent>, f32, f32)>) {
+        for (handle, dent, sinking, level) in dents {
             let old = match dent {
                 Some(dent) => self.dents.insert(handle, dent),
                 None => self.dents.remove(&handle),
@@ -259,6 +293,11 @@ impl PhysicsWorld3D {
                     let strength = (sinking - SPLASH_SPEED) * 0.3 * size;
                     let at = Vec3::new(dent.center.x, 0.0, dent.center.y);
                     self.ripples.splash(at, strength.min(10.0));
+                    self.splashes.push(WaterSplash {
+                        position: Vec3::new(dent.center.x, level, dent.center.y),
+                        speed: sinking,
+                        radius: dent.radius,
+                    });
                 }
             }
             if old != dent {
@@ -291,6 +330,66 @@ impl PhysicsWorld3D {
             return;
         }
         self.ripples.step(dt);
+    }
+
+    /// This step's water particles: a burst of droplets for each body that
+    /// hit the water (sized by how hard), and spray off the crests of
+    /// windy water around the ripple field. Returns the splashes.
+    pub(super) fn water_effects(&mut self, scene: &mut SceneWorld, dt: f32) -> Vec<WaterSplash> {
+        let splashes = std::mem::take(&mut self.splashes);
+        if !self.water_particles {
+            return splashes;
+        }
+        for s in &splashes {
+            let emitter = automata_scene::splash_emitter(s.speed, s.radius, SPLASH_SPEED);
+            automata_scene::spawn_burst(scene, emitter, s.position, None, None);
+        }
+        self.crest_spray(scene, dt);
+        splashes
+    }
+
+    /// Spray off the wave crests of water with wind over `SPRAY_WIND`:
+    /// a few bursts a second at random crests within `SPRAY_REACH` of the
+    /// ripple field's centre (what the camera sees).
+    fn crest_spray(&mut self, scene: &mut SceneWorld, dt: f32) {
+        let center = self.ripples.center();
+        for (surface, &(wind, direction)) in self.water.iter().zip(&self.winds) {
+            if wind <= SPRAY_WIND || surface.max_height() <= surface.level() {
+                continue;
+            }
+            let strength = (wind - SPRAY_WIND) / (1.0 - SPRAY_WIND);
+            self.spray_carry += SPRAY_RATE * strength * dt;
+            let crest = surface.level() + (surface.max_height() - surface.level()) * 0.4;
+            let (dz, dx) = direction.sin_cos();
+            let downwind = Vec3::new(dx, 0.0, dz);
+            while self.spray_carry >= 1.0 {
+                self.spray_carry -= 1.0;
+                // A few tries at landing on a crest.
+                for _ in 0..6 {
+                    let angle = spray_random(&mut self.spray_rng) * std::f32::consts::TAU;
+                    let r = SPRAY_REACH * spray_random(&mut self.spray_rng).sqrt();
+                    let (x, z) = (center.x + angle.cos() * r, center.y + angle.sin() * r);
+                    if !surface.contains(x, z) {
+                        continue;
+                    }
+                    let h = surface.height_unchecked(x, z);
+                    if h < crest {
+                        continue;
+                    }
+                    let up = (downwind + Vec3::Y * (0.5 + 0.3 * spray_random(&mut self.spray_rng)))
+                        .normalize();
+                    let emitter = automata_scene::spray_emitter(wind);
+                    automata_scene::spawn_burst(scene, emitter, Vec3::new(x, h, z), Some(up), None);
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Turns the particles water makes (splash droplets, crest spray) on
+    /// or off; on by default. Splashes still ripple either way.
+    pub fn set_water_particles(&mut self, on: bool) {
+        self.water_particles = on;
     }
 
     /// Makes a splash in the water at `position` (its X and Z): rings that
@@ -367,4 +466,16 @@ fn world_box(collider: &rapier3d::geometry::Collider) -> (Vec3, Vec3, [Vec3; 3])
         half,
         [rot * Vec3::X, rot * Vec3::Y, rot * Vec3::Z],
     )
+}
+
+/// A random number in [0, 1) for the spray (xorshift64* on `state`).
+fn spray_random(state: &mut u64) -> f32 {
+    let mut x = *state;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    *state = x;
+    #[allow(clippy::cast_precision_loss)] // 24 bits
+    let v = (x.wrapping_mul(0x2545_f491_4f6c_dd1d) >> 40) as f32;
+    v / 16_777_216.0
 }

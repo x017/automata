@@ -100,14 +100,31 @@ fn sky_color(ndc: vec2<f32>) -> vec3<f32> {
     return clouds(d, c);
 }
 
+// The background at pixel `frag`: the sky, or from under the water, the
+// sky dimmed by the water up to the surface (looking up) or just the
+// water's colour (looking level or down, where nothing ends the view).
+fn background(ndc: vec2<f32>, frag: vec2<f32>) -> vec3<f32> {
+    var c = light.background.rgb; // the sky pass runs without a dome only for water
+    if sky_on() {
+        c = sky_color(ndc);
+    }
+    if eye_under_water(frag) {
+        let d = view_ray(ndc);
+        let depth = max(light.water_eye.x - camera.view_pos.y, 0.0);
+        let up = smoothstep(0.02, 0.2, d.y);
+        return mix(water_fog_color(), water_fog(c, depth / max(d.y, 0.02)), up);
+    }
+    return c;
+}
+
 // The forward path writes display colors (tone mapped here).
 @fragment
 fn fs_sky(in: SkyOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(finish_forward(sky_color(in.ndc)), 1.0);
+    return vec4<f32>(finish_forward(background(in.ndc, in.position.xy)), 1.0);
 }
 
 // Beautiful writes HDR; alpha 1 so the post chain tone maps and blooms it.
 @fragment
 fn fs_sky_hdr(in: SkyOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(sky_color(in.ndc), 1.0);
+    return vec4<f32>(background(in.ndc, in.position.xy), 1.0);
 }

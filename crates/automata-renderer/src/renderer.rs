@@ -39,9 +39,19 @@ enum FrameTarget {
 }
 
 /// Whether the frame draws the sky dome: a 3D frame whose environment
-/// asks for one.
+/// asks for one, or whose camera is in water (the sky pass then fills the
+/// empty background with the water's colour).
 fn draws_sky(draw: &DrawList) -> bool {
-    draw.camera_3d.is_some() && draw.environment.is_some_and(|e| e.sky)
+    draw.camera_3d.is_some() && (draw.environment.is_some_and(|e| e.sky) || camera_in_water(draw))
+}
+
+/// Whether the frame's 3D camera is in (or at the surface of) water.
+fn camera_in_water(draw: &DrawList) -> bool {
+    draw.camera_3d.is_some_and(|cam| {
+        !draw.waters.is_empty()
+            && crate::water::WaterView::new(&draw.waters, &cam, draw.time.unwrap_or(0.0), false)
+                .camera_in_water()
+    })
 }
 
 /// Per-frame GPU resources derived from a draw list.
@@ -1443,17 +1453,21 @@ impl Renderer {
         }
 
         let env = draw.environment.unwrap_or_default();
-        let flare = draw.camera_3d.filter(|_| draws_sky(draw)).and_then(|cam| {
-            let sun = draw.sun.unwrap_or_default();
-            crate::post::SunFlare::new(
-                &cam,
-                targets.size,
-                sun.normalized_direction(),
-                env.sun_size,
-                env.lens_flare,
-                sun.color,
-            )
-        });
+        // No lens flare from under the water.
+        let flare = draw
+            .camera_3d
+            .filter(|_| draws_sky(draw) && !camera_in_water(draw))
+            .and_then(|cam| {
+                let sun = draw.sun.unwrap_or_default();
+                crate::post::SunFlare::new(
+                    &cam,
+                    targets.size,
+                    sun.normalized_direction(),
+                    env.sun_size,
+                    env.lens_flare,
+                    sun.color,
+                )
+            });
         self.post.record_bloom_and_resolve(
             device,
             encoder,
@@ -1797,6 +1811,12 @@ impl Renderer {
             time,
             beautiful,
             point_shadow_taps: self.quality.point_shadow_taps(),
+            water: crate::water::WaterView::new(
+                &draw.waters,
+                &camera_3d,
+                time,
+                self.quality != crate::GraphicsQuality::Low,
+            ),
         };
         let points = frame_point_lights(
             draw,
@@ -3305,6 +3325,40 @@ mod tests {
         read_pixels(renderer, &target, size)
     }
 
+    /// A grey floor 3 m down in a 20 m pool, seen from a camera 1 m under
+    /// the surface, at `time` s with caustics of strength `caustics`.
+    fn dive_frame(renderer: &mut Renderer, caustics: f32, time: f32) -> Vec<u8> {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let floor = renderer.create_material([0.6, 0.6, 0.6, 1.0], None);
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_time(time);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, -1.0, 3.0),
+            glam::Vec3::new(0.0, -3.0, 0.0),
+        ));
+        draw.set_sun(crate::Sun::new(glam::Vec3::new(-0.3, -1.0, -0.2)));
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::new(20.0, 0.2, 20.0),
+                glam::Quat::IDENTITY,
+                glam::Vec3::new(0.0, -3.1, 0.0),
+            ),
+            &floor,
+        );
+        let water = crate::Water {
+            size: [20.0, 20.0],
+            caustics,
+            ..crate::Water::default()
+        };
+        draw.water(water, glam::Mat4::IDENTITY);
+        renderer.render_offscreen(&draw, &target);
+        read_pixels(renderer, &target, size)
+    }
+
     /// A ripple field with a ring of `height` (m) and foam `foam` around
     /// the world origin, as the physics simulation would hand it over.
     #[allow(clippy::many_single_char_names)]
@@ -4009,6 +4063,65 @@ mod tests {
             assert!(
                 streak > dot + 100,
                 "{quality:?}: the streak should reach left, {streak} vs {dot}"
+            );
+        }
+    }
+
+    #[test]
+    fn diving_tints_the_view_and_caustics_dance_on_the_floor() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping underwater test");
+            return;
+        };
+        let size = renderer.size();
+        // The bottom half of the frame: all pool floor.
+        let floor = |frame: &[u8]| frame[frame.len() / 2..].to_vec();
+        let diff = |a: &[u8], b: &[u8]| {
+            a.iter()
+                .zip(b)
+                .map(|(&x, &y)| u64::from(x.abs_diff(y)))
+                .sum::<u64>()
+        };
+        for quality in [
+            GraphicsQuality::Low,
+            GraphicsQuality::Medium,
+            GraphicsQuality::Beautiful,
+        ] {
+            renderer.set_quality(quality);
+            let still = dive_frame(&mut renderer, 0.0, 1.0);
+            // Grey sand, under water, turns blue-green.
+            let [r, g, b, _] = center_pixel(&still, size);
+            assert!(
+                u32::from(g) + u32::from(b) > 2 * u32::from(r) + 20,
+                "{quality:?}: the deep should be blue-green, got {:?}",
+                [r, g, b]
+            );
+            // Without caustics the floor holds still; with them it moves
+            // (Medium graphics and up: Low skips them).
+            let still_later = dive_frame(&mut renderer, 0.0, 1.7);
+            let lit = dive_frame(&mut renderer, 1.0, 1.0);
+            let lit_later = dive_frame(&mut renderer, 1.0, 1.7);
+            let calm = diff(&floor(&still), &floor(&still_later));
+            let dancing = diff(&floor(&lit), &floor(&lit_later));
+            if quality == GraphicsQuality::Low {
+                assert_eq!(dancing, calm, "Low: no caustics");
+                continue;
+            }
+            assert!(
+                dancing > calm + 5000,
+                "{quality:?}: caustics should move, {dancing} vs {calm}"
+            );
+            // And they brighten the floor where they gather.
+            let bright = |frame: &[u8]| {
+                frame
+                    .chunks_exact(4)
+                    .map(|p| u32::from(p[0]) + u32::from(p[1]) + u32::from(p[2]))
+                    .max()
+                    .unwrap_or(0)
+            };
+            assert!(
+                bright(&floor(&lit)) > bright(&floor(&still)),
+                "{quality:?}: caustics should light the floor"
             );
         }
     }

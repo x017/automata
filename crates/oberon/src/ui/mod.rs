@@ -2310,6 +2310,8 @@ impl Ui {
                 y = self.float_row(canvas, x, y, w, e, "Foam", Field::WaterFoam);
                 y = self.float_row(canvas, x, y, w, e, "Density", Field::WaterDensity);
                 y = self.float_row(canvas, x, y, w, e, "Drag", Field::WaterDrag);
+                y = self.float_row(canvas, x, y, w, e, "Caustics", Field::WaterCaustics);
+                y = self.float_row(canvas, x, y, w, e, "Wind", Field::WaterWind);
                 y = self.flag_row(canvas, x, y, w, e, "Endless", Flag::WaterEndless);
                 y += 6.0;
             }

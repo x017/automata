@@ -380,7 +380,34 @@ foam and buoyancy stay within `size`; put the action there.
 
 Things that cross the surface leave rings and wakes in it, with foam on
 their crests, on every preset (see
-[Physics → Ripples and wakes](physics.md#ripples-and-wakes)).
+[Physics → Ripples and wakes](physics.md#ripples-and-wakes)). Hit it hard
+and it **splashes**: a burst of droplets as big as the impact. Set `wind`
+above 0.5 and **spray** blows off the wave crests near the camera, more
+the stronger it is (see [Physics → Splashes and spray](physics.md#splashes-and-spray)).
+
+### Under the surface
+
+Dive the camera under the water and the view changes, on every preset:
+
+- **Fog and colour absorption.** Everything fades into the water's
+  `shallow_color`, darkening toward `deep_color` with depth. Red goes
+  first and blue-green lasts, so the deep turns blue-green. `clarity` is
+  how far you can see.
+- **The surface from below** shimmers with the sky through it. Seen at a
+  low angle, it turns into a mirror (total internal reflection).
+- **A wobbling waterline** when the camera sits right at the surface:
+  the frame splits at the waves, with air above and water below.
+- **Muffled sound.** Everything you hear goes through a low-pass filter
+  (650 Hz) while the camera is under, and clears again when it comes up.
+  The engine and Oberon's Play mode do this themselves.
+
+**Caustics** are the moving net of light that waves focus onto whatever is
+under them: the sea floor, a reef, the posts of a pier. They're drawn on
+Medium graphics and up, on the nearest four waters, and they're there
+whether the camera is above the water or below it. `caustics` sets their
+strength from 0 (none) to 2 (default 1). They fade out with depth.
+
+![Diving off the pier in the Lagoon: blue-green fog, caustics on the reef and the pier posts, and the splash seen from below](../../assets/rendering/water_underwater.jpg)
 
 Water is also physics: dynamic bodies float in it and ride its waves (see
 [Physics → Water](physics.md#water)). The surface isn't a solid collider,

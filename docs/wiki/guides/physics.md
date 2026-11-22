@@ -154,6 +154,23 @@ Ripples are only drawn; they don't move bodies (those ride the waves).
 They fade over about ten seconds. Beyond the 64 m around the view there are
 none, and the field fades out toward its edges so it never ends in a seam.
 
+### Splashes and spray
+
+A body that hits the water faster than 1.5 m/s also throws up a **splash**:
+a burst of droplets (the `"splash"` particle preset) where it went in.
+Its size follows the entry speed. A crate dropped from a metre makes a
+few droplets; a dive off a pier sends up a white crown. Characters splash
+too, although they're moved by teleporting rather than by velocity.
+
+On a `Water` with `wind` above 0.5, **spray** blows off the wave crests
+within 25 m of the camera, carried downwind (`wave_direction`). It gets
+more frequent and denser as `wind` goes up to 1. Calm water never sprays.
+
+Both are ordinary particle entities that remove themselves once they're
+done. In Rust, `PhysicsTick::splashes` lists each step's splashes (where,
+how fast and how big), and `set_water_particles(false)` stops the
+particles but keeps the rings.
+
 It costs nothing until something disturbs the water and nothing again once
 it calms down. While it runs, about 0.25 ms per physics step in a release
 build. The engine and Oberon point it at the camera that draws the frame;

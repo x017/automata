@@ -15,7 +15,9 @@
 //! the camera arguments are present. `SHOOT=seconds` also holds the left
 //! mouse button (with the cursor captured) from that moment of Play on, for
 //! scenes whose scripts fire on a click (the FPS example); `AIM=dx,dy`
-//! moves the mouse that many pixels on the first frame.
+//! moves the mouse that many pixels on the first frame. `KEYS` holds keys
+//! down over moments of Play: `KEYS=tab@0-0.1,w@0.5-1.5,space@1.2-1.3`
+//! (key names as scripts see them; a bare `name@t` is one step).
 
 #![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 
@@ -129,6 +131,7 @@ fn render_play(
         let (x, y) = s.split_once(',')?;
         Some([x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?])
     });
+    let held = held_keys();
     for step in 0..steps {
         if let Some(b) = bridge.as_mut() {
             // One script frame per physics step: send, then wait for it.
@@ -145,7 +148,13 @@ fn render_play(
             }
             let states = play.script_states(|rel| doc.resolve(rel));
             let answered = b.answered;
-            if b.send_frame_with(TIMESTEP, play.elapsed, &[], &states, &input) {
+            let now = play.elapsed;
+            let keys: Vec<&str> = held
+                .iter()
+                .filter(|(_, from, to)| now >= *from && now <= *to)
+                .map(|(k, _, _)| k.as_str())
+                .collect();
+            if b.send_frame_with(TIMESTEP, play.elapsed, &keys, &states, &input) {
                 let deadline = Instant::now() + std::time::Duration::from_secs(10);
                 while b.answered == answered && Instant::now() < deadline {
                     for msg in b.poll() {
@@ -181,4 +190,24 @@ fn render_play(
     }
     let (rgba, fw, fh) = viewport.render_play(Some(gpu), &mut play, cam, w, h);
     (rgba.to_vec(), fw, fh)
+}
+
+/// `KEYS` from the environment: each key and the Play seconds it's held
+/// from and to.
+fn held_keys() -> Vec<(String, f32, f32)> {
+    let Ok(spec) = std::env::var("KEYS") else {
+        return Vec::new();
+    };
+    spec.split(',')
+        .filter_map(|item| {
+            let (key, when) = item.trim().split_once('@')?;
+            let (from, to) = if let Some((a, b)) = when.split_once('-') {
+                (a.trim().parse().ok()?, b.trim().parse().ok()?)
+            } else {
+                let t: f32 = when.trim().parse().ok()?;
+                (t, t + oberon::play::TIMESTEP * 0.5)
+            };
+            Some((key.trim().to_ascii_lowercase(), from, to))
+        })
+        .collect()
 }

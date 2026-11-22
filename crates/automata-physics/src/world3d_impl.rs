@@ -68,6 +68,19 @@ pub struct PhysicsWorld3D {
     ripples: crate::ripples::RippleField,
     /// Each body's dent in the ripples, as last dug.
     dents: HashMap<r3::dynamics::RigidBodyHandle, crate::ripples::Dent>,
+    /// Each water surface's wind: strength 0..1 and the direction it
+    /// blows (radians around +Y, as `Water::wave_direction`).
+    winds: Vec<(f32, f32)>,
+    /// Bodies that hit the water this step (see `water.rs`).
+    splashes: Vec<crate::world::WaterSplash>,
+    /// Crest spray owed so far (fractional bursts) and its random state.
+    spray_carry: f32,
+    spray_rng: u64,
+    /// Splash and spray particles on (the default).
+    water_particles: bool,
+    /// Each character's last move straight down (m/s): characters are
+    /// teleported, so their bodies carry no velocity for the water.
+    character_sinking: HashMap<r3::dynamics::RigidBodyHandle, f32>,
 }
 
 /// What a built model shape depends on: the loaded model (by identity, so
@@ -129,6 +142,12 @@ impl PhysicsWorld3D {
             water: Vec::new(),
             ripples: crate::ripples::RippleField::new(),
             dents: HashMap::new(),
+            winds: Vec::new(),
+            splashes: Vec::new(),
+            spray_carry: 0.0,
+            spray_rng: 0x9e37_79b9_7f4a_7c15,
+            water_particles: true,
+            character_sinking: HashMap::new(),
         }
     }
 
@@ -513,6 +532,8 @@ impl PhysicsWorld3D {
         if let Ok(mut transform) = scene.get::<&mut Transform>(entity) {
             transform.position += actual;
         }
+        self.character_sinking
+            .insert(body_handle, -actual.y / self.integration_dt().max(1e-6));
         if let Some(body) = self.bodies.get_mut(body_handle) {
             // Teleport immediately: `set_next_kinematic_translation` only
             // affects KinematicPositionBased bodies, but characters may be
@@ -560,6 +581,7 @@ impl PhysicsWorld3D {
         self.collect_water(scene);
         self.apply_water(dt);
         self.step_ripples(dt);
+        let splashes = self.water_effects(scene, dt);
         self.sim_time += f64::from(dt);
 
         self.pipeline.step(
@@ -578,7 +600,10 @@ impl PhysicsWorld3D {
             &events,
         );
 
-        let mut tick = PhysicsTick::default();
+        let mut tick = PhysicsTick {
+            splashes,
+            ..PhysicsTick::default()
+        };
         while let Ok(event) = collision_recv.try_recv() {
             let mapped = match event {
                 CollisionEvent::Started(a, b, _) => {

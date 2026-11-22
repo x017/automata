@@ -910,6 +910,62 @@ pub fn spawn_burst(
     world.spawn((transform, global, emitter))
 }
 
+/// The splash of something hitting water at `speed` m/s (downward) with a
+/// footprint `radius` metres across: the `"splash"` preset, scaled. Just
+/// past `min_speed` it's a few droplets; a body slamming in at 8 m/s
+/// throws a tall crown of them.
+#[must_use]
+pub fn splash_emitter(speed: f32, radius: f32, min_speed: f32) -> ParticleEmitter {
+    let base = ParticleEmitter::preset("splash").unwrap_or_default();
+    // 0 at the threshold, 1 at ~6.5 m/s over it (a dive from a pier).
+    let power = ((speed - min_speed) / 6.5).clamp(0.0, 1.6);
+    let radius = radius.clamp(0.05, 3.0);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // a small count
+    let burst = (12.0 + 90.0 * power * radius.sqrt()).clamp(8.0, 260.0) as u32;
+    ParticleEmitter {
+        burst,
+        max_particles: burst,
+        shape_size: [radius * 0.8, 0.05, radius * 0.8],
+        cone_angle: 22.0 + 10.0 * power,
+        speed: [1.2 + 2.6 * power, 2.4 + 5.0 * power],
+        lifetime: [0.5 + 0.3 * power, 0.9 + 0.6 * power],
+        size: [0.08 + 0.08 * power, 0.2 + 0.18 * power],
+        ..base
+    }
+}
+
+/// Spray blown off a wave crest by `wind` (0..1): fine white mist that
+/// drifts downwind (point the burst's up axis downwind and a little up).
+#[must_use]
+pub fn spray_emitter(wind: f32) -> ParticleEmitter {
+    let wind = wind.clamp(0.0, 1.0);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // a small count
+    let burst = (10.0 + 22.0 * wind) as u32;
+    ParticleEmitter {
+        emitting: true,
+        rate: 0.0,
+        burst,
+        one_shot: true,
+        max_particles: burst,
+        lifetime: [0.6, 1.3],
+        shape: EmitterShape::Box,
+        shape_size: [1.2, 0.1, 0.5],
+        cone_angle: 20.0,
+        speed: [2.0 + 3.0 * wind, 3.5 + 5.0 * wind],
+        gravity: 2.5,
+        drag: 1.2,
+        size: [0.18, 0.7],
+        size_spread: 0.5,
+        color: [0.94, 0.97, 1.0, 0.7],
+        color_end: [0.92, 0.96, 1.0, 0.0],
+        fade_in: 0.05,
+        fade_out: 0.6,
+        lit: true,
+        soft: 0.3,
+        ..ParticleEmitter::default()
+    }
+}
+
 /// Makes `count` extra particles from `entity`'s emitter next frame.
 /// Returns false when it has no emitter.
 pub fn burst(world: &mut SceneWorld, entity: hecs::Entity, count: u32) -> bool {

@@ -200,7 +200,7 @@ Guide: [Rendering & Lights](guides/rendering-and-lights.md#environment).
 at.Water(size=(20, 20), deep_color=(0.01, 0.07, 0.11),
          shallow_color=(0.1, 0.42, 0.44), clarity=2.5, wave_height=0.12,
          wave_length=5.0, wave_speed=1.0, wave_direction=30.0, foam=0.6,
-         density=2.0, drag=1.0, endless=False)
+         density=2.0, drag=1.0, endless=False, caustics=1.0, wind=0.0)
 at.Water.preset("pond" | "lake" | "ocean" | "sea" | "default")
 ```
 
@@ -212,7 +212,10 @@ toward `wave_direction` degrees around +Y). Every quality preset draws it;
 (`clarity` is how many metres you can see down) and shoreline `foam`.
 `endless=True` (on the ocean and sea presets) continues the surface,
 flat and calm, out to the horizon; waves, foam and physics stay within
-`size`. It's also a volume of water for physics. Dynamic bodies in it float by
+`size`. `caustics` (0 to 2) is the strength of the light the waves focus on
+what's under them (Medium and up). `wind` (0 to 1) blows spray off the
+crests from 0.5 up. With the camera under the surface the view fogs
+blue-green and the sound is muffled. It's also a volume of water for physics. Dynamic bodies in it float by
 buoyancy (`density` against their colliders' density, which defaults to
 1.0, so a default box floats half under) and are slowed by `drag`.
 All arguments are readable as properties, and it's saved in scene files.
@@ -370,10 +373,14 @@ ctx.audio.set_volume(sid, 0.8, fade=0.1)
 ctx.audio.set_playback_rate(sid, 0.9)
 ctx.audio.set_panning(sid, 0.5)                  # -1.0 left .. 1.0 right
 ctx.audio.set_master_volume(0.7, fade=0.5)
+ctx.audio.set_low_pass(800.0, fade=0.2)          # muffle everything (Hz)
+ctx.audio.set_low_pass(None, fade=0.2)           # ... and clear it again
 
 ctx.audio.is_playing(sid) -> bool
 ctx.audio.position(sid) -> float | None          # seconds; None if unknown
 ctx.audio.sound_count() -> int
+ctx.audio.low_pass -> float | None               # the cutoff, or None if clear
+ctx.audio.underwater -> bool                     # the camera's under water
 ```
 
 Supported formats: WAV, OGG/Vorbis, MP3, FLAC, PCM. A missing or undecodable

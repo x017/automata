@@ -177,7 +177,7 @@ Guide: <a href="guides/rendering-and-lights.html#environment">Rendering &amp; Li
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Water(size=(<span class="tok-n">20</span>, <span class="tok-n">20</span>), deep_color=(<span class="tok-n">0.01</span>, <span class="tok-n">0.07</span>, <span class="tok-n">0.11</span>),
          shallow_color=(<span class="tok-n">0.1</span>, <span class="tok-n">0.42</span>, <span class="tok-n">0.44</span>), clarity=<span class="tok-n">2.5</span>, wave_height=<span class="tok-n">0.12</span>,
          wave_length=<span class="tok-n">5.0</span>, wave_speed=<span class="tok-n">1.0</span>, wave_direction=<span class="tok-n">30.0</span>, foam=<span class="tok-n">0.6</span>,
-         density=<span class="tok-n">2.0</span>, drag=<span class="tok-n">1.0</span>, endless=<span class="tok-b">False</span>)
+         density=<span class="tok-n">2.0</span>, drag=<span class="tok-n">1.0</span>, endless=<span class="tok-b">False</span>, caustics=<span class="tok-n">1.0</span>, wind=<span class="tok-n">0.0</span>)
 at.Water.preset(<span class="tok-s">&quot;pond&quot;</span> | <span class="tok-s">&quot;lake&quot;</span> | <span class="tok-s">&quot;ocean&quot;</span> | <span class="tok-s">&quot;sea&quot;</span> | <span class="tok-s">&quot;default&quot;</span>)</code></pre></div>
 <p>A rectangle of animated water on the entity's local XZ plane, <code>size</code>
 metres wide, centred on its <code>Transform</code>. Waves are Gerstner waves
@@ -187,7 +187,10 @@ toward <code>wave_direction</code> degrees around +Y). Every quality preset draw
 (<code>clarity</code> is how many metres you can see down) and shoreline <code>foam</code>.
 <code>endless=True</code> (on the ocean and sea presets) continues the surface,
 flat and calm, out to the horizon; waves, foam and physics stay within
-<code>size</code>. It's also a volume of water for physics. Dynamic bodies in it float by
+<code>size</code>. <code>caustics</code> (0 to 2) is the strength of the light the waves focus on
+what's under them (Medium and up). <code>wind</code> (0 to 1) blows spray off the
+crests from 0.5 up. With the camera under the surface the view fogs
+blue-green and the sound is muffled. It's also a volume of water for physics. Dynamic bodies in it float by
 buoyancy (<code>density</code> against their colliders' density, which defaults to
 1.0, so a default box floats half under) and are slowed by <code>drag</code>.
 All arguments are readable as properties, and it's saved in scene files.
@@ -302,10 +305,14 @@ ctx.audio.set_volume(sid, <span class="tok-n">0.8</span>, fade=<span class="tok-
 ctx.audio.set_playback_rate(sid, <span class="tok-n">0.9</span>)
 ctx.audio.set_panning(sid, <span class="tok-n">0.5</span>)                  <span class="tok-c"># -1.0 left .. 1.0 right</span>
 ctx.audio.set_master_volume(<span class="tok-n">0.7</span>, fade=<span class="tok-n">0.5</span>)
+ctx.audio.set_low_pass(<span class="tok-n">800.0</span>, fade=<span class="tok-n">0.2</span>)          <span class="tok-c"># muffle everything (Hz)</span>
+ctx.audio.set_low_pass(<span class="tok-b">None</span>, fade=<span class="tok-n">0.2</span>)           <span class="tok-c"># ... and clear it again</span>
 
 ctx.audio.is_playing(sid) -&gt; <span class="tok-b">bool</span>
 ctx.audio.position(sid) -&gt; <span class="tok-b">float</span> | <span class="tok-b">None</span>          <span class="tok-c"># seconds; None if unknown</span>
-ctx.audio.sound_count() -&gt; <span class="tok-b">int</span></code></pre></div>
+ctx.audio.sound_count() -&gt; <span class="tok-b">int</span>
+ctx.audio.low_pass -&gt; <span class="tok-b">float</span> | <span class="tok-b">None</span>               <span class="tok-c"># the cutoff, or None if clear</span>
+ctx.audio.underwater -&gt; <span class="tok-b">bool</span>                     <span class="tok-c"># the camera&#x27;s under water</span></code></pre></div>
 <p>Supported formats: WAV, OGG/Vorbis, MP3, FLAC, PCM. A missing or undecodable
 file raises <code>ValueError</code>; an unknown sound id raises <code>KeyError</code>.</p>
 <p><strong>Backend:</strong> the default build runs a <em>silent</em> backend — no audio device is

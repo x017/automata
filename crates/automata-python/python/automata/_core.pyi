@@ -396,6 +396,10 @@ class Water:
     """How much the water slows what moves and spins in it (1.0)."""
     endless: bool
     """The surface carries on to the horizon past ``size`` (oceans)."""
+    caustics: float
+    """Sunlight dancing on what's under the water, 0..2 (1.0)."""
+    wind: float
+    """Wind over the water, 0..1 (0.0); from 0.5 up spray blows off crests."""
     def __init__(
         self,
         size: Optional[tuple[float, float]] = None,
@@ -410,6 +414,8 @@ class Water:
         density: Optional[float] = None,
         drag: Optional[float] = None,
         endless: Optional[bool] = None,
+        caustics: Optional[float] = None,
+        wind: Optional[float] = None,
     ) -> None: ...
     @staticmethod
     def preset(name: str) -> Water:
@@ -781,6 +787,17 @@ class Audio:
     def set_panning(self, id: int, panning: float, fade: float = 0.0) -> None: ...
     def set_master_volume(self, volume: float, fade: float = 0.0) -> None: ...
     def sound_count(self) -> int: ...
+    def set_low_pass(self, cutoff_hz: Optional[float] = None, fade: float = 0.0) -> None:
+        """Muffles every sound (low-pass at ``cutoff_hz``) or lifts it (None)."""
+        ...
+    @property
+    def low_pass(self) -> Optional[float]:
+        """The low-pass cutoff (Hz) while sound is muffled, else None."""
+        ...
+    @property
+    def underwater(self) -> bool:
+        """True while the camera is under water (sound muffled)."""
+        ...
 
 class Screen:
     """Window size, HUD drawing and cursor lock (ctx.screen)."""

@@ -5,12 +5,17 @@ refraction and shoreline foam on Beautiful graphics, plus water physics.
 The crates and buoys are ordinary rigid bodies. The water's buoyancy holds
 them up and its waves rock them. When Play starts, a crate drops into the
 sea and rings spread out from the splash, while a motor boat cruises round
-the island leaving a wake.
+the island leaving a wake. A swimmer waits at the end of the pier: press
+Tab, run, jump in with a splash, and dive into a blue-green world with
+sunlight dancing on the reef.
 
 | Input | Action |
 | --- | --- |
 | Drag (either mouse button), A / D, Q / E, arrow keys | Orbit the island |
 | W / S | Zoom |
+| Tab | Take control of the swimmer (Tab again: back to the island view) |
+| W / A / S / D, Shift, Space | Swimmer: walk (relative to the camera), run, jump. In the water Space swims up |
+| C or Ctrl | Swimmer: dive |
 | G | Cycle the graphics quality (Low → Medium → High → Beautiful) |
 | Esc | Quit |
 
@@ -64,6 +69,20 @@ gently as they bob, and the boat pushes ripples aside into a V-shaped wake
 with a foam trail. They show on every graphics preset. See
 [Physics → Ripples and wakes](../../../docs/wiki/guides/physics.md#ripples-and-wakes).
 
+## Swimming and diving
+
+`scripts/swimmer.py` drives a character (a kinematic body with a
+`CharacterController`). On land it walks, runs and jumps. Once the water
+is up to its chest it swims instead: it floats with its head out, C dives
+and Space swims back up. While it's in control, `scripts/orbit_camera.py`
+follows close behind it, and when it dives the camera follows it under.
+
+Underwater, the world turns blue-green with distance, the sun throws
+moving caustics on the reef, sand and pier posts (Medium graphics and up),
+and the sound goes muffled until you surface. Jumping in hard enough
+throws up a splash sized by how fast you hit the water. See
+[Rendering → Under the surface](../../../docs/wiki/guides/rendering-and-lights.md#under-the-surface).
+
 ## Export it
 
 ```sh
@@ -75,8 +94,9 @@ automata-export build examples/oberon/lagoon --target all
 | Path | What |
 | --- | --- |
 | `level.ron` | The scene: the sea and pool, the island in sand slabs and ramps, rocks, trees, the pier and the floating things. |
-| `scripts/orbit_camera.py` | Orbits the island under the mouse and keys, and drifts round on its own when idle. |
+| `scripts/orbit_camera.py` | Orbits the island under the mouse and keys, drifts round on its own when idle, and follows the swimmer while it's in control. |
 | `scripts/motor_boat.py` | Steers the boat round the island on the waves. |
+| `scripts/swimmer.py` | The swimmer: walks, jumps, swims and dives (Tab to take control). |
 | `models/` | The crate and tree models. |
 | `main.py` | Runs the scene with the quality switch (G) and a HUD. |
 | `build_level.py` | Rebuilds `level.ron` from Python. Run it after changing the layout in code. |

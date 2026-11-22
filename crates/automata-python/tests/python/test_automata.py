@@ -1144,6 +1144,36 @@ def test_water_component_and_presets():
         assert game.run(lambda ctx: None, max_frames=2) == 2
 
 
+def test_water_caustics_and_wind():
+    water = at.Water()
+    assert water.caustics == pytest.approx(1.0)
+    assert water.wind == pytest.approx(0.0)
+    stormy = at.Water(caustics=0.5, wind=0.8)
+    assert stormy.caustics == pytest.approx(0.5)
+    assert stormy.wind == pytest.approx(0.8)
+    text = at.Scene().add(at.Entity("sea").add(at.Transform()).add(stormy)).to_ron()
+    assert "caustics: 0.5" in text and "wind: 0.8" in text
+    assert at.Scene.from_ron(text).to_ron() == text
+
+
+def test_audio_low_pass_muffles_and_lifts():
+    game = make_game()
+    seen = {}
+
+    def update(ctx):
+        seen["start"] = (ctx.audio.low_pass, ctx.audio.underwater)
+        ctx.audio.set_low_pass(800.0, fade=0.1)
+        seen["muffled"] = ctx.audio.low_pass
+        ctx.audio.set_low_pass(None)
+        seen["lifted"] = ctx.audio.low_pass
+        ctx.quit()
+
+    game.run(update, max_frames=2)
+    assert seen["start"] == (None, False)
+    assert seen["muffled"] == pytest.approx(800.0)
+    assert seen["lifted"] is None
+
+
 def test_water_floats_bodies_and_reports_its_height():
     water = at.Water(size=(20.0, 20.0), wave_height=0.0, density=2.0, drag=1.5)
     assert water.density == pytest.approx(2.0)

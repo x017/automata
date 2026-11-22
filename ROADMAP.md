@@ -194,15 +194,24 @@ and the FPS example played in Oberon throwing sparks.
 - **Done when:** the FPS blaster throws sparks on hit, and a campfire
   example burns and smokes. ✅
 
-### A7. Water interaction II: splashes, underwater, caustics ⬜ M
-- Splash bursts (A6) sized by the entry speed, plus droplets and spray on
-  wave crests in strong wind.
-- Underwater view: fog and colour absorption when the camera is below the
-  surface, a wobbling waterline, and muffled audio (a low-pass filter in
-  `automata-audio`).
-- Animated caustics projected onto geometry under the water.
+### A7. Water interaction II: splashes, underwater, caustics ✅ M
+Done: bodies and characters that hit the water faster than 1.5 m/s throw a
+splash burst sized by their entry speed, and `Water.wind` above 0.5 blows
+spray off the crests near the camera. With the camera under the surface,
+every preset fogs and absorbs colour toward blue-green, shows the surface
+from below (with total internal reflection) and a wobbling waterline, and
+the main audio track goes through a 650 Hz low-pass (engine and Oberon
+Play; `ctx.audio.set_low_pass` for scripts). Medium and up draw animated
+caustics (`Water.caustics`) on whatever is under the nearest four waters.
+The Lagoon has a swimmer on the pier (Tab, run, jump, C to dive) and the
+orbit camera follows it under.
+- Spec was: splash bursts (A6) sized by the entry speed, plus droplets and
+  spray on wave crests in strong wind; an underwater view with fog and
+  colour absorption, a wobbling waterline and muffled audio (a low-pass
+  filter in `automata-audio`); animated caustics projected onto geometry
+  under the water.
 - **Done when:** jumping into the Lagoon splashes, and diving shows a
-  blue-green world with moving caustics.
+  blue-green world with moving caustics. ✅
 
 ### A8. A post chain for every preset, and colour grading ⬜ M
 Today only Beautiful has HDR, bloom and FXAA (`post.rs`). The styles
@@ -465,7 +474,7 @@ per effort. Reorder any time by telling me.
 | 7 | A3 Point lights and spotlights (+ spot shadows) | S | ✅ |
 | 8 | A5 Water ripples and wakes | M | ✅ |
 | 9 | A6 Particles | L | ✅ |
-| 10 | A7 Splashes, underwater, caustics | M | ⬜ |
+| 10 | A7 Splashes, underwater, caustics | M | ✅ |
 | 11 | A8 Post chain + colour grading | M | ⬜ |
 | 12 | A9 Height fog, god rays, DoF, dust | M | ⬜ |
 | 13 | A10 Style presets | L | ⬜ |

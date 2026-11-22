@@ -190,7 +190,7 @@ fn shade_forward(s: Surface, shadow: f32, point_shadows: bool) -> vec3<f32> {
     if gloss > 0.0 {
         let fr = env_brdf(f0, s.roughness, max(dot(s.n, s.v), 1e-4));
         let env = sky_radiance(reflect(-s.v, s.n));
-        lit += env * fr * gloss * light.color_ambient.a * mix(0.6, 1.0, shadow);
+        lit += env * fr * gloss * light.color_ambient.a * mix(0.6, 1.0, min(shadow, 1.0));
     }
     return lit + s.emissive;
 }
@@ -204,8 +204,10 @@ fn forward(in: VertexOutput, sun_shadows: bool, point_shadows: bool) -> vec4<f32
     if sun_shadows {
         shadow = shadow_forward(in.world_position, s.n, s.l);
     }
-    let lit = shade_forward(s, shadow, point_shadows);
-    return vec4<f32>(finish_forward(apply_fog(lit, in.world_position)), s.base.a);
+    // Under water the light is tinted and the sun comes through in caustics.
+    let wl = water_light(in.world_position);
+    let lit = shade_forward(s, shadow * wl.a, point_shadows) * wl.rgb;
+    return vec4<f32>(finish_forward(apply_fog(lit, in.world_position, in.clip_position.xy)), s.base.a);
 }
 
 // Sun and point light shadows (High and up, when both cast).
@@ -273,12 +275,13 @@ fn screen_occlusion(frag: vec2<f32>, world: vec3<f32>) -> vec2<f32> {
 fn fs_beautiful(in: VertexOutput) -> @location(0) vec4<f32> {
     let s = surface(in);
     let occ = screen_occlusion(in.clip_position.xy, in.world_position);
-    let shadow = shadow_soft(in.world_position, s.n, s.l, in.clip_position.xy) * occ.y;
+    let wl = water_light(in.world_position);
+    let shadow = shadow_soft(in.world_position, s.n, s.l, in.clip_position.xy) * occ.y * wl.a;
     let albedo = s.base.rgb * (1.0 - s.metallic);
     let f0 = mix(vec3<f32>(0.04), s.base.rgb, s.metallic);
     let ao = pow(max(occ.x, 1e-3), light.point_shadow.w);
-    let lit = shade_pbr(albedo, s.n, s.v, s.l, shadow, s.roughness, f0, ao)
+    let lit = (shade_pbr(albedo, s.n, s.v, s.l, shadow, s.roughness, f0, ao)
         + points_pbr(s.p, albedo, s.n, s.v, s.roughness, f0)
-        + s.emissive;
-    return vec4<f32>(apply_fog_scatter(lit, in.world_position), s.base.a);
+        + s.emissive) * wl.rgb;
+    return vec4<f32>(apply_fog_scatter(lit, in.world_position, in.clip_position.xy), s.base.a);
 }

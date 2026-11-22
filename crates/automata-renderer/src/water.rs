@@ -54,6 +54,12 @@ pub struct Water {
     /// `size`. Waves and buoyancy still cover only `size`; past it the
     /// water carries on as a sheet that fades into the fog.
     pub endless: bool,
+    /// How strongly sunlight through the waves dances on what's under the
+    /// water (caustics), 0..=2 (0 = none). Medium graphics and up.
+    pub caustics: f32,
+    /// Wind over the water, 0..=1: from 0.5 up it blows spray off the
+    /// wave crests (more and further the stronger it is).
+    pub wind: f32,
 }
 
 impl Default for Water {
@@ -71,6 +77,8 @@ impl Default for Water {
             density: 2.0,
             drag: 1.0,
             endless: false,
+            caustics: 1.0,
+            wind: 0.0,
         }
     }
 }
@@ -214,6 +222,128 @@ impl WaterUniform {
             [corner.x, corner.y, 1.0 / width.max(1e-3), 1.0]
         });
         self
+    }
+}
+
+/// Waters whose caustics the lit shaders draw at once (the nearest).
+pub(crate) const MAX_CAUSTIC_WATERS: usize = 4;
+
+/// What the lit shaders know about the water (`underwater`, `water_eye`,
+/// `water_rects` and `water_levels` in common.wgsl's light uniform): the
+/// water around the camera, if it's in or at the surface of one, and the
+/// surfaces that throw caustics on what's under them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct WaterView {
+    /// rgb: the colour of the water around the camera, a: how quickly it
+    /// swallows light (per metre; 0 = the camera isn't in any water).
+    pub underwater: [f32; 4],
+    /// x: the surface height above the camera, y: the near plane's half
+    /// height (m, the waterline's wobble), z: waters with caustics.
+    pub eye: [f32; 4],
+    /// Per caustic water: world XZ min (xy) and max (zw).
+    pub rects: [[f32; 4]; MAX_CAUSTIC_WATERS],
+    /// Per caustic water: rest height, caustic strength, clarity (m).
+    pub levels: [[f32; 4]; MAX_CAUSTIC_WATERS],
+}
+
+impl Default for WaterView {
+    fn default() -> Self {
+        Self {
+            underwater: [0.0; 4],
+            eye: [0.0; 4],
+            rects: [[0.0; 4]; MAX_CAUSTIC_WATERS],
+            levels: [[0.0; 4]; MAX_CAUSTIC_WATERS],
+        }
+    }
+}
+
+/// How quickly water of `clarity` metres dims the view through it, per
+/// metre (green light; red goes ~2x faster, blue a little slower).
+#[must_use]
+pub(crate) fn underwater_extinction(clarity: f32) -> f32 {
+    0.35 / clarity.max(0.05)
+}
+
+impl WaterView {
+    /// The view of `waters` at `time` from `camera`. `caustics` off (Low
+    /// graphics) leaves the caustic list empty.
+    pub fn new(waters: &[WaterDraw], camera: &crate::Camera3D, time: f32, caustics: bool) -> Self {
+        let mut view = Self::default();
+        let eye = camera.position;
+        let near_half = camera.near.max(1e-4) * (camera.fov_y_degrees.to_radians() * 0.5).tan();
+        // The water the camera is in: of those over (or under) it, the one
+        // whose surface is the nearest above the lens (or just below it,
+        // where the waterline crosses the view).
+        let mut best: Option<(f32, &WaterDraw)> = None;
+        for w in waters {
+            let surface = WaterSurface::new(&w.water, w.model, time);
+            let height = if surface.contains(eye.x, eye.z) {
+                surface.height_unchecked(eye.x, eye.z)
+            } else if w.water.endless {
+                surface.level()
+            } else {
+                continue;
+            };
+            // Above the surface by more than the lens: dry.
+            if eye.y > height + near_half * 2.0 {
+                continue;
+            }
+            if best.is_none_or(|(h, _)| height < h) {
+                best = Some((height, w));
+            }
+        }
+        if let Some((height, w)) = best {
+            let [dr, dg, db] = w.water.deep_color;
+            let [sr, sg, sb] = w.water.shallow_color;
+            // Between the deep and shallow colours: blue-green, lit from
+            // above in the shader.
+            let mix = |d: f32, s: f32| d + (s - d) * 0.45;
+            view.underwater = [
+                mix(dr, sr),
+                mix(dg, sg),
+                mix(db, sb),
+                underwater_extinction(w.water.clarity),
+            ];
+            view.eye[0] = height;
+        }
+        view.eye[1] = near_half;
+        if caustics {
+            // The nearest waters with caustics, nearest first.
+            let mut lit: Vec<(f32, [f32; 4], [f32; 4])> = waters
+                .iter()
+                .filter(|w| w.water.caustics > 0.0)
+                .map(|w| {
+                    let surface = WaterSurface::new(&w.water, w.model, time);
+                    let (min, max) = surface.bounds();
+                    let closest = glam::Vec2::new(eye.x, eye.z).clamp(min, max);
+                    let distance = closest.distance(glam::Vec2::new(eye.x, eye.z));
+                    (
+                        distance,
+                        [min.x, min.y, max.x, max.y],
+                        [
+                            surface.level(),
+                            w.water.caustics.clamp(0.0, 2.0),
+                            w.water.clarity.max(0.05),
+                            0.0,
+                        ],
+                    )
+                })
+                .collect();
+            lit.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for (i, (_, rect, level)) in lit.into_iter().take(MAX_CAUSTIC_WATERS).enumerate() {
+                view.rects[i] = rect;
+                view.levels[i] = level;
+                view.eye[2] = (i + 1) as f32;
+            }
+        }
+        view
+    }
+
+    /// Whether the camera is in some water (at least partly: at the
+    /// waterline, part of the view is under).
+    #[must_use]
+    pub fn camera_in_water(&self) -> bool {
+        self.underwater[3] > 0.0
     }
 }
 

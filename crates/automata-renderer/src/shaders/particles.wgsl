@@ -100,7 +100,10 @@ fn view_depth(d: f32) -> f32 {
 }
 
 // How much fog covers `world` (0 none, 1 all).
-fn fog_amount(world: vec3<f32>) -> f32 {
+fn fog_amount(world: vec3<f32>, frag: vec2<f32>) -> f32 {
+    if eye_under_water(frag) {
+        return 1.0 - water_transmission(water_path(world)).g;
+    }
     let density = light.fog.a;
     if density <= 0.0 {
         return 0.0;
@@ -131,7 +134,7 @@ fn particle_color(in: VertexOutput) -> vec4<f32> {
 @fragment
 fn fs_ldr_alpha(in: VertexOutput) -> @location(0) vec4<f32> {
     let c = particle_color(in);
-    return vec4<f32>(finish_forward(apply_fog(c.rgb, in.world)), c.a);
+    return vec4<f32>(finish_forward(apply_fog(c.rgb, in.world, in.clip.xy)), c.a);
 }
 
 // Forward path, added on top: fire, sparks, magic. Fog hides them rather
@@ -139,19 +142,19 @@ fn fs_ldr_alpha(in: VertexOutput) -> @location(0) vec4<f32> {
 @fragment
 fn fs_ldr_add(in: VertexOutput) -> @location(0) vec4<f32> {
     let c = particle_color(in);
-    return vec4<f32>(finish_forward(c.rgb) * c.a * (1.0 - fog_amount(in.world)), c.a);
+    return vec4<f32>(finish_forward(c.rgb) * c.a * (1.0 - fog_amount(in.world, in.clip.xy)), c.a);
 }
 
 // Beautiful (HDR, tone mapped after bloom), alpha blended.
 @fragment
 fn fs_hdr_alpha(in: VertexOutput) -> @location(0) vec4<f32> {
     let c = particle_color(in);
-    return vec4<f32>(apply_fog_scatter(c.rgb, in.world), c.a);
+    return vec4<f32>(apply_fog_scatter(c.rgb, in.world, in.clip.xy), c.a);
 }
 
 // Beautiful, added: bright particles bloom.
 @fragment
 fn fs_hdr_add(in: VertexOutput) -> @location(0) vec4<f32> {
     let c = particle_color(in);
-    return vec4<f32>(c.rgb * c.a * (1.0 - fog_amount(in.world)), min(c.a, 1.0));
+    return vec4<f32>(c.rgb * c.a * (1.0 - fog_amount(in.world, in.clip.xy)), min(c.a, 1.0));
 }

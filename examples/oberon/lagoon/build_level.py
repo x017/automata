@@ -133,7 +133,22 @@ BOAT_LOOP = {
 BOAT_SIZE = (1.6, 0.6, 3.8)
 BOAT_START_ANGLE = -0.3  # radians round the loop (0 = due +Z of its centre)
 
-CAMERA = {"target": (0.0, 0.5, 4.0), "distance": 32.0, "yaw": 0.35, "pitch": 0.33, "spin": 0.05}
+CAMERA = {
+    "target": (0.0, 0.5, 4.0),
+    "distance": 32.0,
+    "yaw": 0.35,
+    "pitch": 0.33,
+    "spin": 0.05,
+    # After Tab, the camera follows the swimmer.
+    "follow": "Swimmer",
+    "follow_distance": 6.0,
+}
+
+# The swimmer waits at the end of the pier (scripts/swimmer.py): Tab takes
+# control, and it's a short run and a jump into the sea.
+SWIMMER_SIZE = (0.5, 1.7, 0.5)
+SWIMMER_AT = (PIER_X, 2.13, 20.5)
+SWIMMER = (0.95, 0.75, 0.1, 1.0)
 
 
 def sun_direction(azimuth, elevation):
@@ -238,6 +253,19 @@ def build():
             .add(at.RigidBody.dynamic())
             .add(collider.density(density))
         )
+
+    # The swimmer: a character its script walks, jumps and swims.
+    swimmer = (
+        at.Entity("Swimmer")
+        .add(at.Transform(position=SWIMMER_AT, scale=SWIMMER_SIZE))
+        .add(at.MeshRenderer.cube(size=1.0, color=SWIMMER))
+        .add(at.RigidBody.kinematic_position())
+        .add(at.Collider3D.cuboid(*SWIMMER_SIZE))
+        .add(at.CharacterController(snap_to_ground=0.2))
+        .add(at.CharacterVelocity())
+    )
+    swimmer.script = "scripts/swimmer.py"
+    scene.add(swimmer)
 
     # The boat: a kinematic body the script steers (the water doesn't push
     # it, but it pushes the water, and anything floating in its way).

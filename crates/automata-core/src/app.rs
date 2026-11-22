@@ -178,6 +178,16 @@ impl WorldState {
         self.audio.borrow_mut().pump_frame(delta_seconds);
     }
 
+    /// Hears the world from `camera` (the 3D camera's position): muffled
+    /// while it's under water. Called by the frame loops each frame.
+    pub(crate) fn listen_from(&mut self, camera: glam::Vec3) {
+        let under = self
+            .physics3d
+            .water_height(camera.x, camera.z)
+            .is_some_and(|h| camera.y < h);
+        self.audio.borrow_mut().set_underwater(under);
+    }
+
     /// The physics worlds and scene, split-borrowed for frame views.
     #[doc(hidden)]
     pub fn physics_parts(
@@ -569,6 +579,7 @@ impl Application {
                 self.world
                     .physics3d
                     .set_ripple_view(camera.position, camera.target);
+                self.world.listen_from(camera.position);
             }
             if let Some(ripples) = self.world.physics3d.ripples() {
                 draw.set_ripples(ripples);
@@ -694,5 +705,50 @@ mod tests {
             ctx.request_quit();
         })
         .unwrap();
+    }
+
+    #[test]
+    fn sound_is_muffled_while_the_camera_is_under_water() {
+        let mut app = Application::new(EngineConfig {
+            fixed_delta: Some(1.0 / 60.0),
+            ..test_config()
+        });
+        let mut frames = 0;
+        let mut camera = None;
+        let mut heard = Vec::new();
+        app.run(|ctx| {
+            frames += 1;
+            if frames == 1 {
+                ctx.scene().spawn((
+                    automata_scene::Transform::default(),
+                    automata_renderer::Water {
+                        wave_height: 0.0,
+                        ..automata_renderer::Water::default()
+                    },
+                ));
+                let eye = glam::Vec3::new(0.0, -2.0, 4.0);
+                camera = Some(ctx.scene().spawn((automata_renderer::Camera3D::new(
+                    eye,
+                    glam::Vec3::new(0.0, -2.0, 0.0),
+                ),)));
+            }
+            if frames == 5 {
+                let cam = camera.unwrap();
+                ctx.scene()
+                    .world_mut()
+                    .get::<&mut automata_renderer::Camera3D>(cam)
+                    .unwrap()
+                    .position
+                    .y = 3.0;
+            }
+            heard.push(ctx.audio().borrow().is_underwater());
+            if frames == 8 {
+                ctx.request_quit();
+            }
+        })
+        .unwrap();
+        // Frames see the previous frame's camera.
+        assert!(heard[3] && heard[4], "{heard:?}");
+        assert!(!heard[7], "{heard:?}");
     }
 }

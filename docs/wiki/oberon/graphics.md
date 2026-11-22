@@ -33,7 +33,10 @@ scene tuned here looks the same in Play and under `at.run_scene`.
 Water is a component. Use **Create → Water** (it starts as a calm pond)
 or select an entity and use **Add Component → Water** in the Inspector.
 It has fields for size, colors, clarity, waves and foam. Tick **Endless**
-on a sea to carry it, calm, past its edges to the horizon.
+on a sea to carry it, calm, past its edges to the horizon. **Caustics**
+sets how strongly light dances on what's under it. **Wind** blows spray
+off the crests from 0.5 up. In Play, a camera under the surface sees a
+blue-green world and hears it muffled.
 See [Rendering & Lights](../guides/rendering-and-lights.md#water).
 
 ## Point and spot lights

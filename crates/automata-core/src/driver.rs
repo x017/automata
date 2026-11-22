@@ -165,6 +165,10 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
         if let Some(ripples) = physics.ripples() {
             self.draw.set_ripples(ripples);
         }
+        // Sound is muffled while the camera is under water.
+        if let Some(camera) = self.draw.camera_3d() {
+            self.world.listen_from(camera.position);
+        }
 
         if *self.quit_requested {
             event_loop.exit();

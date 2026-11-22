@@ -60,7 +60,7 @@ pub use components::{
 };
 pub use events::{ContactForce, PhysicsEvent};
 pub use model_shape::{auto_model_shape, box_fill, collider_problem};
-pub use world::{CharacterMove, PhysicsTick, RayFilter, RayHit};
+pub use world::{CharacterMove, PhysicsTick, RayFilter, RayHit, WaterSplash};
 pub use world2d_impl::PhysicsWorld2D;
 pub use world3d_impl::{ColliderSnapshot, PhysicsWorld3D, WorldShape};
 
@@ -71,7 +71,7 @@ pub mod prelude {
         Collider3D, RigidBody, Shape2D, Shape3D,
     };
     pub use crate::events::{ContactForce, PhysicsEvent};
-    pub use crate::world::{CharacterMove, PhysicsTick, RayFilter, RayHit};
+    pub use crate::world::{CharacterMove, PhysicsTick, RayFilter, RayHit, WaterSplash};
     pub use crate::world2d_impl::PhysicsWorld2D;
     pub use crate::world3d_impl::{ColliderSnapshot, PhysicsWorld3D, WorldShape};
 }
