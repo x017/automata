@@ -118,6 +118,32 @@ pub struct Environment {
     pub focus_distance: f32,
     /// How deep the sharp zone around the focus distance is, in metres.
     pub focus_range: f32,
+    /// Toon shading: sunlight falls into this many flat bands (`0` = smooth
+    /// shading, `1` = lit or shaded, up to `4`).
+    pub toon_bands: u32,
+    /// How soft the edges between toon bands are (`0` = hard, `1` = soft).
+    pub toon_softness: f32,
+    /// Shaded parts are multiplied by this colour (linear RGB, white =
+    /// none); a cool blue gives painted, tinted shadows.
+    pub shadow_tint: [f32; 3],
+    /// A bright rim along the edges of objects, lit by the sky and the sun
+    /// (`0` = none, `1` = strong, up to `2`).
+    pub rim_light: f32,
+    /// Draws the sky dome in a painted style: soft bands of colour,
+    /// brush-stroke streaks, flat two-tone clouds and a flat sun.
+    pub painted_sky: bool,
+    /// Outlines around objects and along sharp creases, this many pixels
+    /// thick (`0` = none, up to `4`). Medium graphics and up.
+    pub outline: f32,
+    /// The outlines' colour (linear RGB).
+    pub outline_color: [f32; 3],
+    /// Pixel-art look: the image is drawn in blocks this many pixels wide
+    /// on a 720-pixel-tall screen, scaled with the window (`0` or `1` =
+    /// off, up to `16`). Medium graphics and up.
+    pub pixelate: f32,
+    /// Limits the colours to this many levels per channel, dithered (`0` =
+    /// off, `2`..`32`). Medium graphics and up.
+    pub palette: u32,
     /// Colour grading and screen effects, applied after tone mapping on
     /// Medium graphics and up.
     pub post: PostEffects,
@@ -310,6 +336,15 @@ impl Default for Environment {
             depth_of_field: 0.0,
             focus_distance: 0.0,
             focus_range: 1.0,
+            toon_bands: 0,
+            toon_softness: 0.15,
+            shadow_tint: [1.0; 3],
+            rim_light: 0.0,
+            painted_sky: false,
+            outline: 0.0,
+            outline_color: [0.05, 0.04, 0.06],
+            pixelate: 0.0,
+            palette: 0,
             post: PostEffects::default(),
         }
     }

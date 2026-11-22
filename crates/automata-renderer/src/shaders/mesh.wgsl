@@ -165,10 +165,16 @@ fn shade_forward(s: Surface, shadow: f32, point_shadows: bool) -> vec3<f32> {
     // Energy-normalized so a sharp highlight is a bright one; 0.25 for the
     // default dielectric.
     let spec_color = f0 * 6.25 * (shininess + 8.0) / 40.0;
-    let specular = pow(max(dot(s.n, h), 1e-5), shininess) * diffuse * spec_color;
+    let sun_in = toon_light(diffuse * shadow);
+    var highlight = pow(max(dot(s.n, h), 1e-5), shininess);
+    if toon_on() {
+        highlight = toon_highlight(highlight);
+    }
+    let specular = highlight * spec_color;
     let albedo = s.base.rgb * (1.0 - s.metallic);
-    var lit = albedo * hemi(s.n) * light.color_ambient.a
-        + (albedo * diffuse + specular) * light.color_ambient.rgb * shadow;
+    var lit = albedo * hemi(s.n) * light.color_ambient.a * shade_tint(sun_in)
+        + (albedo + specular) * light.color_ambient.rgb * sun_in
+        + rim_light(s.n, s.v, s.l, shadow, albedo);
     // Point lights (and glowing meshes): the same diffuse + highlight.
     for (var i = 0u; i < point_count(); i = i + 1u) {
         let p = point_light(i, s.p);
@@ -176,7 +182,7 @@ fn shade_forward(s: Surface, shadow: f32, point_shadows: bool) -> vec3<f32> {
         if ndotl > 0.0 && any(p.radiance > vec3<f32>(0.0)) {
             let hp = normalize(p.l + s.v);
             let spec = pow(max(dot(s.n, hp), 1e-5), shininess) * spec_color;
-            var light_in = (albedo + spec) * p.radiance * ndotl;
+            var light_in = (albedo + spec) * p.radiance * toon_light(ndotl);
             // Shadows only where the light shows: in its faint outer reach
             // the lookup would cost more than it could change.
             if point_shadows && max(light_in.r, max(light_in.g, light_in.b)) > POINT_SHADOW_VISIBLE {

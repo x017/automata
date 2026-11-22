@@ -160,12 +160,19 @@ Saved as <code>point_light</code> / <code>spot_light</code> in scene files. Guid
                clouds=<span class="tok-n">0.0</span>, lens_flare=<span class="tok-n">1.0</span>, ambient_occlusion=<span class="tok-n">1.0</span>,
                fog_height=<span class="tok-n">0.0</span>, fog_falloff=<span class="tok-n">0.0</span>, fog_sun=<span class="tok-n">0.0</span>, god_rays=<span class="tok-n">0.0</span>,
                depth_of_field=<span class="tok-n">0.0</span>, focus_distance=<span class="tok-n">0.0</span>, focus_range=<span class="tok-n">1.0</span>,
+               toon_bands=<span class="tok-n">0</span>, toon_softness=<span class="tok-n">0.15</span>, shadow_tint=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>),
+               rim_light=<span class="tok-n">0.0</span>, painted_sky=<span class="tok-b">False</span>, outline=<span class="tok-n">0.0</span>,
+               outline_color=(<span class="tok-n">0.05</span>, <span class="tok-n">0.04</span>, <span class="tok-n">0.06</span>), pixelate=<span class="tok-n">0.0</span>, palette=<span class="tok-n">0</span>,
                post=<span class="tok-b">None</span>, bloom=<span class="tok-b">None</span>, contrast=<span class="tok-b">None</span>, saturation=<span class="tok-b">None</span>,
                temperature=<span class="tok-b">None</span>, tint=<span class="tok-b">None</span>, lift=<span class="tok-b">None</span>, gamma=<span class="tok-b">None</span>, gain=<span class="tok-b">None</span>,
                vignette=<span class="tok-b">None</span>, grain=<span class="tok-b">None</span>, chromatic_aberration=<span class="tok-b">None</span>)
 at.Environment.preset(<span class="tok-s">&quot;neutral&quot;</span> | <span class="tok-s">&quot;daylight&quot;</span> | <span class="tok-s">&quot;dusk&quot;</span> | <span class="tok-s">&quot;night&quot;</span>)
 env.with_post(post=<span class="tok-b">None</span>, *, bloom=<span class="tok-b">None</span>, ...)   <span class="tok-c"># same post keywords</span>
-at.Environment.post_presets()  <span class="tok-c"># [&quot;neutral&quot;, &quot;bleached&quot;, &quot;vivid&quot;, &quot;film&quot;, &quot;noir&quot;]</span></code></pre></div>
+at.Environment.post_presets()  <span class="tok-c"># [&quot;neutral&quot;, &quot;bleached&quot;, &quot;vivid&quot;, &quot;film&quot;, &quot;noir&quot;]</span>
+at.Environment.style(name, base=<span class="tok-b">None</span>)   <span class="tok-c"># &quot;realistic&quot;, &quot;semi-realistic&quot;, &quot;botw&quot;, &quot;a short hike&quot;, &quot;nier&quot;</span>
+env.with_style(name)
+at.Environment.styles()        <span class="tok-c"># the five names, in the editor&#x27;s order</span>
+env.style_name                 <span class="tok-c"># the style it is exactly, or &quot;Custom&quot;</span></code></pre></div>
 <p>The scene look. The first entity carrying one wins. It sets hemisphere
 ambient (sky above, ground below, scaled by the sun's <code>ambient</code>), the
 background clear colour (overriding <code>Game.clear_color</code>), exposure, tone
@@ -195,8 +202,21 @@ without one). Fields are <code>bloom</code> (0..4, <code>HIGH</code> and up), <c
 <code>gain</code> (RGB tuples), and <code>vignette</code>, <code>grain</code> and <code>chromatic_aberration</code>
 (0..1). <code>with_post</code> returns a copy with the post effects changed and
 everything else kept.</p>
-<p>All arguments are readable as properties. Unknown tone mapping, preset or
-look names raise <code>ValueError</code>. It's saved in scene files.
+<p>Styles: <code>Environment.style(name, base=None)</code> applies a whole look to
+<code>base</code> (the default environment if omitted). It sets tone mapping,
+exposure, the lens, the height fog's shape, shading, outlines, pixels
+and post effects, and keeps the scene's colours, fog colour and density,
+sky and clouds. <code>with_style</code> does the same to a copy, and <code>style_name</code>
+reads back which style an environment is, or <code>&quot;Custom&quot;</code>. The style's own
+fields: <code>toon_bands</code> (0..4 flat light steps, 0 = smooth) with
+<code>toon_softness</code> (0..1); <code>shadow_tint</code>, the colour of shade (RGB, white =
+none); <code>rim_light</code> (0..2); <code>painted_sky</code> (bool); and three screen effects
+for <code>MEDIUM</code> and up: <code>outline</code> (pixels on a 720 px screen, 0 = none) in
+<code>outline_color</code>, <code>pixelate</code> (pixel size on a 720 px screen, 0 = off) and
+<code>palette</code> (dithered levels per channel, 0 = full colour). See
+<a href="guides/rendering-and-lights.html#styles-from-realistic-to-toon-and-pixel-art">Styles</a>.</p>
+<p>All arguments are readable as properties. Unknown tone mapping, preset,
+look or style names raise <code>ValueError</code>. It's saved in scene files.
 Guide: <a href="guides/rendering-and-lights.html#environment">Rendering &amp; Lights</a>.</p>
 <h3 id="water">Water<a class="anchor" href="#water" aria-label="Link to this section">#</a></h3>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Water(size=(<span class="tok-n">20</span>, <span class="tok-n">20</span>), deep_color=(<span class="tok-n">0.01</span>, <span class="tok-n">0.07</span>, <span class="tok-n">0.11</span>),

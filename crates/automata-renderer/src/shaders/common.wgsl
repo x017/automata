@@ -59,6 +59,8 @@ struct LightUniform {
     point_faces: array<mat4x4<f32>, 24>,
     point_shadow: vec4<f32>,   // x: texel (uv), y: taps (1, 4 or 8), z: tan(face fov / 2), w: AO strength
     fog_height: vec4<f32>,     // x: fog layer top (world y), y: falloff /m above it (0 = flat), z: sun light
+    style: vec4<f32>,          // x: toon bands (0 = smooth), y: band softness, z: rim light, w: painted sky
+    shadow_tint: vec4<f32>,    // rgb: the shade's tint (white = none)
 };
 @group(3) @binding(0) var<uniform> light: LightUniform;
 @group(3) @binding(1) var shadow_map: texture_depth_2d_array;
@@ -434,6 +436,66 @@ fn hemi(n: vec3<f32>) -> vec3<f32> {
     return mix(light.ground_tonemap.rgb, light.sky_exposure.rgb, n.y * 0.5 + 0.5);
 }
 
+// --- Stylized shading --------------------------------------------------------
+// The Environment's toon bands, shade tint and rim light, shared by the
+// forward and physically based paths.
+
+fn toon_on() -> bool {
+    return light.style.x > 0.5;
+}
+
+// Toon: the light reaching a surface (0..1) falls into `bands` flat steps
+// with soft edges. The first edge sits a little into the light, so the lit
+// side reads as one flat tone and only grazing light turns to shade.
+fn toon_ramp(t: f32) -> f32 {
+    let bands = light.style.x;
+    let soft = max(light.style.y, 0.02) * 0.5;
+    let x = clamp(t, 0.0, 1.0) * bands + 0.3;
+    let i = floor(x);
+    return clamp((i + smoothstep(0.5 - soft, 0.5 + soft, x - i)) / bands, 0.0, 1.0);
+}
+
+// The sunlight on a surface (n.l times shadow) through the toon ramp, or
+// as it is with smooth shading.
+fn toon_light(t: f32) -> f32 {
+    if toon_on() {
+        return toon_ramp(t);
+    }
+    return t;
+}
+
+// A toon highlight: the smooth one cut into a flat spot.
+fn toon_highlight(spec: f32) -> f32 {
+    let soft = max(light.style.y, 0.02) * 0.2;
+    return smoothstep(0.5 - soft, 0.5 + soft, spec) * 0.6;
+}
+
+// Ambient light in shade takes the shade tint; in full sun none of it.
+fn shade_tint(sun_in: f32) -> vec3<f32> {
+    return mix(light.shadow_tint.rgb, vec3<f32>(1.0), clamp(sun_in, 0.0, 1.0));
+}
+
+// Rim light: the edges of objects (where they turn away from the camera)
+// catch the sky, and the sun when it's behind them. Not on floors, which
+// face up and seen at a glancing angle would glow all over.
+fn rim_light(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, shadow: f32, albedo: vec3<f32>) -> vec3<f32> {
+    let k = light.style.z;
+    if k <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let edge = 1.0 - max(dot(n, v), 0.0);
+    var rim = edge * edge * edge;
+    if toon_on() {
+        let soft = max(light.style.y, 0.02) * 0.1;
+        rim = smoothstep(0.62 - soft, 0.62 + soft, edge);
+    }
+    rim = rim * (1.0 - smoothstep(0.5, 0.9, n.y));
+    let behind = clamp(dot(-v, l) * 0.5 + 0.5, 0.0, 1.0);
+    let c = light.sky_exposure.rgb * light.color_ambient.a
+        + light.color_ambient.rgb * min(shadow, 1.0) * behind;
+    return c * (albedo * 0.5 + vec3<f32>(0.5)) * rim * k * 0.6;
+}
+
 // --- Sky dome ---------------------------------------------------------------
 // One sky for everything: the dome behind the scene (sky.wgsl adds the sun
 // disk and clouds), reflections, and fog, so distant things fade into the
@@ -610,7 +672,17 @@ fn shade_pbr(
     ao: f32,
 ) -> vec3<f32> {
     let ndotv = max(dot(n, v), 1e-4);
-    let direct = brdf_direct(albedo, n, v, l, roughness, f0) * light.color_ambient.rgb * shadow;
+    var direct: vec3<f32>;
+    var sun_in = max(dot(n, l), 0.0) * min(shadow, 1.0);
+    if toon_on() {
+        // Flat bands of light with a flat highlight.
+        sun_in = toon_ramp(sun_in);
+        let shininess = exp2(11.0 - 10.0 * roughness);
+        let spec = toon_highlight(pow(max(dot(n, normalize(l + v)), 1e-5), shininess));
+        direct = (albedo + f0 * spec * 4.0) * light.color_ambient.rgb * sun_in;
+    } else {
+        direct = brdf_direct(albedo, n, v, l, roughness, f0) * light.color_ambient.rgb * shadow;
+    }
 
     // Ambient: diffuse from the hemisphere, specular from the sky, weighted
     // by the environment BRDF so rough surfaces don't turn into mirrors.
@@ -619,9 +691,9 @@ fn shade_pbr(
     // Reflections of the sky are partly blocked in shadowed creases, and
     // all ambient light by nearby geometry (`ao`, 1 = open).
     let occlusion = mix(0.6, 1.0, min(shadow, 1.0)) * ao;
-    let ambient = (albedo * hemi(n) * (vec3<f32>(1.0) - fr) * ao + env * fr * occlusion)
-        * light.color_ambient.a;
-    return direct + ambient;
+    let ambient = (albedo * hemi(n) * (vec3<f32>(1.0) - fr) * ao * shade_tint(sun_in)
+        + env * fr * occlusion) * light.color_ambient.a;
+    return direct + ambient + rim_light(n, v, l, shadow, albedo);
 }
 
 // --- Under water -------------------------------------------------------------

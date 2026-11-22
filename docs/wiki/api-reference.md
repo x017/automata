@@ -178,12 +178,19 @@ at.Environment(sky_color=(1, 1, 1), ground_color=(1, 1, 1),
                clouds=0.0, lens_flare=1.0, ambient_occlusion=1.0,
                fog_height=0.0, fog_falloff=0.0, fog_sun=0.0, god_rays=0.0,
                depth_of_field=0.0, focus_distance=0.0, focus_range=1.0,
+               toon_bands=0, toon_softness=0.15, shadow_tint=(1, 1, 1),
+               rim_light=0.0, painted_sky=False, outline=0.0,
+               outline_color=(0.05, 0.04, 0.06), pixelate=0.0, palette=0,
                post=None, bloom=None, contrast=None, saturation=None,
                temperature=None, tint=None, lift=None, gamma=None, gain=None,
                vignette=None, grain=None, chromatic_aberration=None)
 at.Environment.preset("neutral" | "daylight" | "dusk" | "night")
 env.with_post(post=None, *, bloom=None, ...)   # same post keywords
 at.Environment.post_presets()  # ["neutral", "bleached", "vivid", "film", "noir"]
+at.Environment.style(name, base=None)   # "realistic", "semi-realistic", "botw", "a short hike", "nier"
+env.with_style(name)
+at.Environment.styles()        # the five names, in the editor's order
+env.style_name                 # the style it is exactly, or "Custom"
 ```
 
 The scene look. The first entity carrying one wins. It sets hemisphere
@@ -218,8 +225,22 @@ without one). Fields are `bloom` (0..4, `HIGH` and up), `contrast`,
 (0..1). `with_post` returns a copy with the post effects changed and
 everything else kept.
 
-All arguments are readable as properties. Unknown tone mapping, preset or
-look names raise `ValueError`. It's saved in scene files.
+Styles: `Environment.style(name, base=None)` applies a whole look to
+`base` (the default environment if omitted). It sets tone mapping,
+exposure, the lens, the height fog's shape, shading, outlines, pixels
+and post effects, and keeps the scene's colours, fog colour and density,
+sky and clouds. `with_style` does the same to a copy, and `style_name`
+reads back which style an environment is, or `"Custom"`. The style's own
+fields: `toon_bands` (0..4 flat light steps, 0 = smooth) with
+`toon_softness` (0..1); `shadow_tint`, the colour of shade (RGB, white =
+none); `rim_light` (0..2); `painted_sky` (bool); and three screen effects
+for `MEDIUM` and up: `outline` (pixels on a 720 px screen, 0 = none) in
+`outline_color`, `pixelate` (pixel size on a 720 px screen, 0 = off) and
+`palette` (dithered levels per channel, 0 = full colour). See
+[Styles](guides/rendering-and-lights.md#styles-from-realistic-to-toon-and-pixel-art).
+
+All arguments are readable as properties. Unknown tone mapping, preset,
+look or style names raise `ValueError`. It's saved in scene files.
 Guide: [Rendering & Lights](guides/rendering-and-lights.md#environment).
 
 ### Water

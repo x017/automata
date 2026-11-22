@@ -34,6 +34,10 @@ pub enum ColorTarget {
     EnvFog,
     /// Environment sky color straight up (RGB).
     EnvZenith,
+    /// Environment shade tint (RGB).
+    EnvShadowTint,
+    /// Environment outline color (RGB).
+    EnvOutline,
     /// Water deep color (RGB).
     WaterDeep,
     /// Water shallow color (RGB).
@@ -61,6 +65,8 @@ impl ColorTarget {
             Self::EnvBackground => (0..3).map(Field::EnvBackground).collect(),
             Self::EnvFog => (0..3).map(Field::EnvFogColor).collect(),
             Self::EnvZenith => (0..3).map(Field::EnvZenith).collect(),
+            Self::EnvShadowTint => (0..3).map(Field::EnvShadowTint).collect(),
+            Self::EnvOutline => (0..3).map(Field::EnvOutlineColor).collect(),
             Self::WaterDeep => (0..3).map(Field::WaterDeep).collect(),
             Self::WaterShallow => (0..3).map(Field::WaterShallow).collect(),
             Self::ParticleColor => (0..4).map(Field::ParticleColor).collect(),

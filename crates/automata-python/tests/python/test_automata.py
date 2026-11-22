@@ -1215,6 +1215,57 @@ def test_environment_atmosphere():
         assert game.run(lambda ctx: None, max_frames=2) == 2
 
 
+def test_environment_styles():
+    assert at.Environment.styles() == [
+        "Realistic", "Semi-realistic", "BotW", "A Short Hike", "NieR",
+    ]
+    assert at.Environment().style_name == "Custom"
+    nier = at.Environment.style("nier")
+    assert nier.style_name == "NieR"
+    assert nier.saturation < 0.8 and nier.grain > 0.0 and nier.god_rays > 0.5
+    # Names ignore case, spaces and dashes; aliases work too.
+    assert at.Environment.style("Semi Realistic").style_name == "Semi-realistic"
+    hike = at.Environment.style("short-hike")
+    assert hike.outline > 0.0 and hike.pixelate > 1.0 and hike.toon_bands > 0
+    assert at.Environment.style("toon").style_name == "BotW"
+    with pytest.raises(ValueError, match="unknown style"):
+        at.Environment.style("cubism")
+
+    # A style keeps the scene's own colours and sky ...
+    base = at.Environment.preset("dusk")
+    styled = base.with_style("botw")
+    assert styled.zenith_color == base.zenith_color and styled.sky
+    assert styled.fog_color == base.fog_color
+    assert styled.painted_sky and styled.rim_light > 0.5
+    assert at.Environment.style("botw", base).zenith_color == base.zenith_color
+    # ... and changing any of its knobs makes it "Custom".
+    assert at.Environment.style("realistic").style_name == "Realistic"
+    tweaked = at.Environment(toon_bands=3, toon_softness=0.4, shadow_tint=(0.5, 0.6, 1.0),
+                             rim_light=0.7, painted_sky=True, outline=2.0,
+                             outline_color=(0.1, 0.0, 0.0), pixelate=4.0, palette=8)
+    assert tweaked.toon_bands == 3 and tweaked.palette == 8 and tweaked.painted_sky
+    assert tweaked.toon_softness == pytest.approx(0.4)
+    assert tweaked.shadow_tint == pytest.approx((0.5, 0.6, 1.0))
+    assert tweaked.rim_light == pytest.approx(0.7)
+    assert tweaked.outline == pytest.approx(2.0)
+    assert tweaked.outline_color == pytest.approx((0.1, 0.0, 0.0))
+    assert tweaked.pixelate == pytest.approx(4.0)
+    assert tweaked.style_name == "Custom"
+
+    # Saved in scene files, and runs on every preset.
+    text = at.Scene().add(at.Entity("look").add(hike)).to_ron()
+    assert "outline: 1.0" in text and "pixelate: 3.0" in text
+    assert at.Scene.from_ron(text).to_ron() == text
+    for quality in ("low", "medium", "high", "beautiful"):
+        for name in at.Environment.styles():
+            game = at.Game(headless=True, graphics=quality, fixed_delta=1 / 60)
+            scene = at.Scene().add(at.Entity("look").add(at.Environment.style(name)))
+            scene.add(at.Entity("sun").add(at.DirectionalLight(direction=(0.3, -0.4, -1.0))))
+            scene.add(at.Entity("camera").add(at.Camera3D(position=(0, 1, 4), target=(0, 0, 0))))
+            game.load_scene(scene)
+            assert game.run(lambda ctx: None, max_frames=1) == 1
+
+
 def test_water_caustics_and_wind():
     water = at.Water()
     assert water.caustics == pytest.approx(1.0)

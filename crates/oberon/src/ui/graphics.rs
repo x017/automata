@@ -112,6 +112,7 @@ impl Ui {
         let mut y = self.renderer_group(canvas, x, y, w);
         y = self.sun_group(canvas, doc, x, y, w);
         y = self.environment_group(canvas, doc, x, y, w);
+        y = self.style_group(canvas, doc, x, y, w);
         y = self.post_group(canvas, doc, x, y, w);
         y = self.camera_group(canvas, doc, x, y, w);
         y = self.tests_group(canvas, doc, x, y, w);
@@ -383,7 +384,8 @@ impl Ui {
                     self.editable_style(ButtonStyle::Ghost)
                 };
                 if self.button(canvas, b, label, style) {
-                    self.out.push(Intent::SetEnvironment(env.id, value));
+                    self.out
+                        .push(Intent::SetEnvironment(env.id, Box::new(value)));
                 }
             }
         }
@@ -411,6 +413,86 @@ impl Ui {
         y = self.atmosphere_rows(canvas, x, y, w, env);
         y = self.source_note(canvas, x, y, w, env);
         y + 8.0
+    }
+
+    /// The first Environment's style: a pick of whole looks ("Custom" once
+    /// a knob changes), then its shading, outline and pixel settings.
+    fn style_group(&mut self, canvas: &mut Canvas, doc: &Document, x: f32, y: f32, w: f32) -> f32 {
+        let mut y = self.gfx_heading(canvas, x, y, w, "Style");
+        let Some(env) = doc.entities.iter().find(|e| e.data.environment.is_some()) else {
+            y = self.gfx_note(canvas, x, y, w, "Styles live on the Environment:");
+            y = self.gfx_note(canvas, x, y, w, "customize it above.");
+            return y + 8.0;
+        };
+        y = self.gfx_note(
+            canvas,
+            x,
+            y,
+            w,
+            "Sets shading, lens and post; colours and sky stay.",
+        );
+        y = self.choice_row(canvas, x, y, w, env, "Style", Choice::EnvStyle);
+        y = self.style_rows(canvas, x, y, w, env);
+        y = self.gfx_note(
+            canvas,
+            x,
+            y,
+            w,
+            "Outlines and pixels: Medium graphics and up.",
+        );
+        y + 8.0
+    }
+
+    /// An Environment's stylized shading, outlines and pixels (the
+    /// Graphics tab and the Inspector).
+    pub(super) fn style_rows(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        y: f32,
+        w: f32,
+        env: &EntityEntry,
+    ) -> f32 {
+        let e = env.data.environment;
+        let mut y = self.float_row(canvas, x, y, w, env, "Toon Bands", Field::EnvToonBands);
+        if e.is_some_and(|e| e.toon_bands > 0) {
+            y = self.float_row(
+                canvas,
+                x,
+                y,
+                w,
+                env,
+                "Band Softness",
+                Field::EnvToonSoftness,
+            );
+        }
+        y = self.color_row(
+            canvas,
+            x,
+            y,
+            w,
+            env,
+            "Shade Tint",
+            ColorTarget::EnvShadowTint,
+        );
+        y = self.float_row(canvas, x, y, w, env, "Rim Light", Field::EnvRimLight);
+        if e.is_some_and(|e| e.sky) {
+            y = self.flag_row(canvas, x, y, w, env, "Painted Sky", Flag::EnvPaintedSky);
+        }
+        y = self.float_row(canvas, x, y, w, env, "Outline", Field::EnvOutline);
+        if e.is_some_and(|e| e.outline > 0.0) {
+            y = self.color_row(
+                canvas,
+                x,
+                y,
+                w,
+                env,
+                "Outline Color",
+                ColorTarget::EnvOutline,
+            );
+        }
+        y = self.float_row(canvas, x, y, w, env, "Pixelate", Field::EnvPixelate);
+        self.float_row(canvas, x, y, w, env, "Palette", Field::EnvPalette)
     }
 
     /// The first Environment's post effects: a row of looks, then every
@@ -450,8 +532,10 @@ impl Ui {
                 };
                 if self.button(canvas, b, label, style) {
                     if let Some(e) = current {
-                        self.out
-                            .push(Intent::SetEnvironment(env.id, Environment { post, ..e }));
+                        self.out.push(Intent::SetEnvironment(
+                            env.id,
+                            Box::new(Environment { post, ..e }),
+                        ));
                     }
                 }
             }

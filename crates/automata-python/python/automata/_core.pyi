@@ -370,6 +370,28 @@ class Environment:
     """Metres from the camera kept sharp; 0 = the camera's target."""
     focus_range: float
     """Metres either side of the focus that stay sharp too."""
+    toon_bands: int
+    """Toon shading: the light in this many flat bands (0 = smooth)."""
+    toon_softness: float
+    """Softness of the edges between toon bands, 0 (crisp) to 1."""
+    shadow_tint: tuple[float, float, float]
+    """The colour of shade (white = none)."""
+    rim_light: float
+    """Light along objects' edges, 0 (none) to 2."""
+    painted_sky: bool
+    """Banded sky gradient, flat clouds and a flat sun disk."""
+    outline: float
+    """Outline width in pixels on a 720-pixel-tall screen (0 = none;
+    ``"medium"`` and up)."""
+    outline_color: tuple[float, float, float]
+    pixelate: float
+    """Pixel art: pixel size on a 720-pixel-tall screen (0 or 1 = off;
+    ``"medium"`` and up)."""
+    palette: int
+    """Dithered levels per colour channel (0 = full colour; ``"medium"``
+    and up)."""
+    style_name: str
+    """The style this environment is exactly, or ``"Custom"``."""
     bloom: float
     """Glow around bright things, 0 (off) to 4 (``"high"`` and up)."""
     contrast: float
@@ -417,6 +439,15 @@ class Environment:
         depth_of_field: float = 0.0,
         focus_distance: float = 0.0,
         focus_range: float = 1.0,
+        toon_bands: int = 0,
+        toon_softness: float = 0.15,
+        shadow_tint: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        rim_light: float = 0.0,
+        painted_sky: bool = False,
+        outline: float = 0.0,
+        outline_color: tuple[float, float, float] = (0.05, 0.04, 0.06),
+        pixelate: float = 0.0,
+        palette: int = 0,
         post: str | None = None,
         bloom: float | None = None,
         contrast: float | None = None,
@@ -460,6 +491,20 @@ class Environment:
     @staticmethod
     def post_presets() -> list[str]:
         """``["neutral", "bleached", "vivid", "film", "noir"]``."""
+        ...
+    @staticmethod
+    def style(name: str, base: Environment | None = None) -> Environment:
+        """``base`` (default: a plain environment) in the style ``name``:
+        ``"realistic"``, ``"semi-realistic"``, ``"botw"``, ``"a short
+        hike"`` or ``"nier"``. Keeps the base's colours, fog colour and
+        density, sky and clouds."""
+        ...
+    def with_style(self, name: str) -> Environment:
+        """A copy of this environment in the style ``name``."""
+        ...
+    @staticmethod
+    def styles() -> list[str]:
+        """The style names, in the editor's order."""
         ...
 
 class Water:

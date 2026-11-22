@@ -134,6 +134,33 @@ tuning.
 
 Picking an Environment preset keeps your post effects.
 
+## Style
+
+The **Style** group picks a whole look for the scene: **Realistic**,
+**Semi-realistic**, **BotW**, **A Short Hike** or **NieR**. A style sets
+tone mapping, exposure, the lens, the shape of the height fog, shading,
+outlines, pixels and the Post group's values. It keeps your colours, the
+fog's colour and density, the sky and the clouds. Change any setting
+afterwards and the dropdown shows **Custom**. Pick the style again to
+reset it. The same dropdown sits in the Inspector's Environment section.
+
+![The Lagoon as authored, then in each style](../../assets/rendering/styles.jpg)
+
+| Setting | What it does |
+|---|---|
+| Toon Bands | Toon shading: sunlight in this many flat steps, 1 to 4. 0 is smooth shading |
+| Band Softness | How soft the steps' edges are (shown with Toon Bands above 0) |
+| Shade Tint | The colour of shade. White leaves it alone; a light blue gives an illustrated look |
+| Rim Light | Light along objects' edges from the sky, and from the sun when it's behind them, 0 to 2 |
+| Painted Sky | With Sky & Sun on: a banded, brushed gradient, flat clouds and a flat sun |
+| Outline | Dark lines on silhouettes and creases, in pixels on a 720 px screen. 0 is off |
+| Outline Color | The lines' colour (shown with Outline above 0) |
+| Pixelate | Pixel art: pixel size on a 720 px screen, scaled to the window. 0 is off |
+| Palette | Levels per colour channel with a dither, for a retro palette. 0 is full colour |
+
+Outline, Pixelate and Palette need Medium quality or higher. The rest
+work everywhere.
+
 ## Post
 
 The **Post** group grades the finished frame: colour, bloom, vignette,

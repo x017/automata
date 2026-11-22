@@ -256,7 +256,7 @@ and lit particles take the sun's shadow. Daylight and dusk turn on height
 fog and god rays; the lagoon example wears the full list (Film look plus
 all four). Python keywords, the stub, and Oberon rows for all of it.
 
-### A10. Style presets: Realistic, Semi-realistic, BotW, A Short Hike, NieR ⬜ L
+### A10. Style presets: Realistic, Semi-realistic, BotW, A Short Hike, NieR ✅ L
 - Shading modes: **toon** (banded diffuse with a tint ramp and tinted
   shadows), rim light, and a painted-sky mode.
 - **Outlines** (a depth/normal edge pass) and **pixelation** (render at
@@ -267,6 +267,19 @@ all four). Python keywords, the stub, and Oberon rows for all of it.
 - Python: `at.Environment.style("nier")`.
 - **Done when:** the same Lagoon scene renders in all five styles, side
   by side in the docs.
+
+Done: `Environment` gained toon bands (with softness, flat highlights),
+a shade tint, rim light and a painted sky, shared by the forward and
+physically based shaders so they work on every preset. Outlines come from
+a second difference of 1/depth (silhouettes and creases, drawn before
+water so it covers them). Pixels and a dithered palette run in the grade
+pass (Medium to Ultra) or FXAA's (Beautiful), sized for a 720 px screen.
+`Environment::STYLES` and `with_style` set five looks while keeping the
+scene's colours and sky, and `style_name` reads "Custom" once a knob
+changes. Python has `Environment.style("nier")`, `with_style`, `styles()`
+and `style_name`. Oberon has a Style group (dropdown plus every knob) in
+the Graphics tab and the Inspector. `docs/assets/rendering/styles.jpg`
+shows the Lagoon in all five.
 
 ### A11. Big worlds: culling, instancing, LOD ⬜ M
 The main pass draws every mesh. Only shadows are culled today
@@ -496,8 +509,8 @@ per effort. Reorder any time by telling me.
 | 9 | A6 Particles | L | ✅ |
 | 10 | A7 Splashes, underwater, caustics | M | ✅ |
 | 11 | A8 Post chain + colour grading | M | ✅ |
-| 12 | A9 Height fog, god rays, DoF, dust | M | ⬜ |
-| 13 | A10 Style presets | L | ⬜ |
+| 12 | A9 Height fog, god rays, DoF, dust | M | ✅ |
+| 13 | A10 Style presets | L | ✅ |
 | 14 | B1 Animation playback | L | ⬜ |
 | 15 | B2 Spring bones | M | ⬜ |
 | 16 | A11 Culling, instancing, LOD | M | ⬜ |

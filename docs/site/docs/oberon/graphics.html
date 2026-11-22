@@ -93,6 +93,18 @@ background after it, so with ACES or AgX the far fog can look slightly
 different from the background. If the horizon shows a seam, nudge Fog
 Color, or turn on <strong>Sky &amp; Sun</strong>, which fades fog into the sky itself.</p></aside>
 <p>Picking an Environment preset keeps your post effects.</p>
+<h2 id="style">Style<a class="anchor" href="#style" aria-label="Link to this section">#</a></h2>
+<p>The <strong>Style</strong> group picks a whole look for the scene: <strong>Realistic</strong>,
+<strong>Semi-realistic</strong>, <strong>BotW</strong>, <strong>A Short Hike</strong> or <strong>NieR</strong>. A style sets
+tone mapping, exposure, the lens, the shape of the height fog, shading,
+outlines, pixels and the Post group's values. It keeps your colours, the
+fog's colour and density, the sky and the clouds. Change any setting
+afterwards and the dropdown shows <strong>Custom</strong>. Pick the style again to
+reset it. The same dropdown sits in the Inspector's Environment section.</p>
+<p><img src="../../../assets/rendering/styles.jpg" alt="The Lagoon as authored, then in each style" loading="lazy" decoding="async"></p>
+<div class="table"><table><thead><tr><th>Setting</th><th>What it does</th></tr></thead><tbody><tr><td>Toon Bands</td><td>Toon shading: sunlight in this many flat steps, 1 to 4. 0 is smooth shading</td></tr><tr><td>Band Softness</td><td>How soft the steps' edges are (shown with Toon Bands above 0)</td></tr><tr><td>Shade Tint</td><td>The colour of shade. White leaves it alone; a light blue gives an illustrated look</td></tr><tr><td>Rim Light</td><td>Light along objects' edges from the sky, and from the sun when it's behind them, 0 to 2</td></tr><tr><td>Painted Sky</td><td>With Sky &amp; Sun on: a banded, brushed gradient, flat clouds and a flat sun</td></tr><tr><td>Outline</td><td>Dark lines on silhouettes and creases, in pixels on a 720 px screen. 0 is off</td></tr><tr><td>Outline Color</td><td>The lines' colour (shown with Outline above 0)</td></tr><tr><td>Pixelate</td><td>Pixel art: pixel size on a 720 px screen, scaled to the window. 0 is off</td></tr><tr><td>Palette</td><td>Levels per colour channel with a dither, for a retro palette. 0 is full colour</td></tr></tbody></table></div>
+<p>Outline, Pixelate and Palette need Medium quality or higher. The rest
+work everywhere.</p>
 <h2 id="post">Post<a class="anchor" href="#post" aria-label="Link to this section">#</a></h2>
 <p>The <strong>Post</strong> group grades the finished frame: colour, bloom, vignette,
 grain and colour fringes. The values live on the Environment, so click
@@ -135,7 +147,7 @@ through three complete looks.</p>
     <footer class="pager"><a class="prev" href="cameras.html"><small>Previous</small>Cameras</a><a class="next" href="code-editor.html"><small>Next</small>The code editor</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/graphics.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#renderer">Renderer</a></li><li class="l2"><a href="#point-and-spot-lights">Point and spot lights</a></li><li class="l2"><a href="#sun">Sun</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#post">Post</a></li><li class="l2"><a href="#camera">Camera</a></li><li class="l2"><a href="#test-scenes">Test Scenes</a></li><li class="l2"><a href="#a-tuning-workflow">A tuning workflow</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#renderer">Renderer</a></li><li class="l2"><a href="#point-and-spot-lights">Point and spot lights</a></li><li class="l2"><a href="#sun">Sun</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#style">Style</a></li><li class="l2"><a href="#post">Post</a></li><li class="l2"><a href="#camera">Camera</a></li><li class="l2"><a href="#test-scenes">Test Scenes</a></li><li class="l2"><a href="#a-tuning-workflow">A tuning workflow</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

@@ -467,7 +467,7 @@ pub enum Intent {
     /// Restart the language server (its settings changed).
     RestartLanguageServer,
     /// Replace an entity's whole Environment (a preset).
-    SetEnvironment(u64, automata_renderer::Environment),
+    SetEnvironment(u64, Box<automata_renderer::Environment>),
     /// Add a graphics test arrangement.
     SpawnTest(crate::doc::TestScene),
     /// Remove every `Test …` entity.
@@ -2291,6 +2291,8 @@ impl Ui {
                 y = self.float_row(canvas, x, y, w, e, "Fog Density", Field::EnvFogDensity);
                 y = self.float_row(canvas, x, y, w, e, "Fog Start", Field::EnvFogStart);
                 y = self.atmosphere_rows(canvas, x, y, w, e);
+                y = self.choice_row(canvas, x, y, w, e, "Style", Choice::EnvStyle);
+                y = self.style_rows(canvas, x, y, w, e);
                 y = self.post_rows(canvas, x, y, w, e);
                 y += 6.0;
             }
@@ -5363,7 +5365,7 @@ mod tests {
             ui.menu = None;
             if out.iter().any(|i| {
                 matches!(i, Intent::SetEnvironment(id, env)
-                    if *id == env_id && *env == automata_renderer::Environment::night())
+                    if *id == env_id && **env == automata_renderer::Environment::night())
             }) {
                 found_preset = true;
                 break;

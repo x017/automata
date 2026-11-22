@@ -38,6 +38,8 @@ struct PostUniform {
     misc: vec4<f32>,   // x: time (s), y: cheap bloom strength, z: 1 = grade
     lens: vec4<f32>,   // x: god rays, y: depth of field, z: focus distance (m), w: focus range (m)
     depth: vec4<f32>,  // x: near, y: far (m), zw: full-size viewport (px)
+    style: vec4<f32>,  // x: outline width (px), y: pixel block (px, 1 = off), z: palette levels (0 = off)
+    outline_color: vec4<f32>, // rgb: outline colour
 };
 
 @group(0) @binding(0) var src: texture_2d<f32>;
@@ -273,6 +275,78 @@ fn fringed(uv: vec2<f32>) -> vec3<f32> {
     return vec3<f32>(tap(uv + off).r, center.g, tap(uv - off).b);
 }
 
+// --- Styles: outlines, pixelation, palette ----------------------------------
+
+// 1 / view depth at pixel `p` (clamped to the image): it changes linearly
+// across a flat surface on screen, so it's what edge detection compares.
+fn inv_depth_at(p: vec2<i32>) -> f32 {
+    let size = vec2<i32>(textureDimensions(scene_depth));
+    let d = textureLoad(scene_depth, clamp(p, vec2<i32>(0), size - vec2<i32>(1)), 0);
+    return 1.0 / view_depth(d);
+}
+
+// Outlines, blended over the scene: a second difference of 1 / depth is
+// zero across any flat surface, so what's left marks silhouettes (a jump)
+// and creases (a change of slope). Measured against the depth itself, so
+// near and far objects get the same lines; faded out far away.
+@fragment
+fn fs_outline(in: FullscreenOut) -> @location(0) vec4<f32> {
+    let p = vec2<i32>(in.position.xy);
+    let r = i32(max(round(post.style.x * 0.5), 1.0));
+    let c = inv_depth_at(p);
+    let n = inv_depth_at(p + vec2<i32>(0, -r));
+    let s = inv_depth_at(p + vec2<i32>(0, r));
+    let e = inv_depth_at(p + vec2<i32>(r, 0));
+    let w = inv_depth_at(p + vec2<i32>(-r, 0));
+    let nearest = max(c, max(max(n, s), max(e, w)));
+    let bend = max(abs(n + s - 2.0 * c), abs(e + w - 2.0 * c)) / max(nearest, 1e-6);
+    // Thin lines get faint rather than vanishing below a pixel.
+    let width = clamp(post.style.x, 0.0, 1.0);
+    // Faded out from 80 m (or half the view) to 160 m (or most of it).
+    let reach = min(post.depth.y * 0.8, 160.0);
+    let far_fade = 1.0 - smoothstep(reach * 0.5, reach, 1.0 / nearest);
+    let edge = smoothstep(0.012, 0.04, bend) * width * far_fade;
+    return vec4<f32>(post.outline_color.rgb, edge);
+}
+
+// `uv` moved to the centre of its pixel block (pixelation), or as it is.
+fn pixel_snap(uv: vec2<f32>) -> vec2<f32> {
+    let b = post.style.y;
+    if b <= 1.0 {
+        return uv;
+    }
+    // The texel nearest the block's centre, so it reads one pixel, not a
+    // blend of its neighbours.
+    let full = post.depth.zw;
+    return (floor(uv * full / b) * b + floor(b * 0.5) + 0.5) / full;
+}
+
+// Pixel `frag` moved to the corner of its block, so per-pixel noise
+// (grain, dither) is per block too.
+fn pixel_frag(frag: vec2<f32>) -> vec2<f32> {
+    let b = max(post.style.y, 1.0);
+    return floor(frag / b) * b;
+}
+
+const BAYER: array<f32, 16> = array<f32, 16>(
+    0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0,
+    3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0,
+);
+
+// The palette: each channel limited to `levels` steps (spaced evenly to
+// the eye), with an ordered dither between neighbouring steps.
+fn quantize(c: vec3<f32>, frag: vec2<f32>) -> vec3<f32> {
+    let levels = post.style.z;
+    if levels < 2.0 {
+        return c;
+    }
+    let cell = vec2<u32>(floor(frag / max(post.style.y, 1.0))) % vec2<u32>(4u);
+    let dither = (BAYER[cell.y * 4u + cell.x] + 0.5) / 16.0;
+    let steps = levels - 1.0;
+    let q = floor(sqrt(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0))) * steps + dither) / steps;
+    return q * q;
+}
+
 // --- God rays ----------------------------------------------------------------
 // Light shafts (after Mitchell, "Volumetric Light Scattering as a
 // Post-Process", GPU Gems 3): a quarter-size mask of the open sky, glowing
@@ -459,13 +533,15 @@ fn fs_ldr_prefilter(in: FullscreenOut) -> @location(0) vec4<f32> {
 // read and an sRGB target encodes on write.
 @fragment
 fn fs_grade(in: FullscreenOut) -> @location(0) vec4<f32> {
-    var c = fringed(in.uv);
-    c = c + textureSampleLevel(extra, src_sampler, in.uv, 0.0).rgb * post.misc.y;
+    let uv = pixel_snap(in.uv);
+    let frag = pixel_frag(in.position.xy);
+    var c = fringed(uv);
+    c = c + textureSampleLevel(extra, src_sampler, uv, 0.0).rgb * post.misc.y;
     c = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
     if post.misc.z > 0.5 {
-        c = grade(c, in.uv, in.position.xy);
+        c = grade(c, uv, frag);
     }
-    return vec4<f32>(c, 1.0);
+    return vec4<f32>(quantize(c, frag), 1.0);
 }
 
 // FXAA (after Lottes' FXAA 3.11, "quality" variant with a short search).
@@ -475,6 +551,16 @@ fn lum(uv: vec2<f32>) -> f32 {
 
 @fragment
 fn fs_fxaa(in: FullscreenOut) -> @location(0) vec4<f32> {
+    if post.style.y > 1.0 || post.style.z >= 2.0 {
+        // Pixel art: one sample per block, no anti-aliasing (it would
+        // blur the blocks' edges), then the palette.
+        let c = textureSampleLevel(src, src_sampler, pixel_snap(in.uv), 0.0).rgb;
+        var rgb = quantize(c * c, pixel_frag(in.position.xy));
+        if post.output.x > 0.5 {
+            rgb = to_srgb(rgb);
+        }
+        return vec4<f32>(rgb, 1.0);
+    }
     let t = post.texel.xy;
     let uv = in.uv;
     let center = textureSampleLevel(src, src_sampler, uv, 0.0);

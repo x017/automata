@@ -411,6 +411,57 @@ A neutral grade with no bloom costs nothing: the frame is drawn straight
 to the screen as before. Otherwise the grade is one extra full-screen
 pass.
 
+### Styles: from realistic to toon and pixel art
+
+A style sets a whole look in one go. It covers tone mapping, exposure,
+the lens (flare, god rays, depth of field), the shape of the height fog,
+how surfaces are shaded, outlines, pixels and the post effects. It
+keeps what belongs to the scene: its colours, the fog's colour and
+density, the sky and the clouds. So the same level can switch styles
+without being repainted:
+
+```python
+env = at.Environment.style("nier")                  # from the default environment
+env = at.Environment.preset("dusk").with_style("botw")   # or from any other
+at.Environment.style("a short hike", base=env)      # same as base.with_style(...)
+at.Environment.styles()   # ["Realistic", "Semi-realistic", "BotW", "A Short Hike", "NieR"]
+env.style_name            # "NieR", or "Custom" once any of its knobs changed
+```
+
+Names ignore case, spaces and dashes. `"semi"`, `"toon"` and
+`"storybook"`, `"pixel"` and `"short hike"`, and `"hazy"` work too.
+
+| Style | The look |
+|---|---|
+| **Realistic** | ACES, full ambient occlusion and lens flare, light haze and sun shafts, smooth shading, no grade |
+| **Semi-realistic** | AgX, a little brighter; cool shade, a soft rim light, gentle depth of field, a warm, slightly saturated grade with a light vignette |
+| **BotW** | Toon shading in one soft-edged step with blue shade, a strong sky-coloured rim light, a painted sky, a saturated warm grade with blooming highlights |
+| **A Short Hike** | Two crisp toon steps, blue shade, dark outlines and chunky pixels: 3 px on a 720 px screen, scaled to the window. No lens effects |
+| **NieR** | Bleached and hazy: thick sunlit height fog, strong god rays, depth of field, low saturation, raised blacks, heavy bloom, vignette, grain and colour fringes |
+
+![The Lagoon on Beautiful: as authored, then Realistic, Semi-realistic, BotW, A Short Hike and NieR](../../assets/rendering/styles.jpg)
+
+Styles mix with everything else: pick one, then set any field. The
+style's name turns to `"Custom"`, and picking the style again resets
+its knobs. The style fields:
+
+| Field | Range | Meaning |
+|---|---|---|
+| `toon_bands` | 0..4 (0) | Toon shading: sunlight in this many flat steps (0 = smooth). Highlights turn into flat spots too |
+| `toon_softness` | 0..1 (0.15) | How soft the edges between steps are |
+| `shadow_tint` | per channel (1, 1, 1) | The colour of shade: ambient light out of the sun is multiplied by it. Bluish values give the cool shade of illustrated games |
+| `rim_light` | 0..2 (0) | Light along objects' edges, from the sky and a sun behind them. Floors don't get it |
+| `painted_sky` | bool (False) | With the sky on: a banded gradient brushed with streaks, flat two-tone clouds, a flat sun disk |
+| `outline` | 0..4 (0) | Dark lines on silhouettes and creases, this many pixels wide on a 720 px screen. Detected from depth, so they fade out far away and stay under water |
+| `outline_color` | RGB (0.05, 0.04, 0.06) | The lines' colour |
+| `pixelate` | 0..16 (0) | Pixel art: pixels this big on a 720 px screen (0 or 1 = off), no anti-aliasing. Outlines widen with them |
+| `palette` | 0..32 (0) | Levels per colour channel, with an ordered dither (0 = full colour). 4 to 8 gives a retro palette |
+
+Toon shading, shade tint, rim light and the painted sky work on every
+preset. Outlines, pixels and the palette are screen effects, so like the
+grade they need `MEDIUM` and up. Each is one more cheap full-screen pass
+(the palette and pixels share the grade's pass).
+
 ## Sky and quality
 
 ```python

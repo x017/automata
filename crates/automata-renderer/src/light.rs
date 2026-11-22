@@ -510,6 +510,11 @@ pub(crate) struct LightUniform {
     /// x: the fog layer's top (world Y), y: how fast it thins above that
     /// per metre (0 = plain distance fog), z: how much the sun lights it.
     pub fog_height: [f32; 4],
+    /// x: toon bands (0 = smooth), y: band edge softness, z: rim light,
+    /// w: 1 = painted sky.
+    pub style: [f32; 4],
+    /// rgb: the shade's tint (white = none).
+    pub shadow_tint: [f32; 4],
 }
 
 impl LightUniform {
@@ -553,6 +558,7 @@ impl LightUniform {
             },
         ];
         let direction = sun.normalized_direction();
+        let (style, shadow_tint) = style_params(env);
         let density = if env.fog {
             env.fog_density.max(0.0)
         } else {
@@ -626,8 +632,25 @@ impl LightUniform {
             point_faces,
             point_shadow,
             fog_height: height_fog(env),
+            style,
+            shadow_tint,
         }
     }
+}
+
+/// The shading style: toon bands, their softness, rim light and painted
+/// sky; and the shade's tint.
+fn style_params(env: &Environment) -> ([f32; 4], [f32; 4]) {
+    let [r, g, b] = env.shadow_tint.map(|c| c.clamp(0.0, 2.0));
+    (
+        [
+            f32::from(u8::try_from(env.toon_bands.min(4)).unwrap_or(4)),
+            env.toon_softness.clamp(0.0, 1.0),
+            env.rim_light.clamp(0.0, 2.0),
+            f32::from(u8::from(env.painted_sky)),
+        ],
+        [r, g, b, 0.0],
+    )
 }
 
 /// The height fog layer: its top, falloff per metre and sun glow.

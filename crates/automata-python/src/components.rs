@@ -554,6 +554,15 @@ impl PyEnvironment {
         depth_of_field=0.0,
         focus_distance=0.0,
         focus_range=1.0,
+        toon_bands=0,
+        toon_softness=0.15,
+        shadow_tint=(1.0, 1.0, 1.0),
+        rim_light=0.0,
+        painted_sky=false,
+        outline=0.0,
+        outline_color=(0.05, 0.04, 0.06),
+        pixelate=0.0,
+        palette=0,
         post=None,
         bloom=None,
         contrast=None,
@@ -592,6 +601,15 @@ impl PyEnvironment {
         depth_of_field: f32,
         focus_distance: f32,
         focus_range: f32,
+        toon_bands: u32,
+        toon_softness: f32,
+        shadow_tint: (f32, f32, f32),
+        rim_light: f32,
+        painted_sky: bool,
+        outline: f32,
+        outline_color: (f32, f32, f32),
+        pixelate: f32,
+        palette: u32,
         post: Option<&str>,
         bloom: Option<f32>,
         contrast: Option<f32>,
@@ -645,9 +663,121 @@ impl PyEnvironment {
                 depth_of_field,
                 focus_distance,
                 focus_range,
+                toon_bands,
+                toon_softness,
+                shadow_tint: rgb(shadow_tint),
+                rim_light,
+                painted_sky,
+                outline,
+                outline_color: rgb(outline_color),
+                pixelate,
+                palette,
                 post,
             },
         })
+    }
+
+    /// A style: ``"realistic"``, ``"semi-realistic"``, ``"botw"``,
+    /// ``"a short hike"`` or ``"nier"`` (case, spaces and dashes don't
+    /// matter). Applied to ``base`` (the default environment if omitted):
+    /// it sets tone mapping, exposure, the lens, the height fog's shape,
+    /// shading, outlines, pixelation and post effects, and keeps the
+    /// base's colours, fog colour and density, sky and clouds.
+    #[staticmethod]
+    #[pyo3(signature = (name, base=None))]
+    fn style(name: &str, base: Option<&Self>) -> PyResult<Self> {
+        base.map_or_else(Environment::default, |b| b.inner)
+            .with_style(name)
+            .map(|inner| Self { inner })
+            .ok_or_else(|| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "unknown style {name:?}; expected one of {:?}",
+                    Environment::STYLES.map(|(n, _)| n)
+                ))
+            })
+    }
+
+    /// A copy of this environment in the style ``name`` (see
+    /// :meth:`style`).
+    fn with_style(&self, name: &str) -> PyResult<Self> {
+        Self::style(name, Some(self))
+    }
+
+    /// The style names, in the editor's order.
+    #[staticmethod]
+    fn styles() -> Vec<String> {
+        Environment::STYLES
+            .iter()
+            .map(|(name, _)| (*name).to_owned())
+            .collect()
+    }
+
+    /// The style this environment is exactly, or ``"Custom"`` once any of
+    /// a style's knobs has changed.
+    #[getter]
+    fn style_name(&self) -> &'static str {
+        self.inner.style_name()
+    }
+
+    /// Toon shading: the light in this many flat bands (``0`` = smooth).
+    #[getter]
+    fn toon_bands(&self) -> u32 {
+        self.inner.toon_bands
+    }
+
+    /// How soft the edges between toon bands are, ``0`` (crisp) to ``1``.
+    #[getter]
+    fn toon_softness(&self) -> f32 {
+        self.inner.toon_softness
+    }
+
+    /// The colour of shade: ambient light out of the sun is multiplied by
+    /// it (white = none).
+    #[getter]
+    fn shadow_tint(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.shadow_tint;
+        (r, g, b)
+    }
+
+    /// Light along objects' edges, from the sky and a sun behind them
+    /// (``0`` = none).
+    #[getter]
+    fn rim_light(&self) -> f32 {
+        self.inner.rim_light
+    }
+
+    /// A painted sky: banded gradient, flat clouds, a flat sun disk.
+    #[getter]
+    fn painted_sky(&self) -> bool {
+        self.inner.painted_sky
+    }
+
+    /// Outline width in pixels on a 720-pixel-tall screen (Medium graphics
+    /// and up; ``0`` = none).
+    #[getter]
+    fn outline(&self) -> f32 {
+        self.inner.outline
+    }
+
+    /// The outlines' colour.
+    #[getter]
+    fn outline_color(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.outline_color;
+        (r, g, b)
+    }
+
+    /// Pixel art: the size of a pixel on a 720-pixel-tall screen (Medium
+    /// graphics and up; ``0`` or ``1`` = off).
+    #[getter]
+    fn pixelate(&self) -> f32 {
+        self.inner.pixelate
+    }
+
+    /// A limited palette: levels per colour channel, dithered (Medium
+    /// graphics and up; ``0`` = full colour).
+    #[getter]
+    fn palette(&self) -> u32 {
+        self.inner.palette
     }
 
     /// A copy with post effects: start from the named look ``post``

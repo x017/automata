@@ -25,6 +25,7 @@ mod quality;
 mod renderer;
 mod shadow;
 mod ssao;
+mod style;
 pub mod text;
 mod texture;
 mod water;

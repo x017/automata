@@ -62,6 +62,105 @@ struct PostUniform {
     lens: [f32; 4],
     /// x: near, y: far (m), zw: the full-size viewport (px).
     depth: [f32; 4],
+    /// x: outline width (px), y: pixel block (px, 1 = off), z: palette
+    /// levels (0 = off).
+    style: [f32; 4],
+    /// rgb: the outline colour.
+    outline_color: [f32; 4],
+}
+
+/// The Environment's screen-space style this frame: outlines, pixelation
+/// and the palette (Medium graphics and up), in pixels of the viewport.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Stylize {
+    /// Outline width (px, 0 = none).
+    pub outline: f32,
+    pub outline_color: [f32; 3],
+    /// Pixel block size (px, 1 = no pixelation).
+    pub pixel: f32,
+    /// Levels per channel (0 = full colour).
+    pub palette: f32,
+    /// The camera's clip planes, to turn depth into distance.
+    pub near: f32,
+    pub far: f32,
+    /// The viewport (px).
+    pub size: (u32, u32),
+}
+
+impl Default for Stylize {
+    fn default() -> Self {
+        Self {
+            outline: 0.0,
+            outline_color: [0.0; 3],
+            pixel: 1.0,
+            palette: 0.0,
+            near: 0.1,
+            far: 1000.0,
+            size: (1, 1),
+        }
+    }
+}
+
+impl Stylize {
+    /// `env`'s style for a `size` viewport seen through `camera`. Sizes are
+    /// given for a 720-pixel-tall screen and scale with it; outlines get as
+    /// wide as the pixel blocks, so they survive pixelation. No outlines
+    /// without a 3D camera.
+    #[must_use]
+    pub fn new(
+        env: &crate::Environment,
+        camera: Option<&crate::Camera3D>,
+        size: (u32, u32),
+    ) -> Self {
+        let scale = size.1.max(1) as f32 / 720.0;
+        let pixel = if env.pixelate > 1.0 {
+            (env.pixelate.min(16.0) * scale).round().max(1.0)
+        } else {
+            1.0
+        };
+        let outline = match camera {
+            Some(_) if env.outline > 0.0 => env.outline.min(4.0) * scale.max(0.5) * pixel,
+            _ => 0.0,
+        };
+        let palette = if env.palette >= 2 {
+            f32::from(u8::try_from(env.palette.min(32)).unwrap_or(32))
+        } else {
+            0.0
+        };
+        Self {
+            outline,
+            outline_color: env.outline_color,
+            pixel,
+            palette,
+            near: camera.map_or(0.1, |c| c.near),
+            far: camera.map_or(1000.0, |c| c.far),
+            size,
+        }
+    }
+
+    /// Whether outlines are drawn.
+    #[must_use]
+    pub fn outlines(&self) -> bool {
+        self.outline > 0.0
+    }
+
+    /// Whether the final pass pixelates or limits the palette.
+    #[must_use]
+    pub fn pixel_art(&self) -> bool {
+        self.pixel > 1.0 || self.palette >= 2.0
+    }
+
+    fn fill(&self, mut u: PostUniform) -> PostUniform {
+        u.style = [self.outline, self.pixel, self.palette, 0.0];
+        u.outline_color = [
+            self.outline_color[0],
+            self.outline_color[1],
+            self.outline_color[2],
+            1.0,
+        ];
+        u.depth = [self.near, self.far, self.size.0 as f32, self.size.1 as f32];
+        u
+    }
 }
 
 /// Beautiful's camera effects this frame: god rays and depth of field.
@@ -180,6 +279,8 @@ pub(crate) struct LdrChain {
     pub grade: Grade,
     /// Cheap bloom strength (0 = none).
     pub bloom: f32,
+    /// Outlines, pixelation and the palette.
+    pub style: Stylize,
 }
 
 impl LdrChain {
@@ -189,6 +290,7 @@ impl LdrChain {
         quality: crate::GraphicsQuality,
         post: &crate::PostEffects,
         time: f32,
+        style: Stylize,
     ) -> Option<Self> {
         if !quality.post_effects() || quality.is_beautiful() {
             return None;
@@ -199,7 +301,11 @@ impl LdrChain {
         } else {
             0.0
         };
-        (bloom > 0.0 || !grade.is_noop()).then_some(Self { grade, bloom })
+        (bloom > 0.0 || !grade.is_noop() || style.outlines() || style.pixel_art()).then_some(Self {
+            grade,
+            bloom,
+            style,
+        })
     }
 }
 
@@ -466,6 +572,9 @@ pub(crate) struct Post {
     fxaa: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
     /// Grade pipelines per target format (Medium to Ultra).
     grade: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
+    /// Outlines blended over the scene image, per format (HDR for
+    /// Beautiful, the target's for Medium to Ultra).
+    outline: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
     sampler: wgpu::Sampler,
     placeholder: wgpu::TextureView,
     placeholder_depth: wgpu::TextureView,
@@ -648,6 +757,7 @@ impl Post {
             dof,
             fxaa: Vec::new(),
             grade: Vec::new(),
+            outline: Vec::new(),
             sampler,
             placeholder,
             placeholder_depth,
@@ -667,6 +777,63 @@ impl Post {
             let pipeline = self.final_pipeline(device, "fs_fxaa", format);
             self.fxaa.push((format, pipeline));
         }
+        self.ensure_outline(device, HDR_FORMAT);
+    }
+
+    /// Makes sure an outline pipeline exists for `format`.
+    fn ensure_outline(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) {
+        if !self.outline.iter().any(|(f, _)| *f == format) {
+            // Blends the colour in by the edge's alpha and keeps the
+            // image's own alpha (Beautiful's coverage).
+            let blend = wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::SrcAlpha,
+                    dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::Zero,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Add,
+                },
+            };
+            let pipeline = fullscreen_pipeline(
+                device,
+                &self.layout,
+                &self.shader,
+                "fs_outline",
+                format,
+                Some(blend),
+                None,
+            );
+            self.outline.push((format, pipeline));
+        }
+    }
+
+    /// Draws `style`'s outlines over `target` (whose format is `format`),
+    /// from the scene's `depth`.
+    pub fn record_outline(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        format: wgpu::TextureFormat,
+        depth: &wgpu::TextureView,
+        style: &Stylize,
+    ) {
+        let Some((_, pipeline)) = self.outline.iter().find(|(f, _)| *f == format) else {
+            return;
+        };
+        let uniform = style.fill(PostUniform::default());
+        let bind = self.bind_all(device, &self.placeholder, uniform, [None; 4], Some(depth));
+        fullscreen_pass(
+            encoder,
+            "outlines",
+            target,
+            wgpu::LoadOp::Load,
+            pipeline,
+            &bind,
+        );
     }
 
     /// A pipeline drawing into the caller's final pass (which has a depth
@@ -711,6 +878,7 @@ impl Post {
             let pipeline = self.final_pipeline(device, "fs_grade", format);
             self.grade.push((format, pipeline));
         }
+        self.ensure_outline(device, format);
     }
 
     /// Frees the size-dependent targets (when leaving the Beautiful preset).
@@ -1014,6 +1182,7 @@ impl Post {
         device: &wgpu::Device,
         pass: &mut wgpu::RenderPass<'_>,
         format: wgpu::TextureFormat,
+        style: &Stylize,
     ) {
         let (Some(t), Some((_, pipeline))) =
             (&self.targets, self.fxaa.iter().find(|(f, _)| *f == format))
@@ -1021,11 +1190,11 @@ impl Post {
             return;
         };
         let ldr_view = t.ldr.create_view(&wgpu::TextureViewDescriptor::default());
-        let uniform = PostUniform {
+        let uniform = style.fill(PostUniform {
             texel: [1.0 / t.size.0 as f32, 1.0 / t.size.1 as f32, 0.0, 0.0],
             output: [f32::from(u8::from(!format.is_srgb())), 0.0, 0.0, 0.0],
             ..PostUniform::default()
-        };
+        });
         let bind = self.bind(device, &ldr_view, uniform, None, None);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind, &[]);
@@ -1112,13 +1281,13 @@ impl Post {
         };
         let scene = t.scene.create_view(&wgpu::TextureViewDescriptor::default());
         let bloom = (chain.bloom > 0.0).then(|| t.bloom_mip(0));
-        let uniform = chain.grade.into_uniform(
+        let uniform = chain.style.fill(chain.grade.into_uniform(
             PostUniform {
                 texel: [1.0 / t.size.0 as f32, 1.0 / t.size.1 as f32, 0.0, 0.0],
                 ..PostUniform::default()
             },
             chain.bloom,
-        );
+        ));
         let bind = self.bind(device, &scene, uniform, bloom.as_ref(), None);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind, &[]);
@@ -1204,35 +1373,85 @@ mod tests {
         assert_eq!(bloom_level_count((960, 540)), 6);
         assert_eq!(bloom_level_count((32, 32)), 3); // 32, 16, 8
         assert_eq!(bloom_level_count((4, 4)), 1);
-        assert_eq!(std::mem::size_of::<PostUniform>(), 192);
+        assert_eq!(std::mem::size_of::<PostUniform>(), 224);
     }
 
     #[test]
     fn the_ldr_chain_runs_only_when_it_changes_something() {
         use crate::{GraphicsQuality as Q, PostEffects};
         let neutral = PostEffects::default();
+        let plain = Stylize::default();
         let graded = PostEffects::preset("vivid").unwrap();
         let no_bloom = PostEffects {
             bloom: 0.0,
             ..neutral
         };
         // Low never, Beautiful has its own chain.
-        assert!(LdrChain::new(Q::Low, &graded, 0.0).is_none());
-        assert!(LdrChain::new(Q::Beautiful, &graded, 0.0).is_none());
+        assert!(LdrChain::new(Q::Low, &graded, 0.0, plain).is_none());
+        assert!(LdrChain::new(Q::Beautiful, &graded, 0.0, plain).is_none());
         // Medium: only for a grade (no bloom there).
-        assert!(LdrChain::new(Q::Medium, &neutral, 0.0).is_none());
-        let medium = LdrChain::new(Q::Medium, &graded, 0.0).unwrap();
+        assert!(LdrChain::new(Q::Medium, &neutral, 0.0, plain).is_none());
+        let medium = LdrChain::new(Q::Medium, &graded, 0.0, plain).unwrap();
         assert!(medium.bloom == 0.0 && medium.grade.misc[2] > 0.5);
         // High: bloom by default, nothing with it off and no grade.
-        let high = LdrChain::new(Q::High, &neutral, 0.0).unwrap();
+        let high = LdrChain::new(Q::High, &neutral, 0.0, plain).unwrap();
         assert!(high.bloom > 0.0 && high.grade.misc[2] < 0.5);
-        assert!(LdrChain::new(Q::High, &no_bloom, 0.0).is_none());
+        assert!(LdrChain::new(Q::High, &no_bloom, 0.0, plain).is_none());
         // Chromatic aberration alone still needs the pass.
         let fringe = PostEffects {
             chromatic_aberration: 0.5,
             ..no_bloom
         };
-        assert!(LdrChain::new(Q::Medium, &fringe, 0.0).is_some());
+        assert!(LdrChain::new(Q::Medium, &fringe, 0.0, plain).is_some());
+        // So do outlines and pixel art, but not on Low.
+        let env = crate::Environment {
+            outline: 1.0,
+            ..crate::Environment::default()
+        };
+        let cam = crate::Camera3D::default();
+        let outlined = Stylize::new(&env, Some(&cam), (1280, 720));
+        assert!(outlined.outlines() && !outlined.pixel_art());
+        assert!(LdrChain::new(Q::High, &no_bloom, 0.0, outlined).is_some());
+        assert!(LdrChain::new(Q::Low, &no_bloom, 0.0, outlined).is_none());
+        let pixels = Stylize::new(
+            &crate::Environment {
+                pixelate: 3.0,
+                ..crate::Environment::default()
+            },
+            Some(&cam),
+            (1280, 720),
+        );
+        assert!(pixels.pixel_art() && !pixels.outlines());
+        assert!(LdrChain::new(Q::Medium, &neutral, 0.0, pixels).is_some());
+    }
+
+    #[test]
+    fn style_sizes_scale_with_the_screen() {
+        let cam = crate::Camera3D::default();
+        let env = crate::Environment {
+            outline: 1.0,
+            pixelate: 3.0,
+            palette: 12,
+            ..crate::Environment::default()
+        };
+        let hd = Stylize::new(&env, Some(&cam), (1280, 720));
+        assert!((hd.pixel - 3.0).abs() < 1e-6 && (hd.outline - 3.0).abs() < 1e-6);
+        assert!((hd.palette - 12.0).abs() < 1e-6);
+        let uhd = Stylize::new(&env, Some(&cam), (3840, 2160));
+        assert!((uhd.pixel - 9.0).abs() < 1e-6);
+        // Blocks never shrink below a pixel; no outlines without a camera.
+        let tiny = Stylize::new(&env, None, (160, 90));
+        assert!((tiny.pixel - 1.0).abs() < 1e-6 && !tiny.outlines());
+        // A one-level palette is no palette.
+        let flat = Stylize::new(
+            &crate::Environment {
+                palette: 1,
+                ..crate::Environment::default()
+            },
+            Some(&cam),
+            (1280, 720),
+        );
+        assert!(!flat.pixel_art());
     }
 
     #[test]

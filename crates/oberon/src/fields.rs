@@ -159,6 +159,22 @@ pub enum Field {
     EnvFocusDistance,
     /// Distance either side of the focus kept sharp.
     EnvFocusRange,
+    /// Toon shading bands (0 = smooth).
+    EnvToonBands,
+    /// Softness of the toon bands' edges.
+    EnvToonSoftness,
+    /// The shade's tint, channel 0..3.
+    EnvShadowTint(u8),
+    /// Rim light along objects' edges.
+    EnvRimLight,
+    /// Outline width (px on a 720 px screen; 0 = none).
+    EnvOutline,
+    /// Outline color, channel 0..3.
+    EnvOutlineColor(u8),
+    /// Pixel size (px on a 720 px screen; 0 = off).
+    EnvPixelate,
+    /// Palette levels per channel (0 = full colour).
+    EnvPalette,
     /// Camera eye position, axis 0..3.
     CameraPosition(u8),
     /// Camera look-at target, axis 0..3.
@@ -254,6 +270,8 @@ pub enum Flag {
     EnvFog,
     /// Environment sky dome with a sun on/off.
     EnvSkyDome,
+    /// The sky painted: banded, flat clouds and sun.
+    EnvPaintedSky,
     /// Water reaches the horizon.
     WaterEndless,
     /// Audio source repeats.
@@ -287,6 +305,8 @@ pub enum Choice {
     ColliderShape,
     /// Environment tone mapping curve.
     Tonemapping,
+    /// The Environment's style (Realistic, Semi-realistic …; Custom once changed).
+    EnvStyle,
     /// A built-in particle look (Fire, Smoke …; Custom once changed).
     ParticlePreset,
     /// Where particles start: Point, Sphere, Box, Cone.
@@ -365,6 +385,13 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::EnvDepthOfField => data.environment?.depth_of_field,
         F::EnvFocusDistance => data.environment?.focus_distance,
         F::EnvFocusRange => data.environment?.focus_range,
+        F::EnvToonBands | F::EnvPalette => return env_count(data, field),
+        F::EnvToonSoftness => data.environment?.toon_softness,
+        F::EnvShadowTint(i) => data.environment?.shadow_tint[axis(i)],
+        F::EnvRimLight => data.environment?.rim_light,
+        F::EnvOutline => data.environment?.outline,
+        F::EnvOutlineColor(i) => data.environment?.outline_color[axis(i)],
+        F::EnvPixelate => data.environment?.pixelate,
         F::WaterSize(i) => data.water?.size[usize::from(i.min(1))],
         F::WaterDeep(i) => data.water?.deep_color[axis(i)],
         F::WaterShallow(i) => data.water?.shallow_color[axis(i)],
@@ -462,6 +489,8 @@ pub fn range(field: Field) -> (f32, f32) {
         | F::EnvBackground(_)
         | F::EnvFogColor(_)
         | F::EnvZenith(_)
+        | F::EnvOutlineColor(_)
+        | F::EnvToonSoftness
         | F::EnvClouds
         | F::EnvVignette
         | F::EnvGrain
@@ -498,11 +527,17 @@ pub fn range(field: Field) -> (f32, f32) {
         F::LightTimeOfDay => (5.0, 19.0),
         F::LightShadowDistance => (10.0, 1_000.0),
         F::LightShadowSoftness => (0.0, 8.0),
-        F::EnvExposure => (0.0, 16.0),
+        F::EnvExposure | F::EnvPixelate => (0.0, 16.0),
         F::MeshEmissiveStrength => (0.0, 100.0),
         F::MeshGlowLight | F::EnvFogFalloff => (0.0, 10.0),
-        F::EnvFogDensity | F::EnvAmbientOcclusion | F::WaterCaustics | F::EnvGodRays => (0.0, 2.0),
+        F::EnvFogDensity
+        | F::EnvAmbientOcclusion
+        | F::WaterCaustics
+        | F::EnvGodRays
+        | F::EnvShadowTint(_)
+        | F::EnvRimLight => (0.0, 2.0),
         F::EnvFogStart | F::EnvFocusDistance | F::EnvFocusRange => (0.0, 100_000.0),
+        F::EnvPalette => (0.0, 32.0),
         F::EnvFogHeight => (-10_000.0, 10_000.0),
         F::MeshSize | F::ColliderRadius | F::ColliderExtents(_) | F::ColliderHalfHeight => {
             (0.001, 10_000.0)
@@ -510,6 +545,8 @@ pub fn range(field: Field) -> (f32, f32) {
         F::CameraFov => (1.0, 179.0),
         F::CharacterSlope => (0.0, 89.0),
         F::AudioVolume
+        | F::EnvToonBands
+        | F::EnvOutline
         | F::EnvSunGlow
         | F::EnvLensFlare
         | F::EnvBloom
@@ -581,6 +618,10 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::EnvFogSun
         | F::EnvGodRays
         | F::EnvDepthOfField
+        | F::EnvToonSoftness
+        | F::EnvShadowTint(_)
+        | F::EnvRimLight
+        | F::EnvOutlineColor(_)
         | F::EnvBloom
         | F::EnvContrast
         | F::EnvSaturation
@@ -600,7 +641,7 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::AudioVolume
         | F::AudioPitch
         | F::EnvExposure => 0.005,
-        F::AudioRange | F::LightShadowDistance => 0.1,
+        F::AudioRange | F::LightShadowDistance | F::EnvToonBands | F::EnvPalette => 0.1,
         F::Scale(_) | F::LightDirection(_) => 0.01,
         _ => 0.02,
     }
@@ -725,7 +766,13 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
         | F::EnvGodRays
         | F::EnvDepthOfField
         | F::EnvFocusDistance
-        | F::EnvFocusRange => match &mut data.environment {
+        | F::EnvFocusRange
+        | F::EnvToonSoftness
+        | F::EnvShadowTint(_)
+        | F::EnvRimLight
+        | F::EnvOutline
+        | F::EnvOutlineColor(_)
+        | F::EnvPixelate => match &mut data.environment {
             Some(env) => match field {
                 F::EnvSky(i) => env.sky_color[axis(i)] = v,
                 F::EnvGround(i) => env.ground_color[axis(i)] = v,
@@ -756,11 +803,18 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
                 F::EnvDepthOfField => env.depth_of_field = v,
                 F::EnvFocusDistance => env.focus_distance = v,
                 F::EnvFocusRange => env.focus_range = v,
+                F::EnvToonSoftness => env.toon_softness = v,
+                F::EnvShadowTint(i) => env.shadow_tint[axis(i)] = v,
+                F::EnvRimLight => env.rim_light = v,
+                F::EnvOutline => env.outline = v,
+                F::EnvOutlineColor(i) => env.outline_color[axis(i)] = v,
+                F::EnvPixelate => env.pixelate = v,
                 F::EnvFogDensity => env.fog_density = v,
                 _ => env.fog_start = v,
             },
             None => return false,
         },
+        F::EnvToonBands | F::EnvPalette => return set_env_count(data, field, v),
         F::WaterSize(_)
         | F::WaterDeep(_)
         | F::WaterShallow(_)
@@ -932,6 +986,7 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::ColliderEnabled => data.collider_3d.as_ref()?.enabled,
         Flag::EnvFog => data.environment?.fog,
         Flag::EnvSkyDome => data.environment?.sky,
+        Flag::EnvPaintedSky => data.environment?.painted_sky,
         Flag::WaterEndless => data.water?.endless,
         Flag::AudioLoop => data.audio_source.as_ref()?.looping,
         Flag::ParticleEmitting => data.particle_emitter.as_ref()?.emitting,
@@ -981,6 +1036,10 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
         },
         Flag::EnvSkyDome => match &mut data.environment {
             Some(env) => env.sky = !env.sky,
+            None => return false,
+        },
+        Flag::EnvPaintedSky => match &mut data.environment {
+            Some(env) => env.painted_sky = !env.painted_sky,
             None => return false,
         },
         Flag::WaterEndless => match &mut data.water {
@@ -1053,6 +1112,7 @@ pub fn choice_label(data: &EntityData, choice: Choice) -> Option<&'static str> {
         },
         Choice::ColliderShape => data.collider_3d.as_ref()?.shape.label(),
         Choice::Tonemapping => data.environment?.tonemapping.label(),
+        Choice::EnvStyle => data.environment?.style_name(),
         Choice::ParticlePreset => data
             .particle_emitter
             .as_ref()?
@@ -1174,6 +1234,19 @@ pub fn cycle(data: &mut EntityData, choice: Choice) -> bool {
                 let all = automata_renderer::Tonemapping::ALL;
                 let i = all.iter().position(|t| *t == env.tonemapping).unwrap_or(0);
                 env.tonemapping = all[(i + 1) % all.len()];
+            }
+            None => return false,
+        },
+        // Custom → Realistic → … → NieR → Realistic.
+        Choice::EnvStyle => match &mut data.environment {
+            Some(env) => {
+                let all = automata_renderer::Environment::STYLES;
+                let name = env.style_name();
+                let next = all
+                    .iter()
+                    .position(|(n, _)| *n == name)
+                    .map_or(0, |i| (i + 1) % all.len());
+                *env = env.with_style(all[next].0).unwrap_or(*env);
             }
             None => return false,
         },
@@ -1356,6 +1429,32 @@ pub fn set_color(data: &mut EntityData, target: crate::ui::ColorTarget, rgba: [f
             ok
         }
     }
+}
+
+/// An Environment count (toon bands, palette levels) as a field value.
+fn env_count(data: &EntityData, field: Field) -> Option<f32> {
+    let env = data.environment?;
+    let n = if field == Field::EnvToonBands {
+        env.toon_bands
+    } else {
+        env.palette
+    };
+    Some(f32::from(u8::try_from(n).unwrap_or(u8::MAX)))
+}
+
+/// Sets an Environment count from a field value (already in range).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // counts
+fn set_env_count(data: &mut EntityData, field: Field, v: f32) -> bool {
+    let Some(env) = &mut data.environment else {
+        return false;
+    };
+    let n = v.round().max(0.0) as u32;
+    if field == Field::EnvToonBands {
+        env.toon_bands = n;
+    } else {
+        env.palette = n;
+    }
+    true
 }
 
 /// Every option of an enumerated property, in cycling order (empty if the
@@ -1712,6 +1811,46 @@ mod tests {
         assert!((env.fog_falloff - 0.4).abs() < 1e-6);
         assert!((env.god_rays - 2.0).abs() < 1e-6, "god rays top out at 2");
         assert_eq!(get(&d, Field::EnvFocusDistance), Some(12.0));
+    }
+
+    #[test]
+    fn environment_styles_pick_whole_looks_and_go_custom_when_tweaked() {
+        let mut d = entity();
+        assert_eq!(choice_label(&d, Choice::EnvStyle), None);
+        crate::doc::ComponentKind::Environment.add_to(&mut d);
+        let sky = d.environment.unwrap().zenith_color;
+        assert_eq!(
+            choice_options(&d, Choice::EnvStyle),
+            [
+                "Custom",
+                "Realistic",
+                "Semi-realistic",
+                "BotW",
+                "A Short Hike",
+                "NieR"
+            ]
+        );
+        assert!(set_choice(&mut d, Choice::EnvStyle, "A Short Hike"));
+        assert_eq!(choice_label(&d, Choice::EnvStyle), Some("A Short Hike"));
+        let env = d.environment.unwrap();
+        assert!(env.outline > 0.0 && env.pixelate > 1.0 && env.toon_bands == 2);
+        assert_eq!(env.zenith_color, sky, "the scene's sky stays");
+        // Any knob makes it Custom; counts round and clamp.
+        assert!(set(&mut d, Field::EnvPalette, 7.6));
+        assert_eq!(get(&d, Field::EnvPalette), Some(8.0));
+        assert_eq!(choice_label(&d, Choice::EnvStyle), Some("Custom"));
+        assert!(set(&mut d, Field::EnvToonBands, 9.0));
+        assert_eq!(d.environment.unwrap().toon_bands, 4);
+        assert!(set(&mut d, Field::EnvShadowTint(2), 1.5));
+        assert!(set(&mut d, Field::EnvOutlineColor(0), 0.5));
+        assert!(set(&mut d, Field::EnvRimLight, 0.4));
+        assert!(toggle(&mut d, Flag::EnvPaintedSky));
+        let env = d.environment.unwrap();
+        assert!((env.shadow_tint[2] - 1.5).abs() < 1e-6 && !env.painted_sky);
+        // Cycling from NieR wraps to Realistic.
+        assert!(set_choice(&mut d, Choice::EnvStyle, "NieR"));
+        assert!(cycle(&mut d, Choice::EnvStyle));
+        assert_eq!(choice_label(&d, Choice::EnvStyle), Some("Realistic"));
     }
 
     #[test]

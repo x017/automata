@@ -53,6 +53,69 @@ fn fbm(p0: vec2<f32>) -> f32 {
     return sum;
 }
 
+fn painted() -> bool {
+    return light.style.w > 0.5;
+}
+
+// `x` (0..1) in `n` flat steps with soft edges between them.
+fn posterize(x: f32, n: f32, soft: f32) -> f32 {
+    let y = x * n;
+    let i = floor(y);
+    return (i + smoothstep(0.5 - soft, 0.5 + soft, y - i)) / n;
+}
+
+// The painted sky's dome: the gradient in a few soft bands, broken up by
+// brush-stroke streaks running along the horizon, with a banded halo.
+fn painted_dome(d: vec3<f32>) -> vec3<f32> {
+    let up = clamp(d.y, 0.0, 1.0);
+    // Circle coordinates for the azimuth (no seam), stretched by height so
+    // the noise runs in horizontal strokes.
+    let flat_dir = normalize(d.xz + vec2<f32>(1e-4, 0.0));
+    let stroke = fbm(flat_dir * 2.5 + vec2<f32>(1.0, 0.6) * up * 26.0) - 0.5;
+    let q = sqrt(sqrt(up));
+    let t = clamp(q * (2.0 - q) + stroke * 0.12, 0.0, 1.0);
+    var c = mix(light.background.rgb, light.sky_zenith.rgb, posterize(t, 5.0, 0.18));
+    let l = sun_dir();
+    let mu = dot(d, l);
+    let above = smoothstep(-0.25, 0.05, l.y);
+    let halo = posterize(clamp(lobe(mu, 40.0) * 0.8 + lobe(mu, 5.0) * 0.2, 0.0, 1.0), 4.0, 0.12);
+    c = c + sun_tint() * light.sky_sun.y * above * halo * 0.45;
+    if d.y < 0.0 {
+        let ground = light.ground_tonemap.rgb * light.color_ambient.a;
+        c = mix(c, ground, 1.0 - exp(d.y * 12.0));
+    }
+    return c;
+}
+
+// Painted clouds: flat shapes with crisp edges, lit on top and in a cool
+// flat shade inside, with a bright rim toward the sun.
+fn painted_clouds(d: vec3<f32>, base: vec3<f32>) -> vec3<f32> {
+    let cover = light.sky_sun.z;
+    if cover <= 0.001 || d.y <= 0.0 {
+        return base;
+    }
+    let time = light.fog_params.y;
+    let uv = d.xz / (d.y + 0.1) * 1.8 + vec2<f32>(time * 0.01, time * 0.003);
+    let n = fbm(uv * 0.5) * 0.7 + fbm(uv * 1.6 + vec2<f32>(5.2, 1.3)) * 0.3;
+    let threshold = (1.0 - cover) * 0.7 + 0.15;
+    let shape = smoothstep(threshold, threshold + 0.025, n);
+    if shape <= 0.0 {
+        return base;
+    }
+    let l = sun_dir();
+    let tint = sun_tint();
+    let ambient = mix(light.background.rgb, light.sky_zenith.rgb, 0.45);
+    let lit = tint * (0.85 + 0.15 * l.y) + ambient * 0.25;
+    let shade = mix(ambient, lit, 0.45) * vec3<f32>(0.9, 0.92, 1.0);
+    // Where the cloud is thicker toward the sun, this side is in its shade.
+    let toward = fbm((uv + normalize(l.xz + vec2<f32>(1e-4, 0.0)) * 0.12) * 0.5) * 0.7
+        + fbm((uv + normalize(l.xz + vec2<f32>(1e-4, 0.0)) * 0.12) * 1.6 + vec2<f32>(5.2, 1.3)) * 0.3;
+    let shaded = smoothstep(0.0, 0.03, toward - n);
+    let rim = (1.0 - smoothstep(threshold + 0.025, threshold + 0.06, n)) * lobe(dot(d, l), 8.0);
+    let fade = smoothstep(0.0, 0.1, d.y);
+    return mix(base, mix(lit, shade, shaded) + tint * rim * 0.5, shape * fade * 0.95);
+}
+
 // Cloud cover along `d` (above the horizon): coverage and the light
 // through it, from a noise layer projected onto a plane overhead.
 fn clouds(d: vec3<f32>, base: vec3<f32>) -> vec3<f32> {
@@ -84,9 +147,20 @@ fn clouds(d: vec3<f32>, base: vec3<f32>) -> vec3<f32> {
 
 fn sky_color(ndc: vec2<f32>) -> vec3<f32> {
     let d = view_ray(ndc);
-    var c = sky_dome(d);
     let l = sun_dir();
     let mu = dot(d, l);
+    if painted() {
+        // A flat disk with a faint ring, painted rather than blinding.
+        var c = painted_dome(d);
+        let edge = light.sky_sun.x;
+        let width = max((1.0 - edge) * 0.08, 2e-6);
+        let disk = smoothstep(edge - width, edge + width, mu) * smoothstep(-0.02, 0.01, d.y);
+        let ring_edge = 1.0 - (1.0 - edge) * 2.6;
+        let ring = smoothstep(ring_edge - width, ring_edge + width, mu) * (1.0 - disk);
+        c = mix(c, sun_tint() * 4.0, disk) + sun_tint() * ring * 0.12;
+        return painted_clouds(d, c);
+    }
+    var c = sky_dome(d);
     // The disk: a hot core with darker limbs and an anti-aliased edge,
     // bright enough in HDR for bloom to catch.
     let edge = light.sky_sun.x;

@@ -982,7 +982,7 @@ impl Renderer {
             self.ctx.format()
         };
         let beautiful = self.quality.is_beautiful();
-        let chain = self.ldr_chain(draw);
+        let chain = self.ldr_chain(draw, viewport);
         self.ensure_frame_pipelines(draw, viewport, format, beautiful);
         if chain.is_some() {
             self.post.ensure_ldr(self.ctx.device(), viewport, format);
@@ -1200,14 +1200,13 @@ impl Renderer {
             .map(|(_, _, p)| p)
     }
 
-    /// The forward path: meshes, water (blended) and sprites in one pass,
-    /// straight into the target.
-    #[allow(clippy::too_many_arguments)]
     /// The Medium-to-Ultra post chain this frame needs: 3D frames with an
-    /// Environment whose post effects change something on this preset.
-    fn ldr_chain(&self, draw: &DrawList) -> Option<crate::post::LdrChain> {
+    /// Environment whose post effects or style change something on this
+    /// preset.
+    fn ldr_chain(&self, draw: &DrawList, viewport: (u32, u32)) -> Option<crate::post::LdrChain> {
         let env = draw.environment.filter(|_| draw.camera_3d.is_some())?;
-        crate::post::LdrChain::new(self.quality, &env.post, draw.time.unwrap_or(0.0))
+        let style = crate::post::Stylize::new(&env, draw.camera_3d.as_ref(), viewport);
+        crate::post::LdrChain::new(self.quality, &env.post, draw.time.unwrap_or(0.0), style)
     }
 
     /// The forward path (Low to Ultra), straight into `view`, or with a
@@ -1245,6 +1244,7 @@ impl Renderer {
         // Particles get a pass of their own after the scene's, reading its
         // depth (kept for them).
         let particle_depth = depth_view.filter(|_| !prepared.particle_runs.is_empty());
+        let outlines = chain.filter(|c| c.style.outlines());
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("main"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1260,7 +1260,7 @@ impl Renderer {
                 view: dv,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
-                    store: if particle_depth.is_some() {
+                    store: if particle_depth.is_some() || outlines.is_some() {
                         wgpu::StoreOp::Store
                     } else {
                         wgpu::StoreOp::Discard
@@ -1282,7 +1282,8 @@ impl Renderer {
         if depth_view.is_some() {
             self.record_sky(&mut pass, draw, prepared, format);
         }
-        if let Some(water) = self.water_pipeline(format, false, shadows) {
+        let water = self.water_pipeline(format, false, shadows);
+        if let Some(water) = water.filter(|_| outlines.is_none()) {
             self.record_waters(&mut pass, prepared, water, &self.scene_placeholder);
         }
         let (Some(chain), Some(depth_view)) = (chain, depth_view) else {
@@ -1297,11 +1298,29 @@ impl Renderer {
             return;
         };
         drop(pass);
-        if let Some(depth) = particle_depth {
+        let device = self.ctx.device();
+        // Outlines before the water (which covers what's under it, lines
+        // too) and the particles, neither of which writes depth.
+        if let Some(chain) = outlines {
+            self.post.record_outline(
+                device,
+                encoder,
+                scene_view,
+                format,
+                depth_view,
+                &chain.style,
+            );
+            let mut pass = self.particle_pass(encoder, scene_view, depth_view);
+            if let Some(water) = water {
+                self.record_waters(&mut pass, prepared, water, &self.scene_placeholder);
+            }
+            if particle_depth.is_some() {
+                self.record_particles(&mut pass, prepared, format, depth_view);
+            }
+        } else if let Some(depth) = particle_depth {
             let mut pass = self.particle_pass(encoder, scene_view, depth);
             self.record_particles(&mut pass, prepared, format, depth);
         }
-        let device = self.ctx.device();
         self.post.record_ldr_bloom(device, encoder, &chain);
         // Final: the graded image into the target, then sprites on top.
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1409,10 +1428,14 @@ impl Renderer {
             .water_pipeline(pipeline::HDR_FORMAT, true, pipeline::ForwardShadows::ALL)
             .filter(|_| !draw.waters.is_empty());
         let particles = !prepared.particle_runs.is_empty();
-        // God rays and depth of field read the scene's depth afterwards.
-        let lens_depth = draw
+        let env = draw.environment.unwrap_or_default();
+        let style = draw
             .environment
-            .is_some_and(|e| e.god_rays > 0.0 || e.depth_of_field > 0.0);
+            .map(|e| crate::post::Stylize::new(&e, draw.camera_3d.as_ref(), targets.size))
+            .unwrap_or_default();
+        // God rays, depth of field and outlines read the scene's depth
+        // afterwards.
+        let lens_depth = env.god_rays > 0.0 || env.depth_of_field > 0.0 || style.outlines();
         let keep_depth = |keep: bool| {
             if keep {
                 wgpu::StoreOp::Store
@@ -1451,6 +1474,17 @@ impl Renderer {
             self.record_sky(&mut pass, draw, prepared, pipeline::HDR_FORMAT);
         }
 
+        // Outlines before the water, which covers (and bends) them.
+        if style.outlines() {
+            self.post.record_outline(
+                device,
+                encoder,
+                &hdr_view,
+                pipeline::HDR_FORMAT,
+                &hdr_depth,
+                &style,
+            );
+        }
         if let Some(water) = water {
             // Water reads the scene behind it from copies (a texture can't
             // be sampled while it's being drawn into).
@@ -1519,7 +1553,6 @@ impl Renderer {
             self.record_particles(&mut pass, prepared, pipeline::HDR_FORMAT, &hdr_depth);
         }
 
-        let env = draw.environment.unwrap_or_default();
         // No lens flare or god rays from under the water.
         let sun = draw
             .camera_3d
@@ -1573,7 +1606,7 @@ impl Renderer {
             }),
             ..wgpu::RenderPassDescriptor::default()
         });
-        self.post.draw_fxaa(device, &mut pass, format);
+        self.post.draw_fxaa(device, &mut pass, format, &style);
         self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
     }
 
@@ -4000,6 +4033,179 @@ mod tests {
                 outside(&on_it) <= outside(&sharp) + 6,
                 "in focus it stays sharp: {}",
                 outside(&on_it)
+            );
+        }
+    }
+
+    /// A sphere lit from the left on a dark background, under `env`, seen
+    /// from 3 m away.
+    fn styled_sphere(renderer: &mut Renderer, env: crate::Environment) -> Vec<u8> {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let sphere = renderer.create_mesh(&MeshData::sphere(2.0));
+        let paint = renderer.create_material([0.8, 0.8, 0.8, 1.0], None);
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 0.0, 3.0),
+            glam::Vec3::ZERO,
+        ));
+        draw.set_sun(crate::Sun::new(glam::Vec3::new(1.0, 0.0, -0.4)));
+        draw.set_environment(crate::Environment {
+            lens_flare: 0.0,
+            post: crate::PostEffects {
+                bloom: 0.0,
+                ..crate::PostEffects::default()
+            },
+            ..env
+        });
+        draw.mesh(&sphere, glam::Mat4::IDENTITY, &paint);
+        renderer.render_offscreen(&draw, &target);
+        read_pixels(renderer, &target, size)
+    }
+
+    #[test]
+    fn offscreen_toon_bands_flatten_the_shading_into_steps() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping toon test");
+            return;
+        };
+        let size = renderer.size();
+        // The distinct brightnesses along the middle row, across the
+        // sphere from its lit side to its dark side.
+        let tones = |pixels: &[u8]| {
+            let mut l: Vec<u32> = (12..52)
+                .map(|x| {
+                    let p = pixel_at(pixels, size, x, 32);
+                    p[0] + p[1] + p[2]
+                })
+                .collect();
+            l.sort_unstable();
+            l.dedup_by(|a, b| a.abs_diff(*b) <= 3);
+            l.len()
+        };
+        for quality in [GraphicsQuality::High, GraphicsQuality::Beautiful] {
+            renderer.set_quality(quality);
+            let smooth = styled_sphere(&mut renderer, crate::Environment::default());
+            let toon = styled_sphere(
+                &mut renderer,
+                crate::Environment {
+                    toon_bands: 2,
+                    toon_softness: 0.05,
+                    ..crate::Environment::default()
+                },
+            );
+            let (a, b) = (tones(&smooth), tones(&toon));
+            assert!(
+                b * 2 <= a,
+                "{quality:?}: toon shading has a few flat tones, {a} -> {b}"
+            );
+            // The shade tint colours the dark side: blue shade.
+            let tinted = styled_sphere(
+                &mut renderer,
+                crate::Environment {
+                    toon_bands: 2,
+                    shadow_tint: [0.4, 0.6, 1.6],
+                    ..crate::Environment::default()
+                },
+            );
+            let dark = pixel_at(&tinted, size, 46, 32);
+            assert!(dark[2] > dark[0] + 4, "{quality:?}: blue shade, {dark:?}");
+        }
+    }
+
+    #[test]
+    fn offscreen_outlines_trace_edges_but_not_flat_faces() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping outline test");
+            return;
+        };
+        let size = renderer.size();
+        let luma = |p: [u32; 3]| p[0] + p[1] + p[2];
+        let outlined = crate::Environment {
+            outline: 1.0,
+            outline_color: [0.0; 3],
+            ..crate::Environment::default()
+        };
+        for quality in GraphicsQuality::ALL {
+            renderer.set_quality(quality);
+            let plain = styled_sphere(&mut renderer, crate::Environment::default());
+            let lined = styled_sphere(&mut renderer, outlined);
+            if quality == GraphicsQuality::Low {
+                assert_eq!(plain, lined, "Low: no outlines");
+                continue;
+            }
+            // The sphere's lit left edge along the middle row.
+            let edge = (0..32)
+                .find(|&x| luma(pixel_at(&plain, size, x, 32)) > 60)
+                .expect("the sphere is lit");
+            let darkest = (edge.saturating_sub(2)..edge + 3)
+                .map(|x| luma(pixel_at(&lined, size, x, 32)))
+                .min()
+                .unwrap_or(0);
+            let before = luma(pixel_at(&plain, size, edge + 1, 32));
+            assert!(
+                darkest + 60 < before,
+                "{quality:?}: a dark line on the silhouette, {before} -> {darkest}"
+            );
+            // The sphere's middle (smoothly curved) has none.
+            let (a, b) = (
+                luma(pixel_at(&plain, size, 26, 32)),
+                luma(pixel_at(&lined, size, 26, 32)),
+            );
+            assert!(
+                a.abs_diff(b) <= 8,
+                "{quality:?}: no line inside, {a} -> {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn offscreen_pixelation_draws_blocks_in_a_small_palette() {
+        let Some(mut renderer) = pollster::block_on(Renderer::new_offscreen((96, 72))).ok() else {
+            eprintln!("no GPU adapter; skipping pixelation test");
+            return;
+        };
+        let size = renderer.size();
+        let pixel_art = crate::Environment {
+            pixelate: 16.0,
+            ..crate::Environment::default()
+        };
+        // 16 on 720 is 1.6, so 2 px blocks at this size.
+        let blocks_are_flat = |pixels: &[u8]| {
+            (0..size.1 / 2).all(|by| {
+                (0..size.0 / 2).all(|bx| {
+                    let c = pixel_at(pixels, size, bx * 2, by * 2);
+                    (0..2).all(|dy| {
+                        (0..2).all(|dx| pixel_at(pixels, size, bx * 2 + dx, by * 2 + dy) == c)
+                    })
+                })
+            })
+        };
+        for quality in [GraphicsQuality::High, GraphicsQuality::Beautiful] {
+            renderer.set_quality(quality);
+            let plain = styled_sphere(&mut renderer, crate::Environment::default());
+            assert!(!blocks_are_flat(&plain), "{quality:?}: smooth without it");
+            let blocky = styled_sphere(&mut renderer, pixel_art);
+            assert!(blocks_are_flat(&blocky), "{quality:?}: 2 px blocks");
+            // Four levels a channel: at most 64 colours, and few here.
+            let limited = styled_sphere(
+                &mut renderer,
+                crate::Environment {
+                    palette: 4,
+                    ..crate::Environment::default()
+                },
+            );
+            let mut colours: Vec<[u32; 3]> = (0..size.1)
+                .flat_map(|y| (0..size.0).map(move |x| (x, y)))
+                .map(|(x, y)| pixel_at(&limited, size, x, y))
+                .collect();
+            colours.sort_unstable();
+            colours.dedup();
+            assert!(
+                colours.len() <= 64,
+                "{quality:?}: a 4-level palette, {} colours",
+                colours.len()
             );
         }
     }

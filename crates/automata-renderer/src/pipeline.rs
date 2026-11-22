@@ -963,6 +963,8 @@ mod tests {
                     "fs_upsample",
                     "fs_resolve",
                     "fs_fxaa",
+                    "fs_grade",
+                    "fs_outline",
                 ][..],
             ),
         ] {

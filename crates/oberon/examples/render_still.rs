@@ -19,7 +19,8 @@
 //! down over moments of Play: `KEYS=tab@0-0.1,w@0.5-1.5,space@1.2-1.3`
 //! (key names as scripts see them; a bare `name@t` is one step).
 //! `POST=bleached` (or `neutral`, `vivid`, `film`, `noir`) swaps the
-//! scene Environment's post effects for that look.
+//! scene Environment's post effects for that look. `STYLE=nier` (or any
+//! name `Environment::with_style` takes) applies a style first.
 
 #![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 
@@ -70,25 +71,7 @@ fn main() {
         eprintln!("cannot open {scene}: {e}");
         std::process::exit(1);
     });
-    if let Ok(name) = std::env::var("POST") {
-        let Some(post) = automata_renderer::PostEffects::preset(&name) else {
-            eprintln!("unknown POST look {name:?}");
-            std::process::exit(1);
-        };
-        let ids: Vec<u64> = doc
-            .entities
-            .iter()
-            .filter(|e| e.data.environment.is_some())
-            .map(|e| e.id)
-            .collect();
-        for id in ids {
-            doc.modify(id, false, |d| {
-                if let Some(env) = &mut d.environment {
-                    env.post = post;
-                }
-            });
-        }
-    }
+    restyle(&mut doc);
     automata_assets::set_root(Some(&doc.base_dir()));
     let mut gpu = pollster::block_on(Renderer::new_offscreen_with_quality((w, h), quality))
         .unwrap_or_else(|e| {
@@ -211,6 +194,46 @@ fn render_play(
     }
     let (rgba, fw, fh) = viewport.render_play(Some(gpu), &mut play, cam, w, h);
     (rgba.to_vec(), fw, fh)
+}
+
+/// `STYLE` and `POST` from the environment: a style, then a post look, for
+/// every Environment in `doc`.
+fn restyle(doc: &mut Document) {
+    let ids: Vec<u64> = doc
+        .entities
+        .iter()
+        .filter(|e| e.data.environment.is_some())
+        .map(|e| e.id)
+        .collect();
+    if let Ok(name) = std::env::var("STYLE") {
+        if automata_renderer::Environment::default()
+            .with_style(&name)
+            .is_none()
+        {
+            eprintln!("unknown STYLE {name:?}");
+            std::process::exit(1);
+        }
+        for &id in &ids {
+            doc.modify(id, false, |d| {
+                if let Some(env) = &mut d.environment {
+                    *env = env.with_style(&name).unwrap_or(*env);
+                }
+            });
+        }
+    }
+    if let Ok(name) = std::env::var("POST") {
+        let Some(post) = automata_renderer::PostEffects::preset(&name) else {
+            eprintln!("unknown POST look {name:?}");
+            std::process::exit(1);
+        };
+        for &id in &ids {
+            doc.modify(id, false, |d| {
+                if let Some(env) = &mut d.environment {
+                    env.post = post;
+                }
+            });
+        }
+    }
 }
 
 /// `KEYS` from the environment: each key and the Play seconds it's held

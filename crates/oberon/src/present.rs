@@ -713,7 +713,7 @@ impl EditorApp {
             }
             Intent::Quit => self.quit = true,
             Intent::SetEnvironment(id, env) => {
-                doc.modify(id, false, |d| d.environment = Some(env));
+                doc.modify(id, false, |d| d.environment = Some(*env));
             }
             Intent::SpawnTest(scene) => {
                 let n = doc.spawn_test(scene);
