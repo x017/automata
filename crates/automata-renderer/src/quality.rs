@@ -4,25 +4,26 @@
 //! at startup (`Game(graphics="high")` from Python). Finer-grained controls
 //! build on this type.
 //!
-//! [`GraphicsQuality::Beautiful`] is the top tier: cascaded soft shadows,
-//! physically based sun lighting, an HDR pipeline with bloom and FXAA, and
-//! refractive water. The other presets keep the cheaper forward path.
+//! [`GraphicsQuality::Beautiful`] is the top tier: soft shadows, physically
+//! based sun lighting, an HDR pipeline with bloom and FXAA, and refractive
+//! water. The other presets keep the cheaper forward path; High and Ultra
+//! still split their sun shadows into cascades so nearby shadows are crisp.
 
 /// A graphics quality preset.
 ///
-/// The preset controls the shadow map: [`GraphicsQuality::Low`] disables
-/// shadows entirely; higher presets raise the shadow map resolution, and
+/// The preset controls the shadow maps: [`GraphicsQuality::Low`] disables
+/// shadows entirely; higher presets add resolution and cascades, and
 /// [`GraphicsQuality::Beautiful`] switches on everything else too.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GraphicsQuality {
     /// No shadows — for weak GPUs and stylized flat looks.
     Low,
-    /// 1024px shadow map.
+    /// One 1024px shadow map.
     Medium,
-    /// 2048px shadow map (the default).
+    /// Two 2048px shadow cascades (the default).
     #[default]
     High,
-    /// 4096px shadow map.
+    /// Three 2048px shadow cascades.
     Ultra,
     /// Four 2048px shadow cascades with soft filtering, physically based
     /// lighting, HDR bloom, FXAA and refractive water.
@@ -58,8 +59,7 @@ impl GraphicsQuality {
         match self {
             Self::Low => 1,
             Self::Medium => 1024,
-            Self::High | Self::Beautiful => 2048,
-            Self::Ultra => 4096,
+            Self::High | Self::Ultra | Self::Beautiful => 2048,
         }
     }
 
@@ -96,13 +96,17 @@ impl GraphicsQuality {
         }
     }
 
-    /// Shadow cascades: `1` is a single map fit around the whole scene;
-    /// more split the camera's view so nearby shadows get the most texels.
+    /// Sun shadow cascades: each splits off a slice of the camera's view
+    /// (up to the sun's shadow distance) with its own map, so nearby
+    /// shadows get the most texels. With one, the map covers the whole
+    /// scene or the view, whichever is smaller.
     #[must_use]
     pub fn shadow_cascades(self) -> u32 {
         match self {
+            Self::Low | Self::Medium => 1,
+            Self::High => 2,
+            Self::Ultra => 3,
             Self::Beautiful => u32::try_from(crate::shadow::MAX_CASCADES).unwrap_or(1),
-            _ => 1,
         }
     }
 
@@ -131,15 +135,17 @@ mod tests {
         assert!(
             GraphicsQuality::Medium.shadow_map_size() < GraphicsQuality::High.shadow_map_size()
         );
-        assert!(GraphicsQuality::High.shadow_map_size() < GraphicsQuality::Ultra.shadow_map_size());
+        let cascades: Vec<u32> = GraphicsQuality::ALL
+            .iter()
+            .map(|q| q.shadow_cascades())
+            .collect();
+        assert_eq!(cascades, [1, 1, 2, 3, 4]);
     }
 
     #[test]
-    fn only_beautiful_cascades_and_goes_hdr() {
+    fn only_beautiful_goes_hdr() {
         for q in GraphicsQuality::ALL {
             assert_eq!(q.is_beautiful(), q == GraphicsQuality::Beautiful);
-            let cascades = if q.is_beautiful() { 4 } else { 1 };
-            assert_eq!(q.shadow_cascades(), cascades, "{q:?}");
         }
         assert!(GraphicsQuality::Beautiful.shadows_enabled());
     }

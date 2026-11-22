@@ -133,12 +133,17 @@ The file is cached, so a thousand trees load it once. Guide:
 
 ```python
 at.DirectionalLight(direction=(-0.5, -1.0, -0.35),
-                    color=(1.0, 1.0, 1.0), ambient=0.3, shadows=True)
+                    color=(1.0, 1.0, 1.0), ambient=0.3, shadows=True,
+                    *, shadow_distance=120.0, shadow_softness=1.0)
 ```
 
 The scene's sun; the first entity carrying one lights the frame. Getters:
-`direction`, `color`, `ambient`, `shadows`. Without one, a neutral
-shadowless default is used.
+`direction`, `color`, `ambient`, `shadows`, `shadow_distance`,
+`shadow_softness`. Without one, a neutral shadowless default is used.
+`shadow_distance` (metres, above 0) is how far shadows reach; shorter is
+sharper. `shadow_softness` (0..8, default 1) is how soft their edges are.
+Out-of-range values raise `ValueError`. Guide:
+[Rendering & Lights](guides/rendering-and-lights.md#the-sun).
 
 ### Environment
 
@@ -368,7 +373,7 @@ All are `str` enums — members work anywhere the plain string does.
 | `at.MouseButton` | `LEFT`, `RIGHT`, `MIDDLE`, `BACK`, `FORWARD` | 5 |
 | `at.GamepadButton` | `SOUTH`, `EAST`, `NORTH`, `WEST`, triggers, thumbs, d-pad, `START`, `SELECT`… | 19 |
 | `at.GamepadAxis` | `LEFT_STICK_X/Y`, `RIGHT_STICK_X/Y`, `LEFT_Z`, `RIGHT_Z`, `DPAD_X/Y` | 8 |
-| `at.GraphicsQuality` | `LOW` (no shadows), `MEDIUM` (1024), `HIGH` (2048), `ULTRA` (4096), `BEAUTIFUL` (soft cascaded shadows, PBR, bloom, refractive water) | 5 |
+| `at.GraphicsQuality` | `LOW` (no shadows), `MEDIUM` (1 × 1024), `HIGH` (2 cascades × 2048), `ULTRA` (3 cascades × 2048), `BEAUTIFUL` (soft cascaded shadows, PBR, bloom, refractive water) | 5 |
 
 ## Behaviour scripts (`automata.run_scene`)
 

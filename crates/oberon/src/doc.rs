@@ -583,7 +583,7 @@ impl Document {
             direction: glam::Vec3::new(-0.4, -1.0, -0.3),
             color: [1.0, 0.96, 0.88],
             ambient: 0.35,
-            shadows: true,
+            ..Default::default()
         });
         // The sky with its sun, haze and clouds, on the sun itself (a fresh
         // scene shouldn't look like a void).

@@ -641,6 +641,8 @@ mod tests {
                 color: [1.0, 0.96, 0.88],
                 ambient: 0.35,
                 shadows: true,
+                shadow_distance: 60.0,
+                ..Default::default()
             },
         ));
         world.spawn((Camera3D::new(

@@ -22,12 +22,12 @@ scene tuned here looks the same in Play and under `at.run_scene`.
   map size. Use them with the *400 cubes* test scene to see what your
   scene costs.
 
-| Quality | Shadows | Shadow map | Glow lights with shadows |
+| Quality | Shadows | Shadow maps | Glow lights with shadows |
 |---|---|---|---|
 | Low | off | — | none |
-| Medium | on | 1024 px | none |
-| High (default) | on | 2048 px | 2 nearest |
-| Ultra | on | 4096 px | 4 nearest |
+| Medium | on | 1 × 1024 px | none |
+| High (default) | crisp, 2 cascades | 2 × 2048 px | 2 nearest |
+| Ultra | crisp, 3 cascades | 3 × 2048 px | 4 nearest |
 | Beautiful | soft, 4 cascades | 4 × 2048 px | 4 nearest, soft |
 
 Water is a component. Use **Create → Water** (it starts as a calm pond)
@@ -49,6 +49,8 @@ one, **Add Directional Light** creates it.
 | Color | Sunlight tint |
 | Ambient | How bright the shadowed sides are (0 = black shadows, 1 = no shading) |
 | Cast Shadows | Shadow mapping for this light |
+| Shadow Distance | How far from the camera shadows reach, in metres (default 120). They fade out beyond it. Shorter is sharper |
+| Shadow Softness | How soft shadow edges are: 0 sharpest, 1 default, up to 8. Shows most on Beautiful |
 
 Azimuth and elevation are a friendlier way to set the light's direction
 vector. The Inspector's Directional Light section shows the same two

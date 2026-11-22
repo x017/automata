@@ -176,23 +176,39 @@ pub struct PyDirectionalLight {
 
 #[pymethods]
 impl PyDirectionalLight {
-    /// Creates a sun shining along `direction`.
+    /// Creates a sun shining along `direction`. `shadow_distance` is how
+    /// far from the camera its shadows reach (metres;
+    /// shorter is sharper) and `shadow_softness` how soft their edges are
+    /// (0 sharpest, 1 default, up to 8).
     #[new]
-    #[pyo3(signature = (direction=(-0.5, -1.0, -0.35), color=(1.0, 1.0, 1.0), ambient=0.3, shadows=true))]
+    #[pyo3(signature = (direction=(-0.5, -1.0, -0.35), color=(1.0, 1.0, 1.0), ambient=0.3,
+                        shadows=true, *, shadow_distance=120.0, shadow_softness=1.0))]
     fn new(
         direction: (f32, f32, f32),
         color: (f32, f32, f32),
         ambient: f32,
         shadows: bool,
-    ) -> Self {
-        Self {
+        shadow_distance: f32,
+        shadow_softness: f32,
+    ) -> PyResult<Self> {
+        if shadow_distance.is_nan()
+            || shadow_distance <= 0.0
+            || !(0.0..=8.0).contains(&shadow_softness)
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "shadow_distance must be above 0 and shadow_softness between 0 and 8",
+            ));
+        }
+        Ok(Self {
             inner: DirectionalLight {
                 direction: vec3_of(direction),
                 color: [color.0, color.1, color.2],
                 ambient,
                 shadows,
+                shadow_distance,
+                shadow_softness,
             },
-        }
+        })
     }
 
     /// The direction the light travels.
@@ -218,6 +234,18 @@ impl PyDirectionalLight {
     #[getter]
     fn shadows(&self) -> bool {
         self.inner.shadows
+    }
+
+    /// How far from the camera shadows reach (metres).
+    #[getter]
+    fn shadow_distance(&self) -> f32 {
+        self.inner.shadow_distance
+    }
+
+    /// How soft shadow edges are (0 sharpest, 1 default).
+    #[getter]
+    fn shadow_softness(&self) -> f32 {
+        self.inner.shadow_softness
     }
 
     fn __repr__(&self) -> String {

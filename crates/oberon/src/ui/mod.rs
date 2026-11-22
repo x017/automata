@@ -2213,6 +2213,24 @@ impl Ui {
                 y = self.color_row(canvas, x, y, w, e, "Color", ColorTarget::Light);
                 y = self.float_row(canvas, x, y, w, e, "Ambient", Field::LightAmbient);
                 y = self.flag_row(canvas, x, y, w, e, "Cast Shadows", Flag::LightShadows);
+                y = self.float_row(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    e,
+                    "Shadow Distance",
+                    Field::LightShadowDistance,
+                );
+                y = self.float_row(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    e,
+                    "Shadow Softness",
+                    Field::LightShadowSoftness,
+                );
                 y += 6.0;
             }
         }

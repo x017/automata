@@ -51,7 +51,6 @@ struct LightUniform {
 @group(3) @binding(0) var<uniform> light: LightUniform;
 @group(3) @binding(1) var shadow_map: texture_depth_2d_array;
 @group(3) @binding(2) var shadow_sampler: sampler_comparison;
-@group(3) @binding(3) var shadow_map_0: texture_depth_2d; // cascade 0 (forward path)
 @group(3) @binding(4) var point_shadow_map: texture_depth_2d_array; // point light cubes
 
 // Two variants share these helpers: the forward path (`shadow_pcf`,
@@ -81,50 +80,99 @@ const POISSON: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
     vec2<f32>(0.19984126, 0.78641367), vec2<f32>(0.14383161, -0.14100790),
 );
 
-// Forward path: one shadow map, 3x3 PCF with a slope-scaled depth bias.
-// 1.0 lit, 0.0 shadowed.
-fn shadow_pcf(world: vec3<f32>, n: vec3<f32>, l: vec3<f32>) -> f32 {
-    if light.params.x < 0.5 {
-        return 1.0;
-    }
-    let projected = light.cascades[0] * vec4<f32>(world, 1.0);
+// Where `world` lands in cascade `i`'s map: (uv, compare depth), or x < 0
+// outside it. The lookup starts slightly off the surface along `n` (about
+// a texel, more at grazing angles) and compares about a texel nearer the
+// sun, which keeps lit faces free of acne without detaching shadows.
+fn cascade_coords(i: i32, world: vec3<f32>, n: vec3<f32>, ndotl: f32) -> vec3<f32> {
+    let pos = world + n * light.cascade_texel[i] * (1.0 + 2.0 * (1.0 - ndotl));
+    let projected = light.cascades[i] * vec4<f32>(pos, 1.0);
     let ndc = projected.xyz / projected.w;
     let uv = ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
     if uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0 || ndc.z >= 1.0 {
-        return 1.0; // outside the shadow map counts as lit
+        return vec3<f32>(-1.0);
     }
-    let bias = max(0.0025 * (1.0 - dot(n, l)), 0.0005);
-    let texel = light.params.y;
-    var sum = 0.0;
-    for (var y = -1; y <= 1; y = y + 1) {
-        for (var x = -1; x <= 1; x = x + 1) {
-            let offset = vec2<f32>(f32(x), f32(y)) * texel;
-            sum = sum + textureSampleCompareLevel(
-                shadow_map_0, shadow_sampler, uv + offset, ndc.z - bias);
+    return vec3<f32>(uv, ndc.z - light.cascade_bias[i]);
+}
+
+// The cascade covering `world` (by view depth) and how far it is into the
+// band at that cascade's far edge (0..1; 0 before the band). Across the
+// band the next cascade takes over, or past the last one shadows fade
+// out. A scene-wide single map never ends (its split is f32 max).
+fn cascade_pick(world: vec3<f32>) -> vec2<f32> {
+    let count = i32(light.params.z);
+    let depth = dot(world - camera.view_pos.xyz, light.camera_forward.xyz);
+    var i = 0;
+    for (; i < count - 1; i = i + 1) {
+        if depth < light.splits[i] {
+            break;
         }
     }
-    return sum / 9.0;
+    var start = 0.0;
+    if i > 0 {
+        start = light.splits[i - 1];
+    }
+    let band = (light.splits[i] - start) * 0.15;
+    return vec2<f32>(f32(i), clamp((depth - (light.splits[i] - band)) / band, 0.0, 1.0));
+}
+
+// Forward: sunlight through cascade `i`: 4 bilinear compares (16 texels)
+// on a rotated grid, as wide as the sun's softness asks but between 1 and
+// 3 texels, so it stays crisp and cheap.
+fn forward_cascade(i: i32, world: vec3<f32>, n: vec3<f32>, ndotl: f32) -> f32 {
+    let c = cascade_coords(i, world, n, ndotl);
+    if c.x < 0.0 {
+        return 1.0;
+    }
+    let texel = light.params.y;
+    let width = light.cascade_texel[i] / texel; // the cascade's width (m)
+    let r = clamp(light.direction.w / width, texel, 3.0 * texel);
+    let a = vec2<f32>(0.5, 0.2) * r;
+    let b = vec2<f32>(-0.2, 0.5) * r;
+    return (textureSampleCompareLevel(shadow_map, shadow_sampler, c.xy + a, i, c.z)
+        + textureSampleCompareLevel(shadow_map, shadow_sampler, c.xy - a, i, c.z)
+        + textureSampleCompareLevel(shadow_map, shadow_sampler, c.xy + b, i, c.z)
+        + textureSampleCompareLevel(shadow_map, shadow_sampler, c.xy - b, i, c.z)) * 0.25;
+}
+
+// Forward path: 1.0 lit, 0.0 shadowed. Cascade edges cross-fade (both
+// cascades are filtered inside the band, one everywhere else).
+fn shadow_forward(world: vec3<f32>, n: vec3<f32>, l: vec3<f32>) -> f32 {
+    if light.params.x < 0.5 {
+        return 1.0;
+    }
+    let ndotl = dot(n, l);
+    if ndotl <= 0.0 {
+        return 0.0; // facing away: no direct sun to shadow
+    }
+    let pick = cascade_pick(world);
+    let i = i32(pick.x);
+    var lit = forward_cascade(i, world, n, ndotl);
+    if pick.y > 0.0 {
+        var next = 1.0;
+        if i + 1 < i32(light.params.z) {
+            next = forward_cascade(i + 1, world, n, ndotl);
+        }
+        lit = mix(lit, next, pick.y);
+    }
+    return lit;
 }
 
 // Beautiful: sunlight reaching `world` through cascade `i`, filtered by a
 // rotated Poisson disk whose radius is a fixed width in the world (a
 // constant penumbra across cascades), each tap a bilinear 2x2 compare.
 fn sample_cascade(i: i32, world: vec3<f32>, n: vec3<f32>, ndotl: f32, frag: vec2<f32>) -> f32 {
-    // Normal offset: look the shadow up slightly off the surface, more at
-    // grazing angles, instead of a large depth bias.
-    let pos = world + n * light.cascade_texel[i] * (1.0 + 2.0 * (1.0 - ndotl));
-    let projected = light.cascades[i] * vec4<f32>(pos, 1.0);
-    let ndc = projected.xyz / projected.w;
-    let uv = ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
-    if uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0 || ndc.z >= 1.0 {
+    let c = cascade_coords(i, world, n, ndotl);
+    if c.x < 0.0 {
         return 1.0;
     }
+    let uv = c.xy;
     let texel = light.params.y;
     let width = light.cascade_texel[i] / texel; // the cascade's width (m)
     let radius = clamp(light.direction.w / width, 1.5 * texel, 5.0 * texel);
     let angle = ign(frag) * 2.0 * PI;
     let rot = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
-    let depth = ndc.z - light.cascade_bias[i];
+    let depth = c.z;
     var sum = 0.0;
     // 12 taps: each is a bilinear 2x2 compare, and the per-pixel rotation
     // turns what banding remains into fine noise FXAA smooths.
@@ -178,7 +226,8 @@ fn shadow_soft(world: vec3<f32>, n: vec3<f32>, l: vec3<f32>, frag: vec2<f32>) ->
 // --- Point lights -----------------------------------------------------------
 // Inverse-square falloff, held flat inside the glowing body (no hot spot)
 // and windowed to reach exactly zero at the light's range (Karis's
-// (1 - (d/R)^4)^2), so lights can be skipped past it. No shadows.
+// (1 - (d/R)^4)^2), so lights can be skipped past it. The nearest few can
+// cast shadows (`point_shadow`, below).
 
 struct PointSample {
     l: vec3<f32>,        // direction to the light

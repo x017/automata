@@ -164,8 +164,9 @@ class GamepadAxis(str, Enum):
 class GraphicsQuality(str, Enum):
     """Graphics quality preset for ``Game(graphics=...)``.
 
-    ``LOW`` disables shadows; ``MEDIUM``/``HIGH``/``ULTRA`` raise the
-    shadow map resolution (1024/2048/4096). ``BEAUTIFUL`` renders in HDR
+    ``LOW`` disables shadows; ``MEDIUM`` uses one 1024 px shadow map, and
+    ``HIGH``/``ULTRA`` split crisp shadows into 2/3 cascades of 2048 px
+    (sharp near the camera, reaching far). ``BEAUTIFUL`` renders in HDR
     with physically based lighting, soft cascaded shadows, refracting
     water with foam, bloom and FXAA.
     """

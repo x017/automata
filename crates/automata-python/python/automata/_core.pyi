@@ -188,12 +188,19 @@ class DirectionalLight:
     color: tuple[float, float, float]
     ambient: float
     shadows: bool
+    shadow_distance: float
+    """How far from the camera shadows reach (metres); shorter is sharper."""
+    shadow_softness: float
+    """Shadow edge softness: 0 sharpest, 1 default, up to 8."""
     def __init__(
         self,
         direction: Vec3 = (-0.5, -1.0, -0.35),
         color: tuple[float, float, float] = (1.0, 1.0, 1.0),
         ambient: float = 0.3,
         shadows: bool = True,
+        *,
+        shadow_distance: float = 120.0,
+        shadow_softness: float = 1.0,
     ) -> None: ...
 
 class Environment:

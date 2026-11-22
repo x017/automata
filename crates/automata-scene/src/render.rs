@@ -72,6 +72,30 @@ pub struct DirectionalLight {
     pub ambient: f32,
     /// Whether this light casts shadows.
     pub shadows: bool,
+    /// How far from the camera shadows reach (metres); they fade out
+    /// beyond. Shorter is sharper.
+    #[serde(
+        default = "default_shadow_distance",
+        skip_serializing_if = "is_default_shadow_distance"
+    )]
+    pub shadow_distance: f32,
+    /// Shadow edge softness: 1 the default, 0 as sharp as possible, up to
+    /// 8.
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub shadow_softness: f32,
+}
+
+fn default_shadow_distance() -> f32 {
+    automata_renderer::DEFAULT_SHADOW_DISTANCE
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref, clippy::float_cmp)] // serde's signature
+fn is_default_shadow_distance(v: &f32) -> bool {
+    *v == automata_renderer::DEFAULT_SHADOW_DISTANCE
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 impl DirectionalLight {
@@ -83,6 +107,8 @@ impl DirectionalLight {
             color: [1.0, 1.0, 1.0],
             ambient: 0.3,
             shadows: true,
+            shadow_distance: automata_renderer::DEFAULT_SHADOW_DISTANCE,
+            shadow_softness: 1.0,
         }
     }
 }
@@ -100,6 +126,8 @@ impl From<DirectionalLight> for Sun {
             color: light.color,
             ambient: light.ambient,
             shadows: light.shadows,
+            shadow_distance: light.shadow_distance,
+            shadow_softness: light.shadow_softness,
         }
     }
 }
@@ -641,7 +669,9 @@ mod tests {
             direction: Vec3::new(0.0, -1.0, 0.0),
             color: [1.0, 0.9, 0.8],
             ambient: 0.4,
-            shadows: true,
+            shadow_distance: 50.0,
+            shadow_softness: 2.0,
+            ..DirectionalLight::default()
         };
         scene.spawn((light,));
 
@@ -652,6 +682,7 @@ mod tests {
         assert_eq!(sun.direction, Vec3::new(0.0, -1.0, 0.0));
         assert_eq!(sun.color, [1.0, 0.9, 0.8]);
         assert!(sun.shadows);
+        assert_eq!((sun.shadow_distance, sun.shadow_softness), (50.0, 2.0));
 
         // No light entity -> no sun override on the draw list.
         let empty = Scene::new();

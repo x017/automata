@@ -16,10 +16,6 @@ use crate::Camera3D;
 /// The most cascades a frame can use (the size of the shader's arrays).
 pub(crate) const MAX_CASCADES: usize = 4;
 
-/// How far from the camera cascaded shadows reach (metres); beyond it,
-/// shadows fade out. Clamped to the camera's far plane.
-pub(crate) const SHADOW_DISTANCE: f32 = 120.0;
-
 /// Blend between uniform and logarithmic splits (0 = uniform, 1 = log).
 const SPLIT_LAMBDA: f32 = 0.8;
 
@@ -64,9 +60,39 @@ impl ShadowCascades {
         out
     }
 
-    /// `count` cascades splitting `camera`'s view up to [`SHADOW_DISTANCE`];
-    /// `scene` bounds every shadow caster, so casters outside a slice (a
-    /// tall wall behind the camera) still land in its map.
+    /// The frame's `count` cascades: slices of the camera's view out to
+    /// `distance`, or less when the whole scene ends sooner (rounded up in
+    /// ~19% steps, so the slices only change size now and then and don't
+    /// shimmer). A single cascade covers the scene or that view, whichever
+    /// is smaller.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fit(
+        camera: &Camera3D,
+        aspect: f32,
+        scene: Sphere,
+        direction: Vec3,
+        map_size: u32,
+        count: usize,
+        distance: f32,
+    ) -> Self {
+        let reach = camera.position.distance(scene.center) + scene.radius;
+        let far = quantize_up(reach).min(distance.max(1.0));
+        let view = Self::fit_camera(camera, aspect, scene, direction, map_size, count, far);
+        if count > 1 {
+            return view;
+        }
+        let whole = Self::fit_scene(scene, direction, map_size);
+        if view.half_extent[0] < whole.half_extent[0] {
+            view
+        } else {
+            whole
+        }
+    }
+
+    /// `count` cascades splitting `camera`'s view up to `distance` (and the
+    /// camera's far plane); `scene` bounds every shadow caster, so casters
+    /// outside a slice (a tall wall behind the camera) still land in its
+    /// map.
     pub fn fit_camera(
         camera: &Camera3D,
         aspect: f32,
@@ -74,10 +100,11 @@ impl ShadowCascades {
         direction: Vec3,
         map_size: u32,
         count: usize,
+        distance: f32,
     ) -> Self {
         let count = count.clamp(1, MAX_CASCADES);
         let near = camera.near.max(0.01);
-        let far = SHADOW_DISTANCE.min(camera.far).max(near + 1.0);
+        let far = distance.min(camera.far).max(near + 1.0);
         let splits = split_depths(near, far, count);
 
         let forward = (camera.target - camera.position)
@@ -132,6 +159,13 @@ impl ShadowCascades {
         let reach = self.half_extent[i] + sphere.radius;
         p.x.abs() <= reach && p.y.abs() <= reach
     }
+}
+
+/// `x` rounded up to the next of the steps 2^(k/4) (each ~19% above the
+/// last).
+fn quantize_up(x: f32) -> f32 {
+    let x = x.max(1.0);
+    ((x.log2() * 4.0).ceil() * 0.25).exp2()
 }
 
 /// The far view depth of each of `count` slices between `near` and `far`
@@ -223,7 +257,7 @@ mod tests {
     #[test]
     fn every_slice_point_lands_inside_its_cascade() {
         let cam = camera();
-        let c = ShadowCascades::fit_camera(&cam, 16.0 / 9.0, SCENE, sun(), 2048, 4);
+        let c = ShadowCascades::fit_camera(&cam, 16.0 / 9.0, SCENE, sun(), 2048, 4, 120.0);
         assert_eq!(c.count, 4);
         let forward = (cam.target - cam.position).normalize();
         let tan_y = 30.0_f32.to_radians().tan();
@@ -253,7 +287,7 @@ mod tests {
     #[test]
     fn scene_casters_behind_a_slice_stay_in_depth_range() {
         let cam = camera();
-        let c = ShadowCascades::fit_camera(&cam, 1.5, SCENE, sun(), 2048, 4);
+        let c = ShadowCascades::fit_camera(&cam, 1.5, SCENE, sun(), 2048, 4, 120.0);
         // A caster up the light ray from the camera, far outside slice 0.
         let caster = cam.position - sun().normalize() * 150.0;
         let ndc = c.view_proj[0].project_point3(caster);
@@ -263,24 +297,24 @@ mod tests {
     #[test]
     fn cascades_snap_to_texels_so_small_moves_dont_shimmer() {
         let mut cam = camera();
-        let a = ShadowCascades::fit_camera(&cam, 1.5, SCENE, sun(), 2048, 4);
+        let a = ShadowCascades::fit_camera(&cam, 1.5, SCENE, sun(), 2048, 4, 120.0);
         cam.position.x += 0.0001;
         cam.target.x += 0.0001;
-        let b = ShadowCascades::fit_camera(&cam, 1.5, SCENE, sun(), 2048, 4);
+        let b = ShadowCascades::fit_camera(&cam, 1.5, SCENE, sun(), 2048, 4, 120.0);
         assert_eq!(
             a.view_proj[3], b.view_proj[3],
             "a sub-texel move keeps the matrix"
         );
         // Turning in place keeps the size (the sphere is rotation-invariant).
         cam.target = cam.position + Vec3::new(1.0, 0.0, -1.0);
-        let turned = ShadowCascades::fit_camera(&cam, 1.5, SCENE, sun(), 2048, 4);
+        let turned = ShadowCascades::fit_camera(&cam, 1.5, SCENE, sun(), 2048, 4, 120.0);
         assert!((turned.half_extent[1] - a.half_extent[1]).abs() < 1e-4);
     }
 
     #[test]
     fn culling_keeps_nearby_meshes_and_drops_far_ones() {
         let cam = camera();
-        let c = ShadowCascades::fit_camera(&cam, 1.5, SCENE, sun(), 2048, 4);
+        let c = ShadowCascades::fit_camera(&cam, 1.5, SCENE, sun(), 2048, 4, 120.0);
         let near_mesh = Sphere {
             center: cam.position + Vec3::new(0.0, -2.0, -2.0),
             radius: 0.5,
@@ -307,5 +341,60 @@ mod tests {
             assert!(ndc.x.abs() <= 1.0 && ndc.y.abs() <= 1.0, "{ndc:?}");
             assert!((0.0..=1.0).contains(&ndc.z), "{ndc:?}");
         }
+    }
+
+    #[test]
+    fn small_scenes_pull_the_cascades_in_and_big_ones_stop_at_the_distance() {
+        let small = Sphere {
+            center: Vec3::ZERO,
+            radius: 15.0,
+        };
+        let cam = camera();
+        let near = ShadowCascades::fit(&cam, 1.5, small, sun(), 2048, 2, 120.0);
+        let far = ShadowCascades::fit(&cam, 1.5, SCENE, sun(), 2048, 2, 120.0);
+        // The small scene ends ~25 m away: its slices stop soon after.
+        assert!(
+            near.splits[1] >= 25.0 && near.splits[1] < 32.0,
+            "{:?}",
+            near.splits
+        );
+        assert!(near.half_extent[0] < far.half_extent[0]);
+        assert!((far.splits[1] - 120.0).abs() < 1e-3, "{:?}", far.splits);
+        // A shorter shadow distance is sharper.
+        let short = ShadowCascades::fit(&cam, 1.5, SCENE, sun(), 2048, 2, 40.0);
+        assert!(short.half_extent[1] < far.half_extent[1]);
+        // Walking a little doesn't resize the slices (no shimmer).
+        let mut stepped = cam;
+        stepped.position.x += 0.3;
+        stepped.target.x += 0.3;
+        let moved = ShadowCascades::fit(&stepped, 1.5, small, sun(), 2048, 2, 120.0);
+        assert_eq!(moved.half_extent, near.half_extent);
+    }
+
+    #[test]
+    fn one_cascade_takes_the_smaller_of_scene_and_view() {
+        let cam = camera();
+        let small = Sphere {
+            center: Vec3::ZERO,
+            radius: 10.0,
+        };
+        let c = ShadowCascades::fit(&cam, 1.5, small, sun(), 1024, 1, 120.0);
+        assert!((c.half_extent[0] - 11.0).abs() < 1e-3, "the scene map");
+        assert_eq!(c.splits[0], f32::MAX, "which never fades");
+        let huge = Sphere {
+            center: Vec3::ZERO,
+            radius: 2000.0,
+        };
+        let c = ShadowCascades::fit(&cam, 1.5, huge, sun(), 1024, 1, 60.0);
+        assert!(c.half_extent[0] < 100.0, "the view: {}", c.half_extent[0]);
+        assert!((c.splits[0] - 60.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn distances_round_up_in_small_steps() {
+        assert!((quantize_up(16.0) - 16.0).abs() < 1e-3);
+        let q = quantize_up(17.0);
+        assert!((17.0..17.0 * 1.2).contains(&q), "{q}");
+        assert_eq!(quantize_up(17.0), quantize_up(18.0));
     }
 }

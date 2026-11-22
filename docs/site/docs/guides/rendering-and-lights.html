@@ -114,14 +114,25 @@ three lines (smooth exponential follow):</p>
             color=(<span class="tok-n">1.0</span>, <span class="tok-n">0.96</span>, <span class="tok-n">0.88</span>),        <span class="tok-c"># warm afternoon</span>
             ambient=<span class="tok-n">0.35</span>,                   <span class="tok-c"># fill on shadowed faces</span>
             shadows=<span class="tok-b">True</span>,                   <span class="tok-c"># shadow mapping on</span>
+            shadow_distance=<span class="tok-n">120.0</span>,          <span class="tok-c"># metres of shadows (shorter = sharper)</span>
+            shadow_softness=<span class="tok-n">1.0</span>,            <span class="tok-c"># 0 sharpest .. 8 very soft</span>
         )
     )
 )</code></pre></div>
 <ul><li>The first <code>DirectionalLight</code> entity lights the frame. No light entity →
 a neutral shadowless default (the scene is still visible).</li><li>Meshes are Blinn-Phong shaded: <code>ambient * color</code> everywhere, plus
-sun-colored diffuse and a subtle specular highlight where lit.</li><li><strong>Shadows</strong> are shadow-mapped automatically: the engine fits the sun's
-frustum around your scene every frame, so any level size works. Shadowed
-regions keep the ambient term.</li></ul>
+sun-colored diffuse and a subtle specular highlight where lit.</li><li><strong>Shadows</strong> are shadow-mapped automatically, so any level size works.
+On High and up the view is split into cascades (2 on High, 3 on Ultra,
+4 on Beautiful): the first covers the few metres around the camera at
+full resolution, so shadows under the player are sharp, and each next
+one covers farther, coarser. Cascade edges blend, and shadows fade out
+at <code>shadow_distance</code>. A small level is covered only as far as it
+reaches, so it gets even sharper shadows. Medium uses one map around
+the whole scene (or the view, if that's smaller). Shadowed regions keep
+the ambient term.</li><li><strong><code>shadow_distance</code></strong> (metres, default 120): how far shadows reach.
+Shorter is sharper: a tight indoor or top-down game can use 30–50.</li><li><strong><code>shadow_softness</code></strong> (default 1): how soft shadow edges are. 0 is as
+sharp as the shadow map allows, higher values blur the edge (Beautiful
+shows the most difference; High and Ultra stay crisp).</li></ul>
 <h2 id="environment">Environment<a class="anchor" href="#environment" aria-label="Link to this section">#</a></h2>
 <p>The <code>Environment</code> component sets the look of the whole frame:</p>
 <ul><li>hemisphere ambient light (sky above, ground below)</li><li>the background colour</li><li>exposure and tone mapping</li><li>distance fog</li></ul>
@@ -163,7 +174,10 @@ out when the sun leaves the screen, and anything in front of the sun,
 scenery or clouds, hides it.</p></li></ul>
 <ul><li>Ambient is <code>DirectionalLight.ambient × mix(ground, sky)</code>, picked by how
 much a surface faces up. Keep the sky and ground colours near 1.0 in
-brightness and control strength with <code>ambient</code>.</li><li><strong>Fog</strong> fades lit colour toward <code>fog_color</code> as
+brightness and control strength with <code>ambient</code>.</li><li><strong>Sky-tinted shade:</strong> with the sky dome on, the ambient from above leans
+a little toward <code>zenith_color</code> at the same brightness. Shade is lit by
+the sky alone, so shadows and shaded sides turn faintly blue on a clear
+day (or violet at dusk) instead of grey.</li><li><strong>Fog</strong> fades lit colour toward <code>fog_color</code> as
 <code>1 − exp(−density × (distance − start))</code>.</li><li><strong>Tone mapping</strong> runs last. ACES and AgX roll off highlights smoothly,
 so you can use brighter suns and colours without clipping. Raise
 <code>exposure</code> a little to compensate for their darker mid-tones.</li><li>An Environment is staged data like any other component. It's saved in
@@ -172,7 +186,7 @@ scene files and edited in <a href="../oberon/graphics.html">Oberon's Graphics ta
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">MyGame</span>(at.Game):
     clear_color = (<span class="tok-n">0.55</span>, <span class="tok-n">0.78</span>, <span class="tok-n">0.95</span>, <span class="tok-n">1.0</span>)   <span class="tok-c"># the &quot;sky&quot; each frame clears to</span>
     graphics = at.GraphicsQuality.HIGH</code></pre></div>
-<div class="table"><table><thead><tr><th>Preset</th><th>Shadows</th><th>Shadow map</th><th>Glow lights with shadows</th></tr></thead><tbody><tr><td><code>GraphicsQuality.LOW</code></td><td>off</td><td>—</td><td>none</td></tr><tr><td><code>GraphicsQuality.MEDIUM</code></td><td>on</td><td>1024px</td><td>none</td></tr><tr><td><code>GraphicsQuality.HIGH</code> (default)</td><td>on</td><td>2048px</td><td>2 (384px)</td></tr><tr><td><code>GraphicsQuality.ULTRA</code></td><td>on</td><td>4096px</td><td>4 (512px)</td></tr><tr><td><code>GraphicsQuality.BEAUTIFUL</code></td><td>soft</td><td>4 cascades × 2048px</td><td>4 (512px, soft)</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Preset</th><th>Shadows</th><th>Shadow maps</th><th>Glow lights with shadows</th></tr></thead><tbody><tr><td><code>GraphicsQuality.LOW</code></td><td>off</td><td>—</td><td>none</td></tr><tr><td><code>GraphicsQuality.MEDIUM</code></td><td>on</td><td>1 × 1024px</td><td>none</td></tr><tr><td><code>GraphicsQuality.HIGH</code> (default)</td><td>crisp</td><td>2 cascades × 2048px</td><td>2 (384px)</td></tr><tr><td><code>GraphicsQuality.ULTRA</code></td><td>crisp</td><td>3 cascades × 2048px</td><td>4 (512px)</td></tr><tr><td><code>GraphicsQuality.BEAUTIFUL</code></td><td>soft</td><td>4 cascades × 2048px</td><td>4 (512px, soft)</td></tr></tbody></table></div>
 <p><code>LOW</code> is also a <em>style</em>: pure flat-color faces with no shadow shading reads
 as clean minimalism. Finer-grained knobs (render scale, MSAA) build on this
 same setting as the renderer grows.</p>

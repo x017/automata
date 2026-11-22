@@ -40,6 +40,10 @@ pub enum Field {
     LightColor(u8),
     /// Light ambient fraction (0..1).
     LightAmbient,
+    /// How far from the camera sun shadows reach (metres).
+    LightShadowDistance,
+    /// Sun shadow edge softness (0 sharpest, 1 default).
+    LightShadowSoftness,
     /// Compass angle the sunlight comes from, degrees (0 = from +Z).
     LightAzimuth,
     /// Sun height above the horizon, degrees (90 = straight down).
@@ -205,6 +209,8 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::LightDirection(i) => data.directional_light?.direction.to_array()[axis(i)],
         F::LightColor(i) => data.directional_light?.color[axis(i)],
         F::LightAmbient => data.directional_light?.ambient,
+        F::LightShadowDistance => data.directional_light?.shadow_distance,
+        F::LightShadowSoftness => data.directional_light?.shadow_softness,
         F::LightAzimuth => sun_angles(data.directional_light?.direction).0,
         F::LightElevation => sun_angles(data.directional_light?.direction).1,
         F::LightTimeOfDay => time_of_day(sun_angles(data.directional_light?.direction).0),
@@ -295,6 +301,8 @@ pub fn range(field: Field) -> (f32, f32) {
         F::WaterWaveDirection | F::LightAzimuth => (-180.0, 180.0),
         F::LightElevation => (-89.0, 89.0),
         F::LightTimeOfDay => (5.0, 19.0),
+        F::LightShadowDistance => (10.0, 1_000.0),
+        F::LightShadowSoftness => (0.0, 8.0),
         F::EnvExposure => (0.0, 16.0),
         F::MeshEmissiveStrength => (0.0, 100.0),
         F::MeshGlowLight => (0.0, 10.0),
@@ -351,7 +359,7 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::AudioVolume
         | F::AudioPitch
         | F::EnvExposure => 0.005,
-        F::AudioRange => 0.1,
+        F::AudioRange | F::LightShadowDistance => 0.1,
         F::Scale(_) | F::LightDirection(_) => 0.01,
         _ => 0.02,
     }
@@ -418,6 +426,14 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
         },
         F::LightAmbient => match &mut data.directional_light {
             Some(l) => l.ambient = v,
+            None => return false,
+        },
+        F::LightShadowDistance => match &mut data.directional_light {
+            Some(l) => l.shadow_distance = v,
+            None => return false,
+        },
+        F::LightShadowSoftness => match &mut data.directional_light {
+            Some(l) => l.shadow_softness = v,
             None => return false,
         },
         F::LightAzimuth | F::LightElevation => match &mut data.directional_light {

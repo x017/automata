@@ -268,12 +268,9 @@ impl Renderer {
     /// leaving Beautiful frees its HDR targets).
     pub fn set_quality(&mut self, quality: GraphicsQuality) {
         let layers = self.shadow_texture.depth_or_array_layers();
-        if quality.shadow_map_size() != self.shadow_map_size
-            || quality.shadow_cascades() != layers
-            || quality.is_beautiful() != self.quality.is_beautiful()
+        if quality.shadow_map_size() != self.shadow_map_size || quality.shadow_cascades() != layers
         {
             let shadow = ShadowResources::new(self.ctx.device(), quality);
-            // (Also rebuilt when Beautiful toggles: its sampler filters.)
             self.shadow_texture = shadow.texture;
             self.shadow_sampler = shadow.sampler;
             self.shadow_array_view = shadow.array_view;
@@ -1474,20 +1471,16 @@ impl Renderer {
         let sun = draw.sun.unwrap_or_default();
         let (mesh_spheres, scene) = scene_bounds(draw);
         let direction = sun.normalized_direction();
-        let cascades = self.quality.shadow_cascades() as usize;
-        let shadows = if cascades > 1 {
-            let aspect = viewport.0 as f32 / viewport.1.max(1) as f32;
-            ShadowCascades::fit_camera(
-                &camera_3d,
-                aspect,
-                scene,
-                direction,
-                self.shadow_map_size,
-                cascades,
-            )
-        } else {
-            ShadowCascades::fit_scene(scene, direction, self.shadow_map_size)
-        };
+        let aspect = viewport.0 as f32 / viewport.1.max(1) as f32;
+        let shadows = ShadowCascades::fit(
+            &camera_3d,
+            aspect,
+            scene,
+            direction,
+            self.shadow_map_size,
+            self.quality.shadow_cascades() as usize,
+            sun.shadow_distance,
+        );
         let render_shadows = sun.shadows && self.shadows_enabled && !draw.meshes.is_empty();
         let env = draw.environment.unwrap_or_default();
         let c = draw.clear_color;
@@ -1572,10 +1565,6 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&self.shadow_layer_views[0]),
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
@@ -1848,13 +1837,9 @@ impl ShadowResources {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
-        // Beautiful's soft taps each compare a bilinear 2x2 footprint; the
-        // other presets keep single compares (cheap on every GPU).
-        let filter = if quality.is_beautiful() {
-            wgpu::FilterMode::Linear
-        } else {
-            wgpu::FilterMode::Nearest
-        };
+        // Every tap compares a bilinear 2x2 footprint (hardware PCF), so
+        // few taps give smooth edges.
+        let filter = wgpu::FilterMode::Linear;
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow comparison"),
             mag_filter: filter,
@@ -2648,6 +2633,57 @@ mod tests {
             "the shadow should cover at least 4% of the image: {darker} darker"
         );
         assert!(lit.iter().any(|&b| b > 150), "the scene is lit");
+    }
+
+    #[test]
+    fn offscreen_cascaded_shadows_end_at_the_shadow_distance() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping shadow distance test");
+            return;
+        };
+        let sun = crate::Sun::new(glam::Vec3::new(-1.0, -0.5, 0.5));
+        let darker = |lit: &[u32], shadowed: &[u32]| {
+            lit.iter()
+                .zip(shadowed)
+                .filter(|(l, s)| **s + 45 < **l)
+                .count()
+        };
+        for quality in [
+            GraphicsQuality::Medium,
+            GraphicsQuality::High,
+            GraphicsQuality::Ultra,
+            GraphicsQuality::Beautiful,
+        ] {
+            renderer.set_quality(quality);
+            let lit = shadow_scene_brightness(&mut renderer, sun);
+            let near = shadow_scene_brightness(
+                &mut renderer,
+                crate::Sun {
+                    shadows: true,
+                    ..sun
+                },
+            );
+            // The shadow lies ~7 m from the camera: past a 3 m distance.
+            let short = shadow_scene_brightness(
+                &mut renderer,
+                crate::Sun {
+                    shadows: true,
+                    shadow_distance: 3.0,
+                    ..sun
+                },
+            );
+            let pixels = lit.len();
+            assert!(
+                darker(&lit, &near) * 25 >= pixels,
+                "{quality:?} draws the shadow"
+            );
+            // (Medium's single map follows the view too once that's
+            // smaller than the whole scene.)
+            assert!(
+                darker(&lit, &short) * 200 <= pixels,
+                "{quality:?}: no shadow past the shadow distance"
+            );
+        }
     }
 
     #[test]

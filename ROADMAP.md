@@ -53,21 +53,15 @@ lights, Ultra and Beautiful the 4 nearest (six-face shadow cubes, 384 /
 (`glow_shadows=`, scene `Surface`, Oberon). Spotlight shadows move to A3,
 together with spotlights.
 
-### A1. Shadows I: crisp sun shadows on High and Ultra ⬜ M
-Today only Beautiful uses cascades; High and Ultra fit **one** map around
-the whole scene (`shadow.rs` `fit_scene`), so big levels get blurry, faint
-shadows (seen in Coin Run).
-- `quality.rs` `shadow_cascades`: High 2, Ultra 3, Beautiful 4.
-- The forward path (`common.wgsl` `shadow_pcf`) only reads cascade 0.
-  Give it cascade selection with a cross-fade at split edges.
-- Better filtering on High (rotated 8-tap Poisson instead of 3×3 PCF) and a
-  normal-offset bias, so there's no acne and no peter-panning.
-- Shadows fade out at the shadow distance instead of cutting off.
-- **Sky-tinted shadows:** shaded sides take the sky colour instead of
-  grey. This is the look of most stylised games.
-- Graphics tab: Shadow Distance and Shadow Softness.
-- **Done when:** Coin Run's daytime shadows are dark and sharp under the
-  player, there's no shimmer while walking, and High costs at most +15%.
+### A1. Shadows I: crisp sun shadows on High and Ultra ✅
+Sun shadows are split into cascades: 2 on High and 3 on Ultra (2048 px each), plus
+Beautiful's 4. Cascades cross-fade at their edges and fade out at the
+shadow distance, and pull in to the level's size in small levels. The forward path uses
+bilinear 4-tap filtering with a normal offset. Shaded sides lean toward
+the sky colour when the sky dome is on. The sun has Shadow Distance and
+Shadow Softness (scene, Python, Oberon Graphics tab and Inspector).
+Measured cost: High +0–7%, Ultra within noise. (The 8-tap rotated Poisson
+was too slow on High, at +15–24%.)
 
 ### A2. Shadows II: Beautiful's contact-hardening shadows and ambient occlusion ⬜ M
 - PCSS (`shadow_soft`): shadows are sharp where an object touches the
@@ -388,7 +382,7 @@ per effort. Reorder any time by telling me.
 | 2 | A0b Materials | – | ✅ |
 | 3 | A0c Glowing objects light surroundings | – | ✅ |
 | 4 | A4 Point light shadows (glowing objects) | M | ✅ |
-| 5 | A1 Crisp shadows on High/Ultra | M | ⬜ |
+| 5 | A1 Crisp shadows on High/Ultra | M | ✅ |
 | 6 | A2 Contact-hardening shadows + AO | M | ⬜ |
 | 7 | A3 Point lights and spotlights (+ spot shadows) | S | ⬜ |
 | 8 | A5 Water ripples and wakes | M | ⬜ |

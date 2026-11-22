@@ -189,7 +189,7 @@ fn shade_forward(s: Surface, shadow: f32) -> vec3<f32> {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let s = surface(in);
-    let shadow = shadow_pcf(in.world_position, s.n, s.l);
+    let shadow = shadow_forward(in.world_position, s.n, s.l);
     let lit = shade_forward(s, shadow);
     return vec4<f32>(finish_forward(apply_fog(lit, in.world_position)), s.base.a);
 }

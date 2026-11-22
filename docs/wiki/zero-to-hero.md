@@ -554,7 +554,8 @@ specular highlight, and ambient so shadow sides aren't pitch black.
 
 - **Shadows** are automatic for every mesh when the sun has `shadows=True`.
 - **Quality presets:** `LOW` disables shadows (fastest, flat look),
-  `MEDIUM`/`HIGH`/`ULTRA` use 1024/2048/4096 shadow maps, and `BEAUTIFUL`
+  `MEDIUM` uses one shadow map, `HIGH`/`ULTRA` split crisp shadows into
+  2/3 cascades (sharp near the camera, reaching far), and `BEAUTIFUL`
   adds soft cascaded shadows, physically based light, bloom and refractive
   [water](guides/rendering-and-lights.md#water).
 - **Mood is data:** `clear_color` + sun `color` + `ambient` is your whole

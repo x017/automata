@@ -132,6 +132,8 @@ scene.add(
             color=(1.0, 0.96, 0.88),        # warm afternoon
             ambient=0.35,                   # fill on shadowed faces
             shadows=True,                   # shadow mapping on
+            shadow_distance=120.0,          # metres of shadows (shorter = sharper)
+            shadow_softness=1.0,            # 0 sharpest .. 8 very soft
         )
     )
 )
@@ -141,9 +143,20 @@ scene.add(
   a neutral shadowless default (the scene is still visible).
 - Meshes are Blinn-Phong shaded: `ambient * color` everywhere, plus
   sun-colored diffuse and a subtle specular highlight where lit.
-- **Shadows** are shadow-mapped automatically: the engine fits the sun's
-  frustum around your scene every frame, so any level size works. Shadowed
-  regions keep the ambient term.
+- **Shadows** are shadow-mapped automatically, so any level size works.
+  On High and up the view is split into cascades (2 on High, 3 on Ultra,
+  4 on Beautiful): the first covers the few metres around the camera at
+  full resolution, so shadows under the player are sharp, and each next
+  one covers farther, coarser. Cascade edges blend, and shadows fade out
+  at `shadow_distance`. A small level is covered only as far as it
+  reaches, so it gets even sharper shadows. Medium uses one map around
+  the whole scene (or the view, if that's smaller). Shadowed regions keep
+  the ambient term.
+- **`shadow_distance`** (metres, default 120): how far shadows reach.
+  Shorter is sharper: a tight indoor or top-down game can use 30–50.
+- **`shadow_softness`** (default 1): how soft shadow edges are. 0 is as
+  sharp as the shadow map allows, higher values blur the edge (Beautiful
+  shows the most difference; High and Ultra stay crisp).
 
 ## Environment
 
@@ -209,6 +222,10 @@ How it combines with the sun:
 - Ambient is `DirectionalLight.ambient × mix(ground, sky)`, picked by how
   much a surface faces up. Keep the sky and ground colours near 1.0 in
   brightness and control strength with `ambient`.
+- **Sky-tinted shade:** with the sky dome on, the ambient from above leans
+  a little toward `zenith_color` at the same brightness. Shade is lit by
+  the sky alone, so shadows and shaded sides turn faintly blue on a clear
+  day (or violet at dusk) instead of grey.
 - **Fog** fades lit colour toward `fog_color` as
   `1 − exp(−density × (distance − start))`.
 - **Tone mapping** runs last. ACES and AgX roll off highlights smoothly,
@@ -225,12 +242,12 @@ class MyGame(at.Game):
     graphics = at.GraphicsQuality.HIGH
 ```
 
-| Preset | Shadows | Shadow map | Glow lights with shadows |
+| Preset | Shadows | Shadow maps | Glow lights with shadows |
 |---|---|---|---|
 | `GraphicsQuality.LOW` | off | — | none |
-| `GraphicsQuality.MEDIUM` | on | 1024px | none |
-| `GraphicsQuality.HIGH` (default) | on | 2048px | 2 (384px) |
-| `GraphicsQuality.ULTRA` | on | 4096px | 4 (512px) |
+| `GraphicsQuality.MEDIUM` | on | 1 × 1024px | none |
+| `GraphicsQuality.HIGH` (default) | crisp | 2 cascades × 2048px | 2 (384px) |
+| `GraphicsQuality.ULTRA` | crisp | 3 cascades × 2048px | 4 (512px) |
 | `GraphicsQuality.BEAUTIFUL` | soft | 4 cascades × 2048px | 4 (512px, soft) |
 
 `LOW` is also a *style*: pure flat-color faces with no shadow shading reads

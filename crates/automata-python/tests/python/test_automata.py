@@ -937,6 +937,16 @@ def test_directional_light_component():
     # Defaults: shadows on, white light.
     default = at.DirectionalLight()
     assert default.shadows is True
+    assert default.shadow_distance == 120.0 and default.shadow_softness == 1.0
+    assert "shadow_distance" not in at.Scene().add(at.Entity("d").add(default)).to_ron()
+    crisp = at.DirectionalLight(shadow_distance=40.0, shadow_softness=0.0)
+    assert crisp.shadow_distance == 40.0 and crisp.shadow_softness == 0.0
+    text = at.Scene().add(at.Entity("c").add(crisp)).to_ron()
+    assert "shadow_distance: 40.0" in text and "shadow_softness: 0.0" in text
+    with pytest.raises(ValueError):
+        at.DirectionalLight(shadow_distance=0.0)
+    with pytest.raises(ValueError):
+        at.DirectionalLight(shadow_softness=9.0)
 
     # Stages and runs headless (light is inert without a GPU).
     game = make_game()

@@ -246,6 +246,11 @@ impl Ui {
                 q.shadow_cascades(),
                 q.shadow_map_size()
             ),
+            q if q.shadow_cascades() > 1 => format!(
+                "{}×{} px shadow cascades",
+                q.shadow_cascades(),
+                q.shadow_map_size()
+            ),
             q => format!("{} px shadow map", q.shadow_map_size()),
         };
         let s = self.stats;
@@ -286,6 +291,24 @@ impl Ui {
         y = self.color_row(canvas, x, y, w, sun, "Color", ColorTarget::Light);
         y = self.float_row(canvas, x, y, w, sun, "Ambient", Field::LightAmbient);
         y = self.flag_row(canvas, x, y, w, sun, "Cast Shadows", Flag::LightShadows);
+        y = self.float_row(
+            canvas,
+            x,
+            y,
+            w,
+            sun,
+            "Shadow Distance",
+            Field::LightShadowDistance,
+        );
+        y = self.float_row(
+            canvas,
+            x,
+            y,
+            w,
+            sun,
+            "Shadow Softness",
+            Field::LightShadowSoftness,
+        );
         y = self.source_note(canvas, x, y, w, sun);
         y + 8.0
     }

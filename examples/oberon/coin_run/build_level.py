@@ -58,7 +58,7 @@ def environment(preset, **changes):
 # The three looks from "Lighting & mood", exactly as set in the Graphics tab.
 MOODS = {
     "afternoon": {
-        "sun": dict(azimuth=35, elevation=55, color="#FFF5E0", ambient=0.45),
+        "sun": dict(azimuth=35, elevation=55, color="#FFF5E0", ambient=0.3),
         "environment": lambda: environment(
             "daylight", tonemapping="aces", exposure=1.1, fog_density=0.01, fog_start=15.0
         ),

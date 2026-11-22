@@ -208,18 +208,6 @@ impl PipelineShared {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
                     count: None,
                 },
-                // The first cascade as a plain 2D texture: the forward
-                // path's lookup (cheaper than an array on some GPUs).
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
                 // Point light shadow cubes, six layers per shadowed light.
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,

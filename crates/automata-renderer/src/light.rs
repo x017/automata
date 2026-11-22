@@ -29,6 +29,13 @@ pub struct Sun {
     pub ambient: f32,
     /// Whether this sun casts shadows (rendered via shadow mapping).
     pub shadows: bool,
+    /// How far from the camera shadows reach (metres); they fade out
+    /// beyond. Shorter is sharper. (Medium's single shadow map only
+    /// follows it when that covers less than the whole scene.)
+    pub shadow_distance: f32,
+    /// Shadow edge softness: 1 is the default slight blur, 0 as sharp as
+    /// the shadow map allows, higher softer (up to 8).
+    pub shadow_softness: f32,
 }
 
 impl Sun {
@@ -57,6 +64,8 @@ impl Default for Sun {
             color: [1.0, 1.0, 1.0],
             ambient: DEFAULT_AMBIENT,
             shadows: false,
+            shadow_distance: DEFAULT_SHADOW_DISTANCE,
+            shadow_softness: 1.0,
         }
     }
 }
@@ -246,13 +255,33 @@ pub(crate) struct FramePoint {
     pub shadow: Option<(usize, PointShadow)>,
 }
 
-/// GPU mirror of the light bind group's uniform buffer.
-///
-/// Layout (WGSL): a `vec4` direction, a `vec4` color (alpha = ambient),
-/// the light-space view-projection matrix, and a `vec4` of params
-/// (x = shadow flag, y = shadow-map texel size).
-/// Soft shadow penumbra width on the Beautiful preset (metres).
+/// How far the ambient sky light leans toward the sky dome's colour.
+const SKY_TINT: f32 = 0.35;
+
+/// The ambient light from above: the environment's sky colour, and with
+/// the sky dome on, leaning toward the zenith's hue at the same
+/// brightness. Shade is lit by the sky alone, so shaded sides turn
+/// faintly sky-coloured instead of grey (the look of most stylised
+/// outdoor games).
+fn sky_ambient(env: &Environment) -> [f32; 3] {
+    let sky = env.sky_color;
+    if !env.sky {
+        return sky;
+    }
+    let luma = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    let zenith = env.zenith_color.map(|c| c.max(0.0));
+    let l = luma(zenith);
+    if l <= 1e-4 {
+        return sky;
+    }
+    std::array::from_fn(|i| sky[i] * (1.0 + SKY_TINT * (zenith[i] / l - 1.0)))
+}
+
+/// Shadow penumbra width at softness 1 (metres).
 const SOFT_SHADOW_RADIUS: f32 = 0.05;
+
+/// [`Sun::shadow_distance`]'s default (metres).
+pub const DEFAULT_SHADOW_DISTANCE: f32 = 120.0;
 
 /// What the light uniform needs to know about the frame being drawn.
 #[derive(Debug, Clone, Copy)]
@@ -349,7 +378,7 @@ impl LightUniform {
         } else {
             0.0
         };
-        let [sr, sg, sb] = env.sky_color;
+        let [sr, sg, sb] = sky_ambient(env);
         let [gr, gg, gb] = env.ground_color;
         let [fr, fg, fb] = env.fog_color;
         let [br, bg, bb] = frame.background;
@@ -372,7 +401,12 @@ impl LightUniform {
             .try_normalize()
             .unwrap_or(Vec3::NEG_Z);
         Self {
-            direction: [direction.x, direction.y, direction.z, SOFT_SHADOW_RADIUS],
+            direction: [
+                direction.x,
+                direction.y,
+                direction.z,
+                SOFT_SHADOW_RADIUS * sun.shadow_softness.clamp(0.0, 8.0),
+            ],
             color_ambient: [sun.color[0], sun.color[1], sun.color[2], sun.ambient],
             cascades,
             splits: shadows.splits,
@@ -422,6 +456,21 @@ mod tests {
         assert_eq!(sun.color, [1.0, 1.0, 1.0]);
         assert_eq!(sun.ambient, DEFAULT_AMBIENT);
         assert!(!sun.shadows);
+    }
+
+    #[test]
+    fn sky_dome_tints_the_ambient_toward_the_zenith_at_the_same_brightness() {
+        let luma = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        let flat = Environment {
+            sky: false,
+            ..Environment::daylight()
+        };
+        assert_eq!(sky_ambient(&flat), flat.sky_color);
+        let dome = Environment::daylight();
+        let tinted = sky_ambient(&dome);
+        assert!((luma(tinted) - luma(dome.sky_color)).abs() < 0.02);
+        let blue = |c: [f32; 3]| c[2] / c[0];
+        assert!(blue(tinted) > blue(dome.sky_color) * 1.2, "{tinted:?}");
     }
 
     #[test]

@@ -89,26 +89,41 @@ fn wave_slope(xz: vec2<f32>, footprint: f32) -> vec3<f32> {
 
 // Shadows on water need far fewer taps than on solid ground: the waves
 // and ripples break shadow edges up anyway. Both variants take 4 taps
-// (the meshes take 9 and 12) on a flat +Y normal.
+// (the meshes take 8 and 12) on a flat +Y normal.
 //
-// Forward: a 2x2 box at half-texel offsets of the near cascade.
+// Forward: a 2x2 box of bilinear compares in one cascade.
+fn water_cascade(i: i32, world: vec3<f32>, ndotl: f32) -> f32 {
+    let c = cascade_coords(i, world, vec3<f32>(0.0, 1.0, 0.0), ndotl);
+    if c.x < 0.0 {
+        return 1.0;
+    }
+    let h = light.params.y * 0.75;
+    return (textureSampleCompareLevel(shadow_map, shadow_sampler, c.xy + vec2<f32>(-h, -h), i, c.z)
+        + textureSampleCompareLevel(shadow_map, shadow_sampler, c.xy + vec2<f32>(h, -h), i, c.z)
+        + textureSampleCompareLevel(shadow_map, shadow_sampler, c.xy + vec2<f32>(-h, h), i, c.z)
+        + textureSampleCompareLevel(shadow_map, shadow_sampler, c.xy + vec2<f32>(h, h), i, c.z)) * 0.25;
+}
+
+// Forward: the cascade by view depth, cross-faded at its far edge.
 fn water_shadow(world: vec3<f32>) -> f32 {
     if light.params.x < 0.5 {
         return 1.0;
     }
-    let projected = light.cascades[0] * vec4<f32>(world, 1.0);
-    let ndc = projected.xyz / projected.w;
-    let uv = ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
-    if uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0 || ndc.z >= 1.0 {
-        return 1.0;
-    }
     let l = normalize(-light.direction.xyz);
-    let depth = ndc.z - max(0.0025 * (1.0 - l.y), 0.0005);
-    let h = light.params.y * 0.75;
-    return (textureSampleCompareLevel(shadow_map_0, shadow_sampler, uv + vec2<f32>(-h, -h), depth)
-        + textureSampleCompareLevel(shadow_map_0, shadow_sampler, uv + vec2<f32>(h, -h), depth)
-        + textureSampleCompareLevel(shadow_map_0, shadow_sampler, uv + vec2<f32>(-h, h), depth)
-        + textureSampleCompareLevel(shadow_map_0, shadow_sampler, uv + vec2<f32>(h, h), depth)) * 0.25;
+    if l.y <= 0.0 {
+        return 0.0;
+    }
+    let pick = cascade_pick(world);
+    let i = i32(pick.x);
+    var lit = water_cascade(i, world, l.y);
+    if pick.y > 0.0 {
+        var next = 1.0;
+        if i + 1 < i32(light.params.z) {
+            next = water_cascade(i + 1, world, l.y);
+        }
+        lit = mix(lit, next, pick.y);
+    }
+    return lit;
 }
 
 // Beautiful: the dithered cascade choice, then 4 bilinear compares on a

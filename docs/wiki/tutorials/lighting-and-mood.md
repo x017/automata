@@ -34,7 +34,7 @@ Under **Renderer**, set Quality to **High** and note the frame time.
    - **Azimuth** `35`: slightly from the side, so cubes show two
      different shades.
    - **Color** `#FFF5E0`: barely warm.
-   - **Ambient** `0.45`.
+   - **Ambient** `0.3`: shadows stay clearly darker than lit ground.
 3. **Environment:**
    - **Tone Mapping**: ACES.
    - **Exposure**: `1.1`.

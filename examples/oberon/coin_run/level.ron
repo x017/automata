@@ -6,7 +6,7 @@
             directional_light: Some((
                 direction: (-0.32898992, -0.81915206, -0.4698463),
                 color: (1.0, 0.9607843, 0.8784314),
-                ambient: 0.45,
+                ambient: 0.3,
                 shadows: true,
             )),
         ),
