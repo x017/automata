@@ -1758,12 +1758,11 @@ impl Renderer {
         prepared: &PreparedFrame,
     ) {
         for point in &prepared.points {
-            let Some((slot, view)) = &point.shadow else {
+            let Some((first, view)) = &point.shadow else {
                 continue;
             };
-            let range = point.light.effective_range();
-            for (face, vp) in view.faces.iter().enumerate() {
-                let Some(layer_view) = self.point_shadows.views.get(slot * 6 + face) else {
+            for (face, vp) in view.faces.iter().take(view.count).enumerate() {
+                let Some(layer_view) = self.point_shadows.views.get(first + face) else {
                     continue;
                 };
                 let light_vp_bind = self.uniform_bind_group(
@@ -1793,12 +1792,12 @@ impl Renderer {
                     .enumerate();
                 for (i, ((mesh_draw, model_bind), sphere)) in draws {
                     if point.source == Some(i)
-                        || !crate::light::PointShadow::face_sees(
+                        || point.light.inside_fixture(sphere.center, sphere.radius)
+                        || !crate::light::PointShadow::light_face_sees(
+                            &point.light,
                             face,
-                            point.light.position,
                             sphere.center,
                             sphere.radius,
-                            range,
                         )
                     {
                         continue;
@@ -2013,8 +2012,10 @@ fn glow_light(m: &MeshDraw) -> Option<crate::PointLight> {
     })
 }
 
-/// The point lights a frame shades: the draw list's plus one per glowing
-/// mesh, at most `max` of them, the first `shadows` of those that cast
+/// The point lights a frame shades: the draw list's (spotlights too) plus
+/// one per glowing mesh, at most `max` of them, the first of those that
+/// cast shadows getting shadow map layers (six each, one per spotlight, out
+/// of six per point light in `shadows`). Those that cast
 /// shadows getting a shadow slot. The ones that light the camera's
 /// surroundings most come first: brightest over distance squared from the
 /// camera, counting lights the camera is inside as at full strength.
@@ -2048,11 +2049,15 @@ fn frame_point_lights(
     };
     lights.sort_by(|a, b| score(&b.light).total_cmp(&score(&a.light)));
     lights.truncate(max.min(crate::MAX_POINT_LIGHTS));
-    let mut slot = 0;
+    // Shadow map layers: six per point light the preset shadows; a point
+    // light takes six, a spotlight one.
+    let budget = shadows.min(crate::MAX_POINT_SHADOWS) * 6;
+    let mut used = 0;
     for p in &mut lights {
-        if slot < shadows.min(crate::MAX_POINT_SHADOWS) && p.light.shadows {
-            p.shadow = Some((slot, crate::light::PointShadow::for_light(&p.light)));
-            slot += 1;
+        let need = p.light.shadow_layers();
+        if p.light.shadows && used + need <= budget {
+            p.shadow = Some((used, crate::light::PointShadow::for_light(&p.light)));
+            used += need;
         }
     }
     lights
@@ -3243,6 +3248,87 @@ mod tests {
         }
     }
 
+    /// The center of a dark wall under a red spotlight off to the side,
+    /// aimed at it (or straight ahead, missing it), with (or without) a
+    /// plain cube halfway between them.
+    fn wall_under_spot(renderer: &mut Renderer, aimed: bool, blocked: bool) -> [u8; 4] {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let grey = renderer.create_pbr_material(
+            &crate::MaterialParams::with_color([0.5, 0.5, 0.5, 1.0]),
+            crate::MaterialTextures::default(),
+        );
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 0.0, 1.6),
+            glam::Vec3::ZERO,
+        ));
+        draw.set_sun(crate::Sun {
+            ambient: 0.0,
+            ..crate::Sun::new(glam::Vec3::Z)
+        });
+        draw.mesh(&cube, glam::Mat4::IDENTITY, &grey);
+        let at = glam::Vec3::new(0.5, 0.0, 1.1);
+        let aim = if aimed {
+            glam::Vec3::new(0.0, 0.0, 0.5) - at
+        } else {
+            glam::Vec3::NEG_Z
+        };
+        draw.point_light(crate::PointLight::spot(at, aim, [0.5, 0.0, 0.0], 20.0));
+        if blocked {
+            draw.mesh(
+                &cube,
+                glam::Mat4::from_scale_rotation_translation(
+                    glam::Vec3::splat(0.15),
+                    glam::Quat::IDENTITY,
+                    glam::Vec3::new(0.25, 0.0, 0.8),
+                ),
+                &grey,
+            );
+        }
+        renderer.render_offscreen(&draw, &target);
+        center_pixel(&read_pixels(renderer, &target, size), size)
+    }
+
+    #[test]
+    fn offscreen_spotlights_light_only_inside_their_cone_and_cast_shadows() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping spotlight test");
+            return;
+        };
+        for quality in [
+            GraphicsQuality::Low,
+            GraphicsQuality::High,
+            GraphicsQuality::Beautiful,
+        ] {
+            renderer.set_quality(quality);
+            let lit = wall_under_spot(&mut renderer, true, false);
+            let missed = wall_under_spot(&mut renderer, false, false);
+            let shaded = wall_under_spot(&mut renderer, true, true);
+            assert!(
+                lit[0] > 60,
+                "{quality:?}: the spot should light the wall: {lit:?}"
+            );
+            assert!(
+                missed[0] < 10,
+                "{quality:?}: outside the cone stays dark: {missed:?}"
+            );
+            if quality.point_shadows() == 0 {
+                assert!(
+                    u32::from(shaded[0]) + 20 > u32::from(lit[0]),
+                    "{quality:?} has no point shadows: {shaded:?} vs {lit:?}"
+                );
+            } else {
+                assert!(
+                    u32::from(shaded[0]) + 40 < u32::from(lit[0]),
+                    "{quality:?}: the blocker should shade the wall: {shaded:?} vs {lit:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn point_lights_beyond_the_preset_cap_keep_the_ones_near_the_camera() {
         let mut draw = DrawList::new();
@@ -3261,9 +3347,26 @@ mod tests {
         assert_eq!(kept.len(), 4);
         let xs: Vec<f32> = kept.iter().map(|l| l.light.position.x).collect();
         assert_eq!(xs, [0.0, 10.0, 20.0, 30.0], "nearest first");
-        // The two nearest get the shadow slots.
+        // The two nearest get the shadow layers, six each.
         let slots: Vec<Option<usize>> = kept.iter().map(|l| l.shadow.map(|(s, _)| s)).collect();
-        assert_eq!(slots, [Some(0), Some(1), None, None]);
+        assert_eq!(slots, [Some(0), Some(6), None, None]);
+        // Spotlights take one layer each: one point light's room shadows
+        // six of them.
+        let mut spots = DrawList::new();
+        for i in 0..8 {
+            #[allow(clippy::cast_precision_loss)] // small counter
+            let x = i as f32;
+            spots.point_light(crate::PointLight::spot(
+                glam::Vec3::new(x, 2.0, 0.0),
+                glam::Vec3::NEG_Y,
+                [1.0; 3],
+                30.0,
+            ));
+        }
+        let kept = frame_point_lights(&spots, &camera, 8, 1);
+        let layers: Vec<Option<usize>> = kept.iter().map(|l| l.shadow.map(|(s, _)| s)).collect();
+        assert_eq!(layers.iter().flatten().count(), 6);
+        assert!(layers.iter().flatten().all(|&l| l < 6));
         assert_eq!(
             frame_point_lights(&draw, &camera, 100, 0).len(),
             crate::MAX_POINT_LIGHTS

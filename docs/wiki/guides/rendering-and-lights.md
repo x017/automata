@@ -90,7 +90,7 @@ lamp = at.MeshRenderer.sphere(0.4, color=(0.1, 0.1, 0.1, 1),
   untick **Glow Shadows**) lets a glow's light pass through everything,
   which is cheaper; use it for small or unimportant glows.
 - **Limits:** a frame shades at most 4 (Low), 8 (Medium), 16 (High) or 32
-  (Ultra, Beautiful) glow lights; with more, the ones nearest the camera
+  (Ultra, Beautiful) glow lights (placed lights, below, count too); with more, the ones nearest the camera
   win. Of those, the nearest 2 (High) or 4 (Ultra, Beautiful) that have
   `glow_shadows` on cast shadows. The rest light through walls, and so
   does every glow on Low and Medium.
@@ -161,6 +161,57 @@ scene.add(
   the distance to it, as much as the sun's size (`sun_size`) times the
   softness says: a pole's shadow starts crisp at its foot and blurs
   toward its tip.
+
+## Point lights and spotlights
+
+Place lights anywhere: a torch on a wall, a lamp post, a car's headlights,
+a flashlight. A **`PointLight`** shines every way from its entity's
+position. A **`SpotLight`** shines in a cone along its entity's forward
+direction (local −Z, turned by the entity's rotation).
+
+```python
+# A torch on a wall: warm, reaching about 10 m.
+scene.add(at.Entity("torch")
+          .add(at.Transform(position=(-2.2, 2.5, -3.45)))
+          .add(at.PointLight(color=(1.0, 0.58, 0.28), intensity=3.5, range=10.0)))
+
+# A headlight: a 26° cone tipped 9° down toward the road.
+scene.add(at.Entity("headlight")
+          .add(at.Transform(position=(2.0, 0.72, 0.55),
+                            rotation_euler=(math.radians(-9), 0, 0)))
+          .add(at.SpotLight(intensity=18.0, outer_angle=26.0, inner_angle=12.0,
+                            range=22.0)))
+```
+
+| Setting | Values | What it does |
+|---|---|---|
+| `color` | RGB 0..1 | The light's colour |
+| `intensity` | ≥ 0 | Brightness. 1 lights a surface 1 m away, facing the light, as brightly as a white sun overhead; at 2 m it's a quarter of that. Torches and lamps: 2–6. Headlights and stage lights: 10–30 |
+| `range` | m, 0 = auto | Where the light ends. 0 works it out from the brightness, ending where the light is too dim to see. Set a range to keep a light inside a room |
+| `outer_angle` | degrees, ≤ 80 | (Spot) the cone's edge, measured from its axis. A 30° spot is 60° across |
+| `inner_angle` | degrees | (Spot) full strength inside this angle, fading out toward the edge. Defaults to ¾ of `outer_angle`; closer to it gives a harder edge |
+| `radius` | m | The size of the glowing source (default 0.05). Bigger looks softer up close |
+| `shadows` | `True` / `False` | Whether objects block it and cast shadows (High and up). `True` by default |
+
+- **Shadows:** placed lights share the shadow budget with glowing meshes.
+  High shadows the 2 nearest point lights and Ultra and Beautiful the 4
+  nearest. A spotlight costs a sixth of a point light, because its shadow
+  is one view down the cone rather than six around it. So one point
+  light's room shadows six spots, and a pair of headlights is cheap.
+- **Fixtures don't block their own light:** a light inside a small mesh
+  (up to about half a metre across: a bulb, a flame, a headlight lens)
+  leaves that mesh out of its shadow. Give the mesh `glow_light=0` so it
+  glows for the look without adding a second light.
+- **Limits:** placed lights count toward the same per-frame cap as glows
+  (4, 8, 16 or 32 lights from Low to Beautiful); the nearest and brightest
+  win.
+- **Oberon:** **Create → Point Light** or **Spot Light**. Selecting a
+  light shows its reach in the viewport: three rings for a point light's
+  range, or a spot's cone out to its range (the core is the fainter
+  circle). Aim a spot with the Rotate tool.
+- **Example:** `examples/oberon/night_lights` has a torch on a wall and a
+  car with two headlights, all shadowed, with no light coming from a
+  glowing mesh.
 
 ## Environment
 

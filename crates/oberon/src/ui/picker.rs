@@ -20,6 +20,10 @@ pub enum ColorTarget {
     MeshEmissive,
     /// Light color (RGB).
     Light,
+    /// Point light color (RGB).
+    PointLight,
+    /// Spotlight color (RGB).
+    SpotLight,
     /// Environment sky ambient (RGB).
     EnvSky,
     /// Environment ground ambient (RGB).
@@ -46,6 +50,8 @@ impl ColorTarget {
             Self::Mesh => (0..4).map(Field::MeshColor).collect(),
             Self::MeshEmissive => (0..3).map(Field::MeshEmissive).collect(),
             Self::Light => (0..3).map(Field::LightColor).collect(),
+            Self::PointLight => (0..3).map(Field::PointColor).collect(),
+            Self::SpotLight => (0..3).map(Field::SpotColor).collect(),
             Self::EnvSky => (0..3).map(Field::EnvSky).collect(),
             Self::EnvGround => (0..3).map(Field::EnvGround).collect(),
             Self::EnvBackground => (0..3).map(Field::EnvBackground).collect(),

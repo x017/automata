@@ -145,6 +145,28 @@ sharper. `shadow_softness` (0..8, default 1) is how soft their edges are.
 Out-of-range values raise `ValueError`. Guide:
 [Rendering & Lights](guides/rendering-and-lights.md#the-sun).
 
+### PointLight / SpotLight
+
+```python
+at.PointLight(color=(1.0, 0.85, 0.65), intensity=3.0, range=0.0,
+              *, radius=0.05, shadows=True)
+at.SpotLight(color=(1.0, 1.0, 1.0), intensity=8.0, outer_angle=30.0,
+             inner_angle=None, range=0.0, *, radius=0.05, shadows=True)
+```
+
+Placed lights. A `PointLight` shines every way from its entity's position.
+A `SpotLight` shines along its entity's forward axis (local −Z, turned by
+the entity's rotation). `intensity` 1 lights a surface 1 m away like a
+white sun overhead, falling off with the square of the distance. `range`
+(metres) ends the light; 0 works it out from the brightness.
+`outer_angle` is the cone's edge in degrees from its axis (0–80), and
+`inner_angle` is the full-strength core (default ¾ of `outer_angle`).
+`radius` is the size of the glowing source. `shadows` lets objects block
+the light (High and up, nearest first). Getters have the same names.
+Negative values, a zero radius, or angles out of range raise `ValueError`.
+Saved as `point_light` / `spot_light` in scene files. Guide:
+[Rendering & Lights](guides/rendering-and-lights.md#point-lights-and-spotlights).
+
 ### Environment
 
 ```python

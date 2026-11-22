@@ -3,7 +3,7 @@
 //! scene loads.
 
 use automata_renderer::{Camera2D, Camera3D, Environment, Tonemapping, Water};
-use automata_scene::{DirectionalLight, Transform};
+use automata_scene::{DirectionalLight, PointLight, SpotLight, Transform};
 use glam::{EulerRot, Quat, Vec2, Vec3};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -265,6 +265,234 @@ impl PyDirectionalLight {
 
     /// Wraps an engine light for Python (used by scene enumeration).
     pub fn from_inner(inner: DirectionalLight) -> Self {
+        Self { inner }
+    }
+}
+
+/// A light placed in the scene shining every way from its entity's
+/// position: a torch, a lamp, a campfire. It fades with the square of the
+/// distance and reaches nothing past `range` (0 picks it from the
+/// brightness). `intensity` 1 lights a surface 1 m away as brightly as a
+/// white sun overhead.
+///
+/// ```python
+/// scene.add(at.Entity("torch").add(at.Transform(position=(0, 2, -3)))
+///                             .add(at.PointLight(color=(1.0, 0.6, 0.3), intensity=4.0)))
+/// ```
+#[pyclass(name = "PointLight", module = "automata._core", frozen)]
+#[derive(Debug, Clone, Copy)]
+pub struct PyPointLight {
+    inner: PointLight,
+}
+
+fn check_light(intensity: f32, range: f32, radius: f32) -> PyResult<()> {
+    if !(intensity >= 0.0 && range >= 0.0 && radius > 0.0) {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "intensity and range must be 0 or more and radius above 0",
+        ));
+    }
+    Ok(())
+}
+
+#[pymethods]
+impl PyPointLight {
+    /// Creates a point light. `radius` is the glowing source's size
+    /// (bigger is softer up close); `shadows` lets objects block it (the
+    /// nearest few shadowed lights get shadows on High and up).
+    #[new]
+    #[pyo3(signature = (color=(1.0, 0.85, 0.65), intensity=3.0, range=0.0, *, radius=0.05,
+                        shadows=true))]
+    fn new(
+        color: (f32, f32, f32),
+        intensity: f32,
+        range: f32,
+        radius: f32,
+        shadows: bool,
+    ) -> PyResult<Self> {
+        check_light(intensity, range, radius)?;
+        Ok(Self {
+            inner: PointLight {
+                color: [color.0, color.1, color.2],
+                intensity,
+                range,
+                radius,
+                shadows,
+            },
+        })
+    }
+
+    /// The light color (linear RGB).
+    #[getter]
+    fn color(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.color;
+        (r, g, b)
+    }
+
+    /// The brightness.
+    #[getter]
+    fn intensity(&self) -> f32 {
+        self.inner.intensity
+    }
+
+    /// Where the light ends (metres; 0 = picked from the brightness).
+    #[getter]
+    fn range(&self) -> f32 {
+        self.inner.range
+    }
+
+    /// The glowing source's size (metres).
+    #[getter]
+    fn radius(&self) -> f32 {
+        self.inner.radius
+    }
+
+    /// Whether objects block it and cast shadows.
+    #[getter]
+    fn shadows(&self) -> bool {
+        self.inner.shadows
+    }
+
+    fn __repr__(&self) -> String {
+        let [r, g, b] = self.inner.color;
+        format!(
+            "PointLight(color=({r:.2}, {g:.2}, {b:.2}), intensity={:.2}, range={:.2}, shadows={})",
+            self.inner.intensity,
+            self.inner.range,
+            if self.inner.shadows { "True" } else { "False" }
+        )
+    }
+}
+
+impl PyPointLight {
+    /// The engine component value.
+    pub fn inner(&self) -> PointLight {
+        self.inner
+    }
+
+    /// Wraps an engine light for Python (used by scene enumeration).
+    pub fn from_inner(inner: PointLight) -> Self {
+        Self { inner }
+    }
+}
+
+/// A light placed in the scene shining in a cone along its entity's
+/// forward direction (local -Z, turned by the entity's rotation): a
+/// flashlight, a headlight, a stage light. Full strength inside
+/// `inner_angle` (degrees from the axis; three quarters of `outer_angle`
+/// unless given), faded out by `outer_angle` (at most 80).
+///
+/// ```python
+/// scene.add(at.Entity("headlight")
+///           .add(at.Transform(position=(0, 0.7, 2), rotation_euler=(-0.1, 0, 0)))
+///           .add(at.SpotLight(intensity=20.0, outer_angle=25.0)))
+/// ```
+#[pyclass(name = "SpotLight", module = "automata._core", frozen)]
+#[derive(Debug, Clone, Copy)]
+pub struct PySpotLight {
+    inner: SpotLight,
+}
+
+#[pymethods]
+impl PySpotLight {
+    /// Creates a spotlight.
+    #[new]
+    #[pyo3(signature = (color=(1.0, 1.0, 1.0), intensity=8.0, outer_angle=30.0,
+                        inner_angle=None, range=0.0, *, radius=0.05, shadows=true))]
+    fn new(
+        color: (f32, f32, f32),
+        intensity: f32,
+        outer_angle: f32,
+        inner_angle: Option<f32>,
+        range: f32,
+        radius: f32,
+        shadows: bool,
+    ) -> PyResult<Self> {
+        check_light(intensity, range, radius)?;
+        let inner_angle = inner_angle.unwrap_or(outer_angle * 0.75);
+        if !(outer_angle > 0.0
+            && outer_angle <= automata_renderer::SpotCone::MAX_ANGLE
+            && (0.0..=outer_angle).contains(&inner_angle))
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "outer_angle must be between 0 and 80 degrees and inner_angle between 0 and \
+                 outer_angle",
+            ));
+        }
+        Ok(Self {
+            inner: SpotLight {
+                color: [color.0, color.1, color.2],
+                intensity,
+                range,
+                inner_angle,
+                outer_angle,
+                radius,
+                shadows,
+            },
+        })
+    }
+
+    /// The light color (linear RGB).
+    #[getter]
+    fn color(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.color;
+        (r, g, b)
+    }
+
+    /// The brightness on the cone's axis.
+    #[getter]
+    fn intensity(&self) -> f32 {
+        self.inner.intensity
+    }
+
+    /// The cone's edge (degrees from the axis).
+    #[getter]
+    fn outer_angle(&self) -> f32 {
+        self.inner.outer_angle
+    }
+
+    /// The full-strength core (degrees from the axis).
+    #[getter]
+    fn inner_angle(&self) -> f32 {
+        self.inner.inner_angle
+    }
+
+    /// Where the light ends (metres; 0 = picked from the brightness).
+    #[getter]
+    fn range(&self) -> f32 {
+        self.inner.range
+    }
+
+    /// The glowing source's size (metres).
+    #[getter]
+    fn radius(&self) -> f32 {
+        self.inner.radius
+    }
+
+    /// Whether objects block it and cast shadows.
+    #[getter]
+    fn shadows(&self) -> bool {
+        self.inner.shadows
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SpotLight(intensity={:.2}, outer_angle={:.1}, inner_angle={:.1}, shadows={})",
+            self.inner.intensity,
+            self.inner.outer_angle,
+            self.inner.inner_angle,
+            if self.inner.shadows { "True" } else { "False" }
+        )
+    }
+}
+
+impl PySpotLight {
+    /// The engine component value.
+    pub fn inner(&self) -> SpotLight {
+        self.inner
+    }
+
+    /// Wraps an engine light for Python (used by scene enumeration).
+    pub fn from_inner(inner: SpotLight) -> Self {
         Self { inner }
     }
 }
@@ -1103,6 +1331,10 @@ pub enum StagedComponent {
     MeshVisual(automata_scene::MeshVisual),
     /// Directional sun light.
     DirectionalLight(DirectionalLight),
+    /// Placed light shining every way.
+    PointLight(PointLight),
+    /// Placed light shining in a cone.
+    SpotLight(SpotLight),
     /// Scene look (ambient, fog, tone mapping).
     Environment(Environment),
     /// Animated water surface.
@@ -1144,6 +1376,12 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(l) = obj.cast::<PyDirectionalLight>() {
         return Ok(StagedComponent::DirectionalLight(l.get().inner()));
     }
+    if let Ok(l) = obj.cast::<PyPointLight>() {
+        return Ok(StagedComponent::PointLight(l.get().inner()));
+    }
+    if let Ok(l) = obj.cast::<PySpotLight>() {
+        return Ok(StagedComponent::SpotLight(l.get().inner()));
+    }
     if let Ok(e) = obj.cast::<PyEnvironment>() {
         return Ok(StagedComponent::Environment(e.get().inner()));
     }
@@ -1157,7 +1395,8 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
-         MeshRenderer, DirectionalLight, Environment, Water, or AudioSource"
+         MeshRenderer, DirectionalLight, PointLight, SpotLight, Environment, Water, or \
+         AudioSource"
     )))
 }
 

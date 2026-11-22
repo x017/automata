@@ -14,12 +14,19 @@ struct CameraUniform {
 };
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
 
-// A point light (`PointLight` in Rust). Glowing meshes become these too.
+// A point light or spotlight (`PointLight` in Rust). Glowing meshes become
+// these too.
 struct PointLightData {
     position_range: vec4<f32>,   // xyz: position, w: where it fades out (m)
     intensity_radius: vec4<f32>, // rgb: intensity, w: glowing body radius (m)
-    shadow: vec4<f32>,           // x: shadow slot (-1 = none), y: near, z: far
+    shadow: vec4<f32>,           // x: first shadow layer (-1 = none), y: near, z: far,
+                                 // w: cone offset (1 = shines every way)
+    cone: vec4<f32>,             // xyz: spot axis, w: cone scale (0 = not a spot)
 };
+
+// How much wider than its cone a spot's shadow map looks (radians); must
+// match `SPOT_SHADOW_MARGIN` in light.rs.
+const SPOT_SHADOW_MARGIN: f32 = 0.0698132;
 
 // Must match `MAX_POINT_LIGHTS` / `MAX_POINT_SHADOWS` in Rust.
 const MAX_POINT_LIGHTS: u32 = 32u;
@@ -261,8 +268,10 @@ fn shadow_soft(world: vec3<f32>, n: vec3<f32>, l: vec3<f32>, frag: vec2<f32>) ->
 // --- Point lights -----------------------------------------------------------
 // Inverse-square falloff, held flat inside the glowing body (no hot spot)
 // and windowed to reach exactly zero at the light's range (Karis's
-// (1 - (d/R)^4)^2), so lights can be skipped past it. The nearest few can
-// cast shadows (`point_shadow`, below).
+// (1 - (d/R)^4)^2), so lights can be skipped past it. A spotlight also
+// fades from its core to its cone's edge (smoothly, on the cosine of the
+// angle off its axis). The nearest few can cast shadows (`point_shadow`,
+// below).
 
 struct PointSample {
     l: vec3<f32>,        // direction to the light
@@ -288,35 +297,48 @@ fn point_light(i: u32, world: vec3<f32>) -> PointSample {
     let x = d2 / range2;
     let window = clamp(1.0 - x * x, 0.0, 1.0);
     let r = p.intensity_radius.w;
-    out.radiance = p.intensity_radius.rgb * (window * window / max(d2, r * r));
+    // Spot cone: 1 inside the core, 0 past the edge (always 1 for point
+    // lights, whose scale is 0 and offset 1).
+    let cone = clamp(dot(-out.l, p.cone.xyz) * p.cone.w + p.shadow.w, 0.0, 1.0);
+    out.radiance = p.intensity_radius.rgb * (window * window * cone * cone / max(d2, r * r));
     return out;
 }
 
 // How much of point light `i` reaches `world` past the objects between
-// (1 lit, 0 blocked). Each shadowed light renders six slightly wider than
-// 90° views; the direction's major axis picks one. A normal offset of about
-// a texel at that distance keeps surfaces from shadowing themselves.
+// (1 lit, 0 blocked). Each shadowed point light renders six slightly wider
+// than 90° views; the direction's major axis picks one. A spotlight renders
+// one view down its cone. A normal offset of about a texel at that distance
+// keeps surfaces from shadowing themselves.
 fn point_shadow(i: u32, world: vec3<f32>, n: vec3<f32>) -> f32 {
     let p = light.points[i];
-    let slot = i32(p.shadow.x);
-    if slot < 0 {
+    let first = i32(p.shadow.x);
+    if first < 0 {
         return 1.0;
     }
     let to_frag = world - p.position_range.xyz;
-    let a = abs(to_frag);
     var face = 0;
-    if a.x >= a.y && a.x >= a.z {
-        face = select(1, 0, to_frag.x > 0.0);
-    } else if a.y >= a.z {
-        face = select(3, 2, to_frag.y > 0.0);
+    var major = 0.0;
+    var half_tan = light.point_shadow.z;
+    if p.cone.w > 0.0 {
+        // The cone's edge is where cos * scale + offset = 0.
+        let edge = acos(clamp(-p.shadow.w / p.cone.w, -1.0, 1.0));
+        half_tan = tan(min(edge + SPOT_SHADOW_MARGIN, 1.4835));
+        major = max(dot(to_frag, p.cone.xyz), 0.0);
     } else {
-        face = select(5, 4, to_frag.z > 0.0);
+        let a = abs(to_frag);
+        if a.x >= a.y && a.x >= a.z {
+            face = select(1, 0, to_frag.x > 0.0);
+        } else if a.y >= a.z {
+            face = select(3, 2, to_frag.y > 0.0);
+        } else {
+            face = select(5, 4, to_frag.z > 0.0);
+        }
+        major = max(a.x, max(a.y, a.z));
     }
-    let major = max(a.x, max(a.y, a.z));
-    let texel_world = 2.0 * major * light.point_shadow.z * light.point_shadow.x;
+    let texel_world = 2.0 * major * half_tan * light.point_shadow.x;
     let l = -to_frag * inverseSqrt(max(dot(to_frag, to_frag), 1e-8));
     let offset = world + n * (texel_world * 1.5) + l * texel_world;
-    let layer = slot * 6 + face;
+    let layer = first + face;
     let clip = light.point_faces[layer] * vec4<f32>(offset, 1.0);
     let ndc = clip.xyz / clip.w;
     let uv = clamp(ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));

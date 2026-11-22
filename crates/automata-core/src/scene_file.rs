@@ -15,7 +15,10 @@
 use automata_renderer::{Camera2D, Camera3D, Environment, MeshData, Water};
 /// A mesh's roughness / metalness / glow overrides (saved with its visual).
 pub use automata_scene::Surface;
-use automata_scene::{DirectionalLight, MeshVisual, MeshVisualKind, Name, SceneWorld, Transform};
+use automata_scene::{
+    DirectionalLight, MeshVisual, MeshVisualKind, Name, PointLight, SceneWorld, SpotLight,
+    Transform,
+};
 use glam::EulerRot;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -66,6 +69,12 @@ pub struct EntityData {
     /// Directional sun light.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directional_light: Option<DirectionalLight>,
+    /// A light shining every way from the entity's position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub point_light: Option<PointLight>,
+    /// A light shining in a cone along the entity's forward (-Z) axis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spot_light: Option<SpotLight>,
     /// Scene look: ambient, fog, exposure, tone mapping, background.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<Environment>,
@@ -294,6 +303,12 @@ impl SceneFile {
             if let Some(light) = eref.get::<&DirectionalLight>() {
                 data.directional_light = Some(*light);
             }
+            if let Some(light) = eref.get::<&PointLight>() {
+                data.point_light = Some(*light);
+            }
+            if let Some(light) = eref.get::<&SpotLight>() {
+                data.spot_light = Some(*light);
+            }
             if let Some(env) = eref.get::<&Environment>() {
                 data.environment = Some(*env);
             }
@@ -361,6 +376,12 @@ impl SceneFile {
                 let _ = world.insert_one(entity, *camera);
             }
             if let Some(light) = &data.directional_light {
+                let _ = world.insert_one(entity, *light);
+            }
+            if let Some(light) = &data.point_light {
+                let _ = world.insert_one(entity, *light);
+            }
+            if let Some(light) = &data.spot_light {
                 let _ = world.insert_one(entity, *light);
             }
             if let Some(env) = &data.environment {
@@ -690,6 +711,52 @@ mod tests {
         let water = partial.entities[0].water.unwrap();
         assert!((water.wave_height - 0.5).abs() < f32::EPSILON);
         assert_eq!(water.size, Water::default().size);
+    }
+
+    #[test]
+    fn placed_lights_round_trip_and_save_only_what_differs() {
+        let mut world = SceneWorld::new();
+        let spot = SpotLight {
+            color: [1.0, 0.9, 0.7],
+            range: 25.0,
+            ..SpotLight::new(12.0, 25.0)
+        };
+        world.spawn((
+            Name("torch".into()),
+            Transform::from_position(glam::Vec3::new(0.0, 2.0, -1.0)),
+            PointLight::default(),
+        ));
+        world.spawn((Name("headlight".into()), Transform::IDENTITY, spot));
+        let file = SceneFile::from_world(&world);
+        let text = file.to_ron().unwrap();
+        let back = SceneFile::from_ron(&text).unwrap();
+        assert_eq!(back, file);
+        assert_eq!(back.entities[0].point_light, Some(PointLight::default()));
+        assert_eq!(back.entities[1].spot_light, Some(spot));
+        // Defaults stay out of the file.
+        assert!(
+            !text.contains("shadows") && !text.contains("radius"),
+            "{text}"
+        );
+        // Hand-written files may set only a few fields.
+        let partial = SceneFile::from_ron(
+            "(version: 1, entities: [(point_light: Some((intensity: 5.0)), \
+             spot_light: Some((outer_angle: 40.0, shadows: false)))])",
+        )
+        .unwrap();
+        let point = partial.entities[0].point_light.unwrap();
+        assert!((point.intensity - 5.0).abs() < f32::EPSILON);
+        assert!(point.shadows);
+        assert_eq!(point.color, PointLight::default().color);
+        let cone = partial.entities[0].spot_light.unwrap();
+        assert!(!cone.shadows);
+        assert!((cone.outer_angle - 40.0).abs() < f32::EPSILON);
+        // Loaded into a world, both light the frame.
+        let mut live = SceneWorld::new();
+        back.apply_to_world(&mut live);
+        let mut draw = automata_renderer::DrawList::new();
+        automata_scene::record_draw_list(&live, &mut draw);
+        assert_eq!(draw.point_lights().len(), 2);
     }
 
     #[test]

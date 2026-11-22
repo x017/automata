@@ -2234,6 +2234,34 @@ impl Ui {
                 y += 6.0;
             }
         }
+        if d.point_light.is_some() {
+            let kind = ComponentKind::PointLight;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                y = self.color_row(canvas, x, y, w, e, "Color", ColorTarget::PointLight);
+                y = self.float_row(canvas, x, y, w, e, "Intensity", Field::PointIntensity);
+                y = self.float_row(canvas, x, y, w, e, "Range", Field::PointRange);
+                y = self.float_row(canvas, x, y, w, e, "Radius", Field::PointRadius);
+                y = self.flag_row(canvas, x, y, w, e, "Cast Shadows", Flag::PointShadows);
+                y += 6.0;
+            }
+        }
+        if d.spot_light.is_some() {
+            let kind = ComponentKind::SpotLight;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                y = self.color_row(canvas, x, y, w, e, "Color", ColorTarget::SpotLight);
+                y = self.float_row(canvas, x, y, w, e, "Intensity", Field::SpotIntensity);
+                y = self.float_row(canvas, x, y, w, e, "Range", Field::SpotRange);
+                y = self.float_row(canvas, x, y, w, e, "Cone Angle", Field::SpotOuter);
+                y = self.float_row(canvas, x, y, w, e, "Inner Angle", Field::SpotInner);
+                y = self.float_row(canvas, x, y, w, e, "Radius", Field::SpotRadius);
+                y = self.flag_row(canvas, x, y, w, e, "Cast Shadows", Flag::SpotShadows);
+                y += 6.0;
+            }
+        }
         if d.camera_3d.is_some() {
             let kind = ComponentKind::Camera;
             let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
@@ -4065,6 +4093,24 @@ fn entity_icon(canvas: &mut Canvas, cx: f32, cy: f32, d: &EntityData) {
                 1.2,
             );
         }
+    } else if let Some(spot) = d.spot_light {
+        // A lamp head with its beam spreading out.
+        let c = light_color(spot.color);
+        canvas.fill_polygon(
+            &[
+                (cx - 7.0, cy - 7.0),
+                (cx - 2.0, cy - 7.0),
+                (cx + 7.0, cy + 6.0),
+                (cx - 7.0, cy + 6.0),
+            ],
+            c,
+        );
+        canvas.fill_circle(cx - 4.5, cy - 6.0, 2.8, c);
+    } else if let Some(point) = d.point_light {
+        // A bulb: a bright core in a soft halo.
+        let c = light_color(point.color);
+        canvas.stroke_circle(cx, cy, 7.0, c, 1.2);
+        canvas.fill_circle(cx, cy, 4.0, c);
     } else if d.environment.is_some() && d.mesh_visual.is_none() {
         // A horizon: sky arc over a ground line.
         let c = color::text_dim();
@@ -4199,8 +4245,91 @@ fn draw_camera_frustums(
     }
 }
 
-/// The selection outline (oriented box), plus a light's direction arrow.
+/// A placed light's icon color: its own hue, kept bright enough to see.
+fn light_color(rgb: [f32; 3]) -> Color {
+    let peak = rgb.into_iter().fold(0.0_f32, f32::max).max(1e-3);
+    let [r, g, b] = rgb.map(|c| (0.35 + 0.65 * (c / peak)).clamp(0.0, 1.0));
+    Color::from_rgba(r, g, b, 1.0).unwrap_or_else(color::light_icon)
+}
+
+/// Draws a world-space polyline, skipping the parts behind the camera.
+fn world_polyline(canvas: &mut Canvas, proj: &Projector, points: &[Vec3], c: Color, width: f32) {
+    let mut run: Vec<(f32, f32)> = Vec::new();
+    for p in points {
+        match proj.project(*p) {
+            Some(s) => run.push(s),
+            None => {
+                if run.len() > 1 {
+                    canvas.polyline(&run, c, width);
+                }
+                run.clear();
+            }
+        }
+    }
+    if run.len() > 1 {
+        canvas.polyline(&run, c, width);
+    }
+}
+
+/// A circle of `radius` around `center` in the plane spanned by `u` and
+/// `v` (unit, perpendicular), as a closed list of points.
+fn world_circle(center: Vec3, u: Vec3, v: Vec3, radius: f32) -> Vec<Vec3> {
+    (0..=48)
+        .map(|i| {
+            #[allow(clippy::cast_precision_loss)] // small counter
+            let a = i as f32 / 48.0 * std::f32::consts::TAU;
+            center + (u * a.cos() + v * a.sin()) * radius
+        })
+        .collect()
+}
+
+/// A placed light's reach: a point light's range as three rings, a
+/// spotlight's cone out to its range (edge solid, core fainter).
+fn draw_light_reach(canvas: &mut Canvas, d: &EntityData, proj: &Projector) {
+    let Some(t) = d.transform else {
+        return;
+    };
+    let model = view::model_matrix(&t);
+    let at = model.w_axis.truncate();
+    if let Some(point) = d.point_light {
+        let range = point.to_light(at).effective_range();
+        let c = light_color(point.color);
+        for (u, v) in [(Vec3::X, Vec3::Y), (Vec3::X, Vec3::Z), (Vec3::Y, Vec3::Z)] {
+            world_polyline(canvas, proj, &world_circle(at, u, v, range), c, 1.2);
+        }
+    }
+    if let Some(spot) = d.spot_light {
+        let forward = (-model.z_axis.truncate()).normalize_or(Vec3::NEG_Z);
+        let light = spot.to_light(at, forward);
+        let range = light.effective_range();
+        let (inner, outer) = light.spot.map_or((0.0, 0.5), |cone| cone.angles());
+        let u = forward.any_orthonormal_vector();
+        let v = forward.cross(u);
+        let c = light_color(spot.color);
+        let edge = world_circle(
+            at + forward * range * outer.cos(),
+            u,
+            v,
+            range * outer.sin(),
+        );
+        world_polyline(canvas, proj, &edge, c, 1.5);
+        for i in 0..4 {
+            world_polyline(canvas, proj, &[at, edge[i * 12]], c, 1.5);
+        }
+        let core = world_circle(
+            at + forward * range * inner.cos(),
+            u,
+            v,
+            range * inner.sin(),
+        );
+        world_polyline(canvas, proj, &core, color::text_faint(), 1.0);
+    }
+}
+
+/// The selection outline (oriented box), plus a light's direction arrow
+/// or reach.
 fn draw_selection(canvas: &mut Canvas, d: &EntityData, proj: &Projector) {
+    draw_light_reach(canvas, d, proj);
     if d.mesh_visual.is_some() {
         if let Some(corners) = view::box_corners(d) {
             let screen: Vec<Option<(f32, f32)>> =

@@ -82,8 +82,76 @@ const POINT_CUTOFF: f32 = 0.004;
 /// The longest automatic point light range (m).
 const MAX_AUTO_RANGE: f32 = 80.0;
 
-/// Light radiating from a point (or a small glowing body) in every
-/// direction, fading with the square of the distance. It casts no shadows.
+/// A spotlight's cone: the light shines along `direction` only, at full
+/// strength inside `inner_angle` and fading to nothing at `outer_angle`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpotCone {
+    /// The direction the light shines (normalized on use).
+    pub direction: Vec3,
+    /// Angle from the axis (degrees) inside which the light is at full
+    /// strength.
+    pub inner_angle: f32,
+    /// Angle from the axis (degrees) where the light has faded out: the
+    /// cone's edge, up to [`SpotCone::MAX_ANGLE`].
+    pub outer_angle: f32,
+}
+
+impl SpotCone {
+    /// The widest cone edge (degrees from the axis).
+    pub const MAX_ANGLE: f32 = 80.0;
+
+    /// A cone along `direction` whose edge is `outer_angle` degrees from
+    /// the axis, fading over its outer quarter.
+    #[must_use]
+    pub fn new(direction: Vec3, outer_angle: f32) -> Self {
+        Self {
+            direction,
+            inner_angle: outer_angle * 0.75,
+            outer_angle,
+        }
+    }
+
+    /// The normalized axis (straight down if `direction` is zero).
+    #[must_use]
+    pub fn axis(&self) -> Vec3 {
+        self.direction.try_normalize().unwrap_or(Vec3::NEG_Y)
+    }
+
+    /// `(inner, outer)` in radians, clamped: the edge between 1° and
+    /// [`Self::MAX_ANGLE`], the full-strength core inside it.
+    #[must_use]
+    pub fn angles(&self) -> (f32, f32) {
+        let outer = self.outer_angle.clamp(1.0, Self::MAX_ANGLE);
+        let inner = self.inner_angle.clamp(0.0, outer - 0.5);
+        (inner.to_radians(), outer.to_radians())
+    }
+
+    /// The shader's cone falloff `clamp(cos θ × scale + offset, 0, 1)`:
+    /// 1 inside the core, 0 past the edge.
+    pub(crate) fn scale_offset(&self) -> (f32, f32) {
+        let (inner, outer) = self.angles();
+        let scale = 1.0 / (inner.cos() - outer.cos()).max(1e-4);
+        (scale, -outer.cos() * scale)
+    }
+
+    /// Half the field of view of the spot's shadow map: the cone plus a
+    /// little room for filtering (radians).
+    pub(crate) fn shadow_half_fov(&self) -> f32 {
+        (self.angles().1 + SPOT_SHADOW_MARGIN.to_radians()).min(85f32.to_radians())
+    }
+}
+
+/// The largest mesh (bounding radius, m, plus the light's own radius) a
+/// light inside it treats as its fixture rather than a shadow caster.
+const FIXTURE_RADIUS: f32 = 0.3;
+
+/// How much wider than its cone a spot's shadow map looks (degrees). Must
+/// match `spot_shadow_tan` in common.wgsl.
+const SPOT_SHADOW_MARGIN: f32 = 4.0;
+
+/// Light radiating from a point (or a small glowing body), fading with the
+/// square of the distance: in every direction, or with a [`SpotCone`]
+/// only inside it.
 ///
 /// Added to a frame with [`DrawList::point_light`](crate::DrawList::point_light).
 /// Glowing meshes (a material with `emissive` and `glow_light` above zero)
@@ -105,6 +173,8 @@ pub struct PointLight {
     /// lights a frame shadows ([`GraphicsQuality::point_shadows`](crate::GraphicsQuality::point_shadows));
     /// the brightest and nearest get them first.
     pub shadows: bool,
+    /// Makes it a spotlight shining only inside this cone.
+    pub spot: Option<SpotCone>,
 }
 
 impl PointLight {
@@ -117,6 +187,17 @@ impl PointLight {
             radius: 0.05,
             range: 0.0,
             shadows: true,
+            spot: None,
+        }
+    }
+
+    /// A spotlight at `position` shining along `direction` in a cone whose
+    /// edge is `outer_angle` degrees from the axis.
+    #[must_use]
+    pub fn spot(position: Vec3, direction: Vec3, intensity: [f32; 3], outer_angle: f32) -> Self {
+        Self {
+            spot: Some(SpotCone::new(direction, outer_angle)),
+            ..Self::new(position, intensity)
         }
     }
 
@@ -153,17 +234,24 @@ impl PointLight {
             radius: (area / (4.0 * std::f32::consts::PI)).sqrt(),
             range: 0.0,
             shadows: true,
+            spot: None,
         }
     }
 
-    /// The shaders' layout: position + range, intensity + radius, and the
-    /// shadow (its slot or -1, near and far planes).
-    pub(crate) fn packed(&self, shadow: Option<(usize, &PointShadow)>) -> [f32; 12] {
+    /// The shaders' layout: position + range, intensity + radius, the
+    /// shadow (its first layer or -1, near and far planes) with the cone
+    /// offset, and the cone axis with its scale (offset 1 and scale 0 for
+    /// lights shining every way).
+    pub(crate) fn packed(&self, shadow: Option<(usize, &PointShadow)>) -> [f32; 16] {
         let [r, g, b] = self.intensity.map(|c| c.max(0.0));
         let p = self.position;
-        #[allow(clippy::cast_precision_loss)] // a handful of slots
-        let (slot, near, far) =
-            shadow.map_or((-1.0, 0.0, 0.0), |(slot, s)| (slot as f32, s.near, s.far));
+        #[allow(clippy::cast_precision_loss)] // a handful of layers
+        let (layer, near, far) =
+            shadow.map_or((-1.0, 0.0, 0.0), |(layer, s)| (layer as f32, s.near, s.far));
+        let (axis, scale, offset) = self.spot.map_or((Vec3::ZERO, 0.0, 1.0), |cone| {
+            let (scale, offset) = cone.scale_offset();
+            (cone.axis(), scale, offset)
+        });
         [
             p.x,
             p.y,
@@ -173,27 +261,54 @@ impl PointLight {
             g,
             b,
             self.radius.max(0.01),
-            slot,
+            layer,
             near,
             far,
-            0.0,
+            offset,
+            axis.x,
+            axis.y,
+            axis.z,
+            scale,
         ]
+    }
+
+    /// Whether a mesh bounded by this sphere is the light's own fixture
+    /// (a bulb, a flame, a lens): small and around the light, so it is left
+    /// out of the light's shadow instead of blocking all of it.
+    #[must_use]
+    pub fn inside_fixture(&self, center: Vec3, radius: f32) -> bool {
+        radius <= FIXTURE_RADIUS + self.radius && center.distance(self.position) < radius
+    }
+
+    /// How many shadow map layers its shadow takes: six cube faces, or
+    /// one for a spotlight.
+    #[must_use]
+    pub fn shadow_layers(&self) -> usize {
+        if self.spot.is_some() {
+            1
+        } else {
+            6
+        }
     }
 }
 
 /// The most point lights a frame can shadow (the shaders' face array holds
-/// six per light).
+/// six per light). A spotlight takes one face, so up to six spots share one
+/// point light's room.
 pub const MAX_POINT_SHADOWS: usize = 4;
 
 /// Each face of a point light's shadow cube sees a little more than 90°,
 /// so soft-shadow taps near a face's edge stay inside it.
 pub(crate) const POINT_SHADOW_FOV_DEGREES: f32 = 96.0;
 
-/// The six views a point light's shadow renders: +X, -X, +Y, -Y, +Z, -Z
-/// (the order the shaders pick faces in).
+/// The views a light's shadow renders: a point light's six, +X, -X, +Y,
+/// -Y, +Z, -Z (the order the shaders pick faces in), or a spotlight's one
+/// along its cone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PointShadow {
     pub faces: [glam::Mat4; 6],
+    /// How many of `faces` are used (6, or 1 for a spotlight).
+    pub count: usize,
     pub near: f32,
     pub far: f32,
 }
@@ -206,8 +321,23 @@ impl PointShadow {
         use glam::camera::rh::{proj::directx, view};
         let near = (light.radius * 0.5).clamp(0.02, 0.5);
         let far = light.effective_range().max(near * 2.0);
-        let proj = directx::perspective(POINT_SHADOW_FOV_DEGREES.to_radians(), 1.0, near, far);
         let p = light.position;
+        if let Some(cone) = light.spot {
+            let axis = cone.axis();
+            let up = if axis.y.abs() > 0.99 {
+                Vec3::Z
+            } else {
+                Vec3::Y
+            };
+            let proj = directx::perspective(2.0 * cone.shadow_half_fov(), 1.0, near, far);
+            return Self {
+                faces: [proj * view::look_at_mat4(p, p + axis, up); 6],
+                count: 1,
+                near,
+                far,
+            };
+        }
+        let proj = directx::perspective(POINT_SHADOW_FOV_DEGREES.to_radians(), 1.0, near, far);
         let face = |dir: Vec3, up: Vec3| proj * view::look_at_mat4(p, p + dir, up);
         Self {
             faces: [
@@ -218,9 +348,31 @@ impl PointShadow {
                 face(Vec3::Z, Vec3::Y),
                 face(Vec3::NEG_Z, Vec3::Y),
             ],
+            count: 6,
             near,
             far,
         }
+    }
+
+    /// Whether a sphere can cast into face `face` of `light`'s shadow (a
+    /// spotlight's single face: inside its view pyramid, approximated by
+    /// the cone through its corners).
+    pub fn light_face_sees(light: &PointLight, face: usize, center: Vec3, radius: f32) -> bool {
+        let range = light.effective_range();
+        let Some(cone) = light.spot else {
+            return Self::face_sees(face, light.position, center, radius, range);
+        };
+        let d = center - light.position;
+        let dist = d.length();
+        if dist > range + radius {
+            return false;
+        }
+        if dist <= radius {
+            return true;
+        }
+        let angle = (d / dist).dot(cone.axis()).clamp(-1.0, 1.0).acos();
+        let half_diagonal = (cone.shadow_half_fov().tan() * std::f32::consts::SQRT_2).atan();
+        angle - (radius / dist).asin() <= half_diagonal
     }
 
     /// Whether a sphere can cast into face `face`: within the light's
@@ -247,7 +399,7 @@ impl PointShadow {
 }
 
 /// A point light as a frame shades it: the light, the mesh draw it glows
-/// from (left out of its shadow), and its shadow slot and views.
+/// from (left out of its shadow), and its shadow's first layer and views.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FramePoint {
     pub light: PointLight,
@@ -329,10 +481,11 @@ pub(crate) struct LightUniform {
     pub inv_view_proj: [f32; 16],
     pub sky_zenith: [f32; 4],
     pub sky_sun: [f32; 4],
-    /// Point lights (`PointLightData` in common.wgsl); the first
-    /// `fog_params.z` are used.
-    pub points: [[f32; 12]; MAX_POINT_LIGHTS],
-    /// The shadowed point lights' face view-projections, six per slot.
+    /// Point lights and spotlights (`PointLightData` in common.wgsl); the
+    /// first `fog_params.z` are used.
+    pub points: [[f32; 16]; MAX_POINT_LIGHTS],
+    /// The shadowed lights' face view-projections by shadow map layer: six
+    /// per point light, one per spotlight.
     pub point_faces: [[f32; 16]; MAX_POINT_SHADOWS * 6],
     /// x: one shadow texel in UV, y: soft filtering (Beautiful),
     /// z: tan(face FOV / 2), w: ambient occlusion strength (Beautiful).
@@ -354,14 +507,16 @@ impl LightUniform {
         point_lights: &[FramePoint],
         point_map_size: u32,
     ) -> Self {
-        let mut points = [[0.0; 12]; MAX_POINT_LIGHTS];
+        let mut points = [[0.0; 16]; MAX_POINT_LIGHTS];
         let mut point_faces = [[0.0; 16]; MAX_POINT_SHADOWS * 6];
         for (slot, p) in points.iter_mut().zip(point_lights) {
-            let shadow = p.shadow.filter(|(s, _)| *s < MAX_POINT_SHADOWS);
-            *slot = p.light.packed(shadow.as_ref().map(|(s, v)| (*s, v)));
-            if let Some((s, view)) = shadow {
-                for (face, m) in view.faces.iter().enumerate() {
-                    point_faces[s * 6 + face] = m.to_cols_array();
+            let shadow = p
+                .shadow
+                .filter(|(layer, v)| layer + v.count <= MAX_POINT_SHADOWS * 6);
+            *slot = p.light.packed(shadow.as_ref().map(|(l, v)| (*l, v)));
+            if let Some((layer, view)) = shadow {
+                for (face, m) in view.faces.iter().take(view.count).enumerate() {
+                    point_faces[layer + face] = m.to_cols_array();
                 }
             }
         }
@@ -556,7 +711,7 @@ mod tests {
                 FramePoint {
                     light: dark,
                     source: None,
-                    shadow: Some((1, PointShadow::for_light(&dark))),
+                    shadow: Some((6, PointShadow::for_light(&dark))),
                 },
             ],
             256,
@@ -567,7 +722,9 @@ mod tests {
             (u.points[0][8] + 1.0).abs() < f32::EPSILON,
             "no shadow slot"
         );
-        assert!((u.points[1][8] - 1.0).abs() < f32::EPSILON, "shadow slot 1");
+        assert!((u.points[1][8] - 6.0).abs() < f32::EPSILON, "layers 6..12");
+        // Shining every way: no cone falloff.
+        assert_eq!(&packed[11..], &[1.0, 0.0, 0.0, 0.0, 0.0]);
         assert_eq!(
             u.point_faces[6],
             PointShadow::for_light(&dark).faces[0].to_cols_array()
@@ -628,6 +785,74 @@ mod tests {
         let clip = s.faces[0] * (light.position + diag).extend(1.0);
         let ndc = clip.truncate() / clip.w;
         assert!(ndc.x.abs() <= 1.0 && ndc.y.abs() <= 1.0, "{ndc}");
+    }
+
+    #[test]
+    fn spot_cones_fade_from_core_to_edge_and_shadow_one_face() {
+        let light = PointLight {
+            range: 10.0,
+            ..PointLight::spot(Vec3::new(0.0, 3.0, 0.0), Vec3::NEG_Y * 2.0, [5.0; 3], 30.0)
+        };
+        let cone = light.spot.unwrap();
+        assert!((cone.inner_angle - 22.5).abs() < 1e-5);
+        assert_eq!(light.shadow_layers(), 1);
+        let packed = light.packed(None);
+        let (offset, axis, scale) = (
+            packed[11],
+            Vec3::new(packed[12], packed[13], packed[14]),
+            packed[15],
+        );
+        assert!((axis - Vec3::NEG_Y).length() < 1e-6, "normalized axis");
+        // The shader's falloff: full on the axis and inside the core, none
+        // past the edge, in between across the fade.
+        let falloff = |deg: f32| (deg.to_radians().cos() * scale + offset).clamp(0.0, 1.0);
+        assert!((falloff(0.0) - 1.0).abs() < 1e-6);
+        assert!((falloff(22.0) - 1.0).abs() < 1e-6);
+        assert!(falloff(26.0) > 0.1 && falloff(26.0) < 0.9);
+        assert!(falloff(30.5) <= 0.0);
+        // Degenerate angles are clamped into a usable cone.
+        let wide = SpotCone {
+            inner_angle: 120.0,
+            outer_angle: 170.0,
+            ..cone
+        };
+        let (inner, outer) = wide.angles();
+        assert!(outer <= SpotCone::MAX_ANGLE.to_radians() + 1e-6 && inner < outer);
+
+        // The shadow is a single view down the cone.
+        let s = PointShadow::for_light(&light);
+        assert_eq!(s.count, 1);
+        let below = s.faces[0] * Vec3::new(0.0, 0.0, 0.0).extend(1.0);
+        let ndc = below.truncate() / below.w;
+        assert!(ndc.x.abs() < 1e-4 && ndc.y.abs() < 1e-4 && ndc.z > 0.0 && ndc.z < 1.0);
+        // The cone's edge stays inside the view.
+        let edge = Vec3::new(0.0, 3.0, 0.0) + Vec3::new(30f32.to_radians().tan(), -1.0, 0.0);
+        let clip = s.faces[0] * edge.extend(1.0);
+        assert!((clip.x / clip.w).abs() < 1.0);
+        // A small mesh around the light is its fixture; a room around it
+        // still casts.
+        assert!(light.inside_fixture(Vec3::new(0.0, 3.05, 0.0), 0.1));
+        assert!(!light.inside_fixture(Vec3::new(0.0, 3.5, 0.0), 0.1));
+        assert!(!light.inside_fixture(Vec3::new(0.0, 3.0, 0.0), 5.0));
+        // Culling: below it casts, above it or off to the side doesn't.
+        assert!(PointShadow::light_face_sees(
+            &light,
+            0,
+            Vec3::new(0.5, 0.0, 0.0),
+            0.5
+        ));
+        assert!(!PointShadow::light_face_sees(
+            &light,
+            0,
+            Vec3::new(0.0, 6.0, 0.0),
+            0.5
+        ));
+        assert!(!PointShadow::light_face_sees(
+            &light,
+            0,
+            Vec3::new(8.0, 2.5, 0.0),
+            0.5
+        ));
     }
 
     #[test]

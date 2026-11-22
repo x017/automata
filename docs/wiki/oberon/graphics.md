@@ -36,6 +36,31 @@ It has fields for size, colors, clarity, waves and foam. Tick **Endless**
 on a sea to carry it, calm, past its edges to the horizon.
 See [Rendering & Lights](../guides/rendering-and-lights.md#water).
 
+## Point and spot lights
+
+Use **Create → Point Light** for a lamp or torch, and **Create → Spot
+Light** for a flashlight, headlight or stage light. You can also add
+either to any entity with **Add Component**. A point light shines every way
+from the entity. A spot light shines along the entity's forward axis
+(its blue Z handle points backward), so aim it with the **Rotate** tool.
+New spot lights start tipped down, lighting the ground in front of them.
+
+| Field | What it does |
+|---|---|
+| Color | The light's colour |
+| Intensity | Brightness. 1 lights a surface 1 m away like a white sun overhead. Torches and lamps 2–6, headlights 10–30 |
+| Range | Where the light ends (m). 0 works it out from the brightness |
+| Cone Angle | (Spot) the cone's edge, in degrees from its axis (up to 80) |
+| Inner Angle | (Spot) full strength inside this angle. Closer to the cone angle gives a harder edge |
+| Radius | The size of the glowing source. Bigger looks softer up close |
+| Cast Shadows | Whether objects block it (High and up; see the shadow table) |
+
+Placed lights share the shadowed-light budget in the table above with
+glowing meshes. A spot light costs a sixth of a point light, so a pair of
+headlights is cheap. A small mesh around a light (a bulb, a flame, a lens)
+never blocks it. See
+[Rendering & Lights](../guides/rendering-and-lights.md#point-lights-and-spotlights).
+
 ## Sun
 
 This group edits the scene's first **Directional Light**. If there isn't

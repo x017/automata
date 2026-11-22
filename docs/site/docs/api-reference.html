@@ -134,6 +134,23 @@ The file is cached, so a thousand trees load it once. Guide:
 sharper. <code>shadow_softness</code> (0..8, default 1) is how soft their edges are.
 Out-of-range values raise <code>ValueError</code>. Guide:
 <a href="guides/rendering-and-lights.html#the-sun">Rendering &amp; Lights</a>.</p>
+<h3 id="pointlight--spotlight">PointLight / SpotLight<a class="anchor" href="#pointlight--spotlight" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.PointLight(color=(<span class="tok-n">1.0</span>, <span class="tok-n">0.85</span>, <span class="tok-n">0.65</span>), intensity=<span class="tok-n">3.0</span>, <span class="tok-b">range</span>=<span class="tok-n">0.0</span>,
+              *, radius=<span class="tok-n">0.05</span>, shadows=<span class="tok-b">True</span>)
+at.SpotLight(color=(<span class="tok-n">1.0</span>, <span class="tok-n">1.0</span>, <span class="tok-n">1.0</span>), intensity=<span class="tok-n">8.0</span>, outer_angle=<span class="tok-n">30.0</span>,
+             inner_angle=<span class="tok-b">None</span>, <span class="tok-b">range</span>=<span class="tok-n">0.0</span>, *, radius=<span class="tok-n">0.05</span>, shadows=<span class="tok-b">True</span>)</code></pre></div>
+<p>Placed lights. A <code>PointLight</code> shines every way from its entity's position.
+A <code>SpotLight</code> shines along its entity's forward axis (local −Z, turned by
+the entity's rotation). <code>intensity</code> 1 lights a surface 1 m away like a
+white sun overhead, falling off with the square of the distance. <code>range</code>
+(metres) ends the light; 0 works it out from the brightness.
+<code>outer_angle</code> is the cone's edge in degrees from its axis (0–80), and
+<code>inner_angle</code> is the full-strength core (default ¾ of <code>outer_angle</code>).
+<code>radius</code> is the size of the glowing source. <code>shadows</code> lets objects block
+the light (High and up, nearest first). Getters have the same names.
+Negative values, a zero radius, or angles out of range raise <code>ValueError</code>.
+Saved as <code>point_light</code> / <code>spot_light</code> in scene files. Guide:
+<a href="guides/rendering-and-lights.html#point-lights-and-spotlights">Rendering &amp; Lights</a>.</p>
 <h3 id="environment">Environment<a class="anchor" href="#environment" aria-label="Link to this section">#</a></h3>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Environment(sky_color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>), ground_color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>),
                background=(<span class="tok-n">0.012</span>, <span class="tok-n">0.012</span>, <span class="tok-n">0.012</span>), exposure=<span class="tok-n">1.0</span>,
@@ -317,7 +334,7 @@ See <a href="oberon/cameras.html">Oberon: Cameras</a>.</p>
     <footer class="pager"><a class="prev" href="guides/performance.html"><small>Previous</small>Performance</a><a class="next" href="cookbook.html"><small>Next</small>Cookbook</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/api-reference.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#game">Game</a></li><li class="l2"><a href="#scene--entity-staging">Scene &amp; Entity (staging)</a></li><li class="l3"><a href="#transform">Transform</a></li><li class="l3"><a href="#cameras">Cameras</a></li><li class="l3"><a href="#visuals">Visuals</a></li><li class="l3"><a href="#directionallight">DirectionalLight</a></li><li class="l3"><a href="#environment">Environment</a></li><li class="l3"><a href="#water">Water</a></li><li class="l3"><a href="#physics-components">Physics components</a></li><li class="l2"><a href="#framecontext-ctx">FrameContext (ctx)</a></li><li class="l3"><a href="#sceneview--entityview">SceneView / EntityView</a></li><li class="l3"><a href="#input">Input</a></li><li class="l3"><a href="#physics-ctxphysics">Physics (ctx.physics)</a></li><li class="l3"><a href="#audio-ctxaudio">Audio (ctx.audio)</a></li><li class="l2"><a href="#input-mapping">Input mapping</a></li><li class="l2"><a href="#enums">Enums</a></li><li class="l2"><a href="#behaviour-scripts-automatarun_scene">Behaviour scripts (automata.run_scene)</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#game">Game</a></li><li class="l2"><a href="#scene--entity-staging">Scene &amp; Entity (staging)</a></li><li class="l3"><a href="#transform">Transform</a></li><li class="l3"><a href="#cameras">Cameras</a></li><li class="l3"><a href="#visuals">Visuals</a></li><li class="l3"><a href="#directionallight">DirectionalLight</a></li><li class="l3"><a href="#pointlight--spotlight">PointLight / SpotLight</a></li><li class="l3"><a href="#environment">Environment</a></li><li class="l3"><a href="#water">Water</a></li><li class="l3"><a href="#physics-components">Physics components</a></li><li class="l2"><a href="#framecontext-ctx">FrameContext (ctx)</a></li><li class="l3"><a href="#sceneview--entityview">SceneView / EntityView</a></li><li class="l3"><a href="#input">Input</a></li><li class="l3"><a href="#physics-ctxphysics">Physics (ctx.physics)</a></li><li class="l3"><a href="#audio-ctxaudio">Audio (ctx.audio)</a></li><li class="l2"><a href="#input-mapping">Input mapping</a></li><li class="l2"><a href="#enums">Enums</a></li><li class="l2"><a href="#behaviour-scripts-automatarun_scene">Behaviour scripts (automata.run_scene)</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

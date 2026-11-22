@@ -35,7 +35,8 @@ component: cube, sun, camera, horizon (Environment), or empty.
 - Click to select. Double-click (or press F) to frame the entity in the
   view.
 - **+** opens the Create menu: Empty, Cube, Sphere, Plane, Directional
-  Light, Camera, Environment, Water, Physics Cube, Player.
+  Light, Point Light, Spot Light, Camera, Environment, Water, Physics Cube,
+  Player.
 - Right-click an entity for Rename, Duplicate, Copy/Paste, Delete, Frame,
   Save as Prefab, and Attach/Edit Script.
 
@@ -124,7 +125,11 @@ along that axis. Arrow keys nudge the selection across the ground relative to th
 widget (top-right) shows the view orientation.
 
 **Overlays.**
-- Lights draw as a small sun icon.
+- Lights draw as icons: a sun for the Directional Light, a bulb for a
+  Point Light, a lamp with its beam for a Spot Light (in the light's own
+  colour). A selected Point Light shows its range as three rings, and a
+  selected Spot Light shows its cone out to its range. The fainter inner
+  circle is where the light is still at full strength.
 - Cameras draw their view **frustum**: a pyramid showing exactly what the
   camera sees, with a notch marking "up".
 - When a camera is selected, a **live preview** of its view appears in
@@ -135,8 +140,8 @@ widget (top-right) shows the view orientation.
 Shows the selected entity.
 
 - **Name** at the top.
-- **Components**: Transform, Mesh Renderer, Directional Light, Camera,
-  Environment, Rigidbody, Collider, Character Controller, Script. Each
+- **Components**: Transform, Mesh Renderer, Directional Light, Point
+  Light, Spot Light, Camera, Environment, Rigidbody, Collider, Character Controller, Script. Each
   section folds open and closed. The **⋮** menu has Reset, Copy/Paste
   Component, and Remove.
 - **Fields**: drag the label to scrub a number, or click the field and

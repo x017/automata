@@ -25,6 +25,8 @@ pub fn staged_to_entity_data(entity: &StagedEntity) -> EntityData {
             StagedComponent::Camera3D(c) => data.camera_3d = Some(*c),
             StagedComponent::Camera2D(c) => data.camera_2d = Some(*c),
             StagedComponent::DirectionalLight(l) => data.directional_light = Some(*l),
+            StagedComponent::PointLight(l) => data.point_light = Some(*l),
+            StagedComponent::SpotLight(l) => data.spot_light = Some(*l),
             StagedComponent::Environment(e) => data.environment = Some(*e),
             StagedComponent::Water(w) => data.water = Some(*w),
             StagedComponent::AudioSource(a) => data.audio_source = Some(a.clone()),
@@ -57,6 +59,12 @@ pub fn entity_data_to_staged(data: &EntityData) -> StagedEntity {
     }
     if let Some(l) = &data.directional_light {
         components.push(StagedComponent::DirectionalLight(*l));
+    }
+    if let Some(l) = &data.point_light {
+        components.push(StagedComponent::PointLight(*l));
+    }
+    if let Some(l) = &data.spot_light {
+        components.push(StagedComponent::SpotLight(*l));
     }
     if let Some(e) = &data.environment {
         components.push(StagedComponent::Environment(*e));

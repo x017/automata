@@ -7,6 +7,8 @@
 //! carrying a [`Camera3D`] or [`Camera2D`] component becomes the frame's
 //! camera, the first [`DirectionalLight`] becomes the frame's sun, and the
 //! first [`Environment`] sets the frame's look (ambient, fog, tone mapping).
+//! Every [`PointLight`] and [`SpotLight`] lights the frame too (the nearest
+//! and brightest, up to the quality preset's cap).
 
 use automata_renderer::{
     Camera2D, Camera3D, DrawList, Environment, Material, Mesh, MeshData, Sprite, Sun, Texture,
@@ -132,6 +134,162 @@ impl From<DirectionalLight> for Sun {
     }
 }
 
+/// A light placed in the scene that shines in every direction from the
+/// entity's position: a torch, a lamp, a campfire. Its light fades with the
+/// square of the distance and reaches nothing past `range`.
+///
+/// Brightness: `intensity` 1 lights a surface 1 m away, facing it, as
+/// brightly as a white sun shining straight down; at 2 m it is a quarter
+/// of that.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct PointLight {
+    /// Light color (linear RGB, 0..1).
+    pub color: [f32; 3],
+    /// Brightness (see the type's docs).
+    pub intensity: f32,
+    /// Where the light ends (metres); 0 picks it from the brightness: where
+    /// it has faded to almost nothing.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub range: f32,
+    /// The size of the glowing source (metres): bigger is softer up close.
+    #[serde(skip_serializing_if = "is_default_light_radius")]
+    pub radius: f32,
+    /// Whether objects block it and cast shadows. Only the nearest few
+    /// shadowed lights get shadows (the quality preset sets how many; none
+    /// on Low and Medium).
+    #[serde(skip_serializing_if = "is_true")]
+    pub shadows: bool,
+}
+
+impl PointLight {
+    /// A white light of `intensity`, reaching as far as its brightness
+    /// carries, casting shadows.
+    #[must_use]
+    pub fn new(intensity: f32) -> Self {
+        Self {
+            color: [1.0; 3],
+            intensity,
+            range: 0.0,
+            radius: DEFAULT_LIGHT_RADIUS,
+            shadows: true,
+        }
+    }
+
+    /// The renderer's light at `position`.
+    #[must_use]
+    pub fn to_light(&self, position: glam::Vec3) -> automata_renderer::PointLight {
+        automata_renderer::PointLight {
+            radius: self.radius.max(0.01),
+            range: self.range.max(0.0),
+            shadows: self.shadows,
+            ..automata_renderer::PointLight::new(position, scaled(self.color, self.intensity))
+        }
+    }
+}
+
+impl Default for PointLight {
+    /// A warm-white light a few metres across, like a lamp.
+    fn default() -> Self {
+        Self {
+            color: [1.0, 0.85, 0.65],
+            ..Self::new(3.0)
+        }
+    }
+}
+
+/// A light placed in the scene that shines in a cone: a flashlight, a car
+/// headlight, a stage light. It shines along the entity's forward
+/// direction (its local -Z, turned by its rotation), at full strength
+/// inside `inner_angle` and fading out by `outer_angle`.
+///
+/// Brightness works as for [`PointLight`]: `intensity` 1 at 1 m on the
+/// axis matches a white sun.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct SpotLight {
+    /// Light color (linear RGB, 0..1).
+    pub color: [f32; 3],
+    /// Brightness on the cone's axis.
+    pub intensity: f32,
+    /// Where the light ends (metres); 0 picks it from the brightness.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub range: f32,
+    /// Angle from the axis (degrees) inside which it is at full strength.
+    pub inner_angle: f32,
+    /// Angle from the axis (degrees) of the cone's edge, where it has
+    /// faded out (at most 80).
+    pub outer_angle: f32,
+    /// The size of the glowing source (metres).
+    #[serde(skip_serializing_if = "is_default_light_radius")]
+    pub radius: f32,
+    /// Whether objects block it and cast shadows (a spot's shadow costs a
+    /// sixth of a point light's).
+    #[serde(skip_serializing_if = "is_true")]
+    pub shadows: bool,
+}
+
+impl SpotLight {
+    /// A white spot of `intensity` whose cone's edge is `outer_angle`
+    /// degrees from its axis, fading over the outer quarter.
+    #[must_use]
+    pub fn new(intensity: f32, outer_angle: f32) -> Self {
+        Self {
+            color: [1.0; 3],
+            intensity,
+            range: 0.0,
+            inner_angle: outer_angle * 0.75,
+            outer_angle,
+            radius: DEFAULT_LIGHT_RADIUS,
+            shadows: true,
+        }
+    }
+
+    /// The renderer's light at `position`, shining along `direction`.
+    #[must_use]
+    pub fn to_light(
+        &self,
+        position: glam::Vec3,
+        direction: glam::Vec3,
+    ) -> automata_renderer::PointLight {
+        automata_renderer::PointLight {
+            radius: self.radius.max(0.01),
+            range: self.range.max(0.0),
+            shadows: self.shadows,
+            spot: Some(automata_renderer::SpotCone {
+                direction,
+                inner_angle: self.inner_angle,
+                outer_angle: self.outer_angle,
+            }),
+            ..automata_renderer::PointLight::new(position, scaled(self.color, self.intensity))
+        }
+    }
+}
+
+impl Default for SpotLight {
+    /// A bright white 30° flashlight.
+    fn default() -> Self {
+        Self::new(8.0, 30.0)
+    }
+}
+
+/// A placed light's source size unless set.
+const DEFAULT_LIGHT_RADIUS: f32 = 0.05;
+
+fn scaled(color: [f32; 3], intensity: f32) -> [f32; 3] {
+    color.map(|c| c.max(0.0) * intensity.max(0.0))
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref, clippy::float_cmp)] // serde's signature
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref, clippy::float_cmp)] // serde's signature
+fn is_default_light_radius(v: &f32) -> bool {
+    *v == DEFAULT_LIGHT_RADIUS
+}
+
 /// Renders a textured 2D quad.
 ///
 /// The sprite is centered on the entity's position; the entity's Z rotation
@@ -218,6 +376,16 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
                 None => draw.mesh(mesh, model, material),
             }
         }
+    }
+
+    // Placed lights: at the entity's position; spots shine along its
+    // forward (-Z) axis.
+    for (light, global) in &mut world.query::<(&PointLight, &GlobalTransform)>() {
+        draw.point_light(light.to_light(global.matrix().w_axis.truncate()));
+    }
+    for (light, global) in &mut world.query::<(&SpotLight, &GlobalTransform)>() {
+        let m = global.matrix();
+        draw.point_light(light.to_light(m.w_axis.truncate(), -m.z_axis.truncate()));
     }
 
     // Water surfaces: centred on their transform, waves in its local XZ.
@@ -610,6 +778,44 @@ mod tests {
         scene.despawn(visual).unwrap();
         let pending_after = pending_visuals(scene.world());
         assert_eq!(pending_after, [] as [hecs::Entity; 0]);
+    }
+
+    #[test]
+    fn placed_lights_shine_from_their_transform() {
+        let mut scene = Scene::new();
+        scene.spawn((
+            PointLight::new(2.0),
+            GlobalTransform(glam::Mat4::from_translation(Vec3::new(1.0, 2.0, 3.0))),
+        ));
+        // Tipped forward 90° about X: its -Z forward points straight down.
+        scene.spawn((
+            SpotLight {
+                color: [1.0, 0.5, 0.0],
+                shadows: false,
+                ..SpotLight::new(4.0, 20.0)
+            },
+            GlobalTransform(glam::Mat4::from_rotation_translation(
+                glam::Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+                Vec3::new(0.0, 5.0, 0.0),
+            )),
+        ));
+        // No transform: not drawn.
+        scene.spawn((PointLight::default(),));
+        let mut draw = DrawList::new();
+        record_draw_list(scene.world(), &mut draw);
+        let lights = draw.point_lights();
+        assert_eq!(lights.len(), 2);
+        let point = lights.iter().find(|l| l.spot.is_none()).unwrap();
+        assert_eq!(point.position, Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(point.intensity, [2.0; 3]);
+        assert!(point.shadows);
+        let spot = lights.iter().find(|l| l.spot.is_some()).unwrap();
+        assert_eq!(spot.intensity, [4.0, 2.0, 0.0]);
+        assert!(!spot.shadows);
+        let cone = spot.spot.unwrap();
+        assert!((cone.direction - Vec3::NEG_Y).length() < 1e-5, "{cone:?}");
+        assert!((cone.inner_angle - 15.0).abs() < 1e-5);
+        assert!((cone.outer_angle - 20.0).abs() < 1e-5);
     }
 
     #[test]

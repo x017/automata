@@ -154,6 +154,12 @@ impl PyEntity {
                     StagedComponent::DirectionalLight(v) => {
                         Py::new(py, PyDirectionalLight::from_inner(*v))?.into_any()
                     }
+                    StagedComponent::PointLight(v) => {
+                        Py::new(py, crate::components::PyPointLight::from_inner(*v))?.into_any()
+                    }
+                    StagedComponent::SpotLight(v) => {
+                        Py::new(py, crate::components::PySpotLight::from_inner(*v))?.into_any()
+                    }
                     StagedComponent::Environment(v) => {
                         Py::new(py, crate::components::PyEnvironment::from_inner(*v))?.into_any()
                     }
@@ -387,6 +393,12 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }
             StagedComponent::DirectionalLight(c) => {
+                let _ = scene.world_mut().insert_one(id, *c);
+            }
+            StagedComponent::PointLight(c) => {
+                let _ = scene.world_mut().insert_one(id, *c);
+            }
+            StagedComponent::SpotLight(c) => {
                 let _ = scene.world_mut().insert_one(id, *c);
             }
             StagedComponent::Environment(c) => {

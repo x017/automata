@@ -80,19 +80,25 @@ untouched; a GPU test checks the crease darkens on Beautiful and High is
 byte-identical at any strength. Measured cost: Coin Run about 2× faster
 (the blocker search skips filtering in sun), FPS about +12%.
 
-### A3. Placeable point lights and spotlights ⬜ S
-The light array and shading from A0c are already in place.
-- `PointLight` and `SpotLight` scene components (colour, intensity, range,
-  cone angles), in the scene file and Python (`at.PointLight(...)`).
-- The spot cone goes into `PointLightData` (direction plus inner/outer
-  cosines).
-- Oberon: the Create menu (Point Light, Spot Light), Inspector rows,
-  viewport icons and a range/cone gizmo.
-- Placed lights share A4's point shadow slots and get a Cast Shadows
-  toggle. Spots get one shadow map each (a single face, using the same
-  array).
-- **Done when:** a torch on a wall and a car headlight can be made
-  without a glowing mesh, and both cast shadows.
+### A3. Placeable point lights and spotlights ✅ S
+Done. `PointLight` and `SpotLight` scene components (colour, intensity,
+range with 0 = auto, source radius, Cast Shadows; spots add cone and inner
+angles). A spot shines along its entity's −Z. They work in scene files
+(`point_light` / `spot_light`), Python (`at.PointLight`, `at.SpotLight`)
+and Oberon: Create menu, Add Component, Inspector rows, light-coloured
+viewport icons, and range rings or the cone out to its range on
+selection. The renderer's `PointLight` gained `spot: Option<SpotCone>`.
+`PointLightData` grew to 16 floats, carrying the axis and a cos-space
+falloff scale/offset (a point light is scale 0, offset 1, so it is
+unchanged). Shadow slots became a budget of six layers per shadowed point
+light: a point light takes six cube faces, a spot one perspective view
+over its cone plus 4°. So High's two slots shadow up to twelve spots.
+Casters are culled by a cone test. A light inside a small mesh (bounding
+radius up to 0.3 m plus the light's radius: a bulb, flame or lens) leaves
+it out of its shadow. GPU test: a spot lights inside its cone, not
+outside, and a blocker shades it on presets with point shadows. Demo:
+`examples/oberon/night_lights` (a torch on a wall and two headlights, all
+shadowed, with no light from a glowing mesh).
 
 ### A5. Water interaction I: ripples and wakes ⬜ M
 - A ripple heightfield simulated around the camera (a 256² grid
@@ -390,7 +396,7 @@ per effort. Reorder any time by telling me.
 | 4 | A4 Point light shadows (glowing objects) | M | ✅ |
 | 5 | A1 Crisp shadows on High/Ultra | M | ✅ |
 | 6 | A2 Contact-hardening shadows + AO | M | ✅ |
-| 7 | A3 Point lights and spotlights (+ spot shadows) | S | ⬜ |
+| 7 | A3 Point lights and spotlights (+ spot shadows) | S | ✅ |
 | 8 | A5 Water ripples and wakes | M | ⬜ |
 | 9 | A6 Particles | L | ⬜ |
 | 10 | A7 Splashes, underwater, caustics | M | ⬜ |

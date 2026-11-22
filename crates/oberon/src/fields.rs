@@ -95,6 +95,26 @@ pub enum Field {
     WaterDensity,
     /// How much the water slows bodies in it.
     WaterDrag,
+    /// Point light color channel 0..3 (RGB, 0..1).
+    PointColor(u8),
+    /// Point light brightness.
+    PointIntensity,
+    /// Where a point light ends (m; 0 = from its brightness).
+    PointRange,
+    /// A point light's glowing source size (m).
+    PointRadius,
+    /// Spotlight color channel 0..3 (RGB, 0..1).
+    SpotColor(u8),
+    /// Spotlight brightness on its axis.
+    SpotIntensity,
+    /// Where a spotlight ends (m; 0 = from its brightness).
+    SpotRange,
+    /// Spotlight full-strength core (degrees from the axis).
+    SpotInner,
+    /// Spotlight cone edge (degrees from the axis).
+    SpotOuter,
+    /// A spotlight's glowing source size (m).
+    SpotRadius,
     /// Environment fog density per unit.
     EnvFogDensity,
     /// Distance where the fog starts.
@@ -142,6 +162,10 @@ pub enum Field {
 pub enum Flag {
     /// Light casts shadows.
     LightShadows,
+    /// Objects block a point light.
+    PointShadows,
+    /// Objects block a spotlight.
+    SpotShadows,
     /// Objects block a glowing mesh's light.
     MeshGlowShadows,
     /// Rigid body participates in simulation.
@@ -240,6 +264,16 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::WaterFoam => data.water?.foam,
         F::WaterDensity => data.water?.density,
         F::WaterDrag => data.water?.drag,
+        F::PointColor(i) => data.point_light?.color[axis(i)],
+        F::PointIntensity => data.point_light?.intensity,
+        F::PointRange => data.point_light?.range,
+        F::PointRadius => data.point_light?.radius,
+        F::SpotColor(i) => data.spot_light?.color[axis(i)],
+        F::SpotIntensity => data.spot_light?.intensity,
+        F::SpotRange => data.spot_light?.range,
+        F::SpotInner => data.spot_light?.inner_angle,
+        F::SpotOuter => data.spot_light?.outer_angle,
+        F::SpotRadius => data.spot_light?.radius,
         F::CameraPosition(i) => data.camera_3d?.position.to_array()[axis(i)],
         F::CameraTarget(i) => data.camera_3d?.target.to_array()[axis(i)],
         F::CameraFov => data.camera_3d?.fov_y_degrees,
@@ -284,6 +318,8 @@ pub fn range(field: Field) -> (f32, f32) {
         | F::MeshMetallic
         | F::MeshEmissive(_)
         | F::LightColor(_)
+        | F::PointColor(_)
+        | F::SpotColor(_)
         | F::LightAmbient
         | F::ColliderRestitution
         | F::EnvSky(_)
@@ -295,12 +331,20 @@ pub fn range(field: Field) -> (f32, f32) {
         | F::WaterDeep(_)
         | F::WaterShallow(_)
         | F::WaterFoam => (0.0, 1.0),
+        F::PointRadius | F::SpotRadius => (0.01, 5.0),
+        F::SpotInner => (0.0, automata_renderer::SpotCone::MAX_ANGLE),
+        F::SpotOuter => (1.0, automata_renderer::SpotCone::MAX_ANGLE),
         F::EnvSunSize => (0.05, 20.0),
         F::WaterSize(_) => (0.1, 100_000.0),
         F::WaterClarity => (0.05, 100.0),
         F::WaterWaveHeight | F::WaterWaveSpeed => (0.0, 20.0),
         F::WaterWaveLength => (0.1, 1_000.0),
-        F::WaterDensity | F::WaterDrag => (0.0, 1_000.0),
+        F::WaterDensity
+        | F::WaterDrag
+        | F::PointIntensity
+        | F::SpotIntensity
+        | F::PointRange
+        | F::SpotRange => (0.0, 1_000.0),
         F::WaterWaveDirection | F::LightAzimuth => (-180.0, 180.0),
         F::LightElevation => (-89.0, 89.0),
         F::LightTimeOfDay => (5.0, 19.0),
@@ -338,6 +382,8 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::CharacterSlope
         | F::LightAzimuth
         | F::LightElevation
+        | F::SpotInner
+        | F::SpotOuter
         | F::WaterWaveDirection => 0.5,
         F::EnvFogDensity => 0.0005,
         F::MeshColor(_)
@@ -345,6 +391,8 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::MeshMetallic
         | F::MeshEmissive(_)
         | F::LightColor(_)
+        | F::PointColor(_)
+        | F::SpotColor(_)
         | F::LightAmbient
         | F::ColliderRestitution
         | F::EnvSky(_)
@@ -514,6 +562,41 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
             },
             None => return false,
         },
+        F::PointColor(_) | F::PointIntensity | F::PointRange | F::PointRadius => {
+            match &mut data.point_light {
+                Some(l) => match field {
+                    F::PointColor(i) => l.color[axis(i)] = v,
+                    F::PointIntensity => l.intensity = v,
+                    F::PointRange => l.range = v,
+                    _ => l.radius = v,
+                },
+                None => return false,
+            }
+        }
+        F::SpotColor(_)
+        | F::SpotIntensity
+        | F::SpotRange
+        | F::SpotInner
+        | F::SpotOuter
+        | F::SpotRadius => match &mut data.spot_light {
+            Some(l) => match field {
+                F::SpotColor(i) => l.color[axis(i)] = v,
+                F::SpotIntensity => l.intensity = v,
+                F::SpotRange => l.range = v,
+                // The core stays inside the edge: widening the core pushes
+                // the edge out, narrowing the edge pulls the core in.
+                F::SpotInner => {
+                    l.inner_angle = v;
+                    l.outer_angle = l.outer_angle.max(v);
+                }
+                F::SpotOuter => {
+                    l.outer_angle = v;
+                    l.inner_angle = l.inner_angle.min(v);
+                }
+                _ => l.radius = v,
+            },
+            None => return false,
+        },
         F::CameraPosition(i) => match &mut data.camera_3d {
             Some(c) => c.position[axis(i)] = v,
             None => return false,
@@ -591,6 +674,8 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
 pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
     Some(match flag {
         Flag::LightShadows => data.directional_light?.shadows,
+        Flag::PointShadows => data.point_light?.shadows,
+        Flag::SpotShadows => data.spot_light?.shadows,
         Flag::MeshGlowShadows => data.mesh_visual.as_ref()?.surface.glow_shadows,
         Flag::BodyEnabled => data.rigid_body.as_ref()?.enabled,
         Flag::ColliderSensor => data.collider_3d.as_ref()?.sensor,
@@ -608,6 +693,14 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
 pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
     match flag {
         Flag::LightShadows => match &mut data.directional_light {
+            Some(l) => l.shadows = !l.shadows,
+            None => return false,
+        },
+        Flag::PointShadows => match &mut data.point_light {
+            Some(l) => l.shadows = !l.shadows,
+            None => return false,
+        },
+        Flag::SpotShadows => match &mut data.spot_light {
             Some(l) => l.shadows = !l.shadows,
             None => return false,
         },
@@ -1167,6 +1260,31 @@ mod tests {
         );
         assert_eq!(choice_options(&d, Choice::Tonemapping).len(), 4);
         assert!(set_choice(&mut d, Choice::Tonemapping, "AgX"));
+    }
+
+    #[test]
+    fn placed_light_fields_edit_the_component_and_keep_the_core_inside_the_cone() {
+        let mut d = EntityData {
+            point_light: Some(automata_scene::PointLight::default()),
+            spot_light: Some(automata_scene::SpotLight::new(8.0, 30.0)),
+            ..EntityData::default()
+        };
+        assert!(set(&mut d, Field::PointIntensity, 6.0));
+        assert!(set(&mut d, Field::PointColor(2), 2.0), "clamped to 1");
+        assert_eq!(get(&d, Field::PointIntensity), Some(6.0));
+        assert_eq!(get(&d, Field::PointColor(2)), Some(1.0));
+        assert!(set(&mut d, Field::SpotOuter, 120.0));
+        assert_eq!(get(&d, Field::SpotOuter), Some(80.0));
+        assert!(set(&mut d, Field::SpotOuter, 10.0));
+        assert_eq!(get(&d, Field::SpotInner), Some(10.0), "core pulled in");
+        assert!(set(&mut d, Field::SpotInner, 20.0));
+        assert_eq!(get(&d, Field::SpotOuter), Some(20.0), "edge pushed out");
+        assert!(toggle(&mut d, Flag::SpotShadows));
+        assert_eq!(get_flag(&d, Flag::SpotShadows), Some(false));
+        assert_eq!(get_flag(&d, Flag::PointShadows), Some(true));
+        d.point_light = None;
+        assert!(!set(&mut d, Field::PointRange, 3.0));
+        assert_eq!(get_flag(&d, Flag::PointShadows), None);
     }
 
     #[test]

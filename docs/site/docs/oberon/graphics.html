@@ -55,6 +55,19 @@ or select an entity and use <strong>Add Component → Water</strong> in the Insp
 It has fields for size, colors, clarity, waves and foam. Tick <strong>Endless</strong>
 on a sea to carry it, calm, past its edges to the horizon.
 See <a href="../guides/rendering-and-lights.html#water">Rendering &amp; Lights</a>.</p>
+<h2 id="point-and-spot-lights">Point and spot lights<a class="anchor" href="#point-and-spot-lights" aria-label="Link to this section">#</a></h2>
+<p>Use <strong>Create → Point Light</strong> for a lamp or torch, and <strong>Create → Spot
+Light</strong> for a flashlight, headlight or stage light. You can also add
+either to any entity with <strong>Add Component</strong>. A point light shines every way
+from the entity. A spot light shines along the entity's forward axis
+(its blue Z handle points backward), so aim it with the <strong>Rotate</strong> tool.
+New spot lights start tipped down, lighting the ground in front of them.</p>
+<div class="table"><table><thead><tr><th>Field</th><th>What it does</th></tr></thead><tbody><tr><td>Color</td><td>The light's colour</td></tr><tr><td>Intensity</td><td>Brightness. 1 lights a surface 1 m away like a white sun overhead. Torches and lamps 2–6, headlights 10–30</td></tr><tr><td>Range</td><td>Where the light ends (m). 0 works it out from the brightness</td></tr><tr><td>Cone Angle</td><td>(Spot) the cone's edge, in degrees from its axis (up to 80)</td></tr><tr><td>Inner Angle</td><td>(Spot) full strength inside this angle. Closer to the cone angle gives a harder edge</td></tr><tr><td>Radius</td><td>The size of the glowing source. Bigger looks softer up close</td></tr><tr><td>Cast Shadows</td><td>Whether objects block it (High and up; see the shadow table)</td></tr></tbody></table></div>
+<p>Placed lights share the shadowed-light budget in the table above with
+glowing meshes. A spot light costs a sixth of a point light, so a pair of
+headlights is cheap. A small mesh around a light (a bulb, a flame, a lens)
+never blocks it. See
+<a href="../guides/rendering-and-lights.html#point-lights-and-spotlights">Rendering &amp; Lights</a>.</p>
 <h2 id="sun">Sun<a class="anchor" href="#sun" aria-label="Link to this section">#</a></h2>
 <p>This group edits the scene's first <strong>Directional Light</strong>. If there isn't
 one, <strong>Add Directional Light</strong> creates it.</p>
@@ -103,7 +116,7 @@ through three complete looks.</p>
     <footer class="pager"><a class="prev" href="cameras.html"><small>Previous</small>Cameras</a><a class="next" href="code-editor.html"><small>Next</small>The code editor</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/graphics.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#renderer">Renderer</a></li><li class="l2"><a href="#sun">Sun</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#camera">Camera</a></li><li class="l2"><a href="#test-scenes">Test Scenes</a></li><li class="l2"><a href="#a-tuning-workflow">A tuning workflow</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#renderer">Renderer</a></li><li class="l2"><a href="#point-and-spot-lights">Point and spot lights</a></li><li class="l2"><a href="#sun">Sun</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#camera">Camera</a></li><li class="l2"><a href="#test-scenes">Test Scenes</a></li><li class="l2"><a href="#a-tuning-workflow">A tuning workflow</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

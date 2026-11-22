@@ -134,6 +134,10 @@ pub enum CreateKind {
     Plane,
     /// A directional (sun) light.
     Light,
+    /// A light shining every way from a point (a lamp, a torch).
+    PointLight,
+    /// A light shining in a cone (a flashlight, a headlight).
+    SpotLight,
     /// A perspective camera.
     Camera,
     /// Scene look settings (sky, fog, exposure, tone mapping).
@@ -151,12 +155,14 @@ pub enum CreateKind {
 
 impl CreateKind {
     /// Every kind, in menu order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::Empty,
         Self::Cube,
         Self::Sphere,
         Self::Plane,
         Self::Light,
+        Self::PointLight,
+        Self::SpotLight,
         Self::Camera,
         Self::Environment,
         Self::Water,
@@ -173,6 +179,8 @@ impl CreateKind {
             Self::Sphere => "Sphere",
             Self::Plane => "Plane",
             Self::Light => "Directional Light",
+            Self::PointLight => "Point Light",
+            Self::SpotLight => "Spot Light",
             Self::Camera => "Camera",
             Self::Environment => "Environment",
             Self::Water => "Water",
@@ -189,6 +197,10 @@ pub enum ComponentKind {
     Mesh,
     /// Directional light.
     Light,
+    /// Light shining every way from the entity.
+    PointLight,
+    /// Light shining in a cone along the entity's forward axis.
+    SpotLight,
     /// Perspective camera.
     Camera,
     /// Scene look: ambient, fog, exposure, tone mapping.
@@ -207,9 +219,11 @@ pub enum ComponentKind {
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 11] = [
         Self::Mesh,
         Self::Light,
+        Self::PointLight,
+        Self::SpotLight,
         Self::Camera,
         Self::Environment,
         Self::Water,
@@ -225,6 +239,8 @@ impl ComponentKind {
         match self {
             Self::Mesh => "Mesh Renderer",
             Self::Light => "Directional Light",
+            Self::PointLight => "Point Light",
+            Self::SpotLight => "Spot Light",
             Self::Camera => "Camera",
             Self::Environment => "Environment",
             Self::Water => "Water",
@@ -241,6 +257,8 @@ impl ComponentKind {
         match self {
             Self::Mesh => data.mesh_visual.is_some(),
             Self::Light => data.directional_light.is_some(),
+            Self::PointLight => data.point_light.is_some(),
+            Self::SpotLight => data.spot_light.is_some(),
             Self::Camera => data.camera_3d.is_some(),
             Self::Environment => data.environment.is_some(),
             Self::Water => data.water.is_some(),
@@ -264,6 +282,14 @@ impl ComponentKind {
             Self::Light => {
                 data.directional_light
                     .get_or_insert_with(automata_scene::DirectionalLight::default);
+            }
+            Self::PointLight => {
+                data.point_light
+                    .get_or_insert_with(automata_scene::PointLight::default);
+            }
+            Self::SpotLight => {
+                data.spot_light
+                    .get_or_insert_with(automata_scene::SpotLight::default);
             }
             Self::Camera => {
                 data.camera_3d.get_or_insert_with(|| {
@@ -319,6 +345,8 @@ impl ComponentKind {
         match self {
             Self::Mesh => dst.mesh_visual.clone_from(&src.mesh_visual),
             Self::Light => dst.directional_light = src.directional_light,
+            Self::PointLight => dst.point_light = src.point_light,
+            Self::SpotLight => dst.spot_light = src.spot_light,
             Self::Camera => dst.camera_3d = src.camera_3d,
             Self::Environment => dst.environment = src.environment,
             Self::Water => dst.water = src.water,
@@ -338,6 +366,8 @@ impl ComponentKind {
         match self {
             Self::Mesh => data.mesh_visual = None,
             Self::Light => data.directional_light = None,
+            Self::PointLight => data.point_light = None,
+            Self::SpotLight => data.spot_light = None,
             Self::Camera => data.camera_3d = None,
             Self::Environment => data.environment = None,
             Self::Water => data.water = None,
@@ -1100,6 +1130,21 @@ impl Document {
                 }
                 ComponentKind::Light.add_to(&mut data);
             }
+            CreateKind::PointLight => {
+                if let Some(t) = &mut data.transform {
+                    t.position = [0.0, 2.0, 0.0];
+                }
+                ComponentKind::PointLight.add_to(&mut data);
+            }
+            CreateKind::SpotLight => {
+                if let Some(t) = &mut data.transform {
+                    // Forward (-Z) tipped down 60°: a lamp lighting the
+                    // ground in front of it.
+                    t.position = [0.0, 3.0, 2.0];
+                    t.rotation_euler = [-60f32.to_radians(), 0.0, 0.0];
+                }
+                ComponentKind::SpotLight.add_to(&mut data);
+            }
             CreateKind::Camera => {
                 if let Some(t) = &mut data.transform {
                     t.position = [0.0, 2.0, 6.0];
@@ -1831,6 +1876,32 @@ pub(crate) mod tests {
         assert_eq!(data.transform.unwrap().position, [4.0, 5.0, 6.0]);
         assert!(doc.undo());
         assert!(doc.entities.is_empty());
+    }
+
+    #[test]
+    fn created_lights_light_the_scene_and_the_spot_aims_down_ahead() {
+        let mut doc = Document::new();
+        let point = doc.create(CreateKind::PointLight);
+        let spot = doc.create(CreateKind::SpotLight);
+        let data = |id| doc.entities[doc.index_of(id).unwrap()].data.clone();
+        assert!(ComponentKind::PointLight.present_in(&data(point)));
+        assert!(ComponentKind::SpotLight.present_in(&data(spot)));
+        assert_eq!(data(point).name.as_deref(), Some("Point Light"));
+        let mut world = automata_scene::SceneWorld::new();
+        doc.to_scene_file().apply_to_world(&mut world);
+        let mut draw = automata_renderer::DrawList::new();
+        automata_scene::record_draw_list(&world, &mut draw);
+        let lights = draw.point_lights();
+        assert_eq!(lights.len(), 2);
+        let cone = lights.iter().find_map(|l| l.spot).unwrap();
+        let dir = cone.axis();
+        assert!(dir.y < -0.8 && dir.z < -0.4, "down and forward: {dir}");
+        // Copy and remove round out the component.
+        let mut bare = EntityData::default();
+        ComponentKind::SpotLight.copy_between(&data(spot), &mut bare);
+        assert_eq!(bare.spot_light, data(spot).spot_light);
+        ComponentKind::SpotLight.remove_from(&mut bare);
+        assert!(bare.spot_light.is_none());
     }
 
     #[test]

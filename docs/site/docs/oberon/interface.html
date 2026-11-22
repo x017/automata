@@ -56,7 +56,8 @@ command, entity, or script name and press Enter.</li><li><strong>⚙</strong> (C
 component: cube, sun, camera, horizon (Environment), or empty.</p>
 <ul><li>Click to select. Double-click (or press F) to frame the entity in the
 view.</li><li><strong>+</strong> opens the Create menu: Empty, Cube, Sphere, Plane, Directional
-Light, Camera, Environment, Water, Physics Cube, Player.</li><li>Right-click an entity for Rename, Duplicate, Copy/Paste, Delete, Frame,
+Light, Point Light, Spot Light, Camera, Environment, Water, Physics Cube,
+Player.</li><li>Right-click an entity for Rename, Duplicate, Copy/Paste, Delete, Frame,
 Save as Prefab, and Attach/Edit Script.</li></ul>
 <h2 id="files">Files<a class="anchor" href="#files" aria-label="Link to this section">#</a></h2>
 <p>The bottom of the left sidebar is a file tree of your project: the folder
@@ -101,13 +102,17 @@ left out.</p>
 along that axis. Arrow keys nudge the selection across the ground relative to the view, PgUp/PgDn move it up and down, and holding Shift makes the steps finer. The axis
 widget (top-right) shows the view orientation.</p>
 <p><strong>Overlays.</strong></p>
-<ul><li>Lights draw as a small sun icon.</li><li>Cameras draw their view <strong>frustum</strong>: a pyramid showing exactly what the
+<ul><li>Lights draw as icons: a sun for the Directional Light, a bulb for a
+Point Light, a lamp with its beam for a Spot Light (in the light's own
+colour). A selected Point Light shows its range as three rings, and a
+selected Spot Light shows its cone out to its range. The fainter inner
+circle is where the light is still at full strength.</li><li>Cameras draw their view <strong>frustum</strong>: a pyramid showing exactly what the
 camera sees, with a notch marking "up".</li><li>When a camera is selected, a <strong>live preview</strong> of its view appears in
 the bottom-right corner. See <a href="cameras.html">Cameras</a>.</li></ul>
 <h2 id="inspector">Inspector<a class="anchor" href="#inspector" aria-label="Link to this section">#</a></h2>
 <p>Shows the selected entity.</p>
-<ul><li><strong>Name</strong> at the top.</li><li><strong>Components</strong>: Transform, Mesh Renderer, Directional Light, Camera,
-Environment, Rigidbody, Collider, Character Controller, Script. Each
+<ul><li><strong>Name</strong> at the top.</li><li><strong>Components</strong>: Transform, Mesh Renderer, Directional Light, Point
+Light, Spot Light, Camera, Environment, Rigidbody, Collider, Character Controller, Script. Each
 section folds open and closed. The <strong>⋮</strong> menu has Reset, Copy/Paste
 Component, and Remove.</li><li><strong>Fields</strong>: drag the label to scrub a number, or click the field and
 type. Colour swatches open a colour picker with hex input.</li><li><strong>Attributes</strong>: custom values your scripts read. See

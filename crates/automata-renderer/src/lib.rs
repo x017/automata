@@ -33,7 +33,9 @@ pub use context::RenderContext;
 pub use draw::{DrawList, Sprite};
 pub use environment::{Environment, Tonemapping};
 pub use error::{Error, Result};
-pub use light::{PointLight, Sun, DEFAULT_SHADOW_DISTANCE, MAX_POINT_LIGHTS, MAX_POINT_SHADOWS};
+pub use light::{
+    PointLight, SpotCone, Sun, DEFAULT_SHADOW_DISTANCE, MAX_POINT_LIGHTS, MAX_POINT_SHADOWS,
+};
 pub use material::{Material, MaterialParams, MaterialTextures, DEFAULT_ROUGHNESS};
 pub use mesh::{Mesh, MeshData, SkinVertex, Vertex};
 pub use quality::GraphicsQuality;

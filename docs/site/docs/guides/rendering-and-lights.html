@@ -85,7 +85,7 @@ between a lamp and a wall leaves its outline on the wall. The glowing
 mesh itself never blocks its own light. <code>glow_shadows=False</code> (Oberon:
 untick <strong>Glow Shadows</strong>) lets a glow's light pass through everything,
 which is cheaper; use it for small or unimportant glows.</li><li><strong>Limits:</strong> a frame shades at most 4 (Low), 8 (Medium), 16 (High) or 32
-(Ultra, Beautiful) glow lights; with more, the ones nearest the camera
+(Ultra, Beautiful) glow lights (placed lights, below, count too); with more, the ones nearest the camera
 win. Of those, the nearest 2 (High) or 4 (Ultra, Beautiful) that have
 <code>glow_shadows</code> on cast shadows. The rest light through walls, and so
 does every glow on Low and Medium.</li></ul>
@@ -137,6 +137,38 @@ shadows are sharp where an object touches the ground and soften with
 the distance to it, as much as the sun's size (<code>sun_size</code>) times the
 softness says: a pole's shadow starts crisp at its foot and blurs
 toward its tip.</li></ul>
+<h2 id="point-lights-and-spotlights">Point lights and spotlights<a class="anchor" href="#point-lights-and-spotlights" aria-label="Link to this section">#</a></h2>
+<p>Place lights anywhere: a torch on a wall, a lamp post, a car's headlights,
+a flashlight. A <strong><code>PointLight</code></strong> shines every way from its entity's
+position. A <strong><code>SpotLight</code></strong> shines in a cone along its entity's forward
+direction (local −Z, turned by the entity's rotation).</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># A torch on a wall: warm, reaching about 10 m.</span>
+scene.add(at.Entity(<span class="tok-s">&quot;torch&quot;</span>)
+          .add(at.Transform(position=(-<span class="tok-n">2.2</span>, <span class="tok-n">2.5</span>, -<span class="tok-n">3.45</span>)))
+          .add(at.PointLight(color=(<span class="tok-n">1.0</span>, <span class="tok-n">0.58</span>, <span class="tok-n">0.28</span>), intensity=<span class="tok-n">3.5</span>, <span class="tok-b">range</span>=<span class="tok-n">10.0</span>)))
+
+<span class="tok-c"># A headlight: a 26° cone tipped 9° down toward the road.</span>
+scene.add(at.Entity(<span class="tok-s">&quot;headlight&quot;</span>)
+          .add(at.Transform(position=(<span class="tok-n">2.0</span>, <span class="tok-n">0.72</span>, <span class="tok-n">0.55</span>),
+                            rotation_euler=(math.radians(-<span class="tok-n">9</span>), <span class="tok-n">0</span>, <span class="tok-n">0</span>)))
+          .add(at.SpotLight(intensity=<span class="tok-n">18.0</span>, outer_angle=<span class="tok-n">26.0</span>, inner_angle=<span class="tok-n">12.0</span>,
+                            <span class="tok-b">range</span>=<span class="tok-n">22.0</span>)))</code></pre></div>
+<div class="table"><table><thead><tr><th>Setting</th><th>Values</th><th>What it does</th></tr></thead><tbody><tr><td><code>color</code></td><td>RGB 0..1</td><td>The light's colour</td></tr><tr><td><code>intensity</code></td><td>≥ 0</td><td>Brightness. 1 lights a surface 1 m away, facing the light, as brightly as a white sun overhead; at 2 m it's a quarter of that. Torches and lamps: 2–6. Headlights and stage lights: 10–30</td></tr><tr><td><code>range</code></td><td>m, 0 = auto</td><td>Where the light ends. 0 works it out from the brightness, ending where the light is too dim to see. Set a range to keep a light inside a room</td></tr><tr><td><code>outer_angle</code></td><td>degrees, ≤ 80</td><td>(Spot) the cone's edge, measured from its axis. A 30° spot is 60° across</td></tr><tr><td><code>inner_angle</code></td><td>degrees</td><td>(Spot) full strength inside this angle, fading out toward the edge. Defaults to ¾ of <code>outer_angle</code>; closer to it gives a harder edge</td></tr><tr><td><code>radius</code></td><td>m</td><td>The size of the glowing source (default 0.05). Bigger looks softer up close</td></tr><tr><td><code>shadows</code></td><td><code>True</code> / <code>False</code></td><td>Whether objects block it and cast shadows (High and up). <code>True</code> by default</td></tr></tbody></table></div>
+<ul><li><strong>Shadows:</strong> placed lights share the shadow budget with glowing meshes.
+High shadows the 2 nearest point lights and Ultra and Beautiful the 4
+nearest. A spotlight costs a sixth of a point light, because its shadow
+is one view down the cone rather than six around it. So one point
+light's room shadows six spots, and a pair of headlights is cheap.</li><li><strong>Fixtures don't block their own light:</strong> a light inside a small mesh
+(up to about half a metre across: a bulb, a flame, a headlight lens)
+leaves that mesh out of its shadow. Give the mesh <code>glow_light=0</code> so it
+glows for the look without adding a second light.</li><li><strong>Limits:</strong> placed lights count toward the same per-frame cap as glows
+(4, 8, 16 or 32 lights from Low to Beautiful); the nearest and brightest
+win.</li><li><strong>Oberon:</strong> <strong>Create → Point Light</strong> or <strong>Spot Light</strong>. Selecting a
+light shows its reach in the viewport: three rings for a point light's
+range, or a spot's cone out to its range (the core is the fainter
+circle). Aim a spot with the Rotate tool.</li><li><strong>Example:</strong> <code>examples/oberon/night_lights</code> has a torch on a wall and a
+car with two headlights, all shadowed, with no light coming from a
+glowing mesh.</li></ul>
 <h2 id="environment">Environment<a class="anchor" href="#environment" aria-label="Link to this section">#</a></h2>
 <p>The <code>Environment</code> component sets the look of the whole frame:</p>
 <ul><li>hemisphere ambient light (sky above, ground below)</li><li>the background colour</li><li>exposure and tone mapping</li><li>distance fog</li></ul>
@@ -251,7 +283,7 @@ top to get fog and tone mapping too.</p>
     <footer class="pager"><a class="prev" href="scenes-and-entities.html"><small>Previous</small>Scenes &amp; entities</a><a class="next" href="cameras.html"><small>Next</small>Cameras</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/rendering-and-lights.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#drawing-primitives">Drawing primitives</a></li><li class="l2"><a href="#surfaces">Surfaces</a></li><li class="l3"><a href="#glowing-objects-light-their-surroundings">Glowing objects light their surroundings</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#the-sun">The sun</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#sky-and-quality">Sky and quality</a></li><li class="l3"><a href="#beautiful">Beautiful</a></li><li class="l2"><a href="#water">Water</a></li><li class="l2"><a href="#mood-recipes">Mood recipes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#drawing-primitives">Drawing primitives</a></li><li class="l2"><a href="#surfaces">Surfaces</a></li><li class="l3"><a href="#glowing-objects-light-their-surroundings">Glowing objects light their surroundings</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#the-sun">The sun</a></li><li class="l2"><a href="#point-lights-and-spotlights">Point lights and spotlights</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#sky-and-quality">Sky and quality</a></li><li class="l3"><a href="#beautiful">Beautiful</a></li><li class="l2"><a href="#water">Water</a></li><li class="l2"><a href="#mood-recipes">Mood recipes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

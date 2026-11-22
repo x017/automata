@@ -203,6 +203,58 @@ class DirectionalLight:
         shadow_softness: float = 1.0,
     ) -> None: ...
 
+class PointLight:
+    """A placed light shining every way from its entity's position.
+
+    It fades with the square of the distance and ends at `range` (0 picks
+    it from the brightness). `intensity` 1 lights a surface 1 m away as
+    brightly as a white sun overhead. With `shadows` objects block it (the
+    nearest few shadowed lights, on High and up).
+    """
+
+    color: tuple[float, float, float]
+    intensity: float
+    range: float
+    radius: float
+    """The glowing source's size (metres): bigger is softer up close."""
+    shadows: bool
+    def __init__(
+        self,
+        color: tuple[float, float, float] = (1.0, 0.85, 0.65),
+        intensity: float = 3.0,
+        range: float = 0.0,
+        *,
+        radius: float = 0.05,
+        shadows: bool = True,
+    ) -> None: ...
+
+class SpotLight:
+    """A placed light shining in a cone along its entity's forward (-Z) axis.
+
+    Full strength inside `inner_angle` (degrees from the axis; three
+    quarters of `outer_angle` unless given), faded out by `outer_angle`
+    (at most 80). Brightness as for `PointLight`, on the axis.
+    """
+
+    color: tuple[float, float, float]
+    intensity: float
+    outer_angle: float
+    inner_angle: float
+    range: float
+    radius: float
+    shadows: bool
+    def __init__(
+        self,
+        color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        intensity: float = 8.0,
+        outer_angle: float = 30.0,
+        inner_angle: float | None = None,
+        range: float = 0.0,
+        *,
+        radius: float = 0.05,
+        shadows: bool = True,
+    ) -> None: ...
+
 class Environment:
     """Scene-wide look: sky and sun, ambient, exposure, tone mapping, fog.
 

@@ -924,6 +924,41 @@ def test_action_map_axis_bindings_stack():
     assert controls.axis_names() == []
 
 
+def test_point_and_spot_light_components():
+    torch = at.PointLight(color=(1.0, 0.6, 0.3), intensity=4.0, range=8.0)
+    assert torch.color[1] == pytest.approx(0.6)
+    assert torch.intensity == 4.0 and torch.range == 8.0
+    assert torch.shadows is True and torch.radius == pytest.approx(0.05)
+    head = at.SpotLight(intensity=20.0, outer_angle=24.0, shadows=False)
+    assert head.inner_angle == pytest.approx(18.0), "three quarters of the edge"
+    assert head.shadows is False
+    assert at.SpotLight(outer_angle=40.0, inner_angle=10.0).inner_angle == 10.0
+    for bad in (
+        lambda: at.PointLight(intensity=-1.0),
+        lambda: at.PointLight(radius=0.0),
+        lambda: at.SpotLight(outer_angle=90.0),
+        lambda: at.SpotLight(outer_angle=30.0, inner_angle=40.0),
+    ):
+        with pytest.raises(ValueError):
+            bad()
+    assert "PointLight" in repr(torch) and "SpotLight" in repr(head)
+
+    scene = at.Scene()
+    scene.add(at.Entity("torch").add(at.Transform(position=(0.0, 2.0, 0.0))).add(torch))
+    scene.add(at.Entity("headlight").add(at.Transform()).add(head))
+    text = scene.to_ron()
+    assert "point_light" in text and "spot_light" in text
+    assert "radius" not in text, "defaults stay out of the file"
+    assert at.Scene.from_ron(text).to_ron() == text
+    kinds = [type(c).__name__ for e in scene.entities() for c in e.components()]
+    assert "PointLight" in kinds and "SpotLight" in kinds
+
+    # Stages and runs headless.
+    game = make_game()
+    game.load_scene(scene)
+    assert game.run(lambda ctx: ctx.quit()) >= 1
+
+
 def test_directional_light_component():
     light = at.DirectionalLight(
         direction=(0.0, -1.0, 0.0), color=(1.0, 0.9, 0.8), ambient=0.4, shadows=True
