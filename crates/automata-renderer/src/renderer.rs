@@ -3680,7 +3680,7 @@ mod tests {
     }
 
     #[test]
-    fn post_effects_grade_the_image_from_medium_up() {
+    fn offscreen_post_effects_grade_the_image_from_medium_up() {
         let Some(mut renderer) = pollster::block_on(offscreen()) else {
             eprintln!("no GPU adapter; skipping grading test");
             return;
@@ -3741,7 +3741,7 @@ mod tests {
     }
 
     #[test]
-    fn bloom_glows_around_bright_things_on_high_and_up() {
+    fn offscreen_bloom_glows_around_bright_things_on_high_and_up() {
         let Some(mut renderer) = pollster::block_on(offscreen()) else {
             eprintln!("no GPU adapter; skipping bloom test");
             return;
@@ -3811,7 +3811,7 @@ mod tests {
     }
 
     #[test]
-    fn height_fog_is_thick_low_down_and_thin_up_high() {
+    fn offscreen_height_fog_is_thick_low_down_and_thin_up_high() {
         let Some(mut renderer) = pollster::block_on(offscreen()) else {
             eprintln!("no GPU adapter; skipping height fog test");
             return;
@@ -3878,7 +3878,7 @@ mod tests {
     }
 
     #[test]
-    fn god_rays_stream_past_geometry_toward_the_sun_on_beautiful() {
+    fn offscreen_god_rays_stream_past_geometry_toward_the_sun_on_beautiful() {
         let Some(mut renderer) = pollster::block_on(offscreen()) else {
             eprintln!("no GPU adapter; skipping god rays test");
             return;
@@ -3961,7 +3961,7 @@ mod tests {
     }
 
     #[test]
-    fn depth_of_field_blurs_what_is_out_of_focus_on_beautiful() {
+    fn offscreen_depth_of_field_blurs_what_is_out_of_focus_on_beautiful() {
         let Some(mut renderer) = pollster::block_on(Renderer::new_offscreen((160, 120))).ok()
         else {
             eprintln!("no GPU adapter; skipping depth of field test");
@@ -4005,7 +4005,7 @@ mod tests {
     }
 
     #[test]
-    fn lit_particles_darken_in_shade() {
+    fn offscreen_lit_particles_darken_in_shade() {
         let Some(mut renderer) = pollster::block_on(offscreen()) else {
             eprintln!("no GPU adapter; skipping particle shade test");
             return;
@@ -4211,7 +4211,7 @@ mod tests {
     }
 
     #[test]
-    fn forward_frames_compile_only_the_shadows_they_sample() {
+    fn offscreen_forward_frames_compile_only_the_shadows_they_sample() {
         let Some(mut renderer) = pollster::block_on(offscreen()) else {
             eprintln!("no GPU adapter; skipping forward variant test");
             return;
@@ -4248,7 +4248,7 @@ mod tests {
     }
 
     #[test]
-    fn point_shadow_faces_redraw_only_when_what_they_see_changes() {
+    fn offscreen_point_shadow_faces_redraw_only_when_what_they_see_changes() {
         let Some(mut renderer) = pollster::block_on(offscreen()) else {
             eprintln!("no GPU adapter; skipping point shadow cache test");
             return;
@@ -4435,7 +4435,7 @@ mod tests {
     }
 
     #[test]
-    fn simulated_ripples_shape_and_foam_the_water_on_every_preset() {
+    fn offscreen_simulated_ripples_shape_and_foam_the_water_on_every_preset() {
         let Some(mut renderer) = pollster::block_on(offscreen()) else {
             eprintln!("no GPU adapter; skipping ripple test");
             return;
@@ -4528,7 +4528,7 @@ mod tests {
     }
 
     #[test]
-    fn particles_glow_cover_hide_behind_walls_fade_softly_and_streak() {
+    fn offscreen_particles_glow_cover_hide_behind_walls_fade_softly_and_streak() {
         use crate::ParticleBlend::{Additive, Alpha};
         let Some(mut renderer) = pollster::block_on(offscreen()) else {
             eprintln!("no GPU adapter; skipping particle test");
@@ -4591,7 +4591,7 @@ mod tests {
     }
 
     #[test]
-    fn diving_tints_the_view_and_caustics_dance_on_the_floor() {
+    fn offscreen_diving_tints_the_view_and_caustics_dance_on_the_floor() {
         let Some(mut renderer) = pollster::block_on(offscreen()) else {
             eprintln!("no GPU adapter; skipping underwater test");
             return;
