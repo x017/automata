@@ -215,7 +215,9 @@ def build():
             collider = at.Collider3D.convex_hull(look)
         else:
             # A unit cube scaled to `size`; box colliders take world sizes.
-            visual = at.MeshRenderer.cube(size=1.0, color=look)
+            # Buoys are glossy painted plastic; the hull is plain wood.
+            gloss = 0.25 if name.startswith("Buoy") else None
+            visual = at.MeshRenderer.cube(size=1.0, color=look, roughness=gloss)
             collider = at.Collider3D.cuboid(*size)
         scene.add(
             at.Entity(name)

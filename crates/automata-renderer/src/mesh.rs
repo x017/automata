@@ -126,6 +126,46 @@ impl MeshData {
 
         Self::new(vertices, indices)
     }
+
+    /// A UV sphere `size` across (diameter), centered at the origin: 48
+    /// segments around, 24 rings top to bottom, smooth normals, U around the
+    /// equator and V from the top pole down.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)] // small loop counters
+    pub fn sphere(size: f32) -> Self {
+        const SEGMENTS: u32 = 48;
+        const RINGS: u32 = 24;
+        let r = size / 2.0;
+        let mut vertices = Vec::with_capacity(((SEGMENTS + 1) * (RINGS + 1)) as usize);
+        for ring in 0..=RINGS {
+            let v = ring as f32 / RINGS as f32;
+            let (sin_t, cos_t) = (v * std::f32::consts::PI).sin_cos();
+            for seg in 0..=SEGMENTS {
+                let u = seg as f32 / SEGMENTS as f32;
+                let (sin_p, cos_p) = (u * std::f32::consts::TAU).sin_cos();
+                // u = 0 faces +Z and runs counter-clockwise seen from above.
+                let n = Vec3::new(sin_t * sin_p, cos_t, sin_t * cos_p);
+                vertices.push(Vertex::new((n * r).into(), n.into(), [u, v]));
+            }
+        }
+        let row = SEGMENTS + 1;
+        let mut indices = Vec::with_capacity((SEGMENTS * RINGS * 6) as usize);
+        for ring in 0..RINGS {
+            for seg in 0..SEGMENTS {
+                let a = ring * row + seg;
+                let b = a + row;
+                // Counter-clockwise from outside; the pole rows' degenerate
+                // triangles are skipped.
+                if ring != 0 {
+                    indices.extend_from_slice(&[a, b, a + 1]);
+                }
+                if ring != RINGS - 1 {
+                    indices.extend_from_slice(&[a + 1, b, b + 1]);
+                }
+            }
+        }
+        Self::new(vertices, indices)
+    }
 }
 
 /// A mesh uploaded to the GPU.
@@ -167,6 +207,22 @@ pub(crate) struct MeshInner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spheres_face_outward_with_unit_normals() {
+        let m = MeshData::sphere(2.0);
+        for v in &m.vertices {
+            let p = Vec3::from(v.position);
+            assert!((p.length() - 1.0).abs() < 1e-5);
+            assert!((Vec3::from(v.normal) - p).length() < 1e-5);
+        }
+        for t in m.indices.chunks(3) {
+            let [a, b, c] = [0, 1, 2].map(|i| Vec3::from(m.vertices[t[i] as usize].position));
+            let face = (b - a).cross(c - a);
+            assert!(face.length() > 1e-8, "no degenerate triangles");
+            assert!(face.dot(a + b + c) > 0.0, "counter-clockwise from outside");
+        }
+    }
 
     #[test]
     fn quad_has_two_triangles_facing_forward() {

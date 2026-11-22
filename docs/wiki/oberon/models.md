@@ -9,10 +9,14 @@ reads two formats:
 | glTF 2.0 | `.glb` (one file) or `.gltf` (+ `.bin`, images) | Recommended. Blender: **File → Export → glTF 2.0**. |
 | Wavefront OBJ | `.obj` (+ `.mtl`, images) | Universal and simple. Has no node hierarchy. |
 
-From each material Oberon takes the **base colour** and the **colour
-texture** (PNG or JPEG). The model draws with the engine's lighting,
-shadows and fog, like the built-in cubes. PBR maps (normal,
-metallic-roughness) aren't imported yet.
+From each glTF material Oberon takes the full PBR set: **base colour** and
+its texture, **roughness** and **metallic** (factors and the
+metallic-roughness map), the **normal map**, and **emission** (colour, map
+and `KHR_materials_emissive_strength`). Textures can be PNG or JPEG.
+Spec-gloss materials and `KHR_texture_transform` are converted too. OBJ
+files bring base colour and texture, and are drawn as a non-metal with
+roughness 0.6. The model draws with the engine's lighting, shadows and fog,
+like the built-in cubes.
 
 ### Animated models
 
@@ -100,12 +104,13 @@ With a model selected, the **Mesh Renderer** section shows:
 
 | Row | What it does |
 |---|---|
-| **Primitive** | `Model`. Switch to Cube or Quad to go back to a primitive. |
+| **Primitive** | `Model`. Switch to Cube, Sphere or Quad to go back to a primitive. |
 | **File** | The model's path relative to the scene. It turns red if the file is missing or can't be read. Double-click it to show the file in the Files panel. |
 | *summary* | Parts (one per material), triangle count, size in metres, and whether it's textured. If loading failed, this line shows the error instead. |
 | **Change…** | Pick a different model. |
 | **Add Collider / Fit Collider** | Adds a collider shaped for the model, or refits the existing one. |
 | **Tint** | Multiplies every material's colour. Leave it white to see the model as authored. |
+| **Surface**, **Roughness**, **Metallic**, **Emission** | Leave them at Default to keep the file's materials. Setting one overrides it on every part. See [Surfaces](interface.md#surfaces). |
 
 ## Import settings
 

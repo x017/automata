@@ -7,20 +7,57 @@ environment (ambient, fog, tone mapping), and quality presets.
 
 ```python
 entity.add(at.MeshRenderer.cube(size=1.0, color=(r, g, b, a)))
+entity.add(at.MeshRenderer.sphere(size=1.0, color=(r, g, b, a)))
 entity.add(at.MeshRenderer.quad(size=1.0, color=(r, g, b, a)))
 ```
 
-- `size` sets the primitive's base size; the entity's `Transform.scale`
-  multiplies it. A floor is a unit cube with `scale=(40, 1, 40)`.
+- `size` sets the primitive's base size (a sphere's diameter); the entity's
+  `Transform.scale` multiplies it. A floor is a unit cube with
+  `scale=(40, 1, 40)`.
 - `quad` lies in the XY plane facing +Z — billboards, cards, flat details.
 - Colors are linear-space floats in `0.0..=1.0`.
 - Primitives are **plain data**: safe to stage before a window exists and
   inert in headless mode. The windowed driver uploads them to the GPU on
   the first frame automatically.
 
-> There is no texture or custom-mesh API in Python yet — the look is flat
-> colors + lighting. That's a deliberate indie aesthetic and a roadmap
-> item, not an oversight you can configure away.
+> Python has no texture or custom-mesh API yet. For textured, detailed
+> objects, load a model (`MeshRenderer.model`), see [Models](../oberon/models.md).
+
+## Surfaces
+
+Colour says *what* a thing is; the surface says what it's *made of*. Every
+`MeshRenderer` constructor takes four keyword-only surface arguments:
+
+```python
+gold = at.MeshRenderer.sphere(color=(1.0, 0.77, 0.34, 1), metallic=1.0, roughness=0.3)
+tile = at.MeshRenderer.cube(color=(0.9, 0.9, 0.9, 1), roughness=0.15)  # glossy
+felt = at.MeshRenderer.cube(color=(0.2, 0.5, 0.3, 1), roughness=0.95)  # matte
+lamp = at.MeshRenderer.quad(emissive=(1.0, 0.8, 0.5), emissive_strength=4.0)
+```
+
+| Argument | Range | Effect |
+|---|---|---|
+| `roughness` | 0..1 | 0 is a mirror-like gloss with a tight, bright highlight; 1 is chalky with no visible highlight. Default 0.6 |
+| `metallic` | 0 or 1 (in between for dusty / painted metal) | Metals have no diffuse colour: they reflect the sky and sun tinted by `color`. Default 0 |
+| `emissive` | (r, g, b), ≥ 0 | Light the surface gives off itself, unaffected by sun, shadow or fog darkness |
+| `emissive_strength` | ≥ 0 | Multiplies `emissive`. Above about 1 it blooms on Ultra and Beautiful |
+
+Tips:
+
+- Metals look best with a bright, saturated base colour: gold
+  `(1.0, 0.77, 0.34)`, copper `(0.95, 0.64, 0.54)`, silver `(0.95, 0.95, 0.95)`.
+  They need a sky to reflect, so pair them with an Environment.
+- Shiny surfaces show their shape best on round things. A glossy cube
+  only lights up when a face catches the sun.
+- Glow does not light up its surroundings (there are no point lights yet).
+  Fake it with a warm ambient or a coloured sun nearby.
+- Models keep their own materials: glTF base colour, roughness, metallic,
+  normal maps, emission (`KHR_materials_emissive_strength` too) and texture
+  maps are all imported. Passing `roughness` / `metallic` / `emissive`
+  overrides every part of the model.
+
+Every quality level shades surfaces; Beautiful uses the full physically
+based model, Low to Ultra a cheaper approximation that looks close.
 
 ## Cameras
 
@@ -238,6 +275,7 @@ top to get fog and tone mapping too.
 
 - [The Game Loop](game-loop.md) — when frames render
 - [Scenes & Entities](scenes-and-entities.md) — transforms and the scale trick
+- [Models](../oberon/models.md) — imported materials and textures
 - [Cameras](cameras.md) — follow, orbit, rails, shake, zoom
 - [Cookbook](../cookbook.md#cameras) — orbit cams, screen shake
 - [Oberon: Graphics](../oberon/graphics.md) — tune all of this visually

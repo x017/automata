@@ -55,8 +55,8 @@ command, entity, or script name and press Enter.</li><li><strong>⚙</strong> (C
 <p>Lists every entity in the scene. Each icon shows the entity's main
 component: cube, sun, camera, horizon (Environment), or empty.</p>
 <ul><li>Click to select. Double-click (or press F) to frame the entity in the
-view.</li><li><strong>+</strong> opens the Create menu: Empty, Cube, Plane, Directional Light,
-Camera, Environment, Physics Cube, Player.</li><li>Right-click an entity for Rename, Duplicate, Copy/Paste, Delete, Frame,
+view.</li><li><strong>+</strong> opens the Create menu: Empty, Cube, Sphere, Plane, Directional
+Light, Camera, Environment, Water, Physics Cube, Player.</li><li>Right-click an entity for Rename, Duplicate, Copy/Paste, Delete, Frame,
 Save as Prefab, and Attach/Edit Script.</li></ul>
 <h2 id="files">Files<a class="anchor" href="#files" aria-label="Link to this section">#</a></h2>
 <p>The bottom of the left sidebar is a file tree of your project: the folder
@@ -114,6 +114,11 @@ type. Colour swatches open a colour picker with hex input.</li><li><strong>Attri
 <a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a>.</li><li><strong>Add Component</strong> lists every component the entity doesn't have yet.</li></ul>
 <p>Every edit is one undo step. Scrubbing a value counts as one step, not
 one per frame.</p>
+<h3 id="surfaces">Surfaces<a class="anchor" href="#surfaces" aria-label="Link to this section">#</a></h3>
+<p>Below <strong>Color</strong> the Mesh Renderer has the material rows:</p>
+<div class="table"><table><thead><tr><th>Row</th><th>What it does</th></tr></thead><tbody><tr><td><strong>Surface</strong></td><td>A preset: Default, Matte, Glossy, Metal, Brushed Metal, Rubber or Glowing (glows in the mesh's colour). Shows <em>Custom</em> once you change a value by hand.</td></tr><tr><td><strong>Roughness</strong></td><td>0 = mirror-like gloss, 1 = chalk.</td></tr><tr><td><strong>Metallic</strong></td><td>0 = plastic, wood, stone; 1 = metal (reflects the sky, tinted by Color).</td></tr><tr><td><strong>Emission</strong></td><td>The colour the surface glows with. Black = no glow.</td></tr><tr><td><strong>Emission Strength</strong></td><td>Multiplies Emission. Above about 1 it blooms on Ultra and Beautiful.</td></tr></tbody></table></div>
+<p>Metal and gloss show best on a <strong>Sphere</strong> under a sky. On models, Default
+keeps the file's own materials. See <a href="../guides/rendering-and-lights.html#surfaces">Rendering &amp; Lights</a>.</p>
 <h2 id="graphics">Graphics<a class="anchor" href="#graphics" aria-label="Link to this section">#</a></h2>
 <p>The second tab in the right dock. It's a single place to test and tune how
 the scene looks:</p>
@@ -147,7 +152,7 @@ off in <strong>Settings → Appearance</strong>.</p>
     <footer class="pager"><a class="prev" href="index.html"><small>Previous</small>Introduction</a><a class="next" href="scripting.html"><small>Next</small>Scripting</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/interface.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#top-bar">Top bar</a></li><li class="l2"><a href="#hierarchy">Hierarchy</a></li><li class="l2"><a href="#files">Files</a></li><li class="l2"><a href="#file-browser">File browser</a></li><li class="l2"><a href="#scene-view">Scene view</a></li><li class="l2"><a href="#inspector">Inspector</a></li><li class="l2"><a href="#graphics">Graphics</a></li><li class="l2"><a href="#console">Console</a></li><li class="l2"><a href="#assets">Assets</a></li><li class="l2"><a href="#play-mode">Play mode</a></li><li class="l2"><a href="#status-bar">Status bar</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#top-bar">Top bar</a></li><li class="l2"><a href="#hierarchy">Hierarchy</a></li><li class="l2"><a href="#files">Files</a></li><li class="l2"><a href="#file-browser">File browser</a></li><li class="l2"><a href="#scene-view">Scene view</a></li><li class="l2"><a href="#inspector">Inspector</a></li><li class="l3"><a href="#surfaces">Surfaces</a></li><li class="l2"><a href="#graphics">Graphics</a></li><li class="l2"><a href="#console">Console</a></li><li class="l2"><a href="#assets">Assets</a></li><li class="l2"><a href="#play-mode">Play mode</a></li><li class="l2"><a href="#status-bar">Status bar</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

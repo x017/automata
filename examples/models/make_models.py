@@ -196,11 +196,19 @@ def write_tree(path: str) -> None:
         "materials": [
             {
                 "name": "Bark",
-                "pbrMetallicRoughness": {"baseColorFactor": [0.42, 0.27, 0.16, 1.0]},
+                "pbrMetallicRoughness": {
+                    "baseColorFactor": [0.42, 0.27, 0.16, 1.0],
+                    "metallicFactor": 0.0,
+                    "roughnessFactor": 0.9,
+                },
             },
             {
                 "name": "Leaves",
-                "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}},
+                "pbrMetallicRoughness": {
+                    "baseColorTexture": {"index": 0},
+                    "metallicFactor": 0.0,
+                    "roughnessFactor": 0.7,
+                },
             },
         ],
         "textures": [{"source": 0}],

@@ -61,7 +61,9 @@ pub struct Document {
 pub fn mesh_bounds(data: &EntityData) -> Option<(glam::Vec3, glam::Vec3)> {
     use glam::Vec3;
     Some(match &data.mesh_visual.as_ref()?.primitive {
-        PrimitiveData::Cube { size } => (Vec3::ZERO, Vec3::splat(*size)),
+        PrimitiveData::Cube { size } | PrimitiveData::Sphere { size } => {
+            (Vec3::ZERO, Vec3::splat(*size))
+        }
         PrimitiveData::Quad { size } => (Vec3::ZERO, Vec3::new(*size, *size, 0.02)),
         PrimitiveData::Custom { mesh } => {
             let mut lo = Vec3::splat(f32::INFINITY);
@@ -109,6 +111,12 @@ pub fn model_path(data: &EntityData) -> Option<&str> {
 /// [`automata_physics::auto_model_shape`]).
 #[must_use]
 pub fn fitted_collider(data: &EntityData) -> automata_physics::Collider3D {
+    if let Some(PrimitiveData::Sphere { size }) = data.mesh_visual.as_ref().map(|m| &m.primitive) {
+        let scale = glam::Vec3::from(data.transform.map_or([1.0; 3], |t| t.scale));
+        return automata_physics::Collider3D::ball(
+            (size * 0.5 * scale.abs().max_element()).max(0.005),
+        );
+    }
     let body = data.rigid_body.as_ref().map(|b| b.body_type);
     model_path(data)
         .and_then(|path| automata_physics::auto_model_shape(path, body))
@@ -134,6 +142,8 @@ pub enum CreateKind {
     Water,
     /// A cube with a dynamic rigid body and a box collider.
     PhysicsCube,
+    /// A 1 m sphere.
+    Sphere,
     /// A playable character: WASD / arrows to move, Space to jump in Play
     /// mode.
     Player,
@@ -141,9 +151,10 @@ pub enum CreateKind {
 
 impl CreateKind {
     /// Every kind, in menu order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Empty,
         Self::Cube,
+        Self::Sphere,
         Self::Plane,
         Self::Light,
         Self::Camera,
@@ -159,6 +170,7 @@ impl CreateKind {
         match self {
             Self::Empty => "Empty",
             Self::Cube => "Cube",
+            Self::Sphere => "Sphere",
             Self::Plane => "Plane",
             Self::Light => "Directional Light",
             Self::Camera => "Camera",
@@ -246,6 +258,7 @@ impl ComponentKind {
                 data.mesh_visual.get_or_insert(MeshVisualData {
                     primitive: PrimitiveData::Cube { size: 1.0 },
                     color: [0.85, 0.87, 0.92, 1.0],
+                    surface: automata_scene::Surface::default(),
                 });
             }
             Self::Light => {
@@ -407,6 +420,7 @@ fn test_box(pos: [f32; 3], scale: [f32; 3], color: [f32; 4]) -> EntityData {
         mesh_visual: Some(MeshVisualData {
             primitive: PrimitiveData::Cube { size: 1.0 },
             color,
+            surface: automata_scene::Surface::default(),
         }),
         ..Default::default()
     }
@@ -540,6 +554,7 @@ impl Document {
         doc.entities[ground].data.mesh_visual = Some(MeshVisualData {
             primitive: PrimitiveData::Cube { size: 1.0 },
             color: [0.16, 0.17, 0.20, 1.0],
+            surface: automata_scene::Surface::default(),
         });
         // A static collider so physics objects land on the ground in play mode.
         doc.entities[ground].data.rigid_body = Some(automata_physics::RigidBody::fixed());
@@ -553,6 +568,7 @@ impl Document {
         doc.entities[cube].data.mesh_visual = Some(MeshVisualData {
             primitive: PrimitiveData::Cube { size: 1.0 },
             color: [0.62, 0.78, 1.0, 1.0],
+            surface: automata_scene::Surface::default(),
         });
         // Something to play with: a player and a stack of crates.
         let player = doc.create(CreateKind::Player);
@@ -745,6 +761,7 @@ impl Document {
                 PrimitiveData::Quad { size: 1.0 }
             },
             color: [1.0, 1.0, 1.0, 1.0],
+            surface: automata_scene::Surface::default(),
         });
         self.touch();
         true
@@ -852,6 +869,7 @@ impl Document {
                     path: rel.replace('\\', "/"),
                 },
                 color: [1.0; 4],
+                surface: automata_scene::Surface::default(),
             }),
             ..Default::default()
         };
@@ -879,6 +897,7 @@ impl Document {
             d.mesh_visual = Some(MeshVisualData {
                 primitive: PrimitiveData::Model { path: rel.clone() },
                 color,
+                surface: automata_scene::Surface::default(),
             });
         })
     }
@@ -1010,6 +1029,16 @@ impl Document {
                 }
                 ComponentKind::Mesh.add_to(&mut data);
             }
+            CreateKind::Sphere => {
+                if let Some(t) = &mut data.transform {
+                    t.position = [0.0, 0.5, 0.0];
+                }
+                data.mesh_visual = Some(MeshVisualData {
+                    primitive: PrimitiveData::Sphere { size: 1.0 },
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    surface: automata_scene::Surface::default(),
+                });
+            }
             CreateKind::Plane => {
                 if let Some(t) = &mut data.transform {
                     // A quad faces +Z; tip it over to face +Y.
@@ -1019,6 +1048,7 @@ impl Document {
                 data.mesh_visual = Some(MeshVisualData {
                     primitive: PrimitiveData::Quad { size: 10.0 },
                     color: [0.55, 0.58, 0.64, 1.0],
+                    surface: automata_scene::Surface::default(),
                 });
             }
             CreateKind::Light => {
@@ -1055,6 +1085,7 @@ impl Document {
                 data.mesh_visual = Some(MeshVisualData {
                     primitive: PrimitiveData::Cube { size: 1.0 },
                     color: [1.0, 0.56, 0.24, 1.0],
+                    surface: automata_scene::Surface::default(),
                 });
                 ComponentKind::Character.add_to(&mut data);
             }

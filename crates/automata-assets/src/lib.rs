@@ -139,7 +139,50 @@ pub struct ModelPart {
     /// How the part follows the model's [`Rig`]: bind-space vertices plus
     /// joints and weights. `mesh` then holds the rest pose.
     pub skin: Option<PartSkin>,
+    /// Roughness, metalness, glow and the extra PBR maps.
+    pub surface: PartSurface,
 }
+
+/// A part's surface beyond its base color: glTF's metallic-roughness
+/// parameters and maps. The default is the engine's plain look (slightly
+/// rough, non-metal, no glow, no maps), which formats without PBR data
+/// (OBJ) get.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartSurface {
+    /// 0 (mirror) to 1 (chalk).
+    pub roughness: f32,
+    /// 0 for dielectrics, 1 for bare metal.
+    pub metallic: f32,
+    /// Emitted light, linear RGB (already scaled by any emissive strength).
+    pub emissive: [f32; 3],
+    /// Normal map strength.
+    pub normal_scale: f32,
+    /// Tangent-space normal map (data, not color).
+    pub normal_map: Option<Arc<Image>>,
+    /// G = roughness, B = metallic (data, not color).
+    pub metallic_roughness_map: Option<Arc<Image>>,
+    /// Emissive color map (sRGB).
+    pub emissive_map: Option<Arc<Image>>,
+}
+
+impl Default for PartSurface {
+    fn default() -> Self {
+        Self {
+            roughness: automata_renderer::DEFAULT_ROUGHNESS,
+            metallic: 0.0,
+            emissive: [0.0; 3],
+            normal_scale: 1.0,
+            normal_map: None,
+            metallic_roughness_map: None,
+            emissive_map: None,
+        }
+    }
+}
+
+// The roles an image can be uploaded for as a PBR map.
+const MAP_NORMAL: u8 = 0;
+const MAP_METAL_ROUGH: u8 = 1;
+const MAP_EMISSIVE: u8 = 2;
 
 /// A part's GPU resources (see [`Model::gpu`]).
 #[derive(Debug, Clone)]
@@ -148,6 +191,8 @@ pub struct GpuPart {
     pub mesh: Mesh,
     /// The uploaded color texture, if the part has one.
     pub texture: Option<Texture>,
+    /// The uploaded normal, metallic-roughness and emissive maps.
+    pub maps: automata_renderer::MaterialTextures,
     /// The bind-space geometry with joints and weights, for parts that
     /// follow the model's rig (drawn with a joint palette).
     pub skinned: Option<Mesh>,
@@ -272,6 +317,9 @@ impl Model {
     pub fn gpu(&self, renderer: &Renderer) -> &[GpuPart] {
         self.gpu.get_or_init(|| {
             let mut uploaded: Vec<((*const Image, bool), Texture)> = Vec::new();
+            // Images used as PBR maps, by image and role (the same image as
+            // color and as data needs two uploads: sRGB vs linear).
+            let mut maps: Vec<((*const Image, u8), Texture)> = Vec::new();
             self.parts
                 .iter()
                 .map(|part| {
@@ -293,9 +341,36 @@ impl Model {
                         let bind = MeshData::new(skin.bind.clone(), part.mesh.indices.clone());
                         renderer.create_skinned_mesh(&bind, &skin.skin)
                     });
+                    let surface = &part.surface;
+                    let mut upload_map = |img: &Option<Arc<Image>>, kind: u8| {
+                        let img = img.as_ref()?;
+                        let key = (Arc::as_ptr(img), kind);
+                        if let Some((_, t)) = maps.iter().find(|(k, _)| *k == key) {
+                            return Some(t.clone());
+                        }
+                        let t = if kind == MAP_EMISSIVE {
+                            renderer.create_texture_rgba_mipmapped(
+                                img.width, img.height, &img.rgba, false,
+                            )
+                        } else {
+                            renderer.create_data_texture(img.width, img.height, &img.rgba)
+                        };
+                        maps.push((key, t.clone()));
+                        Some(t)
+                    };
+                    let maps = automata_renderer::MaterialTextures {
+                        base: None,
+                        normal: upload_map(&surface.normal_map, MAP_NORMAL),
+                        metallic_roughness: upload_map(
+                            &surface.metallic_roughness_map,
+                            MAP_METAL_ROUGH,
+                        ),
+                        emissive: upload_map(&surface.emissive_map, MAP_EMISSIVE),
+                    };
                     GpuPart {
                         mesh: renderer.create_mesh(&part.mesh),
                         texture,
+                        maps,
                         skinned,
                     }
                 })

@@ -24,6 +24,14 @@ pub enum Field {
     MeshSize,
     /// Mesh color channel 0..4 (RGBA, 0..1).
     MeshColor(u8),
+    /// Mesh surface roughness (0 mirror .. 1 chalk).
+    MeshRoughness,
+    /// Mesh metalness (0 dielectric .. 1 metal).
+    MeshMetallic,
+    /// Mesh emitted color channel 0..3.
+    MeshEmissive(u8),
+    /// Multiplier on the emitted color.
+    MeshEmissiveStrength,
     /// Light direction, axis 0..3.
     LightDirection(u8),
     /// Light color channel 0..3 (RGB, 0..1).
@@ -149,8 +157,10 @@ pub enum Flag {
 /// An enumerated property of an entity (cycled by a dropdown-style button).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Choice {
-    /// Cube ↔ Quad primitive.
+    /// Cube → Sphere → Quad primitive.
     MeshPrimitive,
+    /// A ready-made surface: Default, Matte, Glossy, Metal, ...
+    MeshSurface,
     /// Dynamic → Static → Kinematic (velocity) → Kinematic (position).
     BodyType,
     /// Box → Sphere → Capsule collider shape.
@@ -172,10 +182,21 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::Rotation(i) => data.transform?.rotation_euler[axis(i)].to_degrees(),
         F::Scale(i) => data.transform?.scale[axis(i)],
         F::MeshSize => match data.mesh_visual.as_ref()?.primitive {
-            PrimitiveData::Cube { size } | PrimitiveData::Quad { size } => size,
+            PrimitiveData::Cube { size }
+            | PrimitiveData::Quad { size }
+            | PrimitiveData::Sphere { size } => size,
             PrimitiveData::Custom { .. } | PrimitiveData::Model { .. } => return None,
         },
         F::MeshColor(i) => data.mesh_visual.as_ref()?.color[usize::from(i.min(3))],
+        F::MeshRoughness => {
+            let surface = data.mesh_visual.as_ref()?.surface;
+            surface
+                .roughness
+                .unwrap_or(automata_renderer::DEFAULT_ROUGHNESS)
+        }
+        F::MeshMetallic => data.mesh_visual.as_ref()?.surface.metallic.unwrap_or(0.0),
+        F::MeshEmissive(i) => data.mesh_visual.as_ref()?.surface.emissive[axis(i)],
+        F::MeshEmissiveStrength => data.mesh_visual.as_ref()?.surface.emissive_strength,
         F::LightDirection(i) => data.directional_light?.direction.to_array()[axis(i)],
         F::LightColor(i) => data.directional_light?.color[axis(i)],
         F::LightAmbient => data.directional_light?.ambient,
@@ -245,6 +266,9 @@ pub fn range(field: Field) -> (f32, f32) {
     use Field as F;
     match field {
         F::MeshColor(_)
+        | F::MeshRoughness
+        | F::MeshMetallic
+        | F::MeshEmissive(_)
         | F::LightColor(_)
         | F::LightAmbient
         | F::ColliderRestitution
@@ -267,6 +291,7 @@ pub fn range(field: Field) -> (f32, f32) {
         F::LightElevation => (-89.0, 89.0),
         F::LightTimeOfDay => (5.0, 19.0),
         F::EnvExposure => (0.0, 16.0),
+        F::MeshEmissiveStrength => (0.0, 100.0),
         F::EnvFogDensity => (0.0, 2.0),
         F::EnvFogStart => (0.0, 100_000.0),
         F::MeshSize | F::ColliderRadius | F::ColliderExtents(_) | F::ColliderHalfHeight => {
@@ -299,6 +324,9 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::WaterWaveDirection => 0.5,
         F::EnvFogDensity => 0.0005,
         F::MeshColor(_)
+        | F::MeshRoughness
+        | F::MeshMetallic
+        | F::MeshEmissive(_)
         | F::LightColor(_)
         | F::LightAmbient
         | F::ColliderRestitution
@@ -346,13 +374,29 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
             None => return false,
         },
         F::MeshSize => match data.mesh_visual.as_mut().map(|m| &mut m.primitive) {
-            Some(PrimitiveData::Cube { size } | PrimitiveData::Quad { size }) => *size = v,
+            Some(
+                PrimitiveData::Cube { size }
+                | PrimitiveData::Quad { size }
+                | PrimitiveData::Sphere { size },
+            ) => *size = v,
             _ => return false,
         },
         F::MeshColor(i) => match &mut data.mesh_visual {
             Some(m) => m.color[usize::from(i.min(3))] = v,
             None => return false,
         },
+        F::MeshRoughness | F::MeshMetallic | F::MeshEmissive(_) | F::MeshEmissiveStrength => {
+            let Some(m) = &mut data.mesh_visual else {
+                return false;
+            };
+            let surface = &mut m.surface;
+            match field {
+                F::MeshRoughness => surface.roughness = Some(v),
+                F::MeshMetallic => surface.metallic = Some(v),
+                F::MeshEmissive(i) => surface.emissive[axis(i)] = v,
+                _ => surface.emissive_strength = v,
+            }
+        }
         F::LightDirection(i) => match &mut data.directional_light {
             Some(l) => l.direction[axis(i)] = v,
             None => return false,
@@ -581,9 +625,17 @@ pub fn choice_label(data: &EntityData, choice: Choice) -> Option<&'static str> {
         Choice::MeshPrimitive => match data.mesh_visual.as_ref()?.primitive {
             PrimitiveData::Cube { .. } => "Cube",
             PrimitiveData::Quad { .. } => "Quad",
+            PrimitiveData::Sphere { .. } => "Sphere",
             PrimitiveData::Custom { .. } => "Custom",
             PrimitiveData::Model { .. } => "Model",
         },
+        Choice::MeshSurface => {
+            let m = data.mesh_visual.as_ref()?;
+            SURFACE_PRESETS
+                .iter()
+                .find(|(_, make)| make(m.color) == m.surface)
+                .map_or(CUSTOM_SURFACE, |(label, _)| label)
+        }
         Choice::BodyType => match data.rigid_body.as_ref()?.body_type {
             BodyType::Dynamic => "Dynamic",
             BodyType::Static => "Static",
@@ -599,10 +651,30 @@ pub fn choice_label(data: &EntityData, choice: Choice) -> Option<&'static str> {
 /// entity has it (custom meshes don't cycle).
 pub fn cycle(data: &mut EntityData, choice: Choice) -> bool {
     match choice {
+        Choice::MeshSurface => {
+            let Some(label) = choice_label(data, choice) else {
+                return false;
+            };
+            let next = SURFACE_PRESETS
+                .iter()
+                .position(|(l, _)| *l == label)
+                .map_or(0, |i| (i + 1) % SURFACE_PRESETS.len());
+            if let Some(m) = &mut data.mesh_visual {
+                m.surface = (SURFACE_PRESETS[next].1)(m.color);
+            }
+        }
+        // Cube → Sphere → Quad → Cube, keeping the size.
         Choice::MeshPrimitive => match data.mesh_visual.as_mut().map(|m| &mut m.primitive) {
             Some(p @ PrimitiveData::Cube { .. }) => {
                 let size = match p {
                     PrimitiveData::Cube { size } => *size,
+                    _ => 1.0,
+                };
+                *p = PrimitiveData::Sphere { size };
+            }
+            Some(p @ PrimitiveData::Sphere { .. }) => {
+                let size = match p {
+                    PrimitiveData::Sphere { size } => *size,
                     _ => 1.0,
                 };
                 *p = PrimitiveData::Quad { size };
@@ -723,6 +795,9 @@ pub fn set_color(data: &mut EntityData, target: crate::ui::ColorTarget, rgba: [f
 /// entity lacks the property).
 #[must_use]
 pub fn choice_options(data: &EntityData, choice: Choice) -> Vec<&'static str> {
+    if choice == Choice::MeshSurface {
+        return SURFACE_PRESETS.iter().map(|(label, _)| *label).collect();
+    }
     let mut probe = data.clone();
     let mut out = Vec::new();
     while let Some(label) = choice_label(&probe, choice) {
@@ -737,9 +812,60 @@ pub fn choice_options(data: &EntityData, choice: Choice) -> Vec<&'static str> {
     out
 }
 
+/// Label of a mesh surface that matches no preset.
+const CUSTOM_SURFACE: &str = "Custom";
+
+type SurfacePreset = (&'static str, fn([f32; 4]) -> automata_scene::Surface);
+
+/// The Surface menu: a label and the surface it sets for a mesh of a given
+/// color (Glowing glows in that color).
+const SURFACE_PRESETS: [SurfacePreset; 7] = [
+    ("Default", |_| automata_scene::Surface::default()),
+    ("Matte", |_| automata_scene::Surface {
+        roughness: Some(0.95),
+        metallic: Some(0.0),
+        ..automata_scene::Surface::default()
+    }),
+    ("Glossy", |_| automata_scene::Surface {
+        roughness: Some(0.15),
+        metallic: Some(0.0),
+        ..automata_scene::Surface::default()
+    }),
+    ("Metal", |_| automata_scene::Surface {
+        roughness: Some(0.3),
+        metallic: Some(1.0),
+        ..automata_scene::Surface::default()
+    }),
+    ("Brushed Metal", |_| automata_scene::Surface {
+        roughness: Some(0.6),
+        metallic: Some(1.0),
+        ..automata_scene::Surface::default()
+    }),
+    ("Rubber", |_| automata_scene::Surface {
+        roughness: Some(0.8),
+        metallic: Some(0.0),
+        ..automata_scene::Surface::default()
+    }),
+    ("Glowing", |color| automata_scene::Surface {
+        emissive: [color[0], color[1], color[2]],
+        emissive_strength: 2.0,
+        ..automata_scene::Surface::default()
+    }),
+];
+
 /// Sets an enumerated property to the option labelled `label`. Returns
 /// true if the option exists.
 pub fn set_choice(data: &mut EntityData, choice: Choice, label: &str) -> bool {
+    if choice == Choice::MeshSurface {
+        let preset = SURFACE_PRESETS.iter().find(|(l, _)| *l == label);
+        return match (preset, &mut data.mesh_visual) {
+            (Some((_, make)), Some(m)) => {
+                m.surface = make(m.color);
+                true
+            }
+            _ => false,
+        };
+    }
     for _ in 0..16 {
         match choice_label(data, choice) {
             Some(current) if current == label => return true,
@@ -852,6 +978,58 @@ mod tests {
         let mut d = entity();
         assert_eq!(get(&d, Field::LightAmbient), None);
         assert!(!set(&mut d, Field::LightAmbient, 0.5));
+    }
+
+    #[test]
+    fn spheres_cycle_with_the_primitives_and_get_ball_colliders() {
+        let mut d = entity();
+        crate::doc::ComponentKind::Mesh.add_to(&mut d);
+        assert_eq!(
+            choice_options(&d, Choice::MeshPrimitive),
+            ["Cube", "Sphere", "Quad"]
+        );
+        assert!(set(&mut d, Field::MeshSize, 2.0));
+        assert!(set_choice(&mut d, Choice::MeshPrimitive, "Sphere"));
+        assert_eq!(
+            d.mesh_visual.as_ref().unwrap().primitive,
+            PrimitiveData::Sphere { size: 2.0 }
+        );
+        if let Some(t) = &mut d.transform {
+            t.scale = [1.0, 3.0, 1.0];
+        }
+        assert_eq!(
+            crate::doc::fitted_collider(&d).shape,
+            automata_physics::Shape3D::Ball { radius: 3.0 }
+        );
+    }
+
+    #[test]
+    fn mesh_surfaces_edit_and_follow_presets() {
+        let mut d = entity();
+        crate::doc::ComponentKind::Mesh.add_to(&mut d);
+        assert_eq!(choice_label(&d, Choice::MeshSurface), Some("Default"));
+        assert!(
+            (get(&d, Field::MeshRoughness).unwrap() - automata_renderer::DEFAULT_ROUGHNESS).abs()
+                < 1e-6
+        );
+        assert!(set_choice(&mut d, Choice::MeshSurface, "Metal"));
+        assert!((get(&d, Field::MeshMetallic).unwrap() - 1.0).abs() < 1e-6);
+        assert_eq!(choice_label(&d, Choice::MeshSurface), Some("Metal"));
+        assert!(set(&mut d, Field::MeshRoughness, 0.31));
+        assert_eq!(choice_label(&d, Choice::MeshSurface), Some("Custom"));
+        assert!(!choice_options(&d, Choice::MeshSurface).contains(&"Custom"));
+        // Glowing glows in the mesh's own color.
+        assert!(set_choice(&mut d, Choice::MeshSurface, "Glowing"));
+        let m = d.mesh_visual.as_ref().unwrap();
+        assert_eq!(m.surface.emissive, [m.color[0], m.color[1], m.color[2]]);
+        assert!(set(&mut d, Field::MeshEmissiveStrength, 500.0));
+        assert!((get(&d, Field::MeshEmissiveStrength).unwrap() - 100.0).abs() < 1e-6);
+        assert!(set(&mut d, Field::MeshMetallic, 2.0));
+        assert!((get(&d, Field::MeshMetallic).unwrap() - 1.0).abs() < 1e-6);
+        assert!(
+            cycle(&mut d, Choice::MeshSurface),
+            "Custom cycles to a preset"
+        );
     }
 
     #[test]

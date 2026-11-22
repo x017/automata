@@ -2183,6 +2183,19 @@ impl Ui {
                 );
                 let color_label = if is_model { "Tint" } else { "Color" };
                 y = self.color_row(canvas, x, y, w, e, color_label, ColorTarget::Mesh);
+                y = self.choice_row(canvas, x, y, w, e, "Surface", Choice::MeshSurface);
+                y = self.float_row(canvas, x, y, w, e, "Roughness", Field::MeshRoughness);
+                y = self.float_row(canvas, x, y, w, e, "Metallic", Field::MeshMetallic);
+                y = self.color_row(canvas, x, y, w, e, "Emission", ColorTarget::MeshEmissive);
+                y = self.float_row(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    e,
+                    "Emission Strength",
+                    Field::MeshEmissiveStrength,
+                );
                 y += 6.0;
             }
         }

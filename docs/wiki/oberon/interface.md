@@ -34,8 +34,8 @@ component: cube, sun, camera, horizon (Environment), or empty.
 
 - Click to select. Double-click (or press F) to frame the entity in the
   view.
-- **+** opens the Create menu: Empty, Cube, Plane, Directional Light,
-  Camera, Environment, Physics Cube, Player.
+- **+** opens the Create menu: Empty, Cube, Sphere, Plane, Directional
+  Light, Camera, Environment, Water, Physics Cube, Player.
 - Right-click an entity for Rename, Duplicate, Copy/Paste, Delete, Frame,
   Save as Prefab, and Attach/Edit Script.
 
@@ -147,6 +147,21 @@ Shows the selected entity.
 
 Every edit is one undo step. Scrubbing a value counts as one step, not
 one per frame.
+
+### Surfaces
+
+Below **Color** the Mesh Renderer has the material rows:
+
+| Row | What it does |
+|---|---|
+| **Surface** | A preset: Default, Matte, Glossy, Metal, Brushed Metal, Rubber or Glowing (glows in the mesh's colour). Shows *Custom* once you change a value by hand. |
+| **Roughness** | 0 = mirror-like gloss, 1 = chalk. |
+| **Metallic** | 0 = plastic, wood, stone; 1 = metal (reflects the sky, tinted by Color). |
+| **Emission** | The colour the surface glows with. Black = no glow. |
+| **Emission Strength** | Multiplies Emission. Above about 1 it blooms on Ultra and Beautiful. |
+
+Metal and gloss show best on a **Sphere** under a sky. On models, Default
+keeps the file's own materials. See [Rendering & Lights](../guides/rendering-and-lights.md#surfaces).
 
 ## Graphics
 

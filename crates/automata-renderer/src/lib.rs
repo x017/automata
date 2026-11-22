@@ -33,7 +33,7 @@ pub use draw::{DrawList, Sprite};
 pub use environment::{Environment, Tonemapping};
 pub use error::{Error, Result};
 pub use light::Sun;
-pub use material::Material;
+pub use material::{Material, MaterialParams, MaterialTextures, DEFAULT_ROUGHNESS};
 pub use mesh::{Mesh, MeshData, SkinVertex, Vertex};
 pub use quality::GraphicsQuality;
 pub use renderer::Renderer;

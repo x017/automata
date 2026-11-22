@@ -31,7 +31,7 @@ pub use events::Events;
 pub use handle::{Assets, Handle};
 pub use render::{
     materialize_visuals, record_draw_list, DirectionalLight, MeshRenderer, MeshVisual,
-    MeshVisualKind, SpriteRenderer,
+    MeshVisualKind, SpriteRenderer, Surface,
 };
 pub use resources::Resources;
 pub use scene::{EntityId, Name, Scene, SceneWorld};

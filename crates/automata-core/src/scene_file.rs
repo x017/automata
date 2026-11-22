@@ -13,6 +13,8 @@
 //! significance.
 
 use automata_renderer::{Camera2D, Camera3D, Environment, MeshData, Water};
+/// A mesh's roughness / metalness / glow overrides (saved with its visual).
+pub use automata_scene::Surface;
 use automata_scene::{DirectionalLight, MeshVisual, MeshVisualKind, Name, SceneWorld, Transform};
 use glam::EulerRot;
 use serde::{Deserialize, Serialize};
@@ -202,6 +204,9 @@ pub struct MeshVisualData {
     pub primitive: PrimitiveData,
     /// Flat base color, RGBA.
     pub color: [f32; 4],
+    /// Roughness, metalness and glow (omitted from the file when unset).
+    #[serde(default, skip_serializing_if = "Surface::is_default")]
+    pub surface: Surface,
 }
 
 /// Primitive geometry descriptors compact enough to hand-edit.
@@ -215,6 +220,11 @@ pub enum PrimitiveData {
     /// A quad of `size` units a side, facing +Z.
     Quad {
         /// Side length before scaling.
+        size: f32,
+    },
+    /// A sphere `size` units across.
+    Sphere {
+        /// Diameter before scaling.
         size: f32,
     },
     /// Hand-built geometry, stored as raw vertices and indices.
@@ -235,6 +245,7 @@ impl From<&MeshVisual> for MeshVisualData {
         let primitive = match &visual.kind {
             MeshVisualKind::Cube { size } => PrimitiveData::Cube { size: *size },
             MeshVisualKind::Quad { size } => PrimitiveData::Quad { size: *size },
+            MeshVisualKind::Sphere { size } => PrimitiveData::Sphere { size: *size },
             MeshVisualKind::Custom => PrimitiveData::Custom {
                 mesh: visual.data.clone(),
             },
@@ -243,6 +254,7 @@ impl From<&MeshVisual> for MeshVisualData {
         Self {
             primitive,
             color: visual.color,
+            surface: visual.surface,
         }
     }
 }
@@ -252,9 +264,11 @@ impl From<&MeshVisualData> for MeshVisual {
         match &data.primitive {
             PrimitiveData::Cube { size } => MeshVisual::cube(*size, data.color),
             PrimitiveData::Quad { size } => MeshVisual::quad(*size, data.color),
+            PrimitiveData::Sphere { size } => MeshVisual::sphere(*size, data.color),
             PrimitiveData::Custom { mesh } => MeshVisual::custom(mesh.clone(), data.color),
             PrimitiveData::Model { path } => MeshVisual::model(path, data.color),
         }
+        .with_surface(data.surface)
     }
 }
 
@@ -506,6 +520,51 @@ mod tests {
     }
 
     #[test]
+    fn mesh_surfaces_round_trip_and_stay_out_of_plain_files() {
+        let cube = |surface| SceneFile {
+            version: SCENE_FILE_VERSION,
+            entities: vec![EntityData {
+                mesh_visual: Some(MeshVisualData {
+                    primitive: PrimitiveData::Cube { size: 1.0 },
+                    color: [1.0; 4],
+                    surface,
+                }),
+                ..Default::default()
+            }],
+        };
+        let plain = cube(Surface::default()).to_ron().unwrap();
+        assert!(!plain.contains("surface"), "{plain}");
+        let shiny = cube(Surface {
+            metallic: Some(1.0),
+            roughness: Some(0.2),
+            emissive: [1.0, 0.5, 0.0],
+            emissive_strength: 3.0,
+        });
+        let text = shiny.to_ron().unwrap();
+        assert!(
+            text.contains("metallic") && text.contains("emissive_strength"),
+            "{text}"
+        );
+        assert_eq!(SceneFile::from_ron(&text).unwrap(), shiny);
+        // Only what's set is written.
+        let rough = cube(Surface {
+            roughness: Some(0.9),
+            ..Surface::default()
+        })
+        .to_ron()
+        .unwrap();
+        assert!(
+            rough.contains("roughness") && !rough.contains("metallic"),
+            "{rough}"
+        );
+        // Into a world and back.
+        let mut world = SceneWorld::new();
+        shiny.apply_to_world(&mut world);
+        let again = SceneFile::from_world(&world);
+        assert_eq!(again.entities[0].mesh_visual, shiny.entities[0].mesh_visual);
+    }
+
+    #[test]
     fn model_meshes_and_collider_offsets_round_trip() {
         let dir = std::env::temp_dir().join(format!("scene-model-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -518,6 +577,7 @@ mod tests {
             mesh_visual: Some(MeshVisualData {
                 primitive: PrimitiveData::Model { path: path.clone() },
                 color: [0.5, 1.0, 1.0, 1.0],
+                surface: Surface::default(),
             }),
             collider_3d: Some(
                 automata_physics::Collider3D::cuboid(1.0, 1.0, 0.02).offset([0.5, 0.5, 0.0]),

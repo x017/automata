@@ -120,6 +120,7 @@ mod tests {
                 texture: None,
                 pixelated: false,
                 skin: None,
+                surface: automata_assets::PartSurface::default(),
             }],
         )
     }

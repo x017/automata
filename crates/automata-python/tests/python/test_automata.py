@@ -823,6 +823,29 @@ def test_mesh_renderer_component_builders():
     assert quad.color == (1.0, 1.0, 1.0, 1.0)  # white default
 
 
+def test_mesh_renderer_surfaces():
+    plain = at.MeshRenderer.cube()
+    assert plain.roughness is None and plain.metallic is None
+    assert plain.emissive == (0.0, 0.0, 0.0) and plain.emissive_strength == 1.0
+    gold = at.MeshRenderer.cube(color=(1.0, 0.77, 0.34, 1.0), roughness=0.3, metallic=1.0)
+    assert gold.roughness == pytest.approx(0.3) and gold.metallic == pytest.approx(1.0)
+    ball = at.MeshRenderer.sphere(0.5, metallic=1.0)
+    assert ball.kind == "sphere"
+    assert "Sphere(" in at.Scene().add(at.Entity("b").add(ball)).to_ron()
+    lamp = at.MeshRenderer.quad(emissive=(1.0, 0.8, 0.5), emissive_strength=4.0)
+    assert lamp.emissive == pytest.approx((1.0, 0.8, 0.5)) and lamp.emissive_strength == 4.0
+    with pytest.raises(ValueError):
+        at.MeshRenderer.cube(roughness=1.5)
+    with pytest.raises(ValueError):
+        at.MeshRenderer.cube(emissive_strength=-1.0)
+    # Saved with the scene (and only when set).
+    text = at.Scene().add(at.Entity("gold").add(at.Transform()).add(gold)).to_ron()
+    assert "metallic: Some(1.0)" in text and "emissive" not in text
+    assert "surface" not in at.Scene().add(at.Entity("p").add(plain)).to_ron()
+    back = at.Scene.from_ron(text)
+    assert back.to_ron() == text
+
+
 def test_mesh_renderer_stages_and_runs_headless():
     # Headless mode has no GPU: visuals are inert but must not break the
     # loop, the scene, or physics.

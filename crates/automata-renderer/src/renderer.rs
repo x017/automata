@@ -11,7 +11,7 @@ use crate::composite::Compositor;
 use crate::draw::{DrawList, MeshDraw, Sprite};
 use crate::error::Result;
 use crate::light::{FrameView, LightUniform};
-use crate::material::{Material, MaterialInner};
+use crate::material::{Material, MaterialInner, MaterialUniform};
 use crate::mesh::{Mesh, MeshData, MeshInner, SkinVertex};
 use crate::pipeline::{self, PipelineShared, SpriteVertex};
 use crate::shadow::{ShadowCascades, Sphere};
@@ -72,6 +72,12 @@ pub struct Renderer {
     shadow_pipeline: pipeline::PipelinePair,
     sprite_batch: SpriteBatch,
     white_texture: Texture,
+    /// 1×1 linear textures standing in for missing material maps: a flat
+    /// normal and white (roughness × 1, metallic × 1).
+    flat_normal_texture: Texture,
+    linear_white_texture: Texture,
+    /// The repeating, mipmapped sampler material maps share.
+    material_sampler: wgpu::Sampler,
     /// Tiling ripple normals/heights for water (baked once).
     water_ripples: Texture,
     depth_texture: Option<wgpu::Texture>,
@@ -167,6 +173,29 @@ impl Renderer {
             &[255, 255, 255, 255],
             wgpu::FilterMode::Linear,
         );
+        let linear_1x1 = |rgba: [u8; 4]| {
+            Texture::from_rgba_mipmapped_as(
+                device,
+                ctx.queue(),
+                1,
+                1,
+                &rgba,
+                false,
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+        };
+        let flat_normal_texture = linear_1x1([128, 128, 255, 255]);
+        let linear_white_texture = linear_1x1([255; 4]);
+        let material_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("material maps"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..wgpu::SamplerDescriptor::default()
+        });
         let water_ripples = Texture::from_rgba_mipmapped_as(
             device,
             ctx.queue(),
@@ -189,6 +218,9 @@ impl Renderer {
             shadow_pipeline,
             sprite_batch,
             white_texture,
+            flat_normal_texture,
+            linear_white_texture,
+            material_sampler,
             water_ripples,
             depth_texture,
             shadow_texture: shadow.texture,
@@ -418,41 +450,106 @@ impl Renderer {
     }
 
     /// Creates a material. `texture` defaults to the 1×1 white fallback when
-    /// `None`.
+    /// `None`. The surface is the default slightly rough non-metal; see
+    /// [`Renderer::create_pbr_material`] for the full set of parameters.
     #[must_use]
     pub fn create_material(&self, color: [f32; 4], texture: Option<Texture>) -> Material {
+        self.create_pbr_material(
+            &crate::MaterialParams::with_color(color),
+            crate::MaterialTextures {
+                base: texture,
+                ..crate::MaterialTextures::default()
+            },
+        )
+    }
+
+    /// Creates a physically based material: base color, roughness,
+    /// metallic, emissive, and optional base / normal / metallic-roughness /
+    /// emissive maps (see [`crate::MaterialTextures`]). Every quality preset
+    /// reads all of it; Beautiful shades it with GGX and sky reflections.
+    #[must_use]
+    pub fn create_pbr_material(
+        &self,
+        params: &crate::MaterialParams,
+        textures: crate::MaterialTextures,
+    ) -> Material {
         let device = self.ctx.device();
-        let texture = texture.unwrap_or_else(|| self.white_texture.clone());
-        let color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("material color"),
-            contents: bytemuck::cast_slice(&color),
+        let maps = [
+            (textures.normal.is_some(), crate::material::MAP_NORMAL),
+            (
+                textures.metallic_roughness.is_some(),
+                crate::material::MAP_METAL_ROUGH,
+            ),
+            (textures.emissive.is_some(), crate::material::MAP_EMISSIVE),
+        ]
+        .iter()
+        .filter(|(on, _)| *on)
+        .fold(0, |bits, (_, bit)| bits | bit);
+        let uniform = MaterialUniform::new(params, maps);
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("material"),
+            contents: bytemuck::bytes_of(&uniform),
             usage: wgpu::BufferUsages::UNIFORM,
         });
+        let base = textures.base.unwrap_or_else(|| self.white_texture.clone());
+        let normal = textures
+            .normal
+            .unwrap_or_else(|| self.flat_normal_texture.clone());
+        let metallic_roughness = textures
+            .metallic_roughness
+            .unwrap_or_else(|| self.linear_white_texture.clone());
+        let emissive = textures
+            .emissive
+            .unwrap_or_else(|| self.white_texture.clone());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("material"),
             layout: &self.shared.material_layout,
             entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture.inner.view),
-                },
+                view_entry(0, &base),
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&texture.inner.sampler),
+                    resource: wgpu::BindingResource::Sampler(&base.inner.sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: color_buffer.as_entire_binding(),
+                    resource: buffer.as_entire_binding(),
+                },
+                view_entry(3, &normal),
+                view_entry(4, &metallic_roughness),
+                view_entry(5, &emissive),
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(&self.material_sampler),
                 },
             ],
         });
         Material {
             inner: Arc::new(MaterialInner {
                 bind_group,
-                color,
-                texture,
+                params: *params,
+                texture: base,
             }),
         }
+    }
+
+    /// Creates a mipmapped, repeating texture holding *data* rather than
+    /// color (normal maps, metallic-roughness maps): stored linear, so the
+    /// GPU doesn't apply the sRGB curve to it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `rgba.len() != width * height * 4`.
+    #[must_use]
+    pub fn create_data_texture(&self, width: u32, height: u32, rgba: &[u8]) -> Texture {
+        Texture::from_rgba_mipmapped_as(
+            self.ctx.device(),
+            self.ctx.queue(),
+            width,
+            height,
+            rgba,
+            false,
+            wgpu::TextureFormat::Rgba8Unorm,
+        )
     }
 
     /// Executes a draw list and presents the frame.
@@ -1630,6 +1727,14 @@ impl ShadowResources {
 
 /// The scene bindings forward-path water uses: 1x1 stand-ins (blended
 /// water never samples the scene behind it).
+/// A bind group entry for a texture's view.
+fn view_entry(binding: u32, t: &Texture) -> wgpu::BindGroupEntry<'_> {
+    wgpu::BindGroupEntry {
+        binding,
+        resource: wgpu::BindingResource::TextureView(&t.inner.view),
+    }
+}
+
 fn placeholder_scene_bind_group(device: &wgpu::Device, shared: &PipelineShared) -> wgpu::BindGroup {
     let texture = |label, format| {
         device.create_texture(&wgpu::TextureDescriptor {
@@ -2411,6 +2516,105 @@ mod tests {
             );
             let [r, g, b, _] = center_pixel(&up, size);
             assert!(b > 120 && b > r + 30, "{quality:?}: sky {:?}", [r, g, b]);
+        }
+    }
+
+    /// The center pixel of a cube filling the view, lit along `sun`, with
+    /// the given material parameters (and optional normal map).
+    fn material_center(
+        renderer: &mut Renderer,
+        sun: glam::Vec3,
+        params: &crate::MaterialParams,
+        normal: Option<Texture>,
+    ) -> [u8; 4] {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let material = renderer.create_pbr_material(
+            params,
+            crate::MaterialTextures {
+                normal,
+                ..crate::MaterialTextures::default()
+            },
+        );
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 0.0, 1.6),
+            glam::Vec3::ZERO,
+        ));
+        draw.set_sun(crate::Sun::new(sun));
+        draw.mesh(&cube, glam::Mat4::IDENTITY, &material);
+        renderer.render_offscreen(&draw, &target);
+        center_pixel(&read_pixels(renderer, &target, size), size)
+    }
+
+    #[test]
+    fn offscreen_materials_glow_darken_and_bend_on_every_preset() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping material test");
+            return;
+        };
+        let luma = |p: [u8; 4]| u32::from(p[0]) + u32::from(p[1]) + u32::from(p[2]);
+        // Head-on light (from behind the camera) and light from the side,
+        // where the face shows no highlight.
+        let front = glam::Vec3::new(0.0, 0.0, -1.0);
+        let side = glam::Vec3::new(-0.8, 0.0, -0.6);
+        for quality in [
+            GraphicsQuality::Low,
+            GraphicsQuality::High,
+            GraphicsQuality::Beautiful,
+        ] {
+            renderer.set_quality(quality);
+            let dark = crate::MaterialParams::with_color([0.02, 0.02, 0.02, 1.0]);
+            let plain = material_center(&mut renderer, front, &dark, None);
+            // Emissive red shows on a black surface.
+            let glowing = material_center(
+                &mut renderer,
+                front,
+                &crate::MaterialParams {
+                    emissive: [1.0, 0.0, 0.0],
+                    ..dark
+                },
+                None,
+            );
+            assert!(
+                glowing[0] > plain[0] + 100 && glowing[0] > glowing[2] + 100,
+                "{quality:?}: emissive {glowing:?} vs {plain:?}"
+            );
+            // Metals have no diffuse: away from the highlight a light metal
+            // only shows reflected sky, so it's darker than plastic.
+            let light = crate::MaterialParams::with_color([0.7, 0.7, 0.7, 1.0]);
+            let plastic = material_center(&mut renderer, side, &light, None);
+            let metal = material_center(
+                &mut renderer,
+                side,
+                &crate::MaterialParams {
+                    metallic: 1.0,
+                    roughness: 0.4,
+                    ..light
+                },
+                None,
+            );
+            assert!(
+                luma(metal) + 60 < luma(plastic),
+                "{quality:?}: metal {metal:?} vs plastic {plastic:?}"
+            );
+            // A normal map tilting every normal 60° away from a head-on light
+            // darkens the face.
+            let grey = crate::MaterialParams::with_color([0.3, 0.3, 0.3, 1.0]);
+            let flat = material_center(&mut renderer, front, &grey, None);
+            let (sin, cos) = 60_f32.to_radians().sin_cos();
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..=255
+            let encode = |v: f32| (v * 0.5 + 0.5).mul_add(255.0, 0.5) as u8;
+            let tilted = [encode(sin), 128, encode(cos), 255];
+            let texels: Vec<u8> = std::iter::repeat_n(tilted, 16).flatten().collect();
+            let map = renderer.create_data_texture(4, 4, &texels);
+            let bent = material_center(&mut renderer, front, &grey, Some(map));
+            assert!(
+                luma(bent) + 30 < luma(flat),
+                "{quality:?}: normal-mapped {bent:?} vs flat {flat:?}"
+            );
         }
     }
 

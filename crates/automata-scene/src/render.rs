@@ -237,6 +237,101 @@ pub struct MeshVisual {
     /// asset cache). `None` when the file failed to load.
     #[serde(skip)]
     pub model: Option<Arc<Model>>,
+    /// Roughness, metalness and glow. Unset values keep the default
+    /// surface (primitives) or the file's own materials (models).
+    #[serde(default, skip_serializing_if = "Surface::is_default")]
+    pub surface: Surface,
+}
+
+/// How a [`MeshVisual`]'s surface responds to light, on top of its color.
+/// Every field is optional: unset, a primitive gets the plain default
+/// (roughness 0.6, non-metal, no glow) and a model keeps what its file
+/// says, per part.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Surface {
+    /// 0 = mirror-smooth, 1 = chalky. Replaces every part's roughness.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roughness: Option<f32>,
+    /// 0 = plastic, wood, stone; 1 = bare metal. Replaces every part's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metallic: Option<f32>,
+    /// Light the surface gives off, RGB 0..1 (times `emissive_strength`).
+    /// Added to a model's own glow.
+    #[serde(skip_serializing_if = "is_black")]
+    pub emissive: [f32; 3],
+    /// Multiplier on `emissive`; above 1 it glows (and blooms on
+    /// Beautiful).
+    #[serde(skip_serializing_if = "is_one")]
+    pub emissive_strength: f32,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref, clippy::float_cmp)] // serde's signature
+fn is_black(c: &[f32; 3]) -> bool {
+    *c == [0.0; 3]
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref, clippy::float_cmp)] // serde's signature
+fn is_one(v: &f32) -> bool {
+    *v == 1.0
+}
+
+impl Surface {
+    /// Nothing overridden.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The emitted light: `emissive × emissive_strength`.
+    #[must_use]
+    pub fn glow(&self) -> [f32; 3] {
+        self.emissive.map(|c| c * self.emissive_strength)
+    }
+
+    /// The renderer parameters for a primitive of this `color`.
+    #[must_use]
+    pub fn params(&self, color: [f32; 4]) -> automata_renderer::MaterialParams {
+        automata_renderer::MaterialParams {
+            color,
+            roughness: self
+                .roughness
+                .unwrap_or(automata_renderer::DEFAULT_ROUGHNESS),
+            metallic: self.metallic.unwrap_or(0.0),
+            emissive: self.glow(),
+            normal_scale: 1.0,
+        }
+    }
+
+    /// The renderer parameters for a model part: the part's own surface
+    /// with these overrides applied, its color tinted by `tint`.
+    #[must_use]
+    pub fn part_params(
+        &self,
+        part: &automata_assets::ModelPart,
+        tint: [f32; 4],
+    ) -> automata_renderer::MaterialParams {
+        let own = &part.surface;
+        let glow = self.glow();
+        automata_renderer::MaterialParams {
+            color: std::array::from_fn(|i| part.color[i] * tint[i]),
+            roughness: self.roughness.unwrap_or(own.roughness),
+            metallic: self.metallic.unwrap_or(own.metallic),
+            emissive: std::array::from_fn(|i| own.emissive[i] + glow[i]),
+            normal_scale: own.normal_scale,
+        }
+    }
+}
+
+impl Default for Surface {
+    fn default() -> Self {
+        Self {
+            roughness: None,
+            metallic: None,
+            emissive: [0.0; 3],
+            emissive_strength: 1.0,
+        }
+    }
 }
 
 /// The geometry source a [`MeshVisual`] was built from.
@@ -250,6 +345,11 @@ pub enum MeshVisualKind {
     /// `MeshData::quad(size)`.
     Quad {
         /// Side length before scaling.
+        size: f32,
+    },
+    /// `MeshData::sphere(size)`.
+    Sphere {
+        /// Diameter before scaling.
         size: f32,
     },
     /// Hand-built geometry, stored verbatim.
@@ -271,6 +371,7 @@ impl MeshVisual {
             data: MeshData::cube(size),
             color,
             model: None,
+            surface: Surface::default(),
         }
     }
 
@@ -283,6 +384,19 @@ impl MeshVisual {
             data: MeshData::quad(size),
             color,
             model: None,
+            surface: Surface::default(),
+        }
+    }
+
+    /// A sphere centered on the entity, `size` units across before scaling.
+    #[must_use]
+    pub fn sphere(size: f32, color: [f32; 4]) -> Self {
+        Self {
+            kind: MeshVisualKind::Sphere { size },
+            data: MeshData::sphere(size),
+            color,
+            model: None,
+            surface: Surface::default(),
         }
     }
 
@@ -294,7 +408,15 @@ impl MeshVisual {
             data,
             color,
             model: None,
+            surface: Surface::default(),
         }
+    }
+
+    /// This visual with a different [`Surface`].
+    #[must_use]
+    pub fn with_surface(mut self, surface: Surface) -> Self {
+        self.surface = surface;
+        self
     }
 
     /// A model file, tinted by `tint` (white keeps the file's colors).
@@ -329,6 +451,7 @@ impl MeshVisual {
             data: MeshData::new(Vec::new(), Vec::new()),
             color: tint,
             model,
+            surface: Surface::default(),
         }
     }
 }
@@ -378,7 +501,7 @@ pub fn materialize_visuals(
                 .iter()
                 .zip(&model.parts)
                 .map(|(gpu, part)| {
-                    let color = std::array::from_fn(|i| part.color[i] * tint[i]);
+                    let params = visual.surface.part_params(part, tint);
                     // Rigged parts draw skinned, posed by the joints below.
                     let mesh = if model.rig.is_some() {
                         gpu.skinned.as_ref().unwrap_or(&gpu.mesh)
@@ -387,7 +510,13 @@ pub fn materialize_visuals(
                     };
                     (
                         mesh.clone(),
-                        renderer.create_material(color, gpu.texture.clone()),
+                        renderer.create_pbr_material(
+                            &params,
+                            automata_renderer::MaterialTextures {
+                                base: gpu.texture.clone(),
+                                ..gpu.maps.clone()
+                            },
+                        ),
                     )
                 });
             let Some((mesh, material)) = parts.next() else {
@@ -400,7 +529,10 @@ pub fn materialize_visuals(
             component
         } else {
             let mesh = renderer.create_mesh(&visual.data);
-            let material = renderer.create_material(visual.color, None);
+            let material = renderer.create_pbr_material(
+                &visual.surface.params(visual.color),
+                automata_renderer::MaterialTextures::default(),
+            );
             MeshRenderer::new(mesh, material)
         };
         if world.insert_one(entity, component).is_ok() {

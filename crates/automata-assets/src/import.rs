@@ -192,6 +192,7 @@ mod tests {
             texture: None,
             pixelated: false,
             skin: None,
+            surface: crate::PartSurface::default(),
         }
     }
 

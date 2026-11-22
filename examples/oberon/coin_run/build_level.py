@@ -118,7 +118,10 @@ def build(mood="afternoon"):
         coin = (
             at.Entity(f"Coin {i}")
             .add(at.Transform(position=pos, scale=(0.5, 0.5, 0.12)))
-            .add(at.MeshRenderer.cube(size=1.0, color=GOLD))
+            # Polished gold with a faint glow, so coins catch the eye even
+            # in shadow and at night.
+            .add(at.MeshRenderer.cube(size=1.0, color=GOLD, metallic=1.0, roughness=0.3,
+                                      emissive=(1.0, 0.62, 0.12), emissive_strength=0.35))
         )
         coin.script = "scripts/coin.py"
         coin.attributes["value"] = 5 if pos[1] > 2 else 1

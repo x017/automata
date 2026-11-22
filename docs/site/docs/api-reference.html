@@ -85,10 +85,17 @@ at.Camera2D(center=(<span class="tok-n">0.0</span>, <span class="tok-n">0.0</spa
 replace per frame via <code>EntityView.camera_3d</code>.</p>
 <h3 id="visuals">Visuals<a class="anchor" href="#visuals" aria-label="Link to this section">#</a></h3>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.MeshRenderer.cube(size=<span class="tok-n">1.0</span>, color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>))
+at.MeshRenderer.sphere(size=<span class="tok-n">1.0</span>, color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>))  <span class="tok-c"># size = diameter</span>
 at.MeshRenderer.quad(size=<span class="tok-n">1.0</span>, color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>))
 at.MeshRenderer.model(path, color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>))   <span class="tok-c"># .glb / .gltf / .obj</span>
-m.kind                      <span class="tok-c"># &quot;cube&quot;, &quot;quad&quot; or &quot;model&quot;</span>
+<span class="tok-c"># every constructor also takes the keyword-only surface arguments:</span>
+<span class="tok-c">#   roughness=None, metallic=None, emissive=(0, 0, 0), emissive_strength=1.0</span>
+m.kind                      <span class="tok-c"># &quot;cube&quot;, &quot;sphere&quot;, &quot;quad&quot; or &quot;model&quot;</span>
 m.color                     <span class="tok-c"># (r, g, b, a); tints a model</span>
+m.roughness                 <span class="tok-c"># 0 = mirror .. 1 = chalk, or None (default)</span>
+m.metallic                  <span class="tok-c"># 0 = plastic/wood/stone, 1 = metal, or None</span>
+m.emissive                  <span class="tok-c"># (r, g, b) glow colour, (0, 0, 0) = none</span>
+m.emissive_strength         <span class="tok-c"># glow multiplier</span>
 m.path                      <span class="tok-c"># the model file, or None</span>
 m.bounds                    <span class="tok-c"># ((min x, y, z), (max x, y, z)) or None</span>
 
@@ -96,6 +103,12 @@ at.set_asset_root(path)     <span class="tok-c"># where relative model paths res
 at.asset_root()             <span class="tok-c"># the current root, or None</span></code></pre></div>
 <p>Plain data; materialized on the GPU by the windowed driver, inert headless.
 <code>Transform.scale</code> sizes the primitive.</p>
+<p>Surface arguments: <code>None</code> roughness / metallic means "default", which is
+0.6 / 0 for primitives and the file's own material values for models.
+Setting them overrides every part of a model. Roughness and metallic must be
+in <code>0..=1</code>, and emissive values must not be negative, or <code>ValueError</code> is
+raised. The glow added is <code>emissive × emissive_strength</code>; above 1 it blooms
+on Ultra and Beautiful. Guide: <a href="guides/rendering-and-lights.html#surfaces">Rendering &amp; Lights</a>.</p>
 <p><code>model</code> loads the file right away, so a missing file raises
 <code>FileNotFoundError</code> and a broken one raises <code>ValueError</code> where you create the
 component. Relative paths resolve against the asset root.

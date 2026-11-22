@@ -37,14 +37,34 @@
 environment (ambient, fog, tone mapping), and quality presets.</p>
 <h2 id="drawing-primitives">Drawing primitives<a class="anchor" href="#drawing-primitives" aria-label="Link to this section">#</a></h2>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>entity.add(at.MeshRenderer.cube(size=<span class="tok-n">1.0</span>, color=(r, g, b, a)))
+entity.add(at.MeshRenderer.sphere(size=<span class="tok-n">1.0</span>, color=(r, g, b, a)))
 entity.add(at.MeshRenderer.quad(size=<span class="tok-n">1.0</span>, color=(r, g, b, a)))</code></pre></div>
-<ul><li><code>size</code> sets the primitive's base size; the entity's <code>Transform.scale</code>
-multiplies it. A floor is a unit cube with <code>scale=(40, 1, 40)</code>.</li><li><code>quad</code> lies in the XY plane facing +Z — billboards, cards, flat details.</li><li>Colors are linear-space floats in <code>0.0..=1.0</code>.</li><li>Primitives are <strong>plain data</strong>: safe to stage before a window exists and
+<ul><li><code>size</code> sets the primitive's base size (a sphere's diameter); the entity's
+<code>Transform.scale</code> multiplies it. A floor is a unit cube with
+<code>scale=(40, 1, 40)</code>.</li><li><code>quad</code> lies in the XY plane facing +Z — billboards, cards, flat details.</li><li>Colors are linear-space floats in <code>0.0..=1.0</code>.</li><li>Primitives are <strong>plain data</strong>: safe to stage before a window exists and
 inert in headless mode. The windowed driver uploads them to the GPU on
 the first frame automatically.</li></ul>
-<aside class="note"><p>There is no texture or custom-mesh API in Python yet — the look is flat
-colors + lighting. That's a deliberate indie aesthetic and a roadmap
-item, not an oversight you can configure away.</p></aside>
+<aside class="note"><p>Python has no texture or custom-mesh API yet. For textured, detailed
+objects, load a model (<code>MeshRenderer.model</code>), see <a href="../oberon/models.html">Models</a>.</p></aside>
+<h2 id="surfaces">Surfaces<a class="anchor" href="#surfaces" aria-label="Link to this section">#</a></h2>
+<p>Colour says <em>what</em> a thing is; the surface says what it's <em>made of</em>. Every
+<code>MeshRenderer</code> constructor takes four keyword-only surface arguments:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>gold = at.MeshRenderer.sphere(color=(<span class="tok-n">1.0</span>, <span class="tok-n">0.77</span>, <span class="tok-n">0.34</span>, <span class="tok-n">1</span>), metallic=<span class="tok-n">1.0</span>, roughness=<span class="tok-n">0.3</span>)
+tile = at.MeshRenderer.cube(color=(<span class="tok-n">0.9</span>, <span class="tok-n">0.9</span>, <span class="tok-n">0.9</span>, <span class="tok-n">1</span>), roughness=<span class="tok-n">0.15</span>)  <span class="tok-c"># glossy</span>
+felt = at.MeshRenderer.cube(color=(<span class="tok-n">0.2</span>, <span class="tok-n">0.5</span>, <span class="tok-n">0.3</span>, <span class="tok-n">1</span>), roughness=<span class="tok-n">0.95</span>)  <span class="tok-c"># matte</span>
+lamp = at.MeshRenderer.quad(emissive=(<span class="tok-n">1.0</span>, <span class="tok-n">0.8</span>, <span class="tok-n">0.5</span>), emissive_strength=<span class="tok-n">4.0</span>)</code></pre></div>
+<div class="table"><table><thead><tr><th>Argument</th><th>Range</th><th>Effect</th></tr></thead><tbody><tr><td><code>roughness</code></td><td>0..1</td><td>0 is a mirror-like gloss with a tight, bright highlight; 1 is chalky with no visible highlight. Default 0.6</td></tr><tr><td><code>metallic</code></td><td>0 or 1 (in between for dusty / painted metal)</td><td>Metals have no diffuse colour: they reflect the sky and sun tinted by <code>color</code>. Default 0</td></tr><tr><td><code>emissive</code></td><td>(r, g, b), ≥ 0</td><td>Light the surface gives off itself, unaffected by sun, shadow or fog darkness</td></tr><tr><td><code>emissive_strength</code></td><td>≥ 0</td><td>Multiplies <code>emissive</code>. Above about 1 it blooms on Ultra and Beautiful</td></tr></tbody></table></div>
+<p>Tips:</p>
+<ul><li>Metals look best with a bright, saturated base colour: gold
+<code>(1.0, 0.77, 0.34)</code>, copper <code>(0.95, 0.64, 0.54)</code>, silver <code>(0.95, 0.95, 0.95)</code>.
+They need a sky to reflect, so pair them with an Environment.</li><li>Shiny surfaces show their shape best on round things. A glossy cube
+only lights up when a face catches the sun.</li><li>Glow does not light up its surroundings (there are no point lights yet).
+Fake it with a warm ambient or a coloured sun nearby.</li><li>Models keep their own materials: glTF base colour, roughness, metallic,
+normal maps, emission (<code>KHR_materials_emissive_strength</code> too) and texture
+maps are all imported. Passing <code>roughness</code> / <code>metallic</code> / <code>emissive</code>
+overrides every part of the model.</li></ul>
+<p>Every quality level shades surfaces; Beautiful uses the full physically
+based model, Low to Ultra a cheaper approximation that looks close.</p>
 <h2 id="cameras">Cameras<a class="anchor" href="#cameras" aria-label="Link to this section">#</a></h2>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Camera3D(position=(<span class="tok-n">0</span>, <span class="tok-n">3.5</span>, <span class="tok-n">9</span>), target=(<span class="tok-n">0</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>), fov=<span class="tok-n">60.0</span>)
 at.Camera2D(center=(<span class="tok-n">0</span>, <span class="tok-n">0</span>), half_height=<span class="tok-n">100.0</span>)</code></pre></div>
@@ -171,12 +191,12 @@ so give the water a floor if sinking things should stop.</p>
 top to get fog and tone mapping too.</p>
 <div class="table"><table><thead><tr><th>Look</th><th>clear_color</th><th>sun color</th><th>ambient</th></tr></thead><tbody><tr><td>Noon</td><td><code>(0.55, 0.78, 0.95, 1)</code></td><td><code>(1.0, 1.0, 1.0)</code></td><td>0.35</td></tr><tr><td>Golden hour</td><td><code>(0.98, 0.75, 0.55, 1)</code></td><td><code>(1.0, 0.8, 0.6)</code></td><td>0.25</td></tr><tr><td>Night</td><td><code>(0.05, 0.07, 0.15, 1)</code></td><td><code>(0.6, 0.7, 1.0)</code></td><td>0.15</td></tr><tr><td>Noir</td><td><code>(0.02, 0.02, 0.03, 1)</code></td><td><code>(1.0, 1.0, 1.0)</code></td><td>0.05</td></tr></tbody></table></div>
 <h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
-<ul><li><a href="game-loop.html">The Game Loop</a> — when frames render</li><li><a href="scenes-and-entities.html">Scenes &amp; Entities</a> — transforms and the scale trick</li><li><a href="cameras.html">Cameras</a> — follow, orbit, rails, shake, zoom</li><li><a href="../cookbook.html#cameras">Cookbook</a> — orbit cams, screen shake</li><li><a href="../oberon/graphics.html">Oberon: Graphics</a> — tune all of this visually</li></ul>
+<ul><li><a href="game-loop.html">The Game Loop</a> — when frames render</li><li><a href="scenes-and-entities.html">Scenes &amp; Entities</a> — transforms and the scale trick</li><li><a href="../oberon/models.html">Models</a> — imported materials and textures</li><li><a href="cameras.html">Cameras</a> — follow, orbit, rails, shake, zoom</li><li><a href="../cookbook.html#cameras">Cookbook</a> — orbit cams, screen shake</li><li><a href="../oberon/graphics.html">Oberon: Graphics</a> — tune all of this visually</li></ul>
     </article>
     <footer class="pager"><a class="prev" href="scenes-and-entities.html"><small>Previous</small>Scenes &amp; entities</a><a class="next" href="cameras.html"><small>Next</small>Cameras</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/rendering-and-lights.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#drawing-primitives">Drawing primitives</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#the-sun">The sun</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#sky-and-quality">Sky and quality</a></li><li class="l3"><a href="#beautiful">Beautiful</a></li><li class="l2"><a href="#water">Water</a></li><li class="l2"><a href="#mood-recipes">Mood recipes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#drawing-primitives">Drawing primitives</a></li><li class="l2"><a href="#surfaces">Surfaces</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#the-sun">The sun</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#sky-and-quality">Sky and quality</a></li><li class="l3"><a href="#beautiful">Beautiful</a></li><li class="l2"><a href="#water">Water</a></li><li class="l2"><a href="#mood-recipes">Mood recipes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

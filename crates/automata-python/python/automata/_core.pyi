@@ -96,24 +96,69 @@ class MeshRenderer:
     color: tuple[float, float, float, float]
     path: str | None
     bounds: tuple[tuple[float, float, float], tuple[float, float, float]] | None
+    roughness: float | None
+    """0 = mirror-smooth .. 1 = chalky; None = the default (0.6) or the model's own."""
+    metallic: float | None
+    """0 = plastic, wood, stone .. 1 = bare metal; None = default (0) / the model's own."""
+    emissive: tuple[float, float, float]
+    """RGB light the surface gives off (times emissive_strength)."""
+    emissive_strength: float
     @classmethod
     def model(
-        cls, path: str, color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
+        cls,
+        path: str,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        *,
+        roughness: float | None = None,
+        metallic: float | None = None,
+        emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        emissive_strength: float = 1.0,
     ) -> MeshRenderer:
         """A glTF 2.0 (.glb / .gltf) or .obj model, tinted by `color`.
 
         Relative paths resolve against the asset root (the scene's folder,
-        else the running script's folder). Raises FileNotFoundError or
-        ValueError.
+        else the running script's folder). Unset `roughness` / `metallic`
+        keep the file's materials; `emissive` adds to its glow. Raises
+        FileNotFoundError or ValueError.
         """
         ...
     @classmethod
     def cube(
-        cls, size: float = 1.0, color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
-    ) -> MeshRenderer: ...
+        cls,
+        size: float = 1.0,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        *,
+        roughness: float | None = None,
+        metallic: float | None = None,
+        emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        emissive_strength: float = 1.0,
+    ) -> MeshRenderer:
+        """A cube `size` units a side. `roughness`/`metallic` 0..1; `emissive`
+        with `emissive_strength` above 1 glows (and blooms on BEAUTIFUL)."""
+        ...
+    @classmethod
+    def sphere(
+        cls,
+        size: float = 1.0,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        *,
+        roughness: float | None = None,
+        metallic: float | None = None,
+        emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        emissive_strength: float = 1.0,
+    ) -> MeshRenderer:
+        """A smooth sphere `size` units across."""
+        ...
     @classmethod
     def quad(
-        cls, size: float = 1.0, color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
+        cls,
+        size: float = 1.0,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        *,
+        roughness: float | None = None,
+        metallic: float | None = None,
+        emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        emissive_strength: float = 1.0,
     ) -> MeshRenderer: ...
 
 class DirectionalLight:

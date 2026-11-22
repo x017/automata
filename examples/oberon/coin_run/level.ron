@@ -150,6 +150,12 @@
                     size: 1.0,
                 ),
                 color: (1.0, 0.78, 0.2, 1.0),
+                surface: (
+                    roughness: Some(0.3),
+                    metallic: Some(1.0),
+                    emissive: (1.0, 0.62, 0.12),
+                    emissive_strength: 0.35,
+                ),
             )),
             attributes: {
                 "value": Int(1),
@@ -170,6 +176,12 @@
                     size: 1.0,
                 ),
                 color: (1.0, 0.78, 0.2, 1.0),
+                surface: (
+                    roughness: Some(0.3),
+                    metallic: Some(1.0),
+                    emissive: (1.0, 0.62, 0.12),
+                    emissive_strength: 0.35,
+                ),
             )),
             attributes: {
                 "value": Int(1),
@@ -190,6 +202,12 @@
                     size: 1.0,
                 ),
                 color: (1.0, 0.78, 0.2, 1.0),
+                surface: (
+                    roughness: Some(0.3),
+                    metallic: Some(1.0),
+                    emissive: (1.0, 0.62, 0.12),
+                    emissive_strength: 0.35,
+                ),
             )),
             attributes: {
                 "value": Int(1),
@@ -210,6 +228,12 @@
                     size: 1.0,
                 ),
                 color: (1.0, 0.78, 0.2, 1.0),
+                surface: (
+                    roughness: Some(0.3),
+                    metallic: Some(1.0),
+                    emissive: (1.0, 0.62, 0.12),
+                    emissive_strength: 0.35,
+                ),
             )),
             attributes: {
                 "value": Int(5),
@@ -230,6 +254,12 @@
                     size: 1.0,
                 ),
                 color: (1.0, 0.78, 0.2, 1.0),
+                surface: (
+                    roughness: Some(0.3),
+                    metallic: Some(1.0),
+                    emissive: (1.0, 0.62, 0.12),
+                    emissive_strength: 0.35,
+                ),
             )),
             attributes: {
                 "value": Int(1),
@@ -250,6 +280,12 @@
                     size: 1.0,
                 ),
                 color: (1.0, 0.78, 0.2, 1.0),
+                surface: (
+                    roughness: Some(0.3),
+                    metallic: Some(1.0),
+                    emissive: (1.0, 0.62, 0.12),
+                    emissive_strength: 0.35,
+                ),
             )),
             attributes: {
                 "value": Int(1),

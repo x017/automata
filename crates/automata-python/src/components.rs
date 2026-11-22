@@ -714,24 +714,71 @@ pub struct PyMeshRenderer {
 #[pymethods]
 impl PyMeshRenderer {
     /// A cube centered on the entity, `size` units on a side before scaling.
+    ///
+    /// The keyword-only surface arguments are shared by every constructor:
+    /// `roughness` (0 = mirror-smooth, 1 = chalky; default 0.6),
+    /// `metallic` (0 = plastic/wood/stone, 1 = bare metal; default 0),
+    /// `emissive` (RGB light the surface gives off) and
+    /// `emissive_strength` (its multiplier; above 1 it glows and blooms).
     #[classmethod]
-    #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0)))]
-    fn cube(_cls: &Bound<'_, pyo3::types::PyType>, size: f32, color: (f32, f32, f32, f32)) -> Self {
-        Self {
-            inner: automata_scene::MeshVisual::cube(size, color.into()),
+    #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
+                        emissive=(0.0, 0.0, 0.0), emissive_strength=1.0))]
+    fn cube(
+        _cls: &Bound<'_, pyo3::types::PyType>,
+        size: f32,
+        color: (f32, f32, f32, f32),
+        roughness: Option<f32>,
+        metallic: Option<f32>,
+        emissive: (f32, f32, f32),
+        emissive_strength: f32,
+    ) -> PyResult<Self> {
+        let surface = surface_from(roughness, metallic, emissive, emissive_strength)?;
+        Ok(Self {
+            inner: automata_scene::MeshVisual::cube(size, color.into()).with_surface(surface),
             kind: "cube",
-        }
+        })
+    }
+
+    /// A smooth sphere centered on the entity, `size` units across before
+    /// scaling. Surface arguments as for `cube`.
+    #[classmethod]
+    #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
+                        emissive=(0.0, 0.0, 0.0), emissive_strength=1.0))]
+    fn sphere(
+        _cls: &Bound<'_, pyo3::types::PyType>,
+        size: f32,
+        color: (f32, f32, f32, f32),
+        roughness: Option<f32>,
+        metallic: Option<f32>,
+        emissive: (f32, f32, f32),
+        emissive_strength: f32,
+    ) -> PyResult<Self> {
+        let surface = surface_from(roughness, metallic, emissive, emissive_strength)?;
+        Ok(Self {
+            inner: automata_scene::MeshVisual::sphere(size, color.into()).with_surface(surface),
+            kind: "sphere",
+        })
     }
 
     /// A quad centered on the entity, facing +Z, `size` units on a side
-    /// before scaling.
+    /// before scaling. Surface arguments as for `cube`.
     #[classmethod]
-    #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0)))]
-    fn quad(_cls: &Bound<'_, pyo3::types::PyType>, size: f32, color: (f32, f32, f32, f32)) -> Self {
-        Self {
-            inner: automata_scene::MeshVisual::quad(size, color.into()),
+    #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
+                        emissive=(0.0, 0.0, 0.0), emissive_strength=1.0))]
+    fn quad(
+        _cls: &Bound<'_, pyo3::types::PyType>,
+        size: f32,
+        color: (f32, f32, f32, f32),
+        roughness: Option<f32>,
+        metallic: Option<f32>,
+        emissive: (f32, f32, f32),
+        emissive_strength: f32,
+    ) -> PyResult<Self> {
+        let surface = surface_from(roughness, metallic, emissive, emissive_strength)?;
+        Ok(Self {
+            inner: automata_scene::MeshVisual::quad(size, color.into()).with_surface(surface),
             kind: "quad",
-        }
+        })
     }
 
     /// A model file: glTF 2.0 (`.glb`, `.gltf`) or Wavefront `.obj`. Every
@@ -742,15 +789,25 @@ impl PyMeshRenderer {
     /// folder (set by `Scene.load`), else the folder of the script you ran,
     /// else the working directory. See `set_asset_root`.
     ///
+    /// Surface arguments as for `cube`, except that unset `roughness` and
+    /// `metallic` keep each part's values from the file, and `emissive`
+    /// adds to the file's own glow.
+    ///
     /// Raises `FileNotFoundError` when the file is missing and `ValueError`
     /// when it isn't a readable model.
     #[classmethod]
-    #[pyo3(signature = (path, color=(1.0, 1.0, 1.0, 1.0)))]
+    #[pyo3(signature = (path, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
+                        emissive=(0.0, 0.0, 0.0), emissive_strength=1.0))]
     fn model(
         cls: &Bound<'_, pyo3::types::PyType>,
         path: &str,
         color: (f32, f32, f32, f32),
+        roughness: Option<f32>,
+        metallic: Option<f32>,
+        emissive: (f32, f32, f32),
+        emissive_strength: f32,
     ) -> PyResult<Self> {
+        let surface = surface_from(roughness, metallic, emissive, emissive_strength)?;
         default_asset_root(cls.py());
         let inner =
             automata_scene::MeshVisual::try_model(path, color.into()).map_err(|e| match e {
@@ -760,12 +817,12 @@ impl PyMeshRenderer {
                 _ => pyo3::exceptions::PyValueError::new_err(e.to_string()),
             })?;
         Ok(Self {
-            inner,
+            inner: inner.with_surface(surface),
             kind: "model",
         })
     }
 
-    /// The kind: "cube", "quad", "custom" or "model".
+    /// The kind: "cube", "sphere", "quad", "custom" or "model".
     #[getter]
     fn kind(&self) -> &'static str {
         self.kind
@@ -775,6 +832,32 @@ impl PyMeshRenderer {
     #[getter]
     fn color(&self) -> (f32, f32, f32, f32) {
         self.inner.color.into()
+    }
+
+    /// The roughness override (0..1), or `None` for the default / the
+    /// model's own.
+    #[getter]
+    fn roughness(&self) -> Option<f32> {
+        self.inner.surface.roughness
+    }
+
+    /// The metalness override (0..1), or `None` for the default / the
+    /// model's own.
+    #[getter]
+    fn metallic(&self) -> Option<f32> {
+        self.inner.surface.metallic
+    }
+
+    /// The emitted RGB color (before `emissive_strength`).
+    #[getter]
+    fn emissive(&self) -> (f32, f32, f32) {
+        self.inner.surface.emissive.into()
+    }
+
+    /// The multiplier on `emissive`.
+    #[getter]
+    fn emissive_strength(&self) -> f32 {
+        self.inner.surface.emissive_strength
     }
 
     /// The model file, for `MeshRenderer.model`; otherwise `None`.
@@ -820,11 +903,42 @@ impl PyMeshRenderer {
         let kind = match inner.kind {
             automata_scene::MeshVisualKind::Cube { .. } => "cube",
             automata_scene::MeshVisualKind::Quad { .. } => "quad",
+            automata_scene::MeshVisualKind::Sphere { .. } => "sphere",
             automata_scene::MeshVisualKind::Custom => "custom",
             automata_scene::MeshVisualKind::Model { .. } => "model",
         };
         Self { inner, kind }
     }
+}
+
+/// Validates the keyword-only surface arguments of `MeshRenderer`.
+fn surface_from(
+    roughness: Option<f32>,
+    metallic: Option<f32>,
+    emissive: (f32, f32, f32),
+    emissive_strength: f32,
+) -> PyResult<automata_scene::Surface> {
+    for (name, v) in [("roughness", roughness), ("metallic", metallic)] {
+        if let Some(v) = v {
+            if !(0.0..=1.0).contains(&v) {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "{name} must be between 0 and 1, got {v}"
+                )));
+            }
+        }
+    }
+    let emissive: [f32; 3] = emissive.into();
+    if emissive.iter().any(|c| *c < 0.0) || emissive_strength < 0.0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "emissive and emissive_strength can't be negative",
+        ));
+    }
+    Ok(automata_scene::Surface {
+        roughness,
+        metallic,
+        emissive,
+        emissive_strength,
+    })
 }
 
 /// When no asset root is set, uses the folder of the script being run

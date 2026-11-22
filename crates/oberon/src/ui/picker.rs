@@ -16,6 +16,8 @@ use tiny_skia::Color;
 pub enum ColorTarget {
     /// Mesh base color (RGBA).
     Mesh,
+    /// Mesh emitted color (RGB).
+    MeshEmissive,
     /// Light color (RGB).
     Light,
     /// Environment sky ambient (RGB).
@@ -42,6 +44,7 @@ impl ColorTarget {
     pub fn channels(self) -> Vec<Field> {
         match self {
             Self::Mesh => (0..4).map(Field::MeshColor).collect(),
+            Self::MeshEmissive => (0..3).map(Field::MeshEmissive).collect(),
             Self::Light => (0..3).map(Field::LightColor).collect(),
             Self::EnvSky => (0..3).map(Field::EnvSky).collect(),
             Self::EnvGround => (0..3).map(Field::EnvGround).collect(),

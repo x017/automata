@@ -299,6 +299,7 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
             color: mtl.color,
             texture,
             skin: None,
+            surface: crate::PartSurface::default(),
         });
     }
     Ok(Loaded {

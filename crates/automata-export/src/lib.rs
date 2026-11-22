@@ -1149,6 +1149,7 @@ mod tests {
             mesh_visual: Some(MeshVisualData {
                 primitive: PrimitiveData::Model { path },
                 color: [1.0; 4],
+                surface: automata_core::scene_file::Surface::default(),
             }),
             ..Default::default()
         };

@@ -162,6 +162,17 @@ impl PipelineShared {
                     count: None,
                 },
                 uniform_entry(2, wgpu::ShaderStages::FRAGMENT),
+                // Normal, metallic-roughness and emissive maps, sharing one
+                // repeating sampler.
+                texture_entry(3),
+                texture_entry(4),
+                texture_entry(5),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let model_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -291,6 +302,20 @@ impl PipelineShared {
 }
 
 /// A single-buffer uniform bind group layout entry.
+/// A filterable 2D texture read by the fragment stage.
+fn texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
 fn uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,

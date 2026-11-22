@@ -5,7 +5,9 @@
 //! (float or normalized integer, interleaved or not, sparse accessors),
 //! `u8` / `u16` / `u32` indices, buffers in the GLB chunk, beside the file
 //! or as `data:` URIs, and metallic-roughness (or the older
-//! specular-glossiness) base color factors and textures (PNG / JPEG).
+//! specular-glossiness) base color factors and textures (PNG / JPEG),
+//! roughness / metallic factors and maps, normal maps, and emission
+//! (`KHR_materials_emissive_strength` too).
 //! Primitives sharing a material are merged into one part.
 //!
 //! Skins (`JOINTS_0` / `WEIGHTS_0`, inverse bind matrices) and animations
@@ -15,7 +17,8 @@
 //! skinning share one path.
 //!
 //! Not supported: Draco / meshopt compression (an error says so), morph
-//! targets, vertex colors, and the other PBR maps.
+//! targets, vertex colors, occlusion maps, and the other material
+//! extensions (clearcoat, transmission, ...).
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -28,6 +31,7 @@ use crate::anim::{
     Channel, Clip, Interpolation, PartSkin, Property, Rig, RigNode, Trs, MAX_JOINTS,
 };
 use crate::json::Json;
+use crate::PartSurface;
 use crate::{base64_decode, percent_decode, unweld_flat, Image, Loaded, ModelPart};
 
 const GLB_MAGIC: &[u8; 4] = b"glTF";
@@ -97,6 +101,12 @@ fn usize_of(j: Option<&Json>) -> Option<usize> {
 
 fn floats<const N: usize>(j: Option<&Json>, default: [f32; N]) -> [f32; N] {
     j.and_then(Json::as_floats::<N>).unwrap_or(default)
+}
+
+/// A single number (glTF scalars such as `roughnessFactor`).
+#[allow(clippy::cast_possible_truncation)]
+fn number(j: Option<&Json>, default: f32) -> f32 {
+    j.and_then(Json::as_f64).map_or(default, |v| v as f32)
 }
 
 fn arr<'j>(j: &'j Json, key: &str) -> &'j [Json] {
@@ -481,6 +491,7 @@ impl<'a> Doc<'a> {
                 texcoord: 0,
                 uv_transform: None,
                 pixelated: false,
+                surface: PartSurface::default(),
             };
         };
         let name = mat.get("name").and_then(Json::as_str).map_or_else(
@@ -519,6 +530,7 @@ impl<'a> Doc<'a> {
             .and_then(Json::as_i64)
             == Some(9728);
         let texture = source.and_then(|s| self.image(s));
+        let surface = self.surface(&mat, pbr, spec_gloss);
         Material {
             name,
             color,
@@ -526,6 +538,59 @@ impl<'a> Doc<'a> {
             texcoord,
             uv_transform,
             pixelated,
+            surface,
+        }
+    }
+
+    /// The image a texture reference (`{"index": n, ...}`) points at.
+    fn texture_image(&mut self, tex: Option<&Json>) -> Option<Arc<Image>> {
+        let source = usize_of(tex?.get("index"))
+            .and_then(|t| arr(&self.json, "textures").get(t))
+            .and_then(|t| usize_of(t.get("source")))?;
+        self.image(source)
+    }
+
+    /// Roughness, metalness, emission and the PBR maps of a material. The
+    /// glTF defaults apply (a material without factors is rough metal);
+    /// specular-glossiness materials map glossiness to roughness.
+    fn surface(
+        &mut self,
+        mat: &Json,
+        pbr: Option<&Json>,
+        spec_gloss: Option<&Json>,
+    ) -> PartSurface {
+        let (roughness, metallic, metallic_roughness_map) = match (pbr, spec_gloss) {
+            (_, Some(sg)) => (1.0 - number(sg.get("glossinessFactor"), 1.0), 0.0, None),
+            (Some(pbr), None) => (
+                number(pbr.get("roughnessFactor"), 1.0),
+                number(pbr.get("metallicFactor"), 1.0),
+                self.texture_image(pbr.get("metallicRoughnessTexture")),
+            ),
+            (None, None) => (1.0, 1.0, None),
+        };
+        let normal = mat.get("normalTexture");
+        let normal_scale = number(normal.and_then(|n| n.get("scale")), 1.0);
+        let normal_map = self.texture_image(normal);
+        let strength = number(
+            mat.get("extensions")
+                .and_then(|e| e.get("KHR_materials_emissive_strength"))
+                .and_then(|e| e.get("emissiveStrength")),
+            1.0,
+        );
+        let emissive = floats(mat.get("emissiveFactor"), [0.0; 3]).map(|c| c * strength);
+        let emissive_map = if emissive.iter().all(|c| *c <= 0.0) {
+            None // a map times a zero factor is no glow
+        } else {
+            self.texture_image(mat.get("emissiveTexture"))
+        };
+        PartSurface {
+            roughness: roughness.clamp(0.0, 1.0),
+            metallic: metallic.clamp(0.0, 1.0),
+            emissive,
+            normal_scale,
+            normal_map,
+            metallic_roughness_map,
+            emissive_map,
         }
     }
 }
@@ -562,6 +627,7 @@ struct PartBuilder {
     color: [f32; 4],
     texture: Option<Arc<Image>>,
     pixelated: bool,
+    surface: PartSurface,
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
     /// Joints and weights per vertex (rigged files only).
@@ -579,6 +645,7 @@ struct Material {
     uv_transform: Option<[f32; 6]>,
     /// The sampler magnifies with nearest filtering.
     pixelated: bool,
+    surface: PartSurface,
 }
 
 /// The `KHR_texture_transform` of a texture reference, as a row-major 2×3
@@ -593,7 +660,7 @@ fn uv_transform(tex: Option<&Json>) -> (Option<[f32; 6]>, Option<usize>) {
     };
     let [ox, oy] = floats(ext.get("offset"), [0.0, 0.0]);
     let [sx, sy] = floats(ext.get("scale"), [1.0, 1.0]);
-    let [angle] = floats(ext.get("rotation"), [0.0]);
+    let angle = number(ext.get("rotation"), 0.0);
     let (sin, cos) = angle.sin_cos();
     let matrix = [sx * cos, sx * sin, ox, -sy * sin, sy * cos, oy];
     let identity = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
@@ -943,6 +1010,7 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
                     color: mat.color,
                     texture: mat.texture.clone(),
                     pixelated: mat.pixelated,
+                    surface: mat.surface.clone(),
                     vertices: Vec::new(),
                     indices: Vec::new(),
                     skin: Vec::new(),
@@ -1078,6 +1146,7 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
                     texture: p.texture,
                     pixelated: p.pixelated,
                     skin,
+                    surface: p.surface,
                 }
             })
             .collect(),
@@ -1270,6 +1339,69 @@ pub(crate) mod tests {
             references(Path::new("/m/e.gltf"), json.as_bytes()),
             [PathBuf::from("/m/tex a.png")]
         );
+    }
+
+    #[test]
+    fn pbr_factors_maps_and_emission_load() {
+        let glb = quad_glb(&[[0.0, 0.0, 0.0]], true);
+        let (json, bin) = split_glb(&glb).unwrap();
+        let b64 = encode_base64(bin.unwrap());
+        let mut png = Vec::new();
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([128, 128, 255, 255]))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let png = encode_base64(&png);
+        let json = json
+            .replace(
+                r#""materials":[{"name":"Red","pbrMetallicRoughness":{"baseColorFactor":[1,0,0,1]}}]"#,
+                r#""materials":[{"name":"Steel","pbrMetallicRoughness":{"roughnessFactor":0.25,
+                    "metallicFactor":0.75,"metallicRoughnessTexture":{"index":0}},
+                    "normalTexture":{"index":0,"scale":0.5},
+                    "emissiveFactor":[1,0.5,0],"emissiveTexture":{"index":0},
+                    "extensions":{"KHR_materials_emissive_strength":{"emissiveStrength":4}}}],
+                    "textures":[{"source":0}]"#,
+            )
+            .replace(
+                r#""buffers":[{"byteLength""#,
+                &format!(r#""images":[{{"uri":"data:image/png;base64,{png}"}}],"buffers":[{{"uri":"data:application/octet-stream;base64,{b64}","byteLength""#),
+            );
+        assert!(
+            json.contains("Steel") && json.contains("image/png"),
+            "{json}"
+        );
+        let loaded = load(Path::new("/nowhere/m.gltf"), json.as_bytes()).unwrap();
+        let s = &loaded.parts[0].surface;
+        assert_eq!(loaded.parts[0].name, "Steel");
+        assert!((s.roughness - 0.25).abs() < 1e-6 && (s.metallic - 0.75).abs() < 1e-6);
+        assert_eq!(s.emissive, [4.0, 2.0, 0.0], "factor x strength");
+        assert!((s.normal_scale - 0.5).abs() < 1e-6);
+        let normal = s.normal_map.as_ref().expect("normal map");
+        assert_eq!(
+            (normal.width, &normal.rgba[..4]),
+            (2, &[128, 128, 255, 255][..])
+        );
+        assert!(s.metallic_roughness_map.is_some() && s.emissive_map.is_some());
+        // The same image as all three maps is decoded once.
+        assert!(Arc::ptr_eq(normal, s.emissive_map.as_ref().unwrap()));
+
+        // No factors at all: glTF's default rough metal. No material: the
+        // engine's plain surface.
+        let bare = json.replace(
+            r#""roughnessFactor":0.25,
+                    "metallicFactor":0.75,"#,
+            "",
+        );
+        let s = &load(Path::new("/nowhere/b.gltf"), bare.as_bytes())
+            .unwrap()
+            .parts[0]
+            .surface;
+        assert!((s.roughness - 1.0).abs() < 1e-6 && (s.metallic - 1.0).abs() < 1e-6);
+        let plain = load(Path::new("q.glb"), &glb).unwrap();
+        assert!(
+            (plain.parts[0].surface.metallic - 1.0).abs() < 1e-6,
+            "Red has no factors"
+        );
+        assert_eq!(PartSurface::default().metallic, 0.0);
     }
 
     /// A `.gltf` (buffer as a data URI) with two quads sharing a material:

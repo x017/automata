@@ -28,7 +28,7 @@ game.load_scene(scene)   # replaces the current scene wholesale
 | Component | Purpose |
 |---|---|
 | `Transform(position, rotation_euler, scale)` | Where it is, how it's turned, how big |
-| `MeshRenderer.cube(size, color)` / `.quad(...)` | A visible 3D primitive |
+| `MeshRenderer.cube(size, color)` / `.sphere(...)` / `.quad(...)` | A visible 3D primitive (plus optional `roughness`, `metallic`, `emissive`) |
 | `Camera3D(position, target, fov)` / `Camera2D(center, half_height)` | The frame's eye (first entity wins) |
 | `DirectionalLight(direction, color, ambient, shadows)` | The frame's sun (first entity wins) |
 | `RigidBody.dynamic()/.fixed()/.kinematic_velocity()/.kinematic_position()` | How physics moves it |
