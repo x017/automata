@@ -81,6 +81,11 @@ pub struct ParticleBatch {
     /// Their texture; `None` is the built-in sprite sheet (see
     /// [`ParticleSprite`]).
     pub texture: Option<Texture>,
+    /// Tiles the particles around the camera in boxes this big (metres
+    /// per side): each particle is drawn at its copy nearest the camera,
+    /// fading out toward the box's faces, so a small box of dust fills
+    /// the air wherever the camera goes. `None` draws them where they are.
+    pub wrap: Option<[f32; 3]>,
 }
 
 /// The built-in particle sprites, all white (particles tint them).
@@ -643,6 +648,11 @@ pub(crate) fn order_batches(
         }
         let start = instances.len();
         instances.extend(batch.instances.iter().take(room));
+        if let Some(size) = batch.wrap {
+            for p in &mut instances[start..] {
+                wrap_around(p, eye, size);
+            }
+        }
         if sorted {
             instances[start..].sort_by(|a, b| depth(b).total_cmp(&depth(a)));
         }
@@ -658,6 +668,21 @@ pub(crate) fn order_batches(
     (instances, runs)
 }
 
+/// Moves `p` to its copy nearest `eye` in a grid of `size` boxes, and
+/// fades it over the outer fifth of the box so particles that wrap from
+/// one side to the other don't pop.
+fn wrap_around(p: &mut ParticleInstance, eye: glam::Vec3, size: [f32; 3]) {
+    let mut fade = 1.0_f32;
+    for axis in 0..3 {
+        let side = size[axis].max(1e-3);
+        let offset = (p.position[axis] - eye[axis]) / side;
+        let local = offset - offset.round(); // -0.5..0.5
+        p.position[axis] = eye[axis] + local * side;
+        fade *= ((0.5 - local.abs()) / 0.1).clamp(0.0, 1.0);
+    }
+    p.color[3] *= fade;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -669,6 +694,32 @@ mod tests {
             color: [1.0; 4],
             ..ParticleInstance::default()
         }
+    }
+
+    #[test]
+    fn wrapped_particles_tile_around_the_camera() {
+        let batch = ParticleBatch {
+            instances: vec![at(-23.0), at(-0.5)],
+            wrap: Some([10.0, 10.0, 10.0]),
+            ..ParticleBatch::default()
+        };
+        let eye = glam::Vec3::new(0.0, 0.0, 1.0);
+        let (instances, _) = order_batches(&[batch], eye, glam::Vec3::NEG_Z);
+        // -23 is 24 m behind the eye: its copy 6 m farther in front is
+        // nearer (within the 10 m box's half), and it faces outward so it
+        // fades; -0.5 is well inside and keeps all its colour.
+        let far = instances[0];
+        assert!((far.position[2] - -3.0).abs() < 1e-4, "{:?}", far.position);
+        assert!((far.color[3] - 1.0).abs() < 1e-6);
+        let near = instances[1];
+        assert!((near.position[2] - -0.5).abs() < 1e-4);
+        let edge = ParticleBatch {
+            instances: vec![at(5.6)],
+            wrap: Some([10.0, 10.0, 10.0]),
+            ..ParticleBatch::default()
+        };
+        let (instances, _) = order_batches(&[edge], eye, glam::Vec3::NEG_Z);
+        assert!(instances[0].color[3] < 0.5, "near the box's face it fades");
     }
 
     #[test]

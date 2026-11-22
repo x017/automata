@@ -145,6 +145,20 @@ pub enum Field {
     EnvFogDensity,
     /// Distance where the fog starts.
     EnvFogStart,
+    /// Height fog: full density below this height (m).
+    EnvFogHeight,
+    /// Height fog thinning per metre above `EnvFogHeight` (0 = even fog).
+    EnvFogFalloff,
+    /// How much the fog glows toward the sun.
+    EnvFogSun,
+    /// God ray strength (Beautiful).
+    EnvGodRays,
+    /// Depth of field blur strength (Beautiful).
+    EnvDepthOfField,
+    /// Distance kept sharp (0 = the camera's target).
+    EnvFocusDistance,
+    /// Distance either side of the focus kept sharp.
+    EnvFocusRange,
     /// Camera eye position, axis 0..3.
     CameraPosition(u8),
     /// Camera look-at target, axis 0..3.
@@ -252,6 +266,8 @@ pub enum Flag {
     ParticleLit,
     /// Particles stay where they were made when the emitter moves.
     ParticleWorldSpace,
+    /// Particles fill a box around the camera (dust in the air).
+    ParticleFollowCamera,
     /// Audio source starts when the game starts.
     AudioPlayOnStart,
     /// Audio source fades with distance from the camera.
@@ -342,6 +358,13 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::EnvChromatic => data.environment?.post.chromatic_aberration,
         F::EnvFogDensity => data.environment?.fog_density,
         F::EnvFogStart => data.environment?.fog_start,
+        F::EnvFogHeight => data.environment?.fog_height,
+        F::EnvFogFalloff => data.environment?.fog_falloff,
+        F::EnvFogSun => data.environment?.fog_sun,
+        F::EnvGodRays => data.environment?.god_rays,
+        F::EnvDepthOfField => data.environment?.depth_of_field,
+        F::EnvFocusDistance => data.environment?.focus_distance,
+        F::EnvFocusRange => data.environment?.focus_range,
         F::WaterSize(i) => data.water?.size[usize::from(i.min(1))],
         F::WaterDeep(i) => data.water?.deep_color[axis(i)],
         F::WaterShallow(i) => data.water?.shallow_color[axis(i)],
@@ -477,15 +500,21 @@ pub fn range(field: Field) -> (f32, f32) {
         F::LightShadowSoftness => (0.0, 8.0),
         F::EnvExposure => (0.0, 16.0),
         F::MeshEmissiveStrength => (0.0, 100.0),
-        F::MeshGlowLight => (0.0, 10.0),
-        F::EnvFogDensity | F::EnvAmbientOcclusion | F::WaterCaustics => (0.0, 2.0),
-        F::EnvFogStart => (0.0, 100_000.0),
+        F::MeshGlowLight | F::EnvFogFalloff => (0.0, 10.0),
+        F::EnvFogDensity | F::EnvAmbientOcclusion | F::WaterCaustics | F::EnvGodRays => (0.0, 2.0),
+        F::EnvFogStart | F::EnvFocusDistance | F::EnvFocusRange => (0.0, 100_000.0),
+        F::EnvFogHeight => (-10_000.0, 10_000.0),
         F::MeshSize | F::ColliderRadius | F::ColliderExtents(_) | F::ColliderHalfHeight => {
             (0.001, 10_000.0)
         }
         F::CameraFov => (1.0, 179.0),
         F::CharacterSlope => (0.0, 89.0),
-        F::AudioVolume | F::EnvSunGlow | F::EnvLensFlare | F::EnvBloom => (0.0, 4.0),
+        F::AudioVolume
+        | F::EnvSunGlow
+        | F::EnvLensFlare
+        | F::EnvBloom
+        | F::EnvFogSun
+        | F::EnvDepthOfField => (0.0, 4.0),
         F::AudioPitch => (0.05, 4.0),
         F::AudioRange => (0.5, 10_000.0),
         F::CameraNear => (0.001, 1_000.0),
@@ -523,6 +552,7 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::WaterWaveDirection => 0.5,
         F::ParticleMax => 2.0,
         F::EnvFogDensity => 0.0005,
+        F::EnvFogFalloff => 0.002,
         F::EnvLift(_) => 0.001,
         F::ParticleColor(_)
         | F::ParticleEndColor(_)
@@ -548,6 +578,9 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::EnvSunGlow
         | F::EnvLensFlare
         | F::EnvAmbientOcclusion
+        | F::EnvFogSun
+        | F::EnvGodRays
+        | F::EnvDepthOfField
         | F::EnvBloom
         | F::EnvContrast
         | F::EnvSaturation
@@ -685,7 +718,14 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
         | F::EnvGrain
         | F::EnvChromatic
         | F::EnvFogDensity
-        | F::EnvFogStart => match &mut data.environment {
+        | F::EnvFogStart
+        | F::EnvFogHeight
+        | F::EnvFogFalloff
+        | F::EnvFogSun
+        | F::EnvGodRays
+        | F::EnvDepthOfField
+        | F::EnvFocusDistance
+        | F::EnvFocusRange => match &mut data.environment {
             Some(env) => match field {
                 F::EnvSky(i) => env.sky_color[axis(i)] = v,
                 F::EnvGround(i) => env.ground_color[axis(i)] = v,
@@ -709,6 +749,13 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
                 F::EnvVignette => env.post.vignette = v,
                 F::EnvGrain => env.post.grain = v,
                 F::EnvChromatic => env.post.chromatic_aberration = v,
+                F::EnvFogHeight => env.fog_height = v,
+                F::EnvFogFalloff => env.fog_falloff = v,
+                F::EnvFogSun => env.fog_sun = v,
+                F::EnvGodRays => env.god_rays = v,
+                F::EnvDepthOfField => env.depth_of_field = v,
+                F::EnvFocusDistance => env.focus_distance = v,
+                F::EnvFocusRange => env.focus_range = v,
                 F::EnvFogDensity => env.fog_density = v,
                 _ => env.fog_start = v,
             },
@@ -891,6 +938,7 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::ParticleOneShot => data.particle_emitter.as_ref()?.one_shot,
         Flag::ParticleLit => data.particle_emitter.as_ref()?.lit,
         Flag::ParticleWorldSpace => data.particle_emitter.as_ref()?.world_space,
+        Flag::ParticleFollowCamera => data.particle_emitter.as_ref()?.follow_camera,
         Flag::AudioPlayOnStart => data.audio_source.as_ref()?.play_on_start,
         Flag::AudioSpatial => data.audio_source.as_ref()?.spatial,
     })
@@ -942,12 +990,14 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
         Flag::ParticleEmitting
         | Flag::ParticleOneShot
         | Flag::ParticleLit
-        | Flag::ParticleWorldSpace => match &mut data.particle_emitter {
+        | Flag::ParticleWorldSpace
+        | Flag::ParticleFollowCamera => match &mut data.particle_emitter {
             Some(e) => {
                 let slot = match flag {
                     Flag::ParticleEmitting => &mut e.emitting,
                     Flag::ParticleOneShot => &mut e.one_shot,
                     Flag::ParticleLit => &mut e.lit,
+                    Flag::ParticleFollowCamera => &mut e.follow_camera,
                     _ => &mut e.world_space,
                 };
                 *slot = !*slot;
@@ -1654,6 +1704,14 @@ mod tests {
         );
         assert_eq!(choice_options(&d, Choice::Tonemapping).len(), 4);
         assert!(set_choice(&mut d, Choice::Tonemapping, "AgX"));
+        // Atmosphere: height fog, god rays, depth of field, clamped.
+        assert!(set(&mut d, Field::EnvFogFalloff, 0.4));
+        assert!(set(&mut d, Field::EnvGodRays, 9.0));
+        assert!(set(&mut d, Field::EnvFocusDistance, 12.0));
+        let env = d.environment.unwrap();
+        assert!((env.fog_falloff - 0.4).abs() < 1e-6);
+        assert!((env.god_rays - 2.0).abs() < 1e-6, "god rays top out at 2");
+        assert_eq!(get(&d, Field::EnvFocusDistance), Some(12.0));
     }
 
     #[test]
@@ -1666,7 +1724,7 @@ mod tests {
         assert_eq!(choice_label(&d, Choice::ParticlePreset), Some("Fire"));
         assert_eq!(
             choice_options(&d, Choice::ParticlePreset),
-            vec!["Fire", "Smoke", "Sparks", "Dust", "Splash", "Magic"]
+            vec!["Fire", "Smoke", "Sparks", "Dust", "Splash", "Magic", "Motes"]
         );
         // Any change makes it Custom; picking a preset replaces it whole.
         assert!(set(&mut d, Field::ParticleRate, 80.0));

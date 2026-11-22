@@ -176,6 +176,8 @@ at.Environment(sky_color=(1, 1, 1), ground_color=(1, 1, 1),
                fog_density=0.02, fog_start=0.0, sky=False,
                zenith_color=(0.16, 0.34, 0.78), sun_size=2.0, sun_glow=1.0,
                clouds=0.0, lens_flare=1.0, ambient_occlusion=1.0,
+               fog_height=0.0, fog_falloff=0.0, fog_sun=0.0, god_rays=0.0,
+               depth_of_field=0.0, focus_distance=0.0, focus_range=1.0,
                post=None, bloom=None, contrast=None, saturation=None,
                temperature=None, tint=None, lift=None, gamma=None, gain=None,
                vignette=None, grain=None, chromatic_aberration=None)
@@ -196,6 +198,16 @@ flare (`lens_flare` strength) when the camera looks toward the sun. Also
 on `BEAUTIFUL`, `ambient_occlusion` (0 off, 1 default, up to 2) darkens
 the ambient light in creases, corners and on the ground around objects.
 The non-neutral presets turn the sky on.
+
+Height fog: with `fog_falloff` above 0 the fog has full density below
+`fog_height` and thins by e every `1 / fog_falloff` metres above it, so it
+lies in valleys. `fog_sun` (0..4) makes it glow toward the sun. On
+`BEAUTIFUL`, `god_rays` (0..2) draws sun shafts blocked by geometry, and
+`depth_of_field` (0..4) blurs what's nearer or farther than
+`focus_distance` ± `focus_range` metres (`focus_distance=0` follows the
+camera's target). The `"daylight"` and `"dusk"` presets turn on height fog
+and god rays. See
+[Atmosphere](guides/rendering-and-lights.md#atmosphere-height-fog-god-rays-depth-of-field-dust).
 
 Post effects grade the finished frame on `MEDIUM` and up: `post` starts
 from a named look, and the other post keywords change single fields on
@@ -242,7 +254,7 @@ Guides: [Rendering & Lights](guides/rendering-and-lights.md#water),
 
 ```python
 at.ParticleEmitter(**fields)                 # any field below by keyword
-at.ParticleEmitter.preset("fire" | "smoke" | "sparks" | "dust" | "splash" | "magic", **fields)
+at.ParticleEmitter.preset("fire" | "smoke" | "sparks" | "dust" | "splash" | "magic" | "motes", **fields)
 at.ParticleEmitter.presets() -> list[str]
 emitter.replace(**fields) -> ParticleEmitter # a changed copy
 emitter.preset_name                          # "fire" … or None once changed
@@ -255,7 +267,7 @@ Fields (all readable as properties): `emitting`, `rate`, `burst`,
 `size_spread`, `color`, `color_end` (RGBA, over 1 glows), `fade_in`,
 `fade_out`, `spin`, `stretch`, `blend` (`"alpha"`, `"additive"`), `lit`,
 `soft`, `sprite` (`"dot"`, `"spark"`, `"star"`, `"flame"`, `"puff"`),
-`texture`, `sheet` (columns, rows), `world_space`. Pairs also take one number for both, and colours take RGB or RGBA. A bad name raises `KeyError`. A bad value raises `ValueError`. Saved in scene
+`texture`, `sheet` (columns, rows), `world_space`, `follow_camera` (fill a box of `shape_size` around the camera, wrapping particles round as it moves). Pairs also take one number for both, and colours take RGB or RGBA. A bad name raises `KeyError`. A bad value raises `ValueError`. Saved in scene
 files. Guide: [Rendering & Lights](guides/rendering-and-lights.md#particles).
 
 ### Physics components

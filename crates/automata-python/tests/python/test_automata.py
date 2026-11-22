@@ -1178,6 +1178,43 @@ def test_environment_post_effects():
         assert game.run(lambda ctx: None, max_frames=2) == 2
 
 
+def test_environment_atmosphere():
+    env = at.Environment()
+    assert env.fog_falloff == 0.0 and env.god_rays == 0.0 and env.depth_of_field == 0.0
+    assert env.focus_range == pytest.approx(1.0)
+    misty = at.Environment(
+        fog=True, fog_height=2.0, fog_falloff=0.4, fog_sun=1.2,
+        god_rays=0.8, depth_of_field=1.5, focus_distance=12.0, focus_range=3.0,
+    )
+    assert misty.fog_height == pytest.approx(2.0)
+    assert misty.fog_falloff == pytest.approx(0.4)
+    assert misty.fog_sun == pytest.approx(1.2)
+    assert misty.god_rays == pytest.approx(0.8)
+    assert misty.depth_of_field == pytest.approx(1.5)
+    assert misty.focus_distance == pytest.approx(12.0)
+    assert misty.focus_range == pytest.approx(3.0)
+    # The outdoor presets come with low-lying fog and sun shafts.
+    for name in ("daylight", "dusk"):
+        preset = at.Environment.preset(name)
+        assert preset.fog_falloff > 0.0 and preset.god_rays > 0.0, name
+
+    # Saved in scene files, and runs on every preset, with dust about.
+    text = at.Scene().add(at.Entity("air").add(misty)).to_ron()
+    assert "god_rays: 0.8" in text and "fog_falloff: 0.4" in text
+    assert at.Scene.from_ron(text).to_ron() == text
+    motes = at.ParticleEmitter.preset("motes")
+    assert motes.follow_camera and motes.lit and motes.shape == "box"
+    assert not at.ParticleEmitter.preset("dust").follow_camera
+    for quality in ("low", "medium", "high", "beautiful"):
+        game = at.Game(headless=True, graphics=quality, fixed_delta=1 / 60)
+        scene = at.Scene().add(at.Entity("air").add(misty))
+        scene.add(at.Entity("sun").add(at.DirectionalLight(direction=(0.3, -0.4, -1.0))))
+        scene.add(at.Entity("motes").add(at.Transform()).add(motes))
+        scene.add(at.Entity("camera").add(at.Camera3D(position=(0, 1, 4), target=(0, 0, 0))))
+        game.load_scene(scene)
+        assert game.run(lambda ctx: None, max_frames=2) == 2
+
+
 def test_water_caustics_and_wind():
     water = at.Water()
     assert water.caustics == pytest.approx(1.0)
@@ -1674,7 +1711,9 @@ def test_particle_emitter_presets_fields_and_errors():
     assert repr(fire) == 'ParticleEmitter.preset("fire")'
     assert fire.blend == "additive" and fire.sprite == "flame" and fire.shape == "cone"
     assert fire.color[0] > 1.0, "fire glows"
-    assert at.ParticleEmitter.presets() == ["fire", "smoke", "sparks", "dust", "splash", "magic"]
+    assert at.ParticleEmitter.presets() == [
+        "fire", "smoke", "sparks", "dust", "splash", "magic", "motes"
+    ]
     calm = fire.replace(rate=10, color=(1, 0.5, 0.2))
     assert calm.preset_name is None and calm.rate == 10.0
     assert calm.color == pytest.approx((1.0, 0.5, 0.2, 1.0))

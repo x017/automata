@@ -58,6 +58,7 @@ struct LightUniform {
     // Six views (+X, -X, +Y, -Y, +Z, -Z) per shadowed point light.
     point_faces: array<mat4x4<f32>, 24>,
     point_shadow: vec4<f32>,   // x: texel (uv), y: taps (1, 4 or 8), z: tan(face fov / 2), w: AO strength
+    fog_height: vec4<f32>,     // x: fog layer top (world y), y: falloff /m above it (0 = flat), z: sun light
 };
 @group(3) @binding(0) var<uniform> light: LightUniform;
 @group(3) @binding(1) var shadow_map: texture_depth_2d_array;
@@ -732,20 +733,70 @@ fn water_light(world: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(1.0);
 }
 
-// Exponential distance fog (before tone mapping, like real scattering),
+// The mean of the height fog's density profile (1 at and below the
+// layer's top, thinning by exp(-falloff * height) above it) along a
+// straight line between heights `a` and `b` above the layer's top.
+fn height_fog_mean(a: f32, b: f32, falloff: f32) -> f32 {
+    let lo = min(a, b);
+    let hi = max(a, b);
+    if hi <= 0.0 {
+        return 1.0;
+    }
+    let span = hi - lo;
+    if span < 1e-3 {
+        return exp(-falloff * max(lo, 0.0));
+    }
+    let below = max(-lo, 0.0);
+    let above = (exp(-falloff * max(lo, 0.0)) - exp(-falloff * hi)) / falloff;
+    return (below + above) / span;
+}
+
+// How much fog lies between the camera and `world` in dry air (0 none,
+// 1 all): exponential in the distance past `fog_start`, and with a
+// falloff, thick at and below the layer's top and thinning above it
+// (height fog, integrated exactly along the view ray).
+fn fog_cover(world: vec3<f32>) -> f32 {
+    let density = light.fog.a;
+    if density <= 0.0 {
+        return 0.0;
+    }
+    let to_frag = world - camera.view_pos.xyz;
+    let len = length(to_frag);
+    let dist = max(len - light.fog_params.x, 0.0);
+    var depth = density * dist;
+    let falloff = light.fog_height.y;
+    if falloff > 0.0 && dist > 0.0 {
+        let h1 = world.y - light.fog_height.x;
+        let h0 = h1 - to_frag.y * dist / max(len, 1e-4);
+        depth = depth * height_fog_mean(h0, h1, falloff);
+    }
+    return clamp(1.0 - exp(-depth), 0.0, 1.0);
+}
+
+// Sunlight scattered toward the eye by fog seen along `d`: a glow around
+// the sun's direction (`fog_height.z` sets how much).
+fn fog_sunlight(d: vec3<f32>) -> vec3<f32> {
+    let k = light.fog_height.z;
+    if k <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let mu = dot(d, sun_dir());
+    return sun_tint() * k * (0.6 * lobe(mu, 6.0) + 0.15 * lobe(mu, 1.5));
+}
+
+// Distance and height fog (before tone mapping, like real scattering),
 // or the water's when pixel `frag` looks out from under it.
 fn apply_fog(lit: vec3<f32>, world: vec3<f32>, frag: vec2<f32>) -> vec3<f32> {
     if eye_under_water(frag) {
         return water_fog(lit, water_path(world));
     }
-    let density = light.fog.a;
-    if density <= 0.0 {
+    let f = fog_cover(world);
+    if f <= 0.0 {
         return lit;
     }
     let to_frag = world - camera.view_pos.xyz;
-    let dist = max(length(to_frag) - light.fog_params.x, 0.0);
-    let f = clamp(1.0 - exp(-density * dist), 0.0, 1.0);
-    return mix(lit, fog_tint(to_frag / max(length(to_frag), 1e-4)), f);
+    let d = to_frag / max(length(to_frag), 1e-4);
+    return mix(lit, fog_tint(d) + fog_sunlight(d), f);
 }
 
 // Beautiful's fog adds sun scattering: it glows toward the sun.
@@ -753,23 +804,21 @@ fn apply_fog_scatter(lit: vec3<f32>, world: vec3<f32>, frag: vec2<f32>) -> vec3<
     if eye_under_water(frag) {
         return water_fog(lit, water_path(world));
     }
-    let density = light.fog.a;
-    if density <= 0.0 {
+    let f = fog_cover(world);
+    if f <= 0.0 {
         return lit;
     }
     let to_frag = world - camera.view_pos.xyz;
-    let dist = max(length(to_frag) - light.fog_params.x, 0.0);
-    let f = clamp(1.0 - exp(-density * dist), 0.0, 1.0);
     let d = to_frag / max(length(to_frag), 1e-4);
     if sky_on() {
-        return mix(lit, fog_tint(d), f);
+        return mix(lit, fog_tint(d) + fog_sunlight(d), f);
     }
     let l = normalize(-light.direction.xyz);
     let s2 = max(dot(d, l), 0.0);
     let s4 = s2 * s2;
     let s8 = s4 * s4;
     let s = s8 * s8;
-    let color = light.fog.rgb + light.color_ambient.rgb * s * 0.5;
+    let color = light.fog.rgb + light.color_ambient.rgb * s * 0.5 + fog_sunlight(d);
     return mix(lit, color, f);
 }
 

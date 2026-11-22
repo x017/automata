@@ -1,4 +1,5 @@
-//! Particle emitters: fire, smoke, sparks, dust, splashes, magic.
+//! Particle emitters: fire, smoke, sparks, dust, splashes, magic, and
+//! motes floating in the air around the camera.
 //!
 //! A [`ParticleEmitter`] is plain data saved with the scene: how many
 //! particles to make, where, how they move, and how they look over their
@@ -48,7 +49,9 @@ impl EmitterShape {
 }
 
 /// The built-in looks, by name.
-pub const PRESETS: [&str; 6] = ["Fire", "Smoke", "Sparks", "Dust", "Splash", "Magic"];
+pub const PRESETS: [&str; 7] = [
+    "Fire", "Smoke", "Sparks", "Dust", "Splash", "Magic", "Motes",
+];
 
 /// Makes particles: a scene component (saved with the scene).
 ///
@@ -122,6 +125,11 @@ pub struct ParticleEmitter {
     /// Particles stay where they were made when the entity moves (smoke
     /// trails); off, they move with it.
     pub world_space: bool,
+    /// Fills the air around the camera wherever it goes (dust motes, snow,
+    /// pollen): the box the particles are made in (twice `shape_size`, at
+    /// least half a metre a side) repeats through space, and each particle
+    /// is drawn at its copy nearest the camera.
+    pub follow_camera: bool,
 }
 
 impl Default for ParticleEmitter {
@@ -155,6 +163,7 @@ impl Default for ParticleEmitter {
             texture: String::new(),
             sheet: [1, 1],
             world_space: true,
+            follow_camera: false,
         }
     }
 }
@@ -162,7 +171,9 @@ impl Default for ParticleEmitter {
 impl ParticleEmitter {
     /// A built-in look by name, any case (see [`PRESETS`]): `"fire"`,
     /// `"smoke"`, `"sparks"` (a one-off burst), `"dust"` (motes drifting
-    /// in a 8 x 3 x 8 m box), `"splash"` (a one-off burst) or `"magic"`.
+    /// in a 8 x 3 x 8 m box), `"splash"` (a one-off burst), `"magic"` or
+    /// `"motes"` (specks of dust all around the camera that glint where
+    /// the sun reaches them).
     #[must_use]
     #[allow(clippy::too_many_lines)] // one table of looks
     pub fn preset(name: &str) -> Option<Self> {
@@ -296,8 +307,37 @@ impl ParticleEmitter {
                 sprite: ParticleSprite::Star,
                 ..base
             },
+            "motes" => Self {
+                rate: 32.0,
+                burst: 260,
+                max_particles: 320,
+                lifetime: [6.0, 10.0],
+                shape: EmitterShape::Box,
+                shape_size: [5.0, 2.5, 5.0],
+                cone_angle: 180.0,
+                speed: [0.02, 0.1],
+                gravity: -0.01,
+                drag: 0.3,
+                size: [0.035, 0.035],
+                size_spread: 0.6,
+                color: [1.0, 0.95, 0.82, 0.8],
+                color_end: [1.0, 0.95, 0.82, 0.8],
+                fade_in: 0.2,
+                fade_out: 0.3,
+                blend: ParticleBlend::Additive,
+                lit: true,
+                soft: 0.0,
+                follow_camera: true,
+                ..base
+            },
             _ => return None,
         })
+    }
+
+    /// The box `follow_camera` particles repeat in, metres per side.
+    #[must_use]
+    pub fn wrap_box(&self) -> [f32; 3] {
+        self.shape_size.map(|h| (h * 2.0).max(0.5))
     }
 
     /// The preset this emitter is exactly (see [`PRESETS`]), if any.
@@ -338,7 +378,7 @@ pub enum FieldValue {
 
 impl ParticleEmitter {
     /// Every field's name, as scripts and scene files spell it.
-    pub const FIELDS: [&'static str; 28] = [
+    pub const FIELDS: [&'static str; 29] = [
         "emitting",
         "rate",
         "burst",
@@ -367,6 +407,7 @@ impl ParticleEmitter {
         "texture",
         "sheet",
         "world_space",
+        "follow_camera",
     ];
 
     /// Sets field `name` (see [`Self::FIELDS`]) from a script's value,
@@ -486,6 +527,7 @@ impl ParticleEmitter {
                 self.sheet = [v[0].max(1.0).round() as u32, v[1].max(1.0).round() as u32];
             }
             "world_space" => self.world_space = flag()?,
+            "follow_camera" => self.follow_camera = flag()?,
             _ => return Err(format!("ParticleEmitter has no field {name:?}")),
         }
         Ok(())
@@ -750,6 +792,7 @@ impl ParticleState {
             lit: emitter.lit,
             soft: emitter.soft,
             texture: texture.cloned(),
+            wrap: emitter.follow_camera.then(|| emitter.wrap_box()),
         }
     }
 }
@@ -1323,6 +1366,35 @@ mod tests {
     }
 
     #[test]
+    fn motes_fill_the_air_around_the_camera() {
+        let motes = ParticleEmitter::preset("motes").unwrap();
+        assert!(motes.follow_camera && motes.lit);
+        assert_eq!(motes.wrap_box(), [10.0, 5.0, 10.0]);
+        let mut world = SceneWorld::new();
+        let e = world.spawn((Transform::IDENTITY, motes));
+        crate::propagate_transforms(&mut world);
+        simulate_particles(&mut world, 0.05);
+        let mut draw = automata_renderer::DrawList::new();
+        record_particles(&world, &mut draw);
+        let batch = &draw.particle_batches()[0];
+        assert_eq!(batch.wrap, Some([10.0, 5.0, 10.0]));
+        assert!(
+            batch.instances.len() >= 260,
+            "the burst fills the box at once"
+        );
+        // Off, they're drawn where they are.
+        world.get::<&mut ParticleEmitter>(e).unwrap().follow_camera = false;
+        let mut draw = automata_renderer::DrawList::new();
+        record_particles(&world, &mut draw);
+        assert_eq!(draw.particle_batches()[0].wrap, None);
+        let mut plain = ParticleEmitter::default();
+        plain
+            .set_field("follow_camera", &FieldValue::Bool(true))
+            .unwrap();
+        assert!(plain.follow_camera);
+    }
+
+    #[test]
     fn fields_set_by_name_clamp_and_reject_nonsense() {
         let mut e = ParticleEmitter::default();
         e.set_field("rate", &FieldValue::Number(-5.0)).unwrap();
@@ -1352,7 +1424,7 @@ mod tests {
         assert!(e
             .set_field("color", &FieldValue::Numbers(vec![1.0]))
             .is_err());
-        assert_eq!(ParticleEmitter::FIELDS.len(), 28);
+        assert_eq!(ParticleEmitter::FIELDS.len(), 29);
         for name in ParticleEmitter::FIELDS {
             let probe = [
                 FieldValue::Number(1.0),

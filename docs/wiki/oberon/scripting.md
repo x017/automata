@@ -97,7 +97,7 @@ for `entity` and `ctx`.
 | `ctx.physics.water_height(x, z)` | Height of the water surface at a world point, waves included, or `None` where there's no water |
 | `ctx.water.height(x, z)` | The same |
 | `ctx.water.splash(position, strength=1.0)` | A splash at a point or an entity: rings spread out and foam gathers. `strength` runs from 0 to 10; 1 is about a crate dropped from a couple of metres. Things that fall in or move through water make their own ripples, and hard landings splash |
-| `ctx.particles.burst("sparks", position, direction=None, count=None, **fields)` | A one-off particle effect at a point or an entity that cleans up after itself: `"fire"`, `"smoke"`, `"sparks"`, `"dust"`, `"splash"` or `"magic"`, with any field changed (`color=(0.3, 1, 0.4, 1)`). `direction` aims it, for example along a hit's `normal`. `count` is how many particles. See [Particles](../guides/rendering-and-lights.md#particles) |
+| `ctx.particles.burst("sparks", position, direction=None, count=None, **fields)` | A one-off particle effect at a point or an entity that cleans up after itself: `"fire"`, `"smoke"`, `"sparks"`, `"dust"`, `"splash"`, `"magic"` or `"motes"`, with any field changed (`color=(0.3, 1, 0.4, 1)`). `direction` aims it, for example along a hit's `normal`. `count` is how many particles. See [Particles](../guides/rendering-and-lights.md#particles) |
 | `ctx.particles.emit(entity, count)` | Extra particles from the entity's own Particle Emitter |
 | `ctx.audio.play("sounds/hit.ogg", volume=1, pitch=1, position=None)` | Play a sound once. With a `position` (a point or an entity) it fades with distance |
 | `ctx.hud.image("sprites/crosshair.png", x, y, size=None, color=(1,1,1,1))` | Draw an image this frame, centred on `(x, y)` in screen pixels |

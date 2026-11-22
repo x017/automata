@@ -408,6 +408,7 @@ impl Ui {
             y = self.float_row(canvas, x, y, w, env, "Fog Density", Field::EnvFogDensity);
             y = self.float_row(canvas, x, y, w, env, "Fog Start", Field::EnvFogStart);
         }
+        y = self.atmosphere_rows(canvas, x, y, w, env);
         y = self.source_note(canvas, x, y, w, env);
         y + 8.0
     }
@@ -459,6 +460,48 @@ impl Ui {
         y = self.post_rows(canvas, x, y, w, env);
         y = self.source_note(canvas, x, y, w, env);
         y + 8.0
+    }
+
+    /// Height fog (with fog on), god rays and depth of field (the Graphics
+    /// tab and the Inspector).
+    pub(super) fn atmosphere_rows(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        y: f32,
+        w: f32,
+        env: &EntityEntry,
+    ) -> f32 {
+        let mut y = y;
+        let e = env.data.environment;
+        if e.is_some_and(|e| e.fog) {
+            y = self.float_row(canvas, x, y, w, env, "Fog Height", Field::EnvFogHeight);
+            y = self.float_row(canvas, x, y, w, env, "Fog Falloff", Field::EnvFogFalloff);
+            y = self.float_row(canvas, x, y, w, env, "Fog Sun Glow", Field::EnvFogSun);
+        }
+        y = self.float_row(canvas, x, y, w, env, "God Rays", Field::EnvGodRays);
+        y = self.float_row(
+            canvas,
+            x,
+            y,
+            w,
+            env,
+            "Depth of Field",
+            Field::EnvDepthOfField,
+        );
+        if e.is_some_and(|e| e.depth_of_field > 0.0) {
+            y = self.float_row(
+                canvas,
+                x,
+                y,
+                w,
+                env,
+                "Focus Distance",
+                Field::EnvFocusDistance,
+            );
+            y = self.float_row(canvas, x, y, w, env, "Focus Range", Field::EnvFocusRange);
+        }
+        y
     }
 
     /// An Environment's post-effect settings (the Graphics tab and the

@@ -194,10 +194,15 @@ glowing mesh.</li></ul>
             clouds=<span class="tok-n">0.35</span>,                     <span class="tok-c"># 0 clear .. 1 overcast</span>
             lens_flare=<span class="tok-n">1.0</span>,                  <span class="tok-c"># Beautiful only</span>
             ambient_occlusion=<span class="tok-n">1.0</span>,           <span class="tok-c"># Beautiful only: 0 off .. 2</span>
+            fog_height=<span class="tok-n">2.0</span>,                  <span class="tok-c"># height fog: full below 2 m ..</span>
+            fog_falloff=<span class="tok-n">0.15</span>,                <span class="tok-c"># .. thinning above (0 = even)</span>
+            fog_sun=<span class="tok-n">0.5</span>,                     <span class="tok-c"># fog glows toward the sun</span>
+            god_rays=<span class="tok-n">0.5</span>,                    <span class="tok-c"># Beautiful only: sun shafts</span>
+            depth_of_field=<span class="tok-n">0.0</span>,              <span class="tok-c"># Beautiful only: 0 off .. 4</span>
         )
     )
 )</code></pre></div>
-<div class="table"><table><thead><tr><th>Preset</th><th>Look</th></tr></thead><tbody><tr><td><code>&quot;neutral&quot;</code></td><td>The default: white ambient, no fog, no tone mapping</td></tr><tr><td><code>&quot;daylight&quot;</code></td><td>Blue sky dome with sun and clouds, warm bounce, light haze, ACES</td></tr><tr><td><code>&quot;dusk&quot;</code></td><td>Violet sky with a big warm sun, dark red ground, dense warm fog, AgX</td></tr><tr><td><code>&quot;night&quot;</code></td><td>Near-black sky, cold dark ambient, black fog close to the camera, ACES</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Preset</th><th>Look</th></tr></thead><tbody><tr><td><code>&quot;neutral&quot;</code></td><td>The default: white ambient, no fog, no tone mapping</td></tr><tr><td><code>&quot;daylight&quot;</code></td><td>Blue sky dome with sun and clouds, warm bounce, light haze lying low, soft god rays, ACES</td></tr><tr><td><code>&quot;dusk&quot;</code></td><td>Violet sky with a big warm sun, dark red ground, dense warm fog pooling low and glowing toward the sun, strong god rays, AgX</td></tr><tr><td><code>&quot;night&quot;</code></td><td>Near-black sky, cold dark ambient, black fog close to the camera and thickest low down, ACES</td></tr></tbody></table></div>
 <p>How it combines with the sun:</p>
 <ul><li><p><strong>The sky</strong> (<code>sky=True</code>) replaces the flat background with a dome: a
 gradient from <code>background</code> at the horizon to <code>zenith_color</code> overhead,
@@ -219,10 +224,55 @@ brightness and control strength with <code>ambient</code>.</li><li><strong>Sky-t
 a little toward <code>zenith_color</code> at the same brightness. Shade is lit by
 the sky alone, so shadows and shaded sides turn faintly blue on a clear
 day (or violet at dusk) instead of grey.</li><li><strong>Fog</strong> fades lit colour toward <code>fog_color</code> as
-<code>1 − exp(−density × (distance − start))</code>.</li><li><strong>Tone mapping</strong> runs last. ACES and AgX roll off highlights smoothly,
+<code>1 − exp(−density × (distance − start))</code>. See
+<a href="#atmosphere-height-fog-god-rays-depth-of-field-dust">Atmosphere</a> for
+fog that lies low, sun shafts, depth of field and dust.</li><li><strong>Tone mapping</strong> runs last. ACES and AgX roll off highlights smoothly,
 so you can use brighter suns and colours without clipping. Raise
 <code>exposure</code> a little to compensate for their darker mid-tones.</li><li>An Environment is staged data like any other component. It's saved in
 scene files and edited in <a href="../oberon/graphics.html">Oberon's Graphics tab</a>.</li></ul>
+<h3 id="atmosphere-height-fog-god-rays-depth-of-field-dust">Atmosphere: height fog, god rays, depth of field, dust<a class="anchor" href="#atmosphere-height-fog-god-rays-depth-of-field-dust" aria-label="Link to this section">#</a></h3>
+<p>Four effects give a scene air. Height fog works on every preset. God rays
+and depth of field are <code>BEAUTIFUL</code> only.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Environment.preset(<span class="tok-s">&quot;daylight&quot;</span>)    <span class="tok-c"># height fog and god rays already on</span>
+
+at.Environment(
+    fog=<span class="tok-b">True</span>, fog_color=(<span class="tok-n">0.62</span>, <span class="tok-n">0.78</span>, <span class="tok-n">0.95</span>), fog_density=<span class="tok-n">0.01</span>,
+    fog_height=<span class="tok-n">1.0</span>,       <span class="tok-c"># full density below 1 m ..</span>
+    fog_falloff=<span class="tok-n">0.25</span>,     <span class="tok-c"># .. and e times thinner every 4 m above it</span>
+    fog_sun=<span class="tok-n">0.8</span>,          <span class="tok-c"># the fog glows warm toward the sun</span>
+    god_rays=<span class="tok-n">0.6</span>,         <span class="tok-c"># sun shafts, 0 off .. 2</span>
+    depth_of_field=<span class="tok-n">0.5</span>,   <span class="tok-c"># blur away from the focus, 0 off .. 4</span>
+    focus_distance=<span class="tok-n">0.0</span>,   <span class="tok-c"># metres kept sharp; 0 = the camera&#x27;s target</span>
+    focus_range=<span class="tok-n">6.0</span>,      <span class="tok-c"># metres either side that stay sharp too</span>
+)
+scene.add(at.Entity(<span class="tok-s">&quot;Motes&quot;</span>).add(at.Transform()).add(at.ParticleEmitter.preset(<span class="tok-s">&quot;motes&quot;</span>)))</code></pre></div>
+<ul><li><strong>Height fog.</strong> Below <code>fog_height</code> the fog has its full <code>fog_density</code>.
+Above it, it thins by a factor of e every <code>1 / fog_falloff</code> metres. So
+valleys and the sea fill with haze, and hilltops and the sky above
+stay clear. Each pixel adds up the fog along its own line of sight,
+so looking down into a valley goes through more of it than looking
+across a ridge. <code>fog_falloff=0</code> gives the old even fog. <code>fog_sun</code> makes
+fog toward the sun glow in its colour. It works on every preset; on
+<code>BEAUTIFUL</code> the glow is stronger and lit by the sun's real brightness.</li><li><strong>God rays</strong> (<code>BEAUTIFUL</code> only). Light from the sun and the bright sky
+around it streams out across the screen. Anything in front of the sun
+blocks it, so trees, pillars and ridges cast visible shafts through
+the air. The rays fade when the sun leaves the screen or sinks below
+the horizon. They're computed at quarter resolution from the depth
+buffer, so they're cheap. They need <code>sky=True</code> and a sun.</li><li><strong>Depth of field</strong> (<code>BEAUTIFUL</code> only). Things nearer or farther than
+the focus blur in proportion to how far out of focus they are, and
+bright points open into soft discs (bokeh). By default the focus
+follows the camera's target, so whatever the camera looks at stays
+sharp. Set <code>focus_distance</code> to fix it at a distance instead. A sharp
+object in front of a blurred background keeps a clean edge.</li><li><strong>Dust motes.</strong> The <code>&quot;motes&quot;</code> particle preset fills a box of air around
+the camera with lit specks (<code>follow_camera=True</code>). Particles that fall
+behind wrap around to the far side, so the air stays full wherever
+the camera goes. In sunlight they glint; in shade they go dark. Lit
+particles now take the sun's shadow (<code>MEDIUM</code> and up).</li></ul>
+<p><img src="../../../assets/rendering/atmosphere.jpg" alt="The lagoon before (top) and after (bottom): sea haze, depth of field, a film grade, grain and dust motes" loading="lazy" decoding="async"></p>
+<p>With the <a href="#post-effects-and-colour-grading">film look</a> on top (soft
+bloom, grade, grain, chromatic aberration, vignette), that's the full
+soft, washed-out, hazy console look. <code>examples/oberon/lagoon</code> uses all of
+it.</p>
 <h3 id="post-effects-and-colour-grading">Post effects and colour grading<a class="anchor" href="#post-effects-and-colour-grading" aria-label="Link to this section">#</a></h3>
 <p>After tone mapping, the Environment grades the finished frame like a
 colourist would. It runs on <code>MEDIUM</code> and up (<code>LOW</code> stays untouched and as
@@ -265,7 +315,8 @@ screen-space pass darkens creases and the ground around objects
 (ambient light only; <code>Environment.ambient_occlusion</code> sets how much), and
 a short ray toward the sun catches small gaps the shadow map is too
 coarse for, like a coin resting on the ground.</li><li><strong>Physically based light</strong> (GGX specular) and fog that glows toward the
-sun.</li><li><strong>HDR with bloom</strong>: bright highlights (sun glints on water, white
+sun.</li><li><strong>God rays and depth of field</strong> when the Environment turns them on (see
+<a href="#atmosphere-height-fog-god-rays-depth-of-field-dust">Atmosphere</a>).</li><li><strong>HDR with bloom</strong>: bright highlights (sun glints on water, white
 surfaces in full sun) bleed softly. Then the tone mapper runs, the
 <a href="#post-effects-and-colour-grading">colour grade</a> is applied, and FXAA
 smooths the edges.</li><li><strong>Refractive water</strong> (see below).</li><li><strong>Lens flare</strong> when the camera looks toward the sun (with <code>sky=True</code>).</li></ul>
@@ -321,7 +372,7 @@ strength from 0 (none) to 2 (default 1). They fade out with depth.</p>
 <a href="physics.html#water">Physics → Water</a>). The surface isn't a solid collider,
 so give the water a floor if sinking things should stop.</p>
 <h2 id="particles">Particles<a class="anchor" href="#particles" aria-label="Link to this section">#</a></h2>
-<p>Fire, smoke, sparks, dust, splashes and magic come from a
+<p>Fire, smoke, sparks, dust, splashes, magic and drifting motes come from a
 <strong><code>ParticleEmitter</code></strong>. Start from a preset and change what you like:</p>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>scene.add(at.Entity(<span class="tok-s">&quot;campfire&quot;</span>)
           .add(at.Transform(position=(<span class="tok-n">0</span>, <span class="tok-n">0.1</span>, <span class="tok-n">0</span>)))
@@ -332,11 +383,11 @@ scene.add(at.Entity(<span class="tok-s">&quot;smoke&quot;</span>)
 <span class="tok-c"># From scratch: any field by keyword, the rest default.</span>
 mist = at.ParticleEmitter(rate=<span class="tok-n">4</span>, sprite=<span class="tok-s">&quot;puff&quot;</span>, lit=<span class="tok-b">True</span>, size=(<span class="tok-n">1</span>, <span class="tok-n">3</span>),
                           color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">0.3</span>), color_end=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>))</code></pre></div>
-<div class="table"><table><thead><tr><th>Preset</th><th>Look</th></tr></thead><tbody><tr><td><code>&quot;fire&quot;</code></td><td>Glowing flames rising from a small disc, 45 a second</td></tr><tr><td><code>&quot;smoke&quot;</code></td><td>Lit grey puffs that rise, spread and fade over about 5 s</td></tr><tr><td><code>&quot;sparks&quot;</code></td><td>A one-off burst of 24 glowing streaks that fall. It removes its entity when it's done</td></tr><tr><td><code>&quot;dust&quot;</code></td><td>Motes drifting slowly in an 8 × 3 × 8 m box, lit</td></tr><tr><td><code>&quot;splash&quot;</code></td><td>A one-off burst of 40 water droplets thrown up and out</td></tr><tr><td><code>&quot;magic&quot;</code></td><td>Purple-blue stars swirling up, glowing</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Preset</th><th>Look</th></tr></thead><tbody><tr><td><code>&quot;fire&quot;</code></td><td>Glowing flames rising from a small disc, 45 a second</td></tr><tr><td><code>&quot;smoke&quot;</code></td><td>Lit grey puffs that rise, spread and fade over about 5 s</td></tr><tr><td><code>&quot;sparks&quot;</code></td><td>A one-off burst of 24 glowing streaks that fall. It removes its entity when it's done</td></tr><tr><td><code>&quot;dust&quot;</code></td><td>Motes drifting slowly in an 8 × 3 × 8 m box, lit</td></tr><tr><td><code>&quot;splash&quot;</code></td><td>A one-off burst of 40 water droplets thrown up and out</td></tr><tr><td><code>&quot;magic&quot;</code></td><td>Purple-blue stars swirling up, glowing</td></tr><tr><td><code>&quot;motes&quot;</code></td><td>Lit specks of dust hanging in the air all around the camera (<code>follow_camera</code>)</td></tr></tbody></table></div>
 <p>Particles leave the entity within <code>cone_angle</code> of its up (+Y) axis, so
 rotate the entity to aim them. Over each particle's life its size goes from
 <code>size[0]</code> to <code>size[1]</code> and its colour from <code>color</code> to <code>color_end</code>.</p>
-<div class="table"><table><thead><tr><th>Setting</th><th>Values</th><th>What it does</th></tr></thead><tbody><tr><td><code>rate</code></td><td>per second</td><td>New particles every second</td></tr><tr><td><code>burst</code></td><td>count</td><td>Particles made all at once when it starts</td></tr><tr><td><code>duration</code></td><td>s, 0 = forever</td><td>How long it makes particles</td></tr><tr><td><code>one_shot</code></td><td><code>True</code> / <code>False</code></td><td>Removes the entity once it's done and the last particle is gone</td></tr><tr><td><code>lifetime</code></td><td>(min, max) s</td><td>How long each particle lives (picked at random between the two)</td></tr><tr><td><code>shape</code>, <code>shape_size</code></td><td><code>&quot;point&quot;</code>, <code>&quot;sphere&quot;</code>, <code>&quot;box&quot;</code>, <code>&quot;cone&quot;</code>; m</td><td>Where particles start. <code>shape_size</code> is a sphere's or cone's radius (x), or a box's half extents. Sphere particles fly outward</td></tr><tr><td><code>cone_angle</code></td><td>degrees</td><td>How far from straight up they may leave (180 = any way)</td></tr><tr><td><code>speed</code></td><td>(min, max) m/s</td><td>Starting speed</td></tr><tr><td><code>gravity</code>, <code>drag</code></td><td>m/s², per second</td><td>Gravity pulls them down (negative rises, like smoke or flames). Drag slows them</td></tr><tr><td><code>size</code></td><td>(birth, death) m</td><td>Size over life. A single number sets both</td></tr><tr><td><code>color</code>, <code>color_end</code></td><td>RGBA</td><td>Colour at birth and death. Over 1 glows: fire and sparks bloom on Beautiful</td></tr><tr><td><code>fade_in</code>, <code>fade_out</code></td><td>share of life</td><td>Fades at the start and end of each life</td></tr><tr><td><code>spin</code></td><td>rad/s</td><td>Spins the sprite</td></tr><tr><td><code>stretch</code></td><td>s</td><td>Streaks particles back along their motion (sparks, rain)</td></tr><tr><td><code>blend</code></td><td><code>&quot;alpha&quot;</code> / <code>&quot;additive&quot;</code></td><td>Additive adds light, for fire, sparks and magic. Alpha covers what's behind, for smoke and dust</td></tr><tr><td><code>lit</code></td><td><code>True</code> / <code>False</code></td><td>Lit by the sun and placed lights, like smoke a fire colours. Unlit particles show their colour as-is</td></tr><tr><td><code>soft</code></td><td>m</td><td>Fades particles out where they meet the scene, so smoke doesn't show a hard line on the ground</td></tr><tr><td><code>sprite</code></td><td><code>&quot;dot&quot;</code>, <code>&quot;spark&quot;</code>, <code>&quot;star&quot;</code>, <code>&quot;flame&quot;</code>, <code>&quot;puff&quot;</code></td><td>The built-in picture</td></tr><tr><td><code>texture</code>, <code>sheet</code></td><td>image path; (columns, rows)</td><td>Your own image instead. A sprite sheet's frames play over each particle's life</td></tr><tr><td><code>world_space</code></td><td><code>True</code> / <code>False</code></td><td>On by default: particles stay where they were made when the entity moves, so a moving torch leaves a trail. Off, they move with the entity</td></tr><tr><td><code>max_particles</code></td><td>count</td><td>Most alive at once (default 500). Thousands are fine</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Setting</th><th>Values</th><th>What it does</th></tr></thead><tbody><tr><td><code>rate</code></td><td>per second</td><td>New particles every second</td></tr><tr><td><code>burst</code></td><td>count</td><td>Particles made all at once when it starts</td></tr><tr><td><code>duration</code></td><td>s, 0 = forever</td><td>How long it makes particles</td></tr><tr><td><code>one_shot</code></td><td><code>True</code> / <code>False</code></td><td>Removes the entity once it's done and the last particle is gone</td></tr><tr><td><code>lifetime</code></td><td>(min, max) s</td><td>How long each particle lives (picked at random between the two)</td></tr><tr><td><code>shape</code>, <code>shape_size</code></td><td><code>&quot;point&quot;</code>, <code>&quot;sphere&quot;</code>, <code>&quot;box&quot;</code>, <code>&quot;cone&quot;</code>; m</td><td>Where particles start. <code>shape_size</code> is a sphere's or cone's radius (x), or a box's half extents. Sphere particles fly outward</td></tr><tr><td><code>cone_angle</code></td><td>degrees</td><td>How far from straight up they may leave (180 = any way)</td></tr><tr><td><code>speed</code></td><td>(min, max) m/s</td><td>Starting speed</td></tr><tr><td><code>gravity</code>, <code>drag</code></td><td>m/s², per second</td><td>Gravity pulls them down (negative rises, like smoke or flames). Drag slows them</td></tr><tr><td><code>size</code></td><td>(birth, death) m</td><td>Size over life. A single number sets both</td></tr><tr><td><code>color</code>, <code>color_end</code></td><td>RGBA</td><td>Colour at birth and death. Over 1 glows: fire and sparks bloom on Beautiful</td></tr><tr><td><code>fade_in</code>, <code>fade_out</code></td><td>share of life</td><td>Fades at the start and end of each life</td></tr><tr><td><code>spin</code></td><td>rad/s</td><td>Spins the sprite</td></tr><tr><td><code>stretch</code></td><td>s</td><td>Streaks particles back along their motion (sparks, rain)</td></tr><tr><td><code>blend</code></td><td><code>&quot;alpha&quot;</code> / <code>&quot;additive&quot;</code></td><td>Additive adds light, for fire, sparks and magic. Alpha covers what's behind, for smoke and dust</td></tr><tr><td><code>lit</code></td><td><code>True</code> / <code>False</code></td><td>Lit by the sun and placed lights, like smoke a fire colours. Unlit particles show their colour as-is</td></tr><tr><td><code>soft</code></td><td>m</td><td>Fades particles out where they meet the scene, so smoke doesn't show a hard line on the ground</td></tr><tr><td><code>sprite</code></td><td><code>&quot;dot&quot;</code>, <code>&quot;spark&quot;</code>, <code>&quot;star&quot;</code>, <code>&quot;flame&quot;</code>, <code>&quot;puff&quot;</code></td><td>The built-in picture</td></tr><tr><td><code>texture</code>, <code>sheet</code></td><td>image path; (columns, rows)</td><td>Your own image instead. A sprite sheet's frames play over each particle's life</td></tr><tr><td><code>world_space</code></td><td><code>True</code> / <code>False</code></td><td>On by default: particles stay where they were made when the entity moves, so a moving torch leaves a trail. Off, they move with the entity</td></tr><tr><td><code>follow_camera</code></td><td><code>True</code> / <code>False</code></td><td>Fills a box of <code>shape_size</code> around the camera instead of the entity. Particles that drift out wrap round to the far side (dust in the air)</td></tr><tr><td><code>max_particles</code></td><td>count</td><td>Most alive at once (default 500). Thousands are fine</td></tr></tbody></table></div>
 <p><strong>One-off effects from scripts.</strong> <code>ctx.particles.burst</code> plays an effect
 once at a point and cleans up after itself. <code>ctx.particles.emit</code> adds
 particles to an entity's own emitter:</p>
@@ -366,7 +417,7 @@ top to get fog and tone mapping too.</p>
     <footer class="pager"><a class="prev" href="scenes-and-entities.html"><small>Previous</small>Scenes &amp; entities</a><a class="next" href="cameras.html"><small>Next</small>Cameras</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/rendering-and-lights.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#drawing-primitives">Drawing primitives</a></li><li class="l2"><a href="#surfaces">Surfaces</a></li><li class="l3"><a href="#glowing-objects-light-their-surroundings">Glowing objects light their surroundings</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#the-sun">The sun</a></li><li class="l2"><a href="#point-lights-and-spotlights">Point lights and spotlights</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l3"><a href="#post-effects-and-colour-grading">Post effects and colour grading</a></li><li class="l2"><a href="#sky-and-quality">Sky and quality</a></li><li class="l3"><a href="#beautiful">Beautiful</a></li><li class="l2"><a href="#water">Water</a></li><li class="l3"><a href="#under-the-surface">Under the surface</a></li><li class="l2"><a href="#particles">Particles</a></li><li class="l2"><a href="#mood-recipes">Mood recipes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#drawing-primitives">Drawing primitives</a></li><li class="l2"><a href="#surfaces">Surfaces</a></li><li class="l3"><a href="#glowing-objects-light-their-surroundings">Glowing objects light their surroundings</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#the-sun">The sun</a></li><li class="l2"><a href="#point-lights-and-spotlights">Point lights and spotlights</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l3"><a href="#atmosphere-height-fog-god-rays-depth-of-field-dust">Atmosphere: height fog, god rays, depth of field, dust</a></li><li class="l3"><a href="#post-effects-and-colour-grading">Post effects and colour grading</a></li><li class="l2"><a href="#sky-and-quality">Sky and quality</a></li><li class="l3"><a href="#beautiful">Beautiful</a></li><li class="l2"><a href="#water">Water</a></li><li class="l3"><a href="#under-the-surface">Under the surface</a></li><li class="l2"><a href="#particles">Particles</a></li><li class="l2"><a href="#mood-recipes">Mood recipes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

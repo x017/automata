@@ -5,8 +5,9 @@
 //!
 //! Frame flow: the scene renders into [`PostTargets::hdr`] (with
 //! [`PostTargets::depth`]); water, if any, refracts through copies of both;
-//! then [`Post::record_bloom_and_resolve`] builds the bloom mip chain and
-//! resolves HDR + bloom into an LDR image, and [`Post::draw_fxaa`] writes
+//! then [`Post::record_bloom_and_resolve`] builds the bloom mip chain, god
+//! rays and the depth-of-field blur when the [`Lens`] asks for them, and
+//! resolves them all into an LDR image, and [`Post::draw_fxaa`] writes
 //! the anti-aliased result into the caller's target (inside the caller's
 //! pass, so HUD sprites can follow on top, untouched by post effects).
 //!
@@ -57,6 +58,57 @@ struct PostUniform {
     gain: [f32; 4],
     /// x: time (s), y: cheap bloom strength, z: 1 = grade.
     misc: [f32; 4],
+    /// x: god rays, y: depth of field, z: focus distance, w: focus range.
+    lens: [f32; 4],
+    /// x: near, y: far (m), zw: the full-size viewport (px).
+    depth: [f32; 4],
+}
+
+/// Beautiful's camera effects this frame: god rays and depth of field.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Lens {
+    /// God ray strength (0 = none), already faded by where the sun is.
+    pub god_rays: f32,
+    /// Depth-of-field strength (0 = none).
+    pub depth_of_field: f32,
+    /// The distance in focus and the sharp range around it (m).
+    pub focus: f32,
+    pub range: f32,
+    /// The camera's clip planes, to turn depth into distance.
+    pub near: f32,
+    pub far: f32,
+}
+
+impl Lens {
+    /// The Environment's settings through `camera` (focus on its target
+    /// unless the Environment sets a distance), with the god rays faded by
+    /// `sun`: none without one, and fading as it leaves the screen or
+    /// sinks below the horizon.
+    pub fn new(
+        env: &crate::Environment,
+        camera: &crate::Camera3D,
+        sun: Option<&SunFlare>,
+        sun_height: f32,
+    ) -> Self {
+        let god_rays = sun.map_or(0.0, |s| {
+            let edge = |v: f32| (1.0 - ((v - 0.5).abs() - 0.5).max(0.0) / 0.6).clamp(0.0, 1.0);
+            let up = (sun_height * 8.0).clamp(0.0, 1.0);
+            env.god_rays.clamp(0.0, 2.0) * edge(s.uv[0]) * edge(s.uv[1]) * up
+        });
+        let focus = if env.focus_distance > 0.0 {
+            env.focus_distance
+        } else {
+            camera.position.distance(camera.target)
+        };
+        Self {
+            god_rays,
+            depth_of_field: env.depth_of_field.clamp(0.0, 4.0),
+            focus: focus.max(0.01),
+            range: env.focus_range.max(0.0),
+            near: camera.near,
+            far: camera.far,
+        }
+    }
 }
 
 /// The grading and lens effects a post pass applies, packed for the
@@ -217,7 +269,8 @@ pub(crate) struct SunFlare {
 
 impl SunFlare {
     /// Projects the sun (light traveling along `direction`) through
-    /// `camera`; `None` when it's behind the camera.
+    /// `camera`; `None` when it's behind the camera. (`strength` 0 is no
+    /// flare, but god rays still use the position.)
     pub fn new(
         camera: &crate::Camera3D,
         viewport: (u32, u32),
@@ -227,7 +280,7 @@ impl SunFlare {
         color: [f32; 3],
     ) -> Option<Self> {
         let clip = camera.view_proj(viewport) * (-direction.normalize_or_zero()).extend(0.0);
-        if clip.w <= 1e-4 || strength <= 0.0 {
+        if clip.w <= 1e-4 {
             return None;
         }
         let ndc = clip.truncate() / clip.w;
@@ -264,6 +317,11 @@ pub(crate) struct PostTargets {
     ldr: wgpu::Texture,
     /// 1x1: how much of the sun disk is unblocked this frame.
     sun_visibility: wgpu::Texture,
+    /// Quarter size: the sky around the sun, then the rays from it.
+    rays_mask: wgpu::Texture,
+    rays: wgpu::Texture,
+    /// Half size: the depth-of-field blur.
+    dof: wgpu::Texture,
 }
 
 impl PostTargets {
@@ -340,6 +398,27 @@ impl PostTargets {
                 (1, 1),
                 1,
             ),
+            rays_mask: texture(
+                "god rays mask",
+                HDR_FORMAT,
+                U::RENDER_ATTACHMENT | U::TEXTURE_BINDING,
+                quarter(size),
+                1,
+            ),
+            rays: texture(
+                "god rays",
+                HDR_FORMAT,
+                U::RENDER_ATTACHMENT | U::TEXTURE_BINDING,
+                quarter(size),
+                1,
+            ),
+            dof: texture(
+                "depth of field",
+                HDR_FORMAT,
+                U::RENDER_ATTACHMENT | U::TEXTURE_BINDING,
+                bloom_size,
+                1,
+            ),
         }
     }
 
@@ -351,6 +430,11 @@ impl PostTargets {
             ..wgpu::TextureViewDescriptor::default()
         })
     }
+}
+
+/// A quarter of `size` (at least 1x1).
+fn quarter(size: (u32, u32)) -> (u32, u32) {
+    ((size.0 / 4).max(1), (size.1 / 4).max(1))
 }
 
 /// Bloom mips for a half-resolution base: halve until a side would drop
@@ -375,12 +459,16 @@ pub(crate) struct Post {
     resolve: wgpu::RenderPipeline,
     sun_visibility: wgpu::RenderPipeline,
     ldr_prefilter: wgpu::RenderPipeline,
+    rays_mask: wgpu::RenderPipeline,
+    rays: wgpu::RenderPipeline,
+    dof: wgpu::RenderPipeline,
     /// FXAA pipelines per target format.
     fxaa: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
     /// Grade pipelines per target format (Medium to Ultra).
     grade: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
     sampler: wgpu::Sampler,
     placeholder: wgpu::TextureView,
+    placeholder_depth: wgpu::TextureView,
     pub targets: Option<PostTargets>,
     pub ldr: Option<LdrTargets>,
 }
@@ -421,6 +509,18 @@ impl Post {
                 },
                 texture_entry(3),
                 texture_entry(4),
+                texture_entry(5),
+                texture_entry(6),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -489,6 +589,11 @@ impl Post {
             None,
             None,
         );
+        let pass =
+            |entry| fullscreen_pipeline(device, &layout, &shader, entry, HDR_FORMAT, None, None);
+        let rays_mask = pass("fs_rays_mask");
+        let rays = pass("fs_rays");
+        let dof = pass("fs_dof");
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("post"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -513,6 +618,22 @@ impl Post {
                 view_formats: &[],
             })
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let placeholder_depth = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("post placeholder depth"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: HDR_DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
         Self {
             layout,
             shader,
@@ -522,10 +643,14 @@ impl Post {
             resolve,
             sun_visibility,
             ldr_prefilter,
+            rays_mask,
+            rays,
+            dof,
             fxaa: Vec::new(),
             grade: Vec::new(),
             sampler,
             placeholder,
+            placeholder_depth,
             targets: None,
             ldr: None,
         }
@@ -606,11 +731,26 @@ impl Post {
         extra: Option<&wgpu::TextureView>,
         extra2: Option<&wgpu::TextureView>,
     ) -> wgpu::BindGroup {
+        self.bind_all(device, src, uniform, [extra, extra2, None, None], None)
+    }
+
+    /// A bind group with every input: the source, up to four more images
+    /// (bindings 3 to 6) and the scene's depth; missing ones are 1x1
+    /// placeholders.
+    fn bind_all(
+        &self,
+        device: &wgpu::Device,
+        src: &wgpu::TextureView,
+        uniform: PostUniform,
+        extras: [Option<&wgpu::TextureView>; 4],
+        depth: Option<&wgpu::TextureView>,
+    ) -> wgpu::BindGroup {
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("post"),
             contents: bytemuck::bytes_of(&uniform),
             usage: wgpu::BufferUsages::UNIFORM,
         });
+        let views = extras.map(|v| v.unwrap_or(&self.placeholder));
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("post"),
             layout: &self.layout,
@@ -629,23 +769,34 @@ impl Post {
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
-                    resource: wgpu::BindingResource::TextureView(
-                        extra.unwrap_or(&self.placeholder),
-                    ),
+                    resource: wgpu::BindingResource::TextureView(views[0]),
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
+                    resource: wgpu::BindingResource::TextureView(views[1]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(views[2]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(views[3]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
                     resource: wgpu::BindingResource::TextureView(
-                        extra2.unwrap_or(&self.placeholder),
+                        depth.unwrap_or(&self.placeholder_depth),
                     ),
                 },
             ],
         })
     }
 
-    /// Bloom (down then up the mip chain) and the HDR → LDR resolve with
-    /// `exposure` and tone mapping curve `tonemap` (the shader's index),
-    /// plus the sun's lens flare if there is one.
+    /// Bloom (down then up the mip chain), god rays and depth of field as
+    /// `lens` asks, and the HDR → LDR resolve with `exposure` and tone
+    /// mapping curve `tonemap` (the shader's index), plus the sun's lens
+    /// flare if there is one (`sun` with a strength).
     #[allow(clippy::too_many_lines)] // one pass sequence, read top to bottom
     #[allow(clippy::too_many_arguments)]
     pub fn record_bloom_and_resolve(
@@ -654,9 +805,10 @@ impl Post {
         encoder: &mut wgpu::CommandEncoder,
         exposure: f32,
         tonemap: f32,
-        flare: Option<SunFlare>,
+        sun: Option<SunFlare>,
         grade: Grade,
         bloom: f32,
+        lens: Lens,
     ) {
         let Some(t) = &self.targets else {
             return;
@@ -670,18 +822,32 @@ impl Post {
         };
         let strength = BLOOM * bloom.clamp(0.0, 4.0) / t.bloom_levels.max(1) as f32;
         let aspect = t.size.0 as f32 / t.size.1.max(1) as f32;
-        let flare = flare
+        let flare = sun
             .map(|f| SunFlare {
                 strength: f.strength * f.on_screen(),
                 ..f
             })
             .filter(|f| f.strength > 0.0);
-        let (sun, sun_color) = flare.map_or(([0.0; 4], [0.0, 0.0, 0.0, aspect]), |f| {
+        let rays = sun.filter(|_| lens.god_rays > 0.0);
+        let dof = lens.depth_of_field > 0.0;
+        let (sun, sun_color) = sun.map_or(([0.0; 4], [0.0, 0.0, 0.0, aspect]), |f| {
             (
-                [f.uv[0], f.uv[1], f.strength, f.radius],
+                [
+                    f.uv[0],
+                    f.uv[1],
+                    flare.map_or(0.0, |f| f.strength),
+                    f.radius,
+                ],
                 [f.color[0], f.color[1], f.color[2], aspect],
             )
         });
+        let lens_uniform = [
+            if rays.is_some() { lens.god_rays } else { 0.0 },
+            lens.depth_of_field,
+            lens.focus,
+            lens.range,
+        ];
+        let depth_uniform = [lens.near, lens.far, t.size.0 as f32, t.size.1 as f32];
         let uniform = |texel: (f32, f32)| {
             grade.into_uniform(
                 PostUniform {
@@ -689,6 +855,8 @@ impl Post {
                     params: [0.0, exposure, tonemap, strength],
                     sun,
                     sun_color,
+                    lens: lens_uniform,
+                    depth: depth_uniform,
                     ..PostUniform::default()
                 },
                 0.0,
@@ -755,14 +923,79 @@ impl Post {
                 &bind,
             );
         }
-        // Resolve: HDR + bloom, exposure, tone mapping.
+        // God rays: the sky around the sun, streaked toward it.
+        let depth_view = t.depth.create_view(&wgpu::TextureViewDescriptor::default());
+        let rays_view = t.rays.create_view(&wgpu::TextureViewDescriptor::default());
+        if rays.is_some() {
+            let mask_view = t
+                .rays_mask
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            let full = (t.size.0 as f32, t.size.1 as f32);
+            let bind = self.bind_all(
+                device,
+                &hdr_view,
+                uniform(full),
+                [None; 4],
+                Some(&depth_view),
+            );
+            fullscreen_pass(
+                encoder,
+                "god rays mask",
+                &mask_view,
+                wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                &self.rays_mask,
+                &bind,
+            );
+            let q = quarter(t.size);
+            let bind = self.bind(
+                device,
+                &mask_view,
+                uniform((q.0 as f32, q.1 as f32)),
+                None,
+                None,
+            );
+            fullscreen_pass(
+                encoder,
+                "god rays",
+                &rays_view,
+                wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                &self.rays,
+                &bind,
+            );
+        }
+        // Depth of field: the scene blurred by its distance from the focus.
+        let dof_view = t.dof.create_view(&wgpu::TextureViewDescriptor::default());
+        if dof {
+            let bind = self.bind_all(
+                device,
+                &hdr_view,
+                uniform((t.size.0 as f32, t.size.1 as f32)),
+                [None; 4],
+                Some(&depth_view),
+            );
+            fullscreen_pass(
+                encoder,
+                "depth of field",
+                &dof_view,
+                wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                &self.dof,
+                &bind,
+            );
+        }
+        // Resolve: HDR (over its blur) + bloom + rays, exposure, tone
+        // mapping.
         let ldr_view = t.ldr.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind = self.bind(
+        let bind = self.bind_all(
             device,
             &hdr_view,
             uniform((t.size.0 as f32, t.size.1 as f32)),
-            Some(&mips[0]),
-            flare.map(|_| &visibility),
+            [
+                Some(&mips[0]),
+                flare.map(|_| &visibility),
+                rays.map(|_| &rays_view),
+                dof.then_some(&dof_view),
+            ],
+            dof.then_some(&depth_view),
         );
         fullscreen_pass(
             encoder,
@@ -971,7 +1204,7 @@ mod tests {
         assert_eq!(bloom_level_count((960, 540)), 6);
         assert_eq!(bloom_level_count((32, 32)), 3); // 32, 16, 8
         assert_eq!(bloom_level_count((4, 4)), 1);
-        assert_eq!(std::mem::size_of::<PostUniform>(), 160);
+        assert_eq!(std::mem::size_of::<PostUniform>(), 192);
     }
 
     #[test]
@@ -1010,6 +1243,8 @@ mod tests {
         assert!((f.uv[0] - 0.5).abs() < 1e-4 && (f.uv[1] - 0.5).abs() < 1e-4);
         assert!(f.radius > 0.0 && f.radius < 0.05);
         assert!((f.on_screen() - 1.0).abs() < 1e-6);
+        // No flare, but still a position (for god rays).
+        assert!(SunFlare::new(&cam, (800, 600), glam::Vec3::Z, 2.0, 0.0, [1.0; 3]).is_some());
         // Behind the camera: no flare.
         assert!(SunFlare::new(&cam, (800, 600), glam::Vec3::NEG_Z, 2.0, 1.0, [1.0; 3]).is_none());
         // Far off to the side: faded out.

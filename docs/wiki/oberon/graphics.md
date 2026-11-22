@@ -119,6 +119,13 @@ tuning.
 | Fog Color | Usually the same as Background, so distant objects melt into the sky |
 | Fog Density | How quickly fog thickens per metre. 0.01 is light haze, 0.05 is thick |
 | Fog Start | Distance from the camera with no fog at all |
+| Fog Height | Height fog: the fog has full density below this height (m) |
+| Fog Falloff | How fast it thins above Fog Height: e times thinner every 1/falloff metres. 0 keeps the fog even at every height |
+| Fog Sun Glow | How much fog toward the sun glows in the sun's colour |
+| God Rays | Sun shafts streaming past trees and walls toward the camera, 0 off to 2. Beautiful quality, with Sky & Sun on |
+| Depth of Field | Blur on what's nearer or farther than the focus, 0 off to 4. Beautiful quality only |
+| Focus Distance | Metres from the camera kept sharp. 0 follows the camera's Look At point (shown once Depth of Field is above 0) |
+| Focus Range | Metres either side of the focus that stay sharp too |
 
 > With the sky off, fog is applied before tone mapping and the
 > background after it, so with ACES or AgX the far fog can look slightly

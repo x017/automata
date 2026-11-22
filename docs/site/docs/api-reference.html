@@ -158,6 +158,8 @@ Saved as <code>point_light</code> / <code>spot_light</code> in scene files. Guid
                fog_density=<span class="tok-n">0.02</span>, fog_start=<span class="tok-n">0.0</span>, sky=<span class="tok-b">False</span>,
                zenith_color=(<span class="tok-n">0.16</span>, <span class="tok-n">0.34</span>, <span class="tok-n">0.78</span>), sun_size=<span class="tok-n">2.0</span>, sun_glow=<span class="tok-n">1.0</span>,
                clouds=<span class="tok-n">0.0</span>, lens_flare=<span class="tok-n">1.0</span>, ambient_occlusion=<span class="tok-n">1.0</span>,
+               fog_height=<span class="tok-n">0.0</span>, fog_falloff=<span class="tok-n">0.0</span>, fog_sun=<span class="tok-n">0.0</span>, god_rays=<span class="tok-n">0.0</span>,
+               depth_of_field=<span class="tok-n">0.0</span>, focus_distance=<span class="tok-n">0.0</span>, focus_range=<span class="tok-n">1.0</span>,
                post=<span class="tok-b">None</span>, bloom=<span class="tok-b">None</span>, contrast=<span class="tok-b">None</span>, saturation=<span class="tok-b">None</span>,
                temperature=<span class="tok-b">None</span>, tint=<span class="tok-b">None</span>, lift=<span class="tok-b">None</span>, gamma=<span class="tok-b">None</span>, gain=<span class="tok-b">None</span>,
                vignette=<span class="tok-b">None</span>, grain=<span class="tok-b">None</span>, chromatic_aberration=<span class="tok-b">None</span>)
@@ -176,6 +178,15 @@ flare (<code>lens_flare</code> strength) when the camera looks toward the sun. A
 on <code>BEAUTIFUL</code>, <code>ambient_occlusion</code> (0 off, 1 default, up to 2) darkens
 the ambient light in creases, corners and on the ground around objects.
 The non-neutral presets turn the sky on.</p>
+<p>Height fog: with <code>fog_falloff</code> above 0 the fog has full density below
+<code>fog_height</code> and thins by e every <code>1 / fog_falloff</code> metres above it, so it
+lies in valleys. <code>fog_sun</code> (0..4) makes it glow toward the sun. On
+<code>BEAUTIFUL</code>, <code>god_rays</code> (0..2) draws sun shafts blocked by geometry, and
+<code>depth_of_field</code> (0..4) blurs what's nearer or farther than
+<code>focus_distance</code> ± <code>focus_range</code> metres (<code>focus_distance=0</code> follows the
+camera's target). The <code>&quot;daylight&quot;</code> and <code>&quot;dusk&quot;</code> presets turn on height fog
+and god rays. See
+<a href="guides/rendering-and-lights.html#atmosphere-height-fog-god-rays-depth-of-field-dust">Atmosphere</a>.</p>
 <p>Post effects grade the finished frame on <code>MEDIUM</code> and up: <code>post</code> starts
 from a named look, and the other post keywords change single fields on
 top of it (unset ones keep the look's value, or the neutral default
@@ -212,7 +223,7 @@ Guides: <a href="guides/rendering-and-lights.html#water">Rendering &amp; Lights<
 <a href="guides/physics.html#water">Physics</a>.</p>
 <h3 id="particleemitter">ParticleEmitter<a class="anchor" href="#particleemitter" aria-label="Link to this section">#</a></h3>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.ParticleEmitter(**fields)                 <span class="tok-c"># any field below by keyword</span>
-at.ParticleEmitter.preset(<span class="tok-s">&quot;fire&quot;</span> | <span class="tok-s">&quot;smoke&quot;</span> | <span class="tok-s">&quot;sparks&quot;</span> | <span class="tok-s">&quot;dust&quot;</span> | <span class="tok-s">&quot;splash&quot;</span> | <span class="tok-s">&quot;magic&quot;</span>, **fields)
+at.ParticleEmitter.preset(<span class="tok-s">&quot;fire&quot;</span> | <span class="tok-s">&quot;smoke&quot;</span> | <span class="tok-s">&quot;sparks&quot;</span> | <span class="tok-s">&quot;dust&quot;</span> | <span class="tok-s">&quot;splash&quot;</span> | <span class="tok-s">&quot;magic&quot;</span> | <span class="tok-s">&quot;motes&quot;</span>, **fields)
 at.ParticleEmitter.presets() -&gt; <span class="tok-b">list</span>[<span class="tok-b">str</span>]
 emitter.replace(**fields) -&gt; ParticleEmitter <span class="tok-c"># a changed copy</span>
 emitter.preset_name                          <span class="tok-c"># &quot;fire&quot; … or None once changed</span></code></pre></div>
@@ -223,7 +234,7 @@ emitter.preset_name                          <span class="tok-c"># &quot;fire&qu
 <code>size_spread</code>, <code>color</code>, <code>color_end</code> (RGBA, over 1 glows), <code>fade_in</code>,
 <code>fade_out</code>, <code>spin</code>, <code>stretch</code>, <code>blend</code> (<code>&quot;alpha&quot;</code>, <code>&quot;additive&quot;</code>), <code>lit</code>,
 <code>soft</code>, <code>sprite</code> (<code>&quot;dot&quot;</code>, <code>&quot;spark&quot;</code>, <code>&quot;star&quot;</code>, <code>&quot;flame&quot;</code>, <code>&quot;puff&quot;</code>),
-<code>texture</code>, <code>sheet</code> (columns, rows), <code>world_space</code>. Pairs also take one number for both, and colours take RGB or RGBA. A bad name raises <code>KeyError</code>. A bad value raises <code>ValueError</code>. Saved in scene
+<code>texture</code>, <code>sheet</code> (columns, rows), <code>world_space</code>, <code>follow_camera</code> (fill a box of <code>shape_size</code> around the camera, wrapping particles round as it moves). Pairs also take one number for both, and colours take RGB or RGBA. A bad name raises <code>KeyError</code>. A bad value raises <code>ValueError</code>. Saved in scene
 files. Guide: <a href="guides/rendering-and-lights.html#particles">Rendering &amp; Lights</a>.</p>
 <h3 id="physics-components">Physics components<a class="anchor" href="#physics-components" aria-label="Link to this section">#</a></h3>
 <div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.RigidBody(body_type=&quot;dynamic&quot;, *, gravity_scale=1.0,

@@ -1409,6 +1409,10 @@ impl Renderer {
             .water_pipeline(pipeline::HDR_FORMAT, true, pipeline::ForwardShadows::ALL)
             .filter(|_| !draw.waters.is_empty());
         let particles = !prepared.particle_runs.is_empty();
+        // God rays and depth of field read the scene's depth afterwards.
+        let lens_depth = draw
+            .environment
+            .is_some_and(|e| e.god_rays > 0.0 || e.depth_of_field > 0.0);
         let keep_depth = |keep: bool| {
             if keep {
                 wgpu::StoreOp::Store
@@ -1437,7 +1441,7 @@ impl Renderer {
                     view: &hdr_depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
-                        store: keep_depth(water.is_some() || particles),
+                        store: keep_depth(water.is_some() || particles || lens_depth),
                     }),
                     stencil_ops: None,
                 }),
@@ -1502,7 +1506,7 @@ impl Renderer {
                     view: &hdr_depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Load,
-                        store: keep_depth(particles),
+                        store: keep_depth(particles || lens_depth),
                     }),
                     stencil_ops: None,
                 }),
@@ -1516,8 +1520,8 @@ impl Renderer {
         }
 
         let env = draw.environment.unwrap_or_default();
-        // No lens flare from under the water.
-        let flare = draw
+        // No lens flare or god rays from under the water.
+        let sun = draw
             .camera_3d
             .filter(|_| draws_sky(draw) && !camera_in_water(draw))
             .and_then(|cam| {
@@ -1531,14 +1535,16 @@ impl Renderer {
                     sun.color,
                 )
             });
+        let lens = beautiful_lens(draw, sun.as_ref());
         self.post.record_bloom_and_resolve(
             device,
             encoder,
             env.exposure.max(0.0),
             beautiful_tonemap(draw.environment),
-            flare,
+            sun,
             crate::post::Grade::new(&env.post, draw.time.unwrap_or(0.0)),
             env.post.bloom,
+            lens,
         );
 
         // Final: FXAA into the target, then sprites on top.
@@ -2597,6 +2603,16 @@ fn scene_bounds(draw: &DrawList) -> (Vec<Sphere>, Sphere) {
 /// environment without a curve gets Khronos PBR Neutral (index 4, shader
 /// only): authored colors pass through unchanged and only highlights roll
 /// off, instead of clipping the bright range bloom works with.
+/// Beautiful's god rays and depth of field for `draw`, through its 3D
+/// camera (none without one), with the god rays from `sun`.
+fn beautiful_lens(draw: &DrawList, sun: Option<&crate::post::SunFlare>) -> crate::post::Lens {
+    let (Some(env), Some(camera)) = (draw.environment, draw.camera_3d) else {
+        return crate::post::Lens::default();
+    };
+    let height = -draw.sun.unwrap_or_default().normalized_direction().y;
+    crate::post::Lens::new(&env, &camera, sun, height)
+}
+
 fn beautiful_tonemap(env: Option<crate::Environment>) -> f32 {
     const NEUTRAL: f32 = 4.0;
     match env.map(|e| e.tonemapping) {
@@ -3755,6 +3771,296 @@ mod tests {
             } else {
                 assert!(b > a + 12, "{quality:?}: bloom should glow, {a} -> {b}");
             }
+        }
+    }
+
+    /// A green wall 10 m ahead of a camera 1 m up, in red fog: `falloff`
+    /// 0 is plain distance fog, above 0 height fog with its top at y = 0.
+    fn foggy_wall(renderer: &mut Renderer, falloff: f32) -> Vec<u8> {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let wall = renderer.create_material([0.1, 0.8, 0.1, 1.0], None);
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 1.0, 0.0),
+            glam::Vec3::new(0.0, 1.0, -10.0),
+        ));
+        draw.set_sun(crate::Sun::new(glam::Vec3::new(0.0, -0.5, -1.0)));
+        draw.set_environment(crate::Environment {
+            fog: true,
+            fog_color: [1.0, 0.0, 0.0],
+            fog_density: 0.15,
+            fog_start: 0.0,
+            fog_height: 0.0,
+            fog_falloff: falloff,
+            ..crate::Environment::default()
+        });
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::new(40.0, 40.0, 0.2),
+                glam::Quat::IDENTITY,
+                glam::Vec3::new(0.0, 0.0, -10.0),
+            ),
+            &wall,
+        );
+        renderer.render_offscreen(&draw, &target);
+        read_pixels(renderer, &target, size)
+    }
+
+    #[test]
+    fn height_fog_is_thick_low_down_and_thin_up_high() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping height fog test");
+            return;
+        };
+        let size = renderer.size();
+        // How red the fog makes it: red over red + green.
+        #[allow(clippy::cast_precision_loss)] // bytes
+        let redness = |p: [u32; 3]| p[0] as f32 / (p[0] + p[1]).max(1) as f32;
+        for quality in GraphicsQuality::ALL {
+            renderer.set_quality(quality);
+            let flat = foggy_wall(&mut renderer, 0.0);
+            let (top, bottom) = (
+                redness(pixel_at(&flat, size, 32, 4)),
+                redness(pixel_at(&flat, size, 32, 60)),
+            );
+            assert!(
+                (top - bottom).abs() < 0.1 && top > 0.5,
+                "{quality:?}: distance fog is even, {top} vs {bottom}"
+            );
+            let flat_top = top;
+            let layered = foggy_wall(&mut renderer, 1.5);
+            let (top, bottom) = (
+                redness(pixel_at(&layered, size, 32, 4)),
+                redness(pixel_at(&layered, size, 32, 60)),
+            );
+            assert!(
+                bottom > top + 0.2 && top < flat_top - 0.2,
+                "{quality:?}: thick below the layer's top, thin above: {top} vs {bottom}"
+            );
+        }
+    }
+
+    /// Looking into the sky at the sun, with a dark wall whose top edge is
+    /// just below it (seen from its unlit side), or over it when `covered`.
+    fn sun_over_wall(renderer: &mut Renderer, god_rays: f32, covered: bool) -> Vec<u8> {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let wall = renderer.create_material([0.2, 0.2, 0.2, 1.0], None);
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::ZERO,
+            glam::Vec3::new(0.0, 2.0, -10.0),
+        ));
+        draw.set_sun(crate::Sun::new(glam::Vec3::new(0.0, -0.2, 1.0)));
+        draw.set_environment(crate::Environment {
+            god_rays,
+            lens_flare: 0.0,
+            ..crate::Environment::daylight()
+        });
+        // Top edge at y = 0.7, 5 m away: a little under the sun (y = 1).
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::new(30.0, 20.0, 0.2),
+                glam::Quat::IDENTITY,
+                glam::Vec3::new(0.0, if covered { 0.0 } else { -9.3 }, -5.0),
+            ),
+            &wall,
+        );
+        renderer.render_offscreen(&draw, &target);
+        read_pixels(renderer, &target, size)
+    }
+
+    #[test]
+    fn god_rays_stream_past_geometry_toward_the_sun_on_beautiful() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping god rays test");
+            return;
+        };
+        let size = renderer.size();
+        let luma = |p: [u32; 3]| p[0] + p[1] + p[2];
+        for quality in [GraphicsQuality::High, GraphicsQuality::Beautiful] {
+            renderer.set_quality(quality);
+            let plain = sun_over_wall(&mut renderer, 0.0, false);
+            let rays = sun_over_wall(&mut renderer, 2.0, false);
+            // On the wall just under its edge, below the sun.
+            let near = (
+                luma(pixel_at(&plain, size, 32, 40)),
+                luma(pixel_at(&rays, size, 32, 40)),
+            );
+            if quality == GraphicsQuality::High {
+                assert!(near.0.abs_diff(near.1) <= 6, "High: no god rays {near:?}");
+                continue;
+            }
+            assert!(
+                near.1 > near.0 + 20,
+                "light streams over the wall's edge: {near:?}"
+            );
+            // With the wall hiding the sun there's nothing to stream.
+            let hidden = (
+                sun_over_wall(&mut renderer, 0.0, true),
+                sun_over_wall(&mut renderer, 2.0, true),
+            );
+            let hidden = (
+                luma(pixel_at(&hidden.0, size, 32, 40)),
+                luma(pixel_at(&hidden.1, size, 32, 40)),
+            );
+            assert!(
+                hidden.0.abs_diff(hidden.1) <= 3,
+                "geometry blocks the rays: {hidden:?}"
+            );
+        }
+    }
+
+    /// A white glowing block 50 m away on black, `dof` strong, focused at
+    /// `focus` metres.
+    fn far_block(renderer: &mut Renderer, dof: f32, focus: f32) -> Vec<u8> {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let white = renderer.create_pbr_material(
+            &crate::MaterialParams {
+                emissive: [1.0, 1.0, 1.0],
+                ..crate::MaterialParams::with_color([1.0, 1.0, 1.0, 1.0])
+            },
+            crate::MaterialTextures::default(),
+        );
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::ZERO,
+            glam::Vec3::new(0.0, 0.0, -2.0),
+        ));
+        draw.set_environment(crate::Environment {
+            depth_of_field: dof,
+            focus_distance: focus,
+            focus_range: 0.5,
+            post: crate::PostEffects {
+                bloom: 0.0,
+                ..crate::PostEffects::default()
+            },
+            ..crate::Environment::default()
+        });
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::new(20.0, 20.0, 1.0),
+                glam::Quat::IDENTITY,
+                glam::Vec3::new(0.0, 0.0, -50.0),
+            ),
+            &white,
+        );
+        renderer.render_offscreen(&draw, &target);
+        read_pixels(renderer, &target, size)
+    }
+
+    #[test]
+    fn depth_of_field_blurs_what_is_out_of_focus_on_beautiful() {
+        let Some(mut renderer) = pollster::block_on(Renderer::new_offscreen((160, 120))).ok()
+        else {
+            eprintln!("no GPU adapter; skipping depth of field test");
+            return;
+        };
+        let size = renderer.size();
+        let luma = |p: [u32; 3]| p[0] + p[1] + p[2];
+        for quality in [GraphicsQuality::High, GraphicsQuality::Beautiful] {
+            renderer.set_quality(quality);
+            let sharp = far_block(&mut renderer, 0.0, 0.0);
+            // The block's right edge along the middle row.
+            let edge = (80..size.0)
+                .find(|&x| luma(pixel_at(&sharp, size, x, 60)) < 30)
+                .expect("the block ends");
+            let outside = |pixels: &[u8]| luma(pixel_at(pixels, size, edge + 1, 60));
+            let inside = |pixels: &[u8]| luma(pixel_at(pixels, size, edge - 2, 60));
+            // Focused 2 m away (the camera's target): the block blurs.
+            let near_focus = far_block(&mut renderer, 4.0, 0.0);
+            // Focused on it: sharp.
+            let on_it = far_block(&mut renderer, 4.0, 50.0);
+            if quality == GraphicsQuality::High {
+                assert!(
+                    outside(&near_focus).abs_diff(outside(&sharp)) <= 6,
+                    "High: no depth of field"
+                );
+                continue;
+            }
+            assert!(
+                outside(&near_focus) > outside(&sharp) + 60,
+                "out of focus, the edge spreads: {} -> {}",
+                outside(&sharp),
+                outside(&near_focus)
+            );
+            assert!(inside(&near_focus) < inside(&sharp));
+            assert!(
+                outside(&on_it) <= outside(&sharp) + 6,
+                "in focus it stays sharp: {}",
+                outside(&on_it)
+            );
+        }
+    }
+
+    #[test]
+    fn lit_particles_darken_in_shade() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping particle shade test");
+            return;
+        };
+        let size = renderer.size();
+        let luma = |p: [u32; 3]| p[0] + p[1] + p[2];
+        for quality in [GraphicsQuality::Medium, GraphicsQuality::Beautiful] {
+            renderer.set_quality(quality);
+            let target = target(renderer.context().device(), size);
+            let cube = renderer.create_mesh(&MeshData::cube(1.0));
+            let grey = renderer.create_material([0.05, 0.05, 0.05, 1.0], None);
+            let mut draw = DrawList::new();
+            draw.set_clear_color(Color::BLACK);
+            draw.set_camera_3d(Camera3D::new(
+                glam::Vec3::new(0.0, 0.0, 5.0),
+                glam::Vec3::ZERO,
+            ));
+            draw.set_sun(crate::Sun {
+                shadows: true,
+                ..crate::Sun::new(glam::Vec3::new(0.0, -1.0, -0.2))
+            });
+            // A roof over the left particle, and the wall behind.
+            for (scale, at) in [
+                (
+                    glam::Vec3::new(2.5, 0.2, 3.0),
+                    glam::Vec3::new(-1.5, 1.6, 0.0),
+                ),
+                (
+                    glam::Vec3::new(20.0, 20.0, 0.2),
+                    glam::Vec3::new(0.0, 0.0, -2.0),
+                ),
+            ] {
+                draw.mesh(
+                    &cube,
+                    glam::Mat4::from_scale_rotation_translation(scale, glam::Quat::IDENTITY, at),
+                    &grey,
+                );
+            }
+            for x in [-1.5, 1.5] {
+                draw.particles(crate::ParticleBatch {
+                    lit: true,
+                    ..one_particle([x, 0.0, 0.0], [1.0; 4], crate::ParticleBlend::Alpha, 0.0)
+                });
+            }
+            renderer.render_offscreen(&draw, &target);
+            let pixels = read_pixels(&renderer, &target, size);
+            let (shaded, sunny) = (
+                luma(pixel_at(&pixels, size, 19, 32)),
+                luma(pixel_at(&pixels, size, 45, 32)),
+            );
+            // (sRGB bytes: ambient alone encodes to about half of full sun.)
+            assert!(
+                shaded + 150 < sunny,
+                "{quality:?}: in shade {shaded}, in the sun {sunny}"
+            );
         }
     }
 

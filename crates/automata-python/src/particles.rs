@@ -5,7 +5,7 @@ use pyo3::exceptions::{PyAttributeError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict};
 
-/// Makes particles: fire, smoke, sparks, dust, splashes, magic.
+/// Makes particles: fire, smoke, sparks, dust, splashes, magic, motes.
 ///
 /// Start from a preset and change what you like, or set fields from
 /// scratch (any field below, by keyword):
@@ -28,7 +28,8 @@ use pyo3::types::{PyBool, PyDict};
 /// (shares of life), `spin` (rad/s), `stretch` (s of travel), `blend`
 /// ("alpha", "additive"), `lit`, `soft` (m), `sprite` ("dot", "spark",
 /// "star", "flame", "puff"), `texture` (image file), `sheet` (columns,
-/// rows), `world_space`.
+/// rows), `world_space`, `follow_camera` (fill the air around the camera:
+/// the emitter's box repeats through space, for dust motes or snow).
 #[pyclass(name = "ParticleEmitter", module = "automata._core", frozen)]
 #[derive(Debug, Clone)]
 pub struct PyParticleEmitter {
@@ -178,6 +179,12 @@ impl PyParticleEmitter {
                 .unbind(),
             "world_space" => e
                 .world_space
+                .into_pyobject(py)?
+                .to_owned()
+                .into_any()
+                .unbind(),
+            "follow_camera" => e
+                .follow_camera
                 .into_pyobject(py)?
                 .to_owned()
                 .into_any()

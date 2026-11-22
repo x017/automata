@@ -99,6 +99,25 @@ pub struct Environment {
     /// ground under objects darken the ambient light (`0` = off, `1` =
     /// default, up to `2`). Beautiful preset only.
     pub ambient_occlusion: f32,
+    /// Height fog: the top of the fog layer (world Y). Below it the fog
+    /// has its full `fog_density`; above it, it thins by `fog_falloff`.
+    pub fog_height: f32,
+    /// How fast the fog thins above `fog_height`, per metre (`0` = the
+    /// same everywhere, plain distance fog; `0.1` = to a third in 11 m).
+    pub fog_falloff: f32,
+    /// How much the sun lights the fog: it glows toward the sun (`0` =
+    /// none, `1` = strong).
+    pub fog_sun: f32,
+    /// Light shafts from the sun through gaps in the scenery (`0` = off,
+    /// `1` = default, up to `2`). Beautiful preset only.
+    pub god_rays: f32,
+    /// Depth of field: blur in front of and behind the focus (`0` = off,
+    /// `1` = default, up to `4`). Beautiful preset only.
+    pub depth_of_field: f32,
+    /// The distance in focus, in metres (`0` = auto: the camera's target).
+    pub focus_distance: f32,
+    /// How deep the sharp zone around the focus distance is, in metres.
+    pub focus_range: f32,
     /// Colour grading and screen effects, applied after tone mapping on
     /// Medium graphics and up.
     pub post: PostEffects,
@@ -284,14 +303,21 @@ impl Default for Environment {
             clouds: 0.0,
             lens_flare: 1.0,
             ambient_occlusion: 1.0,
+            fog_height: 0.0,
+            fog_falloff: 0.0,
+            fog_sun: 0.0,
+            god_rays: 0.0,
+            depth_of_field: 0.0,
+            focus_distance: 0.0,
+            focus_range: 1.0,
             post: PostEffects::default(),
         }
     }
 }
 
 impl Environment {
-    /// A daylight preset: blue sky ambient, warm ground bounce, light haze,
-    /// ACES tone mapping.
+    /// A daylight preset: blue sky ambient, warm ground bounce, light haze
+    /// lying low over the ground, soft god rays, ACES tone mapping.
     #[must_use]
     pub fn daylight() -> Self {
         Self {
@@ -304,6 +330,10 @@ impl Environment {
             fog_color: [0.55, 0.68, 0.85],
             fog_density: 0.012,
             fog_start: 10.0,
+            fog_height: 2.0,
+            fog_falloff: 0.15,
+            fog_sun: 0.5,
+            god_rays: 0.5,
             sky: true,
             zenith_color: [0.16, 0.34, 0.78],
             clouds: 0.35,
@@ -311,7 +341,8 @@ impl Environment {
         }
     }
 
-    /// A dusk preset: orange-violet ambient, dense warm fog, `AgX`.
+    /// A dusk preset: orange-violet ambient, dense warm fog pooling in the
+    /// low ground and glowing toward the sun, strong god rays, `AgX`.
     #[must_use]
     pub fn dusk() -> Self {
         Self {
@@ -324,6 +355,10 @@ impl Environment {
             fog_color: [0.32, 0.18, 0.2],
             fog_density: 0.03,
             fog_start: 4.0,
+            fog_height: 1.0,
+            fog_falloff: 0.3,
+            fog_sun: 1.5,
+            god_rays: 1.0,
             sky: true,
             zenith_color: [0.1, 0.09, 0.24],
             sun_size: 2.6,
@@ -333,7 +368,7 @@ impl Environment {
         }
     }
 
-    /// A night preset: cold dark ambient, black fog, ACES.
+    /// A night preset: cold dark ambient, black fog thickest low down, ACES.
     #[must_use]
     pub fn night() -> Self {
         Self {
@@ -346,6 +381,8 @@ impl Environment {
             fog_color: [0.008, 0.01, 0.02],
             fog_density: 0.05,
             fog_start: 2.0,
+            fog_height: 1.0,
+            fog_falloff: 0.2,
             sky: true,
             zenith_color: [0.002, 0.003, 0.01],
             sun_size: 1.6,

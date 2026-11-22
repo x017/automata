@@ -2290,6 +2290,7 @@ impl Ui {
                 y = self.color_row(canvas, x, y, w, e, "Fog Color", ColorTarget::EnvFog);
                 y = self.float_row(canvas, x, y, w, e, "Fog Density", Field::EnvFogDensity);
                 y = self.float_row(canvas, x, y, w, e, "Fog Start", Field::EnvFogStart);
+                y = self.atmosphere_rows(canvas, x, y, w, e);
                 y = self.post_rows(canvas, x, y, w, e);
                 y += 6.0;
             }
@@ -2388,6 +2389,15 @@ impl Ui {
                 y = self.float_row(canvas, x, y, w, e, "Spin", Field::ParticleSpin);
                 y = self.float_row(canvas, x, y, w, e, "Max Alive", Field::ParticleMax);
                 y = self.flag_row(canvas, x, y, w, e, "World Space", Flag::ParticleWorldSpace);
+                y = self.flag_row(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    e,
+                    "Follow Camera",
+                    Flag::ParticleFollowCamera,
+                );
                 y += 6.0;
             }
         }

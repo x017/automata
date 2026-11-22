@@ -232,7 +232,7 @@ Beautiful folds the same grade into its HDR resolve. Five looks
 (`post="bleached"`, `with_post`) and in Oberon's new Post group. A neutral
 grade with no bloom skips the pass entirely.
 
-### A9. Atmosphere: height fog, god rays, depth of field, dust ⬜ M
+### A9. Atmosphere: height fog, god rays, depth of field, dust ✅ M
 - Height fog: thick in valleys, thin up high, lit by the sun.
 - God rays on Beautiful: screen-space light shafts from the sun, blocked
   by geometry.
@@ -242,7 +242,19 @@ grade with no bloom skips the pass entirely.
   (A6).
 - **Done when:** the NieR checklist from planning (desaturated and
   overexposed grade, height fog, strong soft bloom, god rays, DoF, grain,
-  chromatic aberration, vignette, dust) is all there.
+  chromatic aberration, vignette, dust) is all there. ✅
+
+Done: `Environment` gained `fog_height`/`fog_falloff` (fog integrated
+along each view ray through an exponential height layer, every preset)
+and `fog_sun`; on Beautiful, `god_rays` (a quarter-resolution radial blur
+of the sky around the sun, masked by depth so geometry casts shafts) and
+`depth_of_field` (a half-resolution disc blur whose circle of confusion
+follows `focus_distance`, or the camera's target, with a depth-aware
+gather and upsample so in-focus edges don't halo). The `"motes"` particle
+preset fills a box around the camera (`follow_camera`, particles wrap),
+and lit particles take the sun's shadow. Daylight and dusk turn on height
+fog and god rays; the lagoon example wears the full list (Film look plus
+all four). Python keywords, the stub, and Oberon rows for all of it.
 
 ### A10. Style presets: Realistic, Semi-realistic, BotW, A Short Hike, NieR ⬜ L
 - Shading modes: **toon** (banded diffuse with a tint ramp and tinted

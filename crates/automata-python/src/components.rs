@@ -547,6 +547,13 @@ impl PyEnvironment {
         clouds=0.0,
         lens_flare=1.0,
         ambient_occlusion=1.0,
+        fog_height=0.0,
+        fog_falloff=0.0,
+        fog_sun=0.0,
+        god_rays=0.0,
+        depth_of_field=0.0,
+        focus_distance=0.0,
+        focus_range=1.0,
         post=None,
         bloom=None,
         contrast=None,
@@ -578,6 +585,13 @@ impl PyEnvironment {
         clouds: f32,
         lens_flare: f32,
         ambient_occlusion: f32,
+        fog_height: f32,
+        fog_falloff: f32,
+        fog_sun: f32,
+        god_rays: f32,
+        depth_of_field: f32,
+        focus_distance: f32,
+        focus_range: f32,
         post: Option<&str>,
         bloom: Option<f32>,
         contrast: Option<f32>,
@@ -624,6 +638,13 @@ impl PyEnvironment {
                 clouds,
                 lens_flare,
                 ambient_occlusion,
+                fog_height,
+                fog_falloff,
+                fog_sun,
+                god_rays,
+                depth_of_field,
+                focus_distance,
+                focus_range,
                 post,
             },
         })
@@ -689,6 +710,50 @@ impl PyEnvironment {
             .iter()
             .map(|(name, _)| name.to_ascii_lowercase())
             .collect()
+    }
+
+    /// The top of the height fog's layer (world Y): full density below,
+    /// thinning above by ``fog_falloff``.
+    #[getter]
+    fn fog_height(&self) -> f32 {
+        self.inner.fog_height
+    }
+
+    /// How fast fog thins above ``fog_height``, per metre (``0`` = plain
+    /// distance fog).
+    #[getter]
+    fn fog_falloff(&self) -> f32 {
+        self.inner.fog_falloff
+    }
+
+    /// How much the sun lights the fog (``0`` = none).
+    #[getter]
+    fn fog_sun(&self) -> f32 {
+        self.inner.fog_sun
+    }
+
+    /// Light shafts from the sun (Beautiful graphics; ``0`` = off).
+    #[getter]
+    fn god_rays(&self) -> f32 {
+        self.inner.god_rays
+    }
+
+    /// Depth-of-field blur strength (Beautiful graphics; ``0`` = off).
+    #[getter]
+    fn depth_of_field(&self) -> f32 {
+        self.inner.depth_of_field
+    }
+
+    /// The distance in focus in metres (``0`` = the camera's target).
+    #[getter]
+    fn focus_distance(&self) -> f32 {
+        self.inner.focus_distance
+    }
+
+    /// How deep the sharp zone around the focus is, in metres.
+    #[getter]
+    fn focus_range(&self) -> f32 {
+        self.inner.focus_range
     }
 
     /// Glow around bright things (High and Beautiful graphics; ``0`` = off).

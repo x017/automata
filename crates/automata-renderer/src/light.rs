@@ -507,6 +507,9 @@ pub(crate) struct LightUniform {
     /// x: one shadow texel in UV, y: soft filtering (Beautiful),
     /// z: tan(face FOV / 2), w: ambient occlusion strength (Beautiful).
     pub point_shadow: [f32; 4],
+    /// x: the fog layer's top (world Y), y: how fast it thins above that
+    /// per metre (0 = plain distance fog), z: how much the sun lights it.
+    pub fog_height: [f32; 4],
 }
 
 impl LightUniform {
@@ -622,8 +625,19 @@ impl LightUniform {
             points,
             point_faces,
             point_shadow,
+            fog_height: height_fog(env),
         }
     }
+}
+
+/// The height fog layer: its top, falloff per metre and sun glow.
+fn height_fog(env: &Environment) -> [f32; 4] {
+    [
+        env.fog_height,
+        env.fog_falloff.clamp(0.0, 10.0),
+        env.fog_sun.clamp(0.0, 4.0),
+        0.0,
+    ]
 }
 
 #[cfg(test)]

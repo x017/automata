@@ -201,9 +201,19 @@ def build():
                 fog_color=(0.62, 0.78, 0.95),
                 fog_density=0.006,
                 fog_start=35.0,
+                # A sea haze lying on the water, lit up toward the sun.
+                fog_height=1.0,
+                fog_falloff=0.25,
+                fog_sun=0.8,
                 sky=True,
                 zenith_color=(0.16, 0.34, 0.78),
                 clouds=0.35,
+                # Beautiful only: sun shafts, and a soft blur away from the
+                # camera's target.
+                god_rays=0.6,
+                depth_of_field=0.5,
+                focus_range=6.0,
+                post="film",
             )
         )
     )
@@ -298,6 +308,12 @@ def build():
     for key, value in CAMERA.items():
         camera.attributes[key] = value
     scene.add(camera)
+    # Dust in the sunlight: a box of motes that travels with the camera.
+    scene.add(
+        at.Entity("Motes")
+        .add(at.Transform(position=(0.0, 2.0, 0.0)))
+        .add(at.ParticleEmitter.preset("motes"))
+    )
     return scene
 
 

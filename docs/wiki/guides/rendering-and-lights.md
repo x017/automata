@@ -249,6 +249,11 @@ scene.add(
             clouds=0.35,                     # 0 clear .. 1 overcast
             lens_flare=1.0,                  # Beautiful only
             ambient_occlusion=1.0,           # Beautiful only: 0 off .. 2
+            fog_height=2.0,                  # height fog: full below 2 m ..
+            fog_falloff=0.15,                # .. thinning above (0 = even)
+            fog_sun=0.5,                     # fog glows toward the sun
+            god_rays=0.5,                    # Beautiful only: sun shafts
+            depth_of_field=0.0,              # Beautiful only: 0 off .. 4
         )
     )
 )
@@ -257,9 +262,9 @@ scene.add(
 | Preset | Look |
 |---|---|
 | `"neutral"` | The default: white ambient, no fog, no tone mapping |
-| `"daylight"` | Blue sky dome with sun and clouds, warm bounce, light haze, ACES |
-| `"dusk"` | Violet sky with a big warm sun, dark red ground, dense warm fog, AgX |
-| `"night"` | Near-black sky, cold dark ambient, black fog close to the camera, ACES |
+| `"daylight"` | Blue sky dome with sun and clouds, warm bounce, light haze lying low, soft god rays, ACES |
+| `"dusk"` | Violet sky with a big warm sun, dark red ground, dense warm fog pooling low and glowing toward the sun, strong god rays, AgX |
+| `"night"` | Near-black sky, cold dark ambient, black fog close to the camera and thickest low down, ACES |
 
 How it combines with the sun:
 
@@ -288,12 +293,68 @@ How it combines with the sun:
   the sky alone, so shadows and shaded sides turn faintly blue on a clear
   day (or violet at dusk) instead of grey.
 - **Fog** fades lit colour toward `fog_color` as
-  `1 − exp(−density × (distance − start))`.
+  `1 − exp(−density × (distance − start))`. See
+  [Atmosphere](#atmosphere-height-fog-god-rays-depth-of-field-dust) for
+  fog that lies low, sun shafts, depth of field and dust.
 - **Tone mapping** runs last. ACES and AgX roll off highlights smoothly,
   so you can use brighter suns and colours without clipping. Raise
   `exposure` a little to compensate for their darker mid-tones.
 - An Environment is staged data like any other component. It's saved in
   scene files and edited in [Oberon's Graphics tab](../oberon/graphics.md).
+
+### Atmosphere: height fog, god rays, depth of field, dust
+
+Four effects give a scene air. Height fog works on every preset. God rays
+and depth of field are `BEAUTIFUL` only.
+
+```python
+at.Environment.preset("daylight")    # height fog and god rays already on
+
+at.Environment(
+    fog=True, fog_color=(0.62, 0.78, 0.95), fog_density=0.01,
+    fog_height=1.0,       # full density below 1 m ..
+    fog_falloff=0.25,     # .. and e times thinner every 4 m above it
+    fog_sun=0.8,          # the fog glows warm toward the sun
+    god_rays=0.6,         # sun shafts, 0 off .. 2
+    depth_of_field=0.5,   # blur away from the focus, 0 off .. 4
+    focus_distance=0.0,   # metres kept sharp; 0 = the camera's target
+    focus_range=6.0,      # metres either side that stay sharp too
+)
+scene.add(at.Entity("Motes").add(at.Transform()).add(at.ParticleEmitter.preset("motes")))
+```
+
+- **Height fog.** Below `fog_height` the fog has its full `fog_density`.
+  Above it, it thins by a factor of e every `1 / fog_falloff` metres. So
+  valleys and the sea fill with haze, and hilltops and the sky above
+  stay clear. Each pixel adds up the fog along its own line of sight,
+  so looking down into a valley goes through more of it than looking
+  across a ridge. `fog_falloff=0` gives the old even fog. `fog_sun` makes
+  fog toward the sun glow in its colour. It works on every preset; on
+  `BEAUTIFUL` the glow is stronger and lit by the sun's real brightness.
+- **God rays** (`BEAUTIFUL` only). Light from the sun and the bright sky
+  around it streams out across the screen. Anything in front of the sun
+  blocks it, so trees, pillars and ridges cast visible shafts through
+  the air. The rays fade when the sun leaves the screen or sinks below
+  the horizon. They're computed at quarter resolution from the depth
+  buffer, so they're cheap. They need `sky=True` and a sun.
+- **Depth of field** (`BEAUTIFUL` only). Things nearer or farther than
+  the focus blur in proportion to how far out of focus they are, and
+  bright points open into soft discs (bokeh). By default the focus
+  follows the camera's target, so whatever the camera looks at stays
+  sharp. Set `focus_distance` to fix it at a distance instead. A sharp
+  object in front of a blurred background keeps a clean edge.
+- **Dust motes.** The `"motes"` particle preset fills a box of air around
+  the camera with lit specks (`follow_camera=True`). Particles that fall
+  behind wrap around to the far side, so the air stays full wherever
+  the camera goes. In sunlight they glint; in shade they go dark. Lit
+  particles now take the sun's shadow (`MEDIUM` and up).
+
+![The lagoon before (top) and after (bottom): sea haze, depth of field, a film grade, grain and dust motes](../../assets/rendering/atmosphere.jpg)
+
+With the [film look](#post-effects-and-colour-grading) on top (soft
+bloom, grade, grain, chromatic aberration, vignette), that's the full
+soft, washed-out, hazy console look. `examples/oberon/lagoon` uses all of
+it.
 
 ### Post effects and colour grading
 
@@ -385,6 +446,8 @@ same setting as the renderer grows.
   coarse for, like a coin resting on the ground.
 - **Physically based light** (GGX specular) and fog that glows toward the
   sun.
+- **God rays and depth of field** when the Environment turns them on (see
+  [Atmosphere](#atmosphere-height-fog-god-rays-depth-of-field-dust)).
 - **HDR with bloom**: bright highlights (sun glints on water, white
   surfaces in full sun) bleed softly. Then the tone mapper runs, the
   [colour grade](#post-effects-and-colour-grading) is applied, and FXAA
@@ -471,7 +534,7 @@ so give the water a floor if sinking things should stop.
 
 ## Particles
 
-Fire, smoke, sparks, dust, splashes and magic come from a
+Fire, smoke, sparks, dust, splashes, magic and drifting motes come from a
 **`ParticleEmitter`**. Start from a preset and change what you like:
 
 ```python
@@ -494,6 +557,7 @@ mist = at.ParticleEmitter(rate=4, sprite="puff", lit=True, size=(1, 3),
 | `"dust"` | Motes drifting slowly in an 8 × 3 × 8 m box, lit |
 | `"splash"` | A one-off burst of 40 water droplets thrown up and out |
 | `"magic"` | Purple-blue stars swirling up, glowing |
+| `"motes"` | Lit specks of dust hanging in the air all around the camera (`follow_camera`) |
 
 Particles leave the entity within `cone_angle` of its up (+Y) axis, so
 rotate the entity to aim them. Over each particle's life its size goes from
@@ -521,6 +585,7 @@ rotate the entity to aim them. Over each particle's life its size goes from
 | `sprite` | `"dot"`, `"spark"`, `"star"`, `"flame"`, `"puff"` | The built-in picture |
 | `texture`, `sheet` | image path; (columns, rows) | Your own image instead. A sprite sheet's frames play over each particle's life |
 | `world_space` | `True` / `False` | On by default: particles stay where they were made when the entity moves, so a moving torch leaves a trail. Off, they move with the entity |
+| `follow_camera` | `True` / `False` | Fills a box of `shape_size` around the camera instead of the entity. Particles that drift out wrap round to the far side (dust in the air) |
 | `max_particles` | count | Most alive at once (default 500). Thousands are fine |
 
 **One-off effects from scripts.** `ctx.particles.burst` plays an effect

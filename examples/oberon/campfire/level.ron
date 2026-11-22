@@ -29,6 +29,13 @@
                 clouds: 0.0,
                 lens_flare: 0.0,
                 ambient_occlusion: 1.0,
+                fog_height: 1.0,
+                fog_falloff: 0.2,
+                fog_sun: 0.0,
+                god_rays: 0.0,
+                depth_of_field: 0.0,
+                focus_distance: 0.0,
+                focus_range: 1.0,
                 post: (
                     bloom: 1.0,
                     contrast: 1.0,
@@ -371,6 +378,7 @@
                 texture: "",
                 sheet: (1, 1),
                 world_space: true,
+                follow_camera: false,
             )),
         ),
         (
@@ -409,6 +417,7 @@
                 texture: "",
                 sheet: (1, 1),
                 world_space: true,
+                follow_camera: false,
             )),
         ),
         (
@@ -447,6 +456,7 @@
                 texture: "",
                 sheet: (1, 1),
                 world_space: true,
+                follow_camera: false,
             )),
             script: Some((
                 path: "scripts/crackle.py",

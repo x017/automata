@@ -230,10 +230,10 @@ class PointLight:
 
 ParticleShape = Literal["point", "sphere", "box", "cone"]
 ParticleSprite = Literal["dot", "spark", "star", "flame", "puff"]
-ParticlePreset = Literal["fire", "smoke", "sparks", "dust", "splash", "magic"]
+ParticlePreset = Literal["fire", "smoke", "sparks", "dust", "splash", "magic", "motes"]
 
 class ParticleEmitter:
-    """Makes particles: fire, smoke, sparks, dust, splashes, magic.
+    """Makes particles: fire, smoke, sparks, dust, splashes, magic, motes.
 
     Start from a preset and change what you like
     (``ParticleEmitter.preset("fire", rate=60)``), or set fields by keyword
@@ -285,6 +285,9 @@ class ParticleEmitter:
     sheet: tuple[int, int]
     """The image's frames, columns by rows; played over each life."""
     world_space: bool
+    follow_camera: bool
+    """Fills a box of `shape_size` around the camera instead of the entity,
+    wrapping particles to the far side as it moves (dust in the air)."""
     preset_name: Optional[str]
     """The preset this is exactly, or None."""
     def __init__(self, **fields: Any) -> None: ...
@@ -323,9 +326,10 @@ class SpotLight:
     ) -> None: ...
 
 class Environment:
-    """Scene-wide look: sky and sun, ambient, exposure, tone mapping, fog,
-    and post effects (bloom, colour grading, vignette, grain, chromatic
-    aberration; Medium graphics and up).
+    """Scene-wide look: sky and sun, ambient, exposure, tone mapping, fog
+    (optionally height fog lying low), god rays and depth of field
+    (Beautiful), and post effects (bloom, colour grading, vignette, grain,
+    chromatic aberration; Medium graphics and up).
 
     Attach to any entity; the first entity carrying one sets the frame's look.
     """
@@ -352,6 +356,20 @@ class Environment:
     ambient_occlusion: float
     """How much creases and the ground under objects darken, 0 (off) to 2
     (``"beautiful"`` only)."""
+    fog_height: float
+    """Height fog: full density below this height (m) ..."""
+    fog_falloff: float
+    """... thinning by e per 1/falloff metres above it (0 = even fog)."""
+    fog_sun: float
+    """How much the fog glows toward the sun, 0 to 4."""
+    god_rays: float
+    """Sun shafts past geometry, 0 (off) to 2 (``"beautiful"`` only)."""
+    depth_of_field: float
+    """Blur away from the focus, 0 (off) to 4 (``"beautiful"`` only)."""
+    focus_distance: float
+    """Metres from the camera kept sharp; 0 = the camera's target."""
+    focus_range: float
+    """Metres either side of the focus that stay sharp too."""
     bloom: float
     """Glow around bright things, 0 (off) to 4 (``"high"`` and up)."""
     contrast: float
@@ -392,6 +410,13 @@ class Environment:
         clouds: float = 0.0,
         lens_flare: float = 1.0,
         ambient_occlusion: float = 1.0,
+        fog_height: float = 0.0,
+        fog_falloff: float = 0.0,
+        fog_sun: float = 0.0,
+        god_rays: float = 0.0,
+        depth_of_field: float = 0.0,
+        focus_distance: float = 0.0,
+        focus_range: float = 1.0,
         post: str | None = None,
         bloom: float | None = None,
         contrast: float | None = None,

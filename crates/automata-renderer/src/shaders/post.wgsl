@@ -5,13 +5,18 @@
 //      threshold, so only highlights glow), then a mip chain of dual-filter
 //      downsamples and upsamples added back up (Bjorge, "Bandwidth-Efficient
 //      Rendering", SIGGRAPH 2015): 4-5 fetches per pixel per pass
-//   2. resolve: HDR + bloom, exposure, tone mapping -> display-encoded LDR
+//   2. god rays and depth of field when the Environment asks for them:
+//      a quarter-size mask of the sky around the sun, blurred toward the
+//      sun into light shafts; a half-size disc blur of the scene sized by
+//      each pixel's distance from the focus
+//   3. resolve: HDR + bloom + rays (over the depth-of-field blur where it's
+//      out of focus), exposure, tone mapping -> display-encoded LDR
 //      with luma in alpha. The HDR image's alpha is surface coverage: the
 //      background (alpha 0) skips exposure and the curve, exactly like the
 //      forward path, so the clear color shows as authored.
 //      Colour grading, vignette, grain and chromatic aberration happen
 //      here too, after tone mapping.
-//   3. fxaa: edge anti-aliasing on the LDR image, written to the target
+//   4. fxaa: edge anti-aliasing on the LDR image, written to the target
 //
 // Medium to Ultra (the forward path renders display-ready colour into an
 // intermediate image): on High and Ultra a cheap bloom (ldr_prefilter into
@@ -31,6 +36,8 @@ struct PostUniform {
     gamma: vec4<f32>,  // rgb: gamma, a: film grain
     gain: vec4<f32>,   // rgb: gain, a: chromatic aberration
     misc: vec4<f32>,   // x: time (s), y: cheap bloom strength, z: 1 = grade
+    lens: vec4<f32>,   // x: god rays, y: depth of field, z: focus distance (m), w: focus range (m)
+    depth: vec4<f32>,  // x: near, y: far (m), zw: full-size viewport (px)
 };
 
 @group(0) @binding(0) var src: texture_2d<f32>;
@@ -38,6 +45,9 @@ struct PostUniform {
 @group(0) @binding(2) var<uniform> post: PostUniform;
 @group(0) @binding(3) var extra: texture_2d<f32>; // resolve: the bloom
 @group(0) @binding(4) var extra2: texture_2d<f32>; // resolve: sun visibility (1x1)
+@group(0) @binding(5) var extra3: texture_2d<f32>; // resolve: god rays
+@group(0) @binding(6) var extra4: texture_2d<f32>; // resolve: depth of field
+@group(0) @binding(7) var scene_depth: texture_depth_2d; // the scene's depth (full size)
 
 struct FullscreenOut {
     @builtin(position) position: vec4<f32>,
@@ -263,11 +273,158 @@ fn fringed(uv: vec2<f32>) -> vec3<f32> {
     return vec3<f32>(tap(uv + off).r, center.g, tap(uv - off).b);
 }
 
+// --- God rays ----------------------------------------------------------------
+// Light shafts (after Mitchell, "Volumetric Light Scattering as a
+// Post-Process", GPU Gems 3): a quarter-size mask of the open sky, glowing
+// toward the sun (geometry blocks it), then each pixel sums the mask along
+// the line toward the sun with a decay, so light streams through the gaps
+// between leaves and pillars and shadowed shafts trail behind them. The
+// resolve tints the result with the sunlight.
+
+// The scene's depth at `uv`, clamped to the image.
+fn depth_at(uv: vec2<f32>) -> f32 {
+    let size = vec2<i32>(textureDimensions(scene_depth));
+    let p = clamp(vec2<i32>(uv * vec2<f32>(size)), vec2<i32>(0), size - vec2<i32>(1));
+    return textureLoad(scene_depth, p, 0);
+}
+
+@fragment
+fn fs_rays_mask(in: FullscreenOut) -> @location(0) vec4<f32> {
+    // Four depth reads over the 4x4 block this pixel covers.
+    let t = post.texel.xy;
+    var sky = 0.0;
+    for (var k = 0; k < 4; k = k + 1) {
+        let o = vec2<f32>(f32(k & 1), f32(k >> 1u)) * 2.0 - 1.0;
+        sky = sky + select(0.0, 0.25, depth_at(in.uv + o * t * 0.375) >= 1.0);
+    }
+    if sky <= 0.0 {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    // Open sky glows by its distance from the sun.
+    let d = length((in.uv - post.sun.xy) * vec2<f32>(post.sun_color.a, 1.0));
+    return vec4<f32>(vec3<f32>(sky * exp(-d * 10.0)), 1.0);
+}
+
+const RAY_TAPS: i32 = 40;
+const RAY_REACH: f32 = 0.6;
+
+@fragment
+fn fs_rays(in: FullscreenOut) -> @location(0) vec4<f32> {
+    // At most RAY_REACH screen heights toward the sun, so far corners
+    // don't gather the glow around it (shafts stay near the sun).
+    let to_sun = post.sun.xy - in.uv;
+    let len = length(to_sun * vec2<f32>(post.sun_color.a, 1.0));
+    let step = to_sun * min(1.0, RAY_REACH / max(len, 1e-4)) / f32(RAY_TAPS);
+    // A per-pixel offset along the line trades banding for fine noise.
+    let jitter = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));
+    var uv = in.uv + step * jitter;
+    var decay = 1.0;
+    var sum = vec3<f32>(0.0);
+    for (var k = 0; k < RAY_TAPS; k = k + 1) {
+        let inside = all(uv >= vec2<f32>(0.0)) && all(uv <= vec2<f32>(1.0));
+        sum = sum + select(vec3<f32>(0.0), tap(uv), inside) * decay;
+        decay = decay * 0.975;
+        uv = uv + step;
+    }
+    return vec4<f32>(sum / f32(RAY_TAPS), 1.0);
+}
+
+// --- Depth of field --------------------------------------------------------
+// Each pixel's circle of confusion grows with its distance from the focus
+// (past the sharp range around it), as a fraction of the screen height.
+// A half-size pass gathers a disc of that size from the full-size scene;
+// samples nearer than the pixel only count as far as their own blur
+// reaches (so a sharp subject doesn't smear into the blurred background),
+// and bright highlights weigh more, so they open into bokeh discs.
+
+fn view_depth(d: f32) -> f32 {
+    let near = post.depth.x;
+    let far = post.depth.y;
+    return near * far / max(far - d * (far - near), 1e-6);
+}
+
+// Blur diameter in full-size pixels at view depth `z`.
+fn coc_px(z: f32) -> f32 {
+    let blur = max(abs(z - post.lens.z) - post.lens.w, 0.0) / max(z, 1e-3);
+    return min(post.lens.y * blur * post.depth.w * 0.02, post.depth.w * 0.03);
+}
+
+const DOF_TAPS: i32 = 32;
+
+@fragment
+fn fs_dof(in: FullscreenOut) -> @location(0) vec4<f32> {
+    let full = post.depth.zw;
+    // Taps sit on pixel centres so colour and depth come from one pixel
+    // (a filtered tap across an edge would smear a sharp object outward).
+    let here = (floor(in.uv * full) + 0.5) / full;
+    let zc = view_depth(depth_at(here));
+    let cc = coc_px(zc);
+    let center = tap(here);
+    // Alpha keeps the circle of confusion for the depth-aware upsample.
+    if cc < 0.5 {
+        return vec4<f32>(center, cc);
+    }
+    let px = 1.0 / post.depth.zw;
+    let radius = cc * 0.5;
+    var sum = center;
+    var weight = 1.0;
+    for (var k = 0; k < DOF_TAPS; k = k + 1) {
+        let r = sqrt((f32(k) + 0.5) / f32(DOF_TAPS)) * radius;
+        let a = f32(k) * 2.39996323;
+        let uv = (floor((here + vec2<f32>(cos(a), sin(a)) * r * px) * full) + 0.5) / full;
+        let zs = view_depth(depth_at(uv));
+        let cs = coc_px(zs);
+        let reach = select(cc, cs, zs < zc) * 0.5;
+        // A nearer, sharper sample only spreads as far as its own blur,
+        // so a far background doesn't halo an in-focus object.
+        let w = clamp((reach - r) * 2.0, 0.0, 1.0);
+        let c = tap(uv);
+        let bright = 1.0 + max(luma(c) - 1.0, 0.0);
+        sum = sum + c * w * bright;
+        weight = weight + w * bright;
+    }
+    return vec4<f32>(sum / weight, cc);
+}
+
+// The scene at `uv`, over its depth-of-field blur where that's out of
+// focus.
+fn focused(uv: vec2<f32>) -> vec3<f32> {
+    let sharp = fringed(uv);
+    if post.lens.y <= 0.0 {
+        return sharp;
+    }
+    let coc = coc_px(view_depth(depth_at(uv)));
+    let blend = smoothstep(0.75, 3.0, coc);
+    if blend <= 0.0 {
+        return sharp;
+    }
+    // Upsample the half-size blur from the texels whose blur matches this
+    // pixel's, so sharp things don't bleed into a blurred background.
+    let size = vec2<f32>(textureDimensions(extra4));
+    let base = floor(uv * size - 0.5);
+    let f = uv * size - 0.5 - base;
+    var sum = vec3<f32>(0.0);
+    var weight = 0.0;
+    for (var k = 0; k < 4; k = k + 1) {
+        let o = vec2<f32>(f32(k & 1), f32(k >> 1u));
+        let t = textureSampleLevel(extra4, src_sampler, (base + o + 0.5) / size, 0.0);
+        let bilinear = mix(1.0 - f.x, f.x, o.x) * mix(1.0 - f.y, f.y, o.y);
+        let w = bilinear / (0.05 + abs(t.a - coc)) + 1e-5;
+        sum = sum + t.rgb * w;
+        weight = weight + w;
+    }
+    return mix(sharp, sum / weight, blend);
+}
+
 @fragment
 fn fs_resolve(in: FullscreenOut) -> @location(0) vec4<f32> {
     let hdr = textureSampleLevel(src, src_sampler, in.uv, 0.0);
     let bloom = textureSampleLevel(extra, src_sampler, in.uv, 0.0).rgb;
-    let color = fringed(in.uv) + bloom * post.params.w + lens_flare(in.uv);
+    var color = focused(in.uv) + bloom * post.params.w + lens_flare(in.uv);
+    if post.lens.x > 0.0 {
+        let rays = textureSampleLevel(extra3, src_sampler, in.uv, 0.0).r;
+        color = color + post.sun_color.rgb * rays * post.lens.x * 1.5;
+    }
     let lit = tonemap_with(color, post.params.y, post.params.z);
     var mapped = clamp(mix(color, lit, hdr.a), vec3<f32>(0.0), vec3<f32>(1.0));
     if post.misc.z > 0.5 {

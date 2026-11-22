@@ -29,21 +29,44 @@ struct VertexOutput {
     @location(1) color: vec4<f32>,
     @location(2) world: vec3<f32>,
     @location(3) light_in: vec3<f32>,
+    // The sunlight it gets when nothing shades it, and its centre (where
+    // the fragment stage looks the shade up).
+    @location(4) sun_in: vec3<f32>,
+    @location(5) @interpolate(flat) center: vec3<f32>,
 };
 
-// The light a particle at `p` gets: sky and ground ambient, the sun
-// wrapped round it (a puff lit from behind still glows a little), and the
-// point lights. Lighting per particle rather than per pixel: a puff has no
+// The light a particle at `p` gets: sky and ground ambient and the point
+// lights. Lighting per particle rather than per pixel: a puff has no
 // surface to shade.
 fn particle_light(p: vec3<f32>) -> vec3<f32> {
-    let to_cam = normalize(camera.view_pos.xyz - p);
-    let facing = 0.5 + 0.5 * dot(to_cam, sun_dir());
-    var lit = hemi(vec3<f32>(0.0, 1.0, 0.0)) * light.color_ambient.a
-        + light.color_ambient.rgb * mix(0.3, 1.0, facing);
+    var lit = hemi(vec3<f32>(0.0, 1.0, 0.0)) * light.color_ambient.a;
     for (var i = 0u; i < point_count(); i = i + 1u) {
         lit = lit + point_light(i, p).radiance * 0.6;
     }
     return lit;
+}
+
+// The sun on a particle at `p`, wrapped round it (a puff lit from behind
+// still glows a little); shade is looked up per pixel.
+fn particle_sun(p: vec3<f32>) -> vec3<f32> {
+    let to_cam = normalize(camera.view_pos.xyz - p);
+    let facing = 0.5 + 0.5 * dot(to_cam, sun_dir());
+    return light.color_ambient.rgb * mix(0.3, 1.0, facing);
+}
+
+// Whether the sun reaches `p` (1) or something shades it (0): one
+// filtered compare in its shadow cascade, so motes glint in sunbeams and
+// smoke darkens in shade.
+fn particle_shade(p: vec3<f32>) -> f32 {
+    if light.params.x < 0.5 {
+        return 1.0;
+    }
+    let i = i32(cascade_pick(p).x);
+    let c = cascade_coords(i, p, sun_dir(), 1.0);
+    if c.x < 0.0 {
+        return 1.0;
+    }
+    return textureSampleCompareLevel(shadow_map, shadow_sampler, c.xy, i, c.z);
 }
 
 @vertex
@@ -86,8 +109,11 @@ fn vs_main(@builtin(vertex_index) index: u32, inst: Instance) -> VertexOutput {
     out.color = inst.color;
     out.world = world;
     out.light_in = vec3<f32>(1.0);
+    out.sun_in = vec3<f32>(0.0);
+    out.center = inst.position_size.xyz;
     if particles.up_lit.w > 0.5 {
         out.light_in = particle_light(inst.position_size.xyz);
+        out.sun_in = particle_sun(inst.position_size.xyz);
     }
     return out;
 }
@@ -104,19 +130,18 @@ fn fog_amount(world: vec3<f32>, frag: vec2<f32>) -> f32 {
     if eye_under_water(frag) {
         return 1.0 - water_transmission(water_path(world)).g;
     }
-    let density = light.fog.a;
-    if density <= 0.0 {
-        return 0.0;
-    }
-    let dist = max(length(world - camera.view_pos.xyz) - light.fog_params.x, 0.0);
-    return clamp(1.0 - exp(-density * dist), 0.0, 1.0);
+    return fog_cover(world);
 }
 
 // The particle's colour and coverage, before fog and tone mapping.
 fn particle_color(in: VertexOutput) -> vec4<f32> {
     let tex = textureSample(sprite, sprite_sampler, in.uv);
     var c = in.color * tex;
-    c = vec4<f32>(c.rgb * in.light_in, c.a);
+    var light_in = in.light_in;
+    if particles.up_lit.w > 0.5 {
+        light_in = light_in + in.sun_in * particle_shade(in.center);
+    }
+    c = vec4<f32>(c.rgb * light_in, c.a);
     let mine = dot(in.world - camera.view_pos.xyz, light.camera_forward.xyz);
     // Fade out right in front of the lens instead of filling the screen.
     c.a = c.a * clamp((mine - 0.15) * 2.5, 0.0, 1.0);
