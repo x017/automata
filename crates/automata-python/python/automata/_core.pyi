@@ -323,7 +323,9 @@ class SpotLight:
     ) -> None: ...
 
 class Environment:
-    """Scene-wide look: sky and sun, ambient, exposure, tone mapping, fog.
+    """Scene-wide look: sky and sun, ambient, exposure, tone mapping, fog,
+    and post effects (bloom, colour grading, vignette, grain, chromatic
+    aberration; Medium graphics and up).
 
     Attach to any entity; the first entity carrying one sets the frame's look.
     """
@@ -350,6 +352,28 @@ class Environment:
     ambient_occlusion: float
     """How much creases and the ground under objects darken, 0 (off) to 2
     (``"beautiful"`` only)."""
+    bloom: float
+    """Glow around bright things, 0 (off) to 4 (``"high"`` and up)."""
+    contrast: float
+    """Contrast around mid grey (1 = unchanged)."""
+    saturation: float
+    """0 = black and white, 1 = unchanged, up to 3."""
+    temperature: float
+    """White balance, -1 (cool) to 1 (warm)."""
+    tint: float
+    """White balance, -1 (green) to 1 (magenta)."""
+    lift: tuple[float, float, float]
+    """Added to the shadows per channel (0 = none)."""
+    gamma: tuple[float, float, float]
+    """Midtone power per channel (1 = unchanged, above 1 brightens)."""
+    gain: tuple[float, float, float]
+    """Highlight multiplier per channel (1 = unchanged)."""
+    vignette: float
+    """Darkened corners, 0 (none) to 1."""
+    grain: float
+    """Animated film grain, 0 (none) to 1."""
+    chromatic_aberration: float
+    """Colour fringes toward the frame's edges, 0 (none) to 1."""
     def __init__(
         self,
         sky_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
@@ -368,10 +392,49 @@ class Environment:
         clouds: float = 0.0,
         lens_flare: float = 1.0,
         ambient_occlusion: float = 1.0,
-    ) -> None: ...
+        post: str | None = None,
+        bloom: float | None = None,
+        contrast: float | None = None,
+        saturation: float | None = None,
+        temperature: float | None = None,
+        tint: float | None = None,
+        lift: tuple[float, float, float] | None = None,
+        gamma: tuple[float, float, float] | None = None,
+        gain: tuple[float, float, float] | None = None,
+        vignette: float | None = None,
+        grain: float | None = None,
+        chromatic_aberration: float | None = None,
+    ) -> None:
+        """``post`` starts the post effects from a named look (see
+        :meth:`post_presets`); the other post keywords then change single
+        fields."""
+        ...
     @staticmethod
     def preset(name: str) -> Environment:
         """``"neutral"``, ``"daylight"``, ``"dusk"``, or ``"night"``."""
+        ...
+    def with_post(
+        self,
+        post: str | None = None,
+        *,
+        bloom: float | None = None,
+        contrast: float | None = None,
+        saturation: float | None = None,
+        temperature: float | None = None,
+        tint: float | None = None,
+        lift: tuple[float, float, float] | None = None,
+        gamma: tuple[float, float, float] | None = None,
+        gain: tuple[float, float, float] | None = None,
+        vignette: float | None = None,
+        grain: float | None = None,
+        chromatic_aberration: float | None = None,
+    ) -> Environment:
+        """A copy with post effects from the look ``post`` (None keeps the
+        current ones), plus any field changed by keyword."""
+        ...
+    @staticmethod
+    def post_presets() -> list[str]:
+        """``["neutral", "bleached", "vivid", "film", "noir"]``."""
         ...
 
 class Water:

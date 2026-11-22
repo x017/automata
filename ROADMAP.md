@@ -213,7 +213,7 @@ orbit camera follows it under.
 - **Done when:** jumping into the Lagoon splashes, and diving shows a
   blue-green world with moving caustics. ✅
 
-### A8. A post chain for every preset, and colour grading ⬜ M
+### A8. A post chain for every preset, and colour grading ✅ M
 Today only Beautiful has HDR, bloom and FXAA (`post.rs`). The styles
 need post effects on High too.
 - A lighter LDR post chain on Medium and up: colour grading (exposure,
@@ -222,7 +222,15 @@ need post effects on High too.
 - `Environment` fields for each, plus a "Post" section in the Graphics
   tab.
 - **Done when:** a desaturated, overexposed NieR grade and a warm,
-  saturated BotW grade can be dialled in on High.
+  saturated BotW grade can be dialled in on High. ✅
+
+Done: `Environment` grades the frame after tone mapping on Medium and up
+(white balance, lift/gamma/gain, contrast, saturation, vignette, grain,
+chromatic aberration) and High/Ultra get a cheap quarter-resolution bloom;
+Beautiful folds the same grade into its HDR resolve. Five looks
+(`PostEffects::PRESETS`: Neutral, Bleached, Vivid, Film, Noir) in Python
+(`post="bleached"`, `with_post`) and in Oberon's new Post group. A neutral
+grade with no bloom skips the pass entirely.
 
 ### A9. Atmosphere: height fog, god rays, depth of field, dust ⬜ M
 - Height fog: thick in valleys, thin up high, lit by the sun.
@@ -475,7 +483,7 @@ per effort. Reorder any time by telling me.
 | 8 | A5 Water ripples and wakes | M | ✅ |
 | 9 | A6 Particles | L | ✅ |
 | 10 | A7 Splashes, underwater, caustics | M | ✅ |
-| 11 | A8 Post chain + colour grading | M | ⬜ |
+| 11 | A8 Post chain + colour grading | M | ✅ |
 | 12 | A9 Height fog, god rays, DoF, dust | M | ⬜ |
 | 13 | A10 Style presets | L | ⬜ |
 | 14 | B1 Animation playback | L | ⬜ |

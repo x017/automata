@@ -18,6 +18,8 @@
 //! moves the mouse that many pixels on the first frame. `KEYS` holds keys
 //! down over moments of Play: `KEYS=tab@0-0.1,w@0.5-1.5,space@1.2-1.3`
 //! (key names as scripts see them; a bare `name@t` is one step).
+//! `POST=bleached` (or `neutral`, `vivid`, `film`, `noir`) swaps the
+//! scene Environment's post effects for that look.
 
 #![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 
@@ -64,10 +66,29 @@ fn main() {
         };
     }
 
-    let doc = Document::load(Path::new(scene)).unwrap_or_else(|e| {
+    let mut doc = Document::load(Path::new(scene)).unwrap_or_else(|e| {
         eprintln!("cannot open {scene}: {e}");
         std::process::exit(1);
     });
+    if let Ok(name) = std::env::var("POST") {
+        let Some(post) = automata_renderer::PostEffects::preset(&name) else {
+            eprintln!("unknown POST look {name:?}");
+            std::process::exit(1);
+        };
+        let ids: Vec<u64> = doc
+            .entities
+            .iter()
+            .filter(|e| e.data.environment.is_some())
+            .map(|e| e.id)
+            .collect();
+        for id in ids {
+            doc.modify(id, false, |d| {
+                if let Some(env) = &mut d.environment {
+                    env.post = post;
+                }
+            });
+        }
+    }
     automata_assets::set_root(Some(&doc.base_dir()));
     let mut gpu = pollster::block_on(Renderer::new_offscreen_with_quality((w, h), quality))
         .unwrap_or_else(|e| {

@@ -175,8 +175,13 @@ at.Environment(sky_color=(1, 1, 1), ground_color=(1, 1, 1),
                tonemapping="none", fog=False, fog_color=(0.5, 0.55, 0.6),
                fog_density=0.02, fog_start=0.0, sky=False,
                zenith_color=(0.16, 0.34, 0.78), sun_size=2.0, sun_glow=1.0,
-               clouds=0.0, lens_flare=1.0, ambient_occlusion=1.0)
+               clouds=0.0, lens_flare=1.0, ambient_occlusion=1.0,
+               post=None, bloom=None, contrast=None, saturation=None,
+               temperature=None, tint=None, lift=None, gamma=None, gain=None,
+               vignette=None, grain=None, chromatic_aberration=None)
 at.Environment.preset("neutral" | "daylight" | "dusk" | "night")
+env.with_post(post=None, *, bloom=None, ...)   # same post keywords
+at.Environment.post_presets()  # ["neutral", "bleached", "vivid", "film", "noir"]
 ```
 
 The scene look. The first entity carrying one wins. It sets hemisphere
@@ -190,8 +195,19 @@ a halo (`sun_glow`), `clouds` cover from 0 to 1, and on `BEAUTIFUL` a lens
 flare (`lens_flare` strength) when the camera looks toward the sun. Also
 on `BEAUTIFUL`, `ambient_occlusion` (0 off, 1 default, up to 2) darkens
 the ambient light in creases, corners and on the ground around objects.
-The non-neutral presets turn the sky on. All arguments are readable as properties. Unknown tone
-mapping or preset names raise `ValueError`. It's saved in scene files.
+The non-neutral presets turn the sky on.
+
+Post effects grade the finished frame on `MEDIUM` and up: `post` starts
+from a named look, and the other post keywords change single fields on
+top of it (unset ones keep the look's value, or the neutral default
+without one). Fields are `bloom` (0..4, `HIGH` and up), `contrast`,
+`saturation` (0..3), `temperature` and `tint` (-1..1), `lift`, `gamma` and
+`gain` (RGB tuples), and `vignette`, `grain` and `chromatic_aberration`
+(0..1). `with_post` returns a copy with the post effects changed and
+everything else kept.
+
+All arguments are readable as properties. Unknown tone mapping, preset or
+look names raise `ValueError`. It's saved in scene files.
 Guide: [Rendering & Lights](guides/rendering-and-lights.md#environment).
 
 ### Water

@@ -157,8 +157,13 @@ Saved as <code>point_light</code> / <code>spot_light</code> in scene files. Guid
                tonemapping=<span class="tok-s">&quot;none&quot;</span>, fog=<span class="tok-b">False</span>, fog_color=(<span class="tok-n">0.5</span>, <span class="tok-n">0.55</span>, <span class="tok-n">0.6</span>),
                fog_density=<span class="tok-n">0.02</span>, fog_start=<span class="tok-n">0.0</span>, sky=<span class="tok-b">False</span>,
                zenith_color=(<span class="tok-n">0.16</span>, <span class="tok-n">0.34</span>, <span class="tok-n">0.78</span>), sun_size=<span class="tok-n">2.0</span>, sun_glow=<span class="tok-n">1.0</span>,
-               clouds=<span class="tok-n">0.0</span>, lens_flare=<span class="tok-n">1.0</span>, ambient_occlusion=<span class="tok-n">1.0</span>)
-at.Environment.preset(<span class="tok-s">&quot;neutral&quot;</span> | <span class="tok-s">&quot;daylight&quot;</span> | <span class="tok-s">&quot;dusk&quot;</span> | <span class="tok-s">&quot;night&quot;</span>)</code></pre></div>
+               clouds=<span class="tok-n">0.0</span>, lens_flare=<span class="tok-n">1.0</span>, ambient_occlusion=<span class="tok-n">1.0</span>,
+               post=<span class="tok-b">None</span>, bloom=<span class="tok-b">None</span>, contrast=<span class="tok-b">None</span>, saturation=<span class="tok-b">None</span>,
+               temperature=<span class="tok-b">None</span>, tint=<span class="tok-b">None</span>, lift=<span class="tok-b">None</span>, gamma=<span class="tok-b">None</span>, gain=<span class="tok-b">None</span>,
+               vignette=<span class="tok-b">None</span>, grain=<span class="tok-b">None</span>, chromatic_aberration=<span class="tok-b">None</span>)
+at.Environment.preset(<span class="tok-s">&quot;neutral&quot;</span> | <span class="tok-s">&quot;daylight&quot;</span> | <span class="tok-s">&quot;dusk&quot;</span> | <span class="tok-s">&quot;night&quot;</span>)
+env.with_post(post=<span class="tok-b">None</span>, *, bloom=<span class="tok-b">None</span>, ...)   <span class="tok-c"># same post keywords</span>
+at.Environment.post_presets()  <span class="tok-c"># [&quot;neutral&quot;, &quot;bleached&quot;, &quot;vivid&quot;, &quot;film&quot;, &quot;noir&quot;]</span></code></pre></div>
 <p>The scene look. The first entity carrying one wins. It sets hemisphere
 ambient (sky above, ground below, scaled by the sun's <code>ambient</code>), the
 background clear colour (overriding <code>Game.clear_color</code>), exposure, tone
@@ -170,8 +175,17 @@ a halo (<code>sun_glow</code>), <code>clouds</code> cover from 0 to 1, and on <c
 flare (<code>lens_flare</code> strength) when the camera looks toward the sun. Also
 on <code>BEAUTIFUL</code>, <code>ambient_occlusion</code> (0 off, 1 default, up to 2) darkens
 the ambient light in creases, corners and on the ground around objects.
-The non-neutral presets turn the sky on. All arguments are readable as properties. Unknown tone
-mapping or preset names raise <code>ValueError</code>. It's saved in scene files.
+The non-neutral presets turn the sky on.</p>
+<p>Post effects grade the finished frame on <code>MEDIUM</code> and up: <code>post</code> starts
+from a named look, and the other post keywords change single fields on
+top of it (unset ones keep the look's value, or the neutral default
+without one). Fields are <code>bloom</code> (0..4, <code>HIGH</code> and up), <code>contrast</code>,
+<code>saturation</code> (0..3), <code>temperature</code> and <code>tint</code> (-1..1), <code>lift</code>, <code>gamma</code> and
+<code>gain</code> (RGB tuples), and <code>vignette</code>, <code>grain</code> and <code>chromatic_aberration</code>
+(0..1). <code>with_post</code> returns a copy with the post effects changed and
+everything else kept.</p>
+<p>All arguments are readable as properties. Unknown tone mapping, preset or
+look names raise <code>ValueError</code>. It's saved in scene files.
 Guide: <a href="guides/rendering-and-lights.html#environment">Rendering &amp; Lights</a>.</p>
 <h3 id="water">Water<a class="anchor" href="#water" aria-label="Link to this section">#</a></h3>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Water(size=(<span class="tok-n">20</span>, <span class="tok-n">20</span>), deep_color=(<span class="tok-n">0.01</span>, <span class="tok-n">0.07</span>, <span class="tok-n">0.11</span>),

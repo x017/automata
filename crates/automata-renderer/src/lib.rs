@@ -32,7 +32,7 @@ mod water;
 pub use camera::{Camera2D, Camera3D};
 pub use context::RenderContext;
 pub use draw::{DrawList, Sprite};
-pub use environment::{Environment, Tonemapping};
+pub use environment::{Environment, PostEffects, Tonemapping};
 pub use error::{Error, Result};
 pub use light::{
     PointLight, SpotCone, Sun, DEFAULT_SHADOW_DISTANCE, MAX_POINT_LIGHTS, MAX_POINT_SHADOWS,

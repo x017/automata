@@ -1,5 +1,6 @@
 //! Scene-wide look settings: the sky and sun, sky/ground ambient, distance
-//! fog, exposure, and tone mapping.
+//! fog, exposure, tone mapping, and post effects (colour grading, bloom,
+//! vignette, film grain, chromatic aberration).
 //!
 //! An [`Environment`] is set per frame with
 //! [`DrawList::set_environment`](crate::DrawList::set_environment). The
@@ -98,6 +99,170 @@ pub struct Environment {
     /// ground under objects darken the ambient light (`0` = off, `1` =
     /// default, up to `2`). Beautiful preset only.
     pub ambient_occlusion: f32,
+    /// Colour grading and screen effects, applied after tone mapping on
+    /// Medium graphics and up.
+    pub post: PostEffects,
+}
+
+/// Post effects: bloom, colour grading and lens/film effects.
+///
+/// The default changes nothing (bloom 1 is the Beautiful preset's usual
+/// glow). Medium graphics and up grade the image and draw the vignette,
+/// grain and chromatic aberration; High adds a cheap bloom of the
+/// brightest pixels; Beautiful's bloom is the full HDR one. Low skips
+/// them all.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct PostEffects {
+    /// Glow around bright things (`0` = none, `1` = default, up to `4`).
+    /// High and Beautiful.
+    pub bloom: f32,
+    /// Contrast around mid grey (`1` = unchanged, `0.5`..`2`).
+    pub contrast: f32,
+    /// Colour saturation (`0` = black and white, `1` = unchanged, up to `2`).
+    pub saturation: f32,
+    /// White balance: `-1` (cool, blue) to `1` (warm, orange).
+    pub temperature: f32,
+    /// White balance: `-1` (green) to `1` (magenta).
+    pub tint: f32,
+    /// Added to the shadows (linear RGB offset, `0` = none). Raising it
+    /// washes the blacks out; colour it to tint the shadows.
+    pub lift: [f32; 3],
+    /// Midtone power per channel (`1` = unchanged, above 1 brightens).
+    pub gamma: [f32; 3],
+    /// Highlight multiplier per channel (`1` = unchanged).
+    pub gain: [f32; 3],
+    /// Darkens the corners (`0` = none, `1` = strong).
+    pub vignette: f32,
+    /// Animated film grain (`0` = none, `1` = heavy).
+    pub grain: f32,
+    /// Colour fringes toward the edges of the frame, like a cheap lens
+    /// (`0` = none, `1` = strong).
+    pub chromatic_aberration: f32,
+}
+
+impl Default for PostEffects {
+    fn default() -> Self {
+        Self {
+            bloom: 1.0,
+            contrast: 1.0,
+            saturation: 1.0,
+            temperature: 0.0,
+            tint: 0.0,
+            lift: [0.0; 3],
+            gamma: [1.0; 3],
+            gain: [1.0; 3],
+            vignette: 0.0,
+            grain: 0.0,
+            chromatic_aberration: 0.0,
+        }
+    }
+}
+
+impl PostEffects {
+    /// Every named look, in UI order: name and settings.
+    #[allow(clippy::type_complexity)]
+    pub const PRESETS: [(&'static str, fn() -> Self); 5] = [
+        ("Neutral", Self::default),
+        ("Bleached", Self::bleached),
+        ("Vivid", Self::vivid),
+        ("Film", Self::film),
+        ("Noir", Self::noir),
+    ];
+
+    /// A named look (case-insensitive): `"neutral"`, `"bleached"`,
+    /// `"vivid"`, `"film"` or `"noir"`.
+    #[must_use]
+    pub fn preset(name: &str) -> Option<Self> {
+        Self::PRESETS
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, make)| make())
+    }
+
+    /// Washed out and overexposed, with strong soft bloom: pale, nearly
+    /// colourless, sun-bleached light.
+    #[must_use]
+    pub fn bleached() -> Self {
+        Self {
+            bloom: 2.2,
+            contrast: 0.9,
+            saturation: 0.5,
+            temperature: -0.04,
+            tint: 0.0,
+            lift: [0.05, 0.05, 0.055],
+            gamma: [1.06, 1.06, 1.05],
+            gain: [1.18, 1.18, 1.16],
+            vignette: 0.25,
+            grain: 0.12,
+            chromatic_aberration: 0.25,
+        }
+    }
+
+    /// Warm and saturated, sunny: rich greens and blues, golden light.
+    #[must_use]
+    pub fn vivid() -> Self {
+        Self {
+            bloom: 1.4,
+            contrast: 1.08,
+            saturation: 1.35,
+            temperature: 0.14,
+            tint: -0.02,
+            lift: [0.01, 0.008, 0.0],
+            gamma: [1.03, 1.02, 1.0],
+            gain: [1.04, 1.02, 0.98],
+            vignette: 0.15,
+            grain: 0.0,
+            chromatic_aberration: 0.0,
+        }
+    }
+
+    /// Filmic: a touch of contrast and warmth, lifted shadows, grain and a
+    /// vignette.
+    #[must_use]
+    pub fn film() -> Self {
+        Self {
+            bloom: 1.2,
+            contrast: 1.12,
+            saturation: 0.88,
+            temperature: 0.1,
+            tint: 0.02,
+            lift: [0.02, 0.02, 0.035],
+            gamma: [1.0; 3],
+            gain: [1.02, 1.0, 0.96],
+            vignette: 0.4,
+            grain: 0.3,
+            chromatic_aberration: 0.15,
+        }
+    }
+
+    /// Black and white, hard contrast, heavy vignette and grain.
+    #[must_use]
+    pub fn noir() -> Self {
+        Self {
+            bloom: 1.0,
+            contrast: 1.35,
+            saturation: 0.0,
+            temperature: 0.0,
+            tint: 0.0,
+            lift: [0.0; 3],
+            gamma: [0.95; 3],
+            gain: [1.05; 3],
+            vignette: 0.6,
+            grain: 0.35,
+            chromatic_aberration: 0.0,
+        }
+    }
+
+    /// Whether the grading and screen effects change nothing (bloom aside).
+    #[must_use]
+    pub fn is_neutral_grade(&self) -> bool {
+        let n = Self::default();
+        Self {
+            bloom: n.bloom,
+            ..*self
+        } == n
+    }
 }
 
 impl Default for Environment {
@@ -119,6 +284,7 @@ impl Default for Environment {
             clouds: 0.0,
             lens_flare: 1.0,
             ambient_occlusion: 1.0,
+            post: PostEffects::default(),
         }
     }
 }
@@ -225,6 +391,38 @@ mod tests {
         let old: Environment = ron::from_str("(exposure: 1.2, fog: true)").unwrap();
         assert!(!old.sky);
         assert!((old.exposure - 1.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn post_effects_default_to_nothing_and_load_partially() {
+        let post = PostEffects::default();
+        assert!(post.is_neutral_grade());
+        assert!(PostEffects { bloom: 0.0, ..post }.is_neutral_grade());
+        assert!(!PostEffects {
+            vignette: 0.2,
+            ..post
+        }
+        .is_neutral_grade());
+        // Old scenes (no post) and partial ones load with the rest neutral.
+        let old: Environment = ron::from_str("(exposure: 1.2)").unwrap();
+        assert_eq!(old.post, post);
+        let some: Environment = ron::from_str("(post: (saturation: 0.5))").unwrap();
+        assert!((some.post.saturation - 0.5).abs() < 1e-6);
+        assert_eq!(some.post.gain, [1.0; 3]);
+    }
+
+    #[test]
+    fn post_presets_are_named_and_distinct() {
+        assert_eq!(PostEffects::preset("NEUTRAL"), Some(PostEffects::default()));
+        assert!(PostEffects::preset("sepia").is_none());
+        let bleached = PostEffects::preset("bleached").unwrap();
+        let vivid = PostEffects::preset("vivid").unwrap();
+        // Bleached: desaturated and brightened; vivid: saturated and warm.
+        assert!(bleached.saturation < 0.7 && bleached.gain[0] > 1.1);
+        assert!(vivid.saturation > 1.2 && vivid.temperature > 0.1);
+        for (name, make) in PostEffects::PRESETS.iter().skip(1) {
+            assert!(!make().is_neutral_grade(), "{name}");
+        }
     }
 
     #[test]

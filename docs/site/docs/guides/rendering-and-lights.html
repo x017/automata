@@ -223,11 +223,35 @@ day (or violet at dusk) instead of grey.</li><li><strong>Fog</strong> fades lit 
 so you can use brighter suns and colours without clipping. Raise
 <code>exposure</code> a little to compensate for their darker mid-tones.</li><li>An Environment is staged data like any other component. It's saved in
 scene files and edited in <a href="../oberon/graphics.html">Oberon's Graphics tab</a>.</li></ul>
+<h3 id="post-effects-and-colour-grading">Post effects and colour grading<a class="anchor" href="#post-effects-and-colour-grading" aria-label="Link to this section">#</a></h3>
+<p>After tone mapping, the Environment grades the finished frame like a
+colourist would. It runs on <code>MEDIUM</code> and up (<code>LOW</code> stays untouched and as
+cheap as before), and adds bloom from <code>HIGH</code> up:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>look = at.Environment.preset(<span class="tok-s">&quot;daylight&quot;</span>).with_post(
+    <span class="tok-s">&quot;vivid&quot;</span>,            <span class="tok-c"># start from a named look (or None to keep the current one)</span>
+    saturation=<span class="tok-n">1.4</span>,     <span class="tok-c"># ...then change single fields</span>
+    vignette=<span class="tok-n">0.2</span>,
+)</code></pre></div>
+<p>The same keywords work in the constructor:
+<code>at.Environment(..., post=&quot;bleached&quot;, grain=0.0)</code>.
+<code>at.Environment.post_presets()</code> lists the looks:</p>
+<div class="table"><table><thead><tr><th>Look</th><th>What it does</th></tr></thead><tbody><tr><td><code>&quot;neutral&quot;</code></td><td>The default: no grade, normal bloom</td></tr><tr><td><code>&quot;bleached&quot;</code></td><td>Overexposed and washed out: half the saturation, raised blacks, strong soft bloom, a little grain and colour fringing</td></tr><tr><td><code>&quot;vivid&quot;</code></td><td>Warm and saturated sunshine: rich greens and blues, golden highlights</td></tr><tr><td><code>&quot;film&quot;</code></td><td>A touch of contrast and warmth, lifted blue shadows, grain and a vignette</td></tr><tr><td><code>&quot;noir&quot;</code></td><td>Black and white, hard contrast, heavy vignette and grain</td></tr></tbody></table></div>
+<p><img src="../../../assets/rendering/post_looks.jpg" alt="The Lagoon on High: before, then the Neutral, Bleached, Vivid, Film and Noir looks" loading="lazy" decoding="async"></p>
+<div class="table"><table><thead><tr><th>Field</th><th>Range</th><th>Meaning</th></tr></thead><tbody><tr><td><code>bloom</code></td><td>0..4 (1)</td><td>Glow around bright things. <code>HIGH</code> and <code>ULTRA</code> get a cheap quarter-resolution bloom; <code>BEAUTIFUL</code> keeps its HDR bloom, scaled by this</td></tr><tr><td><code>temperature</code></td><td>-1..1 (0)</td><td>White balance: cool blue to warm orange</td></tr><tr><td><code>tint</code></td><td>-1..1 (0)</td><td>White balance: green to magenta</td></tr><tr><td><code>lift</code></td><td>per channel (0, 0, 0)</td><td>Added to the shadows. Positive values wash blacks out; a little blue gives cool shadows</td></tr><tr><td><code>gamma</code></td><td>per channel (1, 1, 1)</td><td>Midtone power: above 1 brightens the midtones</td></tr><tr><td><code>gain</code></td><td>per channel (1, 1, 1)</td><td>Highlight multiplier: above 1 overexposes</td></tr><tr><td><code>contrast</code></td><td>0.25..3 (1)</td><td>Spread around mid grey</td></tr><tr><td><code>saturation</code></td><td>0..3 (1)</td><td>0 is black and white</td></tr><tr><td><code>vignette</code></td><td>0..1 (0)</td><td>Darkens the corners</td></tr><tr><td><code>grain</code></td><td>0..1 (0)</td><td>Animated film grain</td></tr><tr><td><code>chromatic_aberration</code></td><td>0..1 (0)</td><td>Red and blue fringes toward the edges of the frame</td></tr></tbody></table></div>
+<p>They apply in that order: white balance, then lift, gamma and gain, then
+contrast and saturation, then the vignette and grain. Two recipes:</p>
+<ul><li><strong>Bleached, overexposed sun:</strong> <code>gain</code> around 1.2, <code>saturation</code> 0.5,
+<code>lift</code> 0.05, <code>contrast</code> 0.9, <code>bloom</code> 2. Pair it with a bright sun and
+a pale sky.</li><li><strong>Warm, saturated adventure:</strong> <code>temperature</code> 0.15, <code>saturation</code> 1.35,
+<code>contrast</code> 1.1, a slightly warm <code>gain</code> like <code>(1.04, 1.02, 0.98)</code>.</li></ul>
+<p>A neutral grade with no bloom costs nothing: the frame is drawn straight
+to the screen as before. Otherwise the grade is one extra full-screen
+pass.</p>
 <h2 id="sky-and-quality">Sky and quality<a class="anchor" href="#sky-and-quality" aria-label="Link to this section">#</a></h2>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">MyGame</span>(at.Game):
     clear_color = (<span class="tok-n">0.55</span>, <span class="tok-n">0.78</span>, <span class="tok-n">0.95</span>, <span class="tok-n">1.0</span>)   <span class="tok-c"># the &quot;sky&quot; each frame clears to</span>
     graphics = at.GraphicsQuality.HIGH</code></pre></div>
-<div class="table"><table><thead><tr><th>Preset</th><th>Shadows</th><th>Shadow maps</th><th>Glow lights with shadows</th></tr></thead><tbody><tr><td><code>GraphicsQuality.LOW</code></td><td>off</td><td>—</td><td>none</td></tr><tr><td><code>GraphicsQuality.MEDIUM</code></td><td>on</td><td>1 × 1024px</td><td>none</td></tr><tr><td><code>GraphicsQuality.HIGH</code> (default)</td><td>crisp</td><td>2 cascades × 2048px</td><td>2 (384px)</td></tr><tr><td><code>GraphicsQuality.ULTRA</code></td><td>crisp</td><td>3 cascades × 2048px</td><td>4 (512px)</td></tr><tr><td><code>GraphicsQuality.BEAUTIFUL</code></td><td>soft</td><td>4 cascades × 2048px</td><td>4 (512px, soft)</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Preset</th><th>Shadows</th><th>Shadow maps</th><th>Glow lights with shadows</th><th>Post effects</th></tr></thead><tbody><tr><td><code>GraphicsQuality.LOW</code></td><td>off</td><td>—</td><td>none</td><td>—</td></tr><tr><td><code>GraphicsQuality.MEDIUM</code></td><td>on</td><td>1 × 1024px</td><td>none</td><td>grading</td></tr><tr><td><code>GraphicsQuality.HIGH</code> (default)</td><td>crisp</td><td>2 cascades × 2048px</td><td>2 (384px)</td><td>grading, bloom</td></tr><tr><td><code>GraphicsQuality.ULTRA</code></td><td>crisp</td><td>3 cascades × 2048px</td><td>4 (512px)</td><td>grading, bloom</td></tr><tr><td><code>GraphicsQuality.BEAUTIFUL</code></td><td>soft</td><td>4 cascades × 2048px</td><td>4 (512px, soft)</td><td>grading, HDR bloom</td></tr></tbody></table></div>
 <p><code>LOW</code> is also a <em>style</em>: pure flat-color faces with no shadow shading reads
 as clean minimalism. Finer-grained knobs (render scale, MSAA) build on this
 same setting as the renderer grows.</p>
@@ -242,7 +266,8 @@ screen-space pass darkens creases and the ground around objects
 a short ray toward the sun catches small gaps the shadow map is too
 coarse for, like a coin resting on the ground.</li><li><strong>Physically based light</strong> (GGX specular) and fog that glows toward the
 sun.</li><li><strong>HDR with bloom</strong>: bright highlights (sun glints on water, white
-surfaces in full sun) bleed softly. Then the tone mapper runs, and FXAA
+surfaces in full sun) bleed softly. Then the tone mapper runs, the
+<a href="#post-effects-and-colour-grading">colour grade</a> is applied, and FXAA
 smooths the edges.</li><li><strong>Refractive water</strong> (see below).</li><li><strong>Lens flare</strong> when the camera looks toward the sun (with <code>sky=True</code>).</li></ul>
 <p>It's built to stay cheap. Each pixel filters only one shadow cascade (with
 dithering where cascades meet), and sunlit pixels skip shadow filtering
@@ -341,7 +366,7 @@ top to get fog and tone mapping too.</p>
     <footer class="pager"><a class="prev" href="scenes-and-entities.html"><small>Previous</small>Scenes &amp; entities</a><a class="next" href="cameras.html"><small>Next</small>Cameras</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/rendering-and-lights.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#drawing-primitives">Drawing primitives</a></li><li class="l2"><a href="#surfaces">Surfaces</a></li><li class="l3"><a href="#glowing-objects-light-their-surroundings">Glowing objects light their surroundings</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#the-sun">The sun</a></li><li class="l2"><a href="#point-lights-and-spotlights">Point lights and spotlights</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#sky-and-quality">Sky and quality</a></li><li class="l3"><a href="#beautiful">Beautiful</a></li><li class="l2"><a href="#water">Water</a></li><li class="l3"><a href="#under-the-surface">Under the surface</a></li><li class="l2"><a href="#particles">Particles</a></li><li class="l2"><a href="#mood-recipes">Mood recipes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#drawing-primitives">Drawing primitives</a></li><li class="l2"><a href="#surfaces">Surfaces</a></li><li class="l3"><a href="#glowing-objects-light-their-surroundings">Glowing objects light their surroundings</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#the-sun">The sun</a></li><li class="l2"><a href="#point-lights-and-spotlights">Point lights and spotlights</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l3"><a href="#post-effects-and-colour-grading">Post effects and colour grading</a></li><li class="l2"><a href="#sky-and-quality">Sky and quality</a></li><li class="l3"><a href="#beautiful">Beautiful</a></li><li class="l2"><a href="#water">Water</a></li><li class="l3"><a href="#under-the-surface">Under the surface</a></li><li class="l2"><a href="#particles">Particles</a></li><li class="l2"><a href="#mood-recipes">Mood recipes</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

@@ -92,6 +92,22 @@ tuning.</p>
 background after it, so with ACES or AgX the far fog can look slightly
 different from the background. If the horizon shows a seam, nudge Fog
 Color, or turn on <strong>Sky &amp; Sun</strong>, which fades fog into the sky itself.</p></aside>
+<p>Picking an Environment preset keeps your post effects.</p>
+<h2 id="post">Post<a class="anchor" href="#post" aria-label="Link to this section">#</a></h2>
+<p>The <strong>Post</strong> group grades the finished frame: colour, bloom, vignette,
+grain and colour fringes. The values live on the Environment, so click
+<strong>Customize Environment</strong> first. They also show in the Inspector's
+Environment section. Grading runs on Medium quality and up, and bloom on
+High and up.</p>
+<p>The row of <strong>looks</strong> at the top sets every field at once, and the current
+look is highlighted. Pick one, then fine-tune:</p>
+<div class="table"><table><thead><tr><th>Look</th><th>Feel</th></tr></thead><tbody><tr><td>Neutral</td><td>No grade: the default</td></tr><tr><td>Bleached</td><td>Overexposed, washed out and pale, with strong bloom</td></tr><tr><td>Vivid</td><td>Warm, saturated sunshine</td></tr><tr><td>Film</td><td>Gentle contrast and warmth, grain, vignette</td></tr><tr><td>Noir</td><td>Black and white, hard contrast</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td>Bloom</td><td>Glow around bright things, 0 off to 4. High and up</td></tr><tr><td>Contrast</td><td>Spread around mid grey. 1 is unchanged</td></tr><tr><td>Saturation</td><td>0 is black and white, 1 is unchanged, up to 3</td></tr><tr><td>Temperature</td><td>White balance: negative is cooler (blue), positive is warmer (orange)</td></tr><tr><td>Tint</td><td>White balance: negative is greener, positive is more magenta</td></tr><tr><td>Lift</td><td>Added to the shadows, per channel (R, G, B). Raises the blacks</td></tr><tr><td>Gamma</td><td>Midtone power per channel. Above 1 brightens the midtones</td></tr><tr><td>Gain</td><td>Highlight multiplier per channel. Above 1 overexposes</td></tr><tr><td>Vignette</td><td>Darkens the corners</td></tr><tr><td>Grain</td><td>Animated film grain</td></tr><tr><td>Aberration</td><td>Red and blue colour fringes toward the frame's edges</td></tr></tbody></table></div>
+<p>For a bleached, overexposed look, start from <strong>Bleached</strong> or raise Gain
+to about 1.2 and drop Saturation to 0.5. For a warm adventure look, start
+from <strong>Vivid</strong> or set Temperature to 0.15 and Saturation to 1.35. See
+<a href="../guides/rendering-and-lights.html#post-effects-and-colour-grading">Post effects and colour grading</a>
+for the details.</p>
 <h2 id="camera">Camera<a class="anchor" href="#camera" aria-label="Link to this section">#</a></h2>
 <p>This group edits the scene's first camera, the one Play renders through.
 If there isn't one, <strong>Add Camera</strong> creates one framed on your current
@@ -119,7 +135,7 @@ through three complete looks.</p>
     <footer class="pager"><a class="prev" href="cameras.html"><small>Previous</small>Cameras</a><a class="next" href="code-editor.html"><small>Next</small>The code editor</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/graphics.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#renderer">Renderer</a></li><li class="l2"><a href="#point-and-spot-lights">Point and spot lights</a></li><li class="l2"><a href="#sun">Sun</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#camera">Camera</a></li><li class="l2"><a href="#test-scenes">Test Scenes</a></li><li class="l2"><a href="#a-tuning-workflow">A tuning workflow</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#renderer">Renderer</a></li><li class="l2"><a href="#point-and-spot-lights">Point and spot lights</a></li><li class="l2"><a href="#sun">Sun</a></li><li class="l2"><a href="#environment">Environment</a></li><li class="l2"><a href="#post">Post</a></li><li class="l2"><a href="#camera">Camera</a></li><li class="l2"><a href="#test-scenes">Test Scenes</a></li><li class="l2"><a href="#a-tuning-workflow">A tuning workflow</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

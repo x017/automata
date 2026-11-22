@@ -1,5 +1,7 @@
-//! The Beautiful preset's post chain: HDR scene targets, bloom, tone
-//! mapping and FXAA (shaders in `shaders/post.wgsl`).
+//! The post chains (shaders in `shaders/post.wgsl`).
+//!
+//! **Beautiful**: HDR scene targets, bloom, tone mapping, colour grading
+//! and FXAA.
 //!
 //! Frame flow: the scene renders into [`PostTargets::hdr`] (with
 //! [`PostTargets::depth`]); water, if any, refracts through copies of both;
@@ -7,6 +9,12 @@
 //! resolves HDR + bloom into an LDR image, and [`Post::draw_fxaa`] writes
 //! the anti-aliased result into the caller's target (inside the caller's
 //! pass, so HUD sprites can follow on top, untouched by post effects).
+//!
+//! **Medium to Ultra** ([`LdrTargets`]), only when the Environment's post
+//! effects change something: the forward path renders into
+//! [`LdrTargets::scene`] instead of the target, [`Post::record_ldr_bloom`]
+//! builds a cheap quarter-size bloom (High and Ultra), and
+//! [`Post::draw_grade`] grades the image into the caller's pass.
 
 use wgpu::util::DeviceExt;
 
@@ -24,9 +32,15 @@ const MAX_BLOOM_LEVELS: u32 = 6;
 /// one level's worth per level.
 const BLOOM: f32 = 1.2;
 
+/// Cheap bloom mips (a quarter resolution down).
+const LDR_BLOOM_LEVELS: u32 = 3;
+
+/// How strongly the cheap bloom adds on at `PostEffects::bloom` 1.
+const LDR_BLOOM: f32 = 2.4;
+
 /// The post chain uniform (`PostUniform` in post.wgsl).
 #[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
 struct PostUniform {
     texel: [f32; 4],
     params: [f32; 4],
@@ -36,6 +50,156 @@ struct PostUniform {
     sun: [f32; 4],
     /// rgb: sunlight color, a: aspect ratio (width / height).
     sun_color: [f32; 4],
+    /// The grade: see [`Grade`].
+    grade: [f32; 4],
+    lift: [f32; 4],
+    gamma: [f32; 4],
+    gain: [f32; 4],
+    /// x: time (s), y: cheap bloom strength, z: 1 = grade.
+    misc: [f32; 4],
+}
+
+/// The grading and lens effects a post pass applies, packed for the
+/// shader from the Environment's [`crate::PostEffects`].
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Grade {
+    tone: [f32; 4],
+    lift: [f32; 4],
+    gamma: [f32; 4],
+    gain: [f32; 4],
+    /// x: time, z: 1 = grade (y is set per pass).
+    misc: [f32; 4],
+}
+
+impl Grade {
+    /// `post` at `time` seconds (for the grain), with the values clamped
+    /// to their ranges.
+    pub fn new(post: &crate::PostEffects, time: f32) -> Self {
+        let rgb = |c: [f32; 3], lo: f32, hi: f32, a: f32| {
+            [
+                c[0].clamp(lo, hi),
+                c[1].clamp(lo, hi),
+                c[2].clamp(lo, hi),
+                a,
+            ]
+        };
+        Self {
+            tone: [
+                post.contrast.clamp(0.0, 4.0),
+                post.saturation.clamp(0.0, 4.0),
+                post.temperature.clamp(-1.0, 1.0),
+                post.tint.clamp(-1.0, 1.0),
+            ],
+            lift: rgb(post.lift, -1.0, 1.0, post.vignette.clamp(0.0, 1.0)),
+            gamma: rgb(post.gamma, 0.05, 8.0, post.grain.clamp(0.0, 1.0)),
+            gain: rgb(
+                post.gain,
+                0.0,
+                8.0,
+                post.chromatic_aberration.clamp(0.0, 1.0),
+            ),
+            misc: [
+                time.rem_euclid(3600.0),
+                0.0,
+                f32::from(u8::from(!post.is_neutral_grade())),
+                0.0,
+            ],
+        }
+    }
+
+    /// Whether the pass has nothing to grade or fringe.
+    fn is_noop(&self) -> bool {
+        self.misc[2] < 0.5 && self.gain[3] <= 0.0
+    }
+
+    fn into_uniform(self, mut u: PostUniform, bloom: f32) -> PostUniform {
+        u.grade = self.tone;
+        u.lift = self.lift;
+        u.gamma = self.gamma;
+        u.gain = self.gain;
+        u.misc = [self.misc[0], bloom, self.misc[2], 0.0];
+        u
+    }
+}
+
+/// What the Medium-to-Ultra post chain does this frame, if anything.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LdrChain {
+    pub grade: Grade,
+    /// Cheap bloom strength (0 = none).
+    pub bloom: f32,
+}
+
+impl LdrChain {
+    /// The chain `post` asks for on `quality` (None: render straight to
+    /// the target, as without post effects).
+    pub fn new(
+        quality: crate::GraphicsQuality,
+        post: &crate::PostEffects,
+        time: f32,
+    ) -> Option<Self> {
+        if !quality.post_effects() || quality.is_beautiful() {
+            return None;
+        }
+        let grade = Grade::new(post, time);
+        let bloom = if quality.bloom() {
+            post.bloom.clamp(0.0, 4.0) * LDR_BLOOM / LDR_BLOOM_LEVELS as f32
+        } else {
+            0.0
+        };
+        (bloom > 0.0 || !grade.is_noop()).then_some(Self { grade, bloom })
+    }
+}
+
+/// Medium to Ultra's targets: the scene image and the cheap bloom chain.
+pub(crate) struct LdrTargets {
+    pub size: (u32, u32),
+    pub format: wgpu::TextureFormat,
+    /// What the forward path draws into (the target's format).
+    pub scene: wgpu::Texture,
+    bloom: wgpu::Texture,
+    bloom_levels: u32,
+}
+
+impl LdrTargets {
+    fn new(device: &wgpu::Device, size: (u32, u32), format: wgpu::TextureFormat) -> Self {
+        use wgpu::TextureUsages as U;
+        let (w, h) = (size.0.max(1), size.1.max(1));
+        let bloom_size = ((w / 4).max(1), (h / 4).max(1));
+        let bloom_levels = bloom_level_count(bloom_size).min(LDR_BLOOM_LEVELS);
+        let texture = |label, format, size: (u32, u32), mips| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width: size.0,
+                    height: size.1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: mips,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: U::RENDER_ATTACHMENT | U::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        };
+        Self {
+            size: (w, h),
+            format,
+            scene: texture("post scene", format, (w, h), 1),
+            bloom: texture("cheap bloom", HDR_FORMAT, bloom_size, bloom_levels),
+            bloom_levels,
+        }
+    }
+
+    fn bloom_mip(&self, level: u32) -> wgpu::TextureView {
+        self.bloom.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("cheap bloom mip"),
+            base_mip_level: level,
+            mip_level_count: Some(1),
+            ..wgpu::TextureViewDescriptor::default()
+        })
+    }
 }
 
 /// Where the sun is on screen, for the lens flare.
@@ -210,11 +374,15 @@ pub(crate) struct Post {
     upsample: wgpu::RenderPipeline,
     resolve: wgpu::RenderPipeline,
     sun_visibility: wgpu::RenderPipeline,
+    ldr_prefilter: wgpu::RenderPipeline,
     /// FXAA pipelines per target format.
     fxaa: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
+    /// Grade pipelines per target format (Medium to Ultra).
+    grade: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
     sampler: wgpu::Sampler,
     placeholder: wgpu::TextureView,
     pub targets: Option<PostTargets>,
+    pub ldr: Option<LdrTargets>,
 }
 
 impl Post {
@@ -312,6 +480,15 @@ impl Post {
             None,
             None,
         );
+        let ldr_prefilter = fullscreen_pipeline(
+            device,
+            &layout,
+            &shader,
+            "fs_ldr_prefilter",
+            HDR_FORMAT,
+            None,
+            None,
+        );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("post"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -344,10 +521,13 @@ impl Post {
             upsample,
             resolve,
             sun_visibility,
+            ldr_prefilter,
             fxaa: Vec::new(),
+            grade: Vec::new(),
             sampler,
             placeholder,
             targets: None,
+            ldr: None,
         }
     }
 
@@ -359,29 +539,63 @@ impl Post {
             self.targets = Some(PostTargets::new(device, size));
         }
         if !self.fxaa.iter().any(|(f, _)| *f == format) {
-            let depth = Some(wgpu::DepthStencilState {
-                format: crate::renderer::DEPTH_FORMAT,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            });
-            let pipeline = fullscreen_pipeline(
-                device,
-                &self.layout,
-                &self.shader,
-                "fs_fxaa",
-                format,
-                None,
-                depth,
-            );
+            let pipeline = self.final_pipeline(device, "fs_fxaa", format);
             self.fxaa.push((format, pipeline));
+        }
+    }
+
+    /// A pipeline drawing into the caller's final pass (which has a depth
+    /// buffer for the HUD sprites that follow).
+    fn final_pipeline(
+        &self,
+        device: &wgpu::Device,
+        entry: &str,
+        format: wgpu::TextureFormat,
+    ) -> wgpu::RenderPipeline {
+        let depth = Some(wgpu::DepthStencilState {
+            format: crate::renderer::DEPTH_FORMAT,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Always),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        });
+        fullscreen_pipeline(
+            device,
+            &self.layout,
+            &self.shader,
+            entry,
+            format,
+            None,
+            depth,
+        )
+    }
+
+    /// Makes sure Medium-to-Ultra's targets match `size` and `format`, and
+    /// a grade pipeline exists for `format`.
+    pub fn ensure_ldr(
+        &mut self,
+        device: &wgpu::Device,
+        size: (u32, u32),
+        format: wgpu::TextureFormat,
+    ) {
+        let size = (size.0.max(1), size.1.max(1));
+        if self.ldr.as_ref().map(|t| (t.size, t.format)) != Some((size, format)) {
+            self.ldr = Some(LdrTargets::new(device, size, format));
+        }
+        if !self.grade.iter().any(|(f, _)| *f == format) {
+            let pipeline = self.final_pipeline(device, "fs_grade", format);
+            self.grade.push((format, pipeline));
         }
     }
 
     /// Frees the size-dependent targets (when leaving the Beautiful preset).
     pub fn release(&mut self) {
         self.targets = None;
+    }
+
+    /// Frees Medium-to-Ultra's targets (Low, Beautiful, or no post effects).
+    pub fn release_ldr(&mut self) {
+        self.ldr = None;
     }
 
     fn bind(
@@ -433,6 +647,7 @@ impl Post {
     /// `exposure` and tone mapping curve `tonemap` (the shader's index),
     /// plus the sun's lens flare if there is one.
     #[allow(clippy::too_many_lines)] // one pass sequence, read top to bottom
+    #[allow(clippy::too_many_arguments)]
     pub fn record_bloom_and_resolve(
         &self,
         device: &wgpu::Device,
@@ -440,6 +655,8 @@ impl Post {
         exposure: f32,
         tonemap: f32,
         flare: Option<SunFlare>,
+        grade: Grade,
+        bloom: f32,
     ) {
         let Some(t) = &self.targets else {
             return;
@@ -451,7 +668,7 @@ impl Post {
             let h = (t.size.1 / 2).max(1) >> level;
             (w.max(1) as f32, h.max(1) as f32)
         };
-        let strength = BLOOM / t.bloom_levels.max(1) as f32;
+        let strength = BLOOM * bloom.clamp(0.0, 4.0) / t.bloom_levels.max(1) as f32;
         let aspect = t.size.0 as f32 / t.size.1.max(1) as f32;
         let flare = flare
             .map(|f| SunFlare {
@@ -465,12 +682,17 @@ impl Post {
                 [f.color[0], f.color[1], f.color[2], aspect],
             )
         });
-        let uniform = |texel: (f32, f32)| PostUniform {
-            texel: [1.0 / texel.0, 1.0 / texel.1, 0.0, 0.0],
-            params: [0.0, exposure, tonemap, strength],
-            output: [0.0; 4],
-            sun,
-            sun_color,
+        let uniform = |texel: (f32, f32)| {
+            grade.into_uniform(
+                PostUniform {
+                    texel: [1.0 / texel.0, 1.0 / texel.1, 0.0, 0.0],
+                    params: [0.0, exposure, tonemap, strength],
+                    sun,
+                    sun_color,
+                    ..PostUniform::default()
+                },
+                0.0,
+            )
         };
         // The sun's visibility: how much of its disk still blazes in the
         // HDR image (blocked by geometry or dimmed by clouds).
@@ -568,12 +790,103 @@ impl Post {
         let ldr_view = t.ldr.create_view(&wgpu::TextureViewDescriptor::default());
         let uniform = PostUniform {
             texel: [1.0 / t.size.0 as f32, 1.0 / t.size.1 as f32, 0.0, 0.0],
-            params: [0.0; 4],
             output: [f32::from(u8::from(!format.is_srgb())), 0.0, 0.0, 0.0],
-            sun: [0.0; 4],
-            sun_color: [0.0; 4],
+            ..PostUniform::default()
         };
         let bind = self.bind(device, &ldr_view, uniform, None, None);
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    /// Medium to Ultra: the cheap bloom of [`LdrTargets::scene`] (High and
+    /// Ultra; nothing when `chain.bloom` is 0).
+    pub fn record_ldr_bloom(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        chain: &LdrChain,
+    ) {
+        let Some(t) = &self.ldr else {
+            return;
+        };
+        if chain.bloom <= 0.0 {
+            return;
+        }
+        let scene = t.scene.create_view(&wgpu::TextureViewDescriptor::default());
+        let mips: Vec<wgpu::TextureView> = (0..t.bloom_levels).map(|i| t.bloom_mip(i)).collect();
+        let size_of = |level: u32| {
+            let w = (t.size.0 / 4).max(1) >> level;
+            let h = (t.size.1 / 4).max(1) >> level;
+            (w.max(1) as f32, h.max(1) as f32)
+        };
+        let uniform = |texel: (f32, f32)| PostUniform {
+            texel: [1.0 / texel.0, 1.0 / texel.1, 0.0, 0.0],
+            ..PostUniform::default()
+        };
+        for level in 0..t.bloom_levels {
+            let (src, src_size) = if level == 0 {
+                (&scene, (t.size.0 as f32, t.size.1 as f32))
+            } else {
+                (&mips[level as usize - 1], size_of(level - 1))
+            };
+            let bind = self.bind(device, src, uniform(src_size), None, None);
+            fullscreen_pass(
+                encoder,
+                "cheap bloom down",
+                &mips[level as usize],
+                wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                if level == 0 {
+                    &self.ldr_prefilter
+                } else {
+                    &self.downsample
+                },
+                &bind,
+            );
+        }
+        for level in (1..t.bloom_levels).rev() {
+            let bind = self.bind(
+                device,
+                &mips[level as usize],
+                uniform(size_of(level)),
+                None,
+                None,
+            );
+            fullscreen_pass(
+                encoder,
+                "cheap bloom up",
+                &mips[level as usize - 1],
+                wgpu::LoadOp::Load,
+                &self.upsample,
+                &bind,
+            );
+        }
+    }
+
+    /// Medium to Ultra: grades [`LdrTargets::scene`] (plus the cheap bloom)
+    /// into `pass`, whose color target has `format`.
+    pub fn draw_grade(
+        &self,
+        device: &wgpu::Device,
+        pass: &mut wgpu::RenderPass<'_>,
+        format: wgpu::TextureFormat,
+        chain: &LdrChain,
+    ) {
+        let (Some(t), Some((_, pipeline))) =
+            (&self.ldr, self.grade.iter().find(|(f, _)| *f == format))
+        else {
+            return;
+        };
+        let scene = t.scene.create_view(&wgpu::TextureViewDescriptor::default());
+        let bloom = (chain.bloom > 0.0).then(|| t.bloom_mip(0));
+        let uniform = chain.grade.into_uniform(
+            PostUniform {
+                texel: [1.0 / t.size.0 as f32, 1.0 / t.size.1 as f32, 0.0, 0.0],
+                ..PostUniform::default()
+            },
+            chain.bloom,
+        );
+        let bind = self.bind(device, &scene, uniform, bloom.as_ref(), None);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind, &[]);
         pass.draw(0..3, 0..1);
@@ -658,7 +971,35 @@ mod tests {
         assert_eq!(bloom_level_count((960, 540)), 6);
         assert_eq!(bloom_level_count((32, 32)), 3); // 32, 16, 8
         assert_eq!(bloom_level_count((4, 4)), 1);
-        assert_eq!(std::mem::size_of::<PostUniform>(), 80);
+        assert_eq!(std::mem::size_of::<PostUniform>(), 160);
+    }
+
+    #[test]
+    fn the_ldr_chain_runs_only_when_it_changes_something() {
+        use crate::{GraphicsQuality as Q, PostEffects};
+        let neutral = PostEffects::default();
+        let graded = PostEffects::preset("vivid").unwrap();
+        let no_bloom = PostEffects {
+            bloom: 0.0,
+            ..neutral
+        };
+        // Low never, Beautiful has its own chain.
+        assert!(LdrChain::new(Q::Low, &graded, 0.0).is_none());
+        assert!(LdrChain::new(Q::Beautiful, &graded, 0.0).is_none());
+        // Medium: only for a grade (no bloom there).
+        assert!(LdrChain::new(Q::Medium, &neutral, 0.0).is_none());
+        let medium = LdrChain::new(Q::Medium, &graded, 0.0).unwrap();
+        assert!(medium.bloom == 0.0 && medium.grade.misc[2] > 0.5);
+        // High: bloom by default, nothing with it off and no grade.
+        let high = LdrChain::new(Q::High, &neutral, 0.0).unwrap();
+        assert!(high.bloom > 0.0 && high.grade.misc[2] < 0.5);
+        assert!(LdrChain::new(Q::High, &no_bloom, 0.0).is_none());
+        // Chromatic aberration alone still needs the pass.
+        let fringe = PostEffects {
+            chromatic_aberration: 0.5,
+            ..no_bloom
+        };
+        assert!(LdrChain::new(Q::Medium, &fringe, 0.0).is_some());
     }
 
     #[test]

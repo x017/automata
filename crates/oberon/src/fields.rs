@@ -73,6 +73,28 @@ pub enum Field {
     EnvLensFlare,
     /// Ambient occlusion strength (Beautiful).
     EnvAmbientOcclusion,
+    /// Post: bloom strength (High and up).
+    EnvBloom,
+    /// Post: contrast.
+    EnvContrast,
+    /// Post: saturation.
+    EnvSaturation,
+    /// Post: white balance, cool to warm.
+    EnvTemperature,
+    /// Post: white balance, green to magenta.
+    EnvTint,
+    /// Post: lift (shadows), channel 0..3.
+    EnvLift(u8),
+    /// Post: gamma (midtones), channel 0..3.
+    EnvGamma(u8),
+    /// Post: gain (highlights), channel 0..3.
+    EnvGain(u8),
+    /// Post: vignette.
+    EnvVignette,
+    /// Post: film grain.
+    EnvGrain,
+    /// Post: chromatic aberration.
+    EnvChromatic,
     /// Water surface width (X) and length (Z): index 0..2.
     WaterSize(u8),
     /// Water deep color channel 0..3.
@@ -307,6 +329,17 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::EnvClouds => data.environment?.clouds,
         F::EnvLensFlare => data.environment?.lens_flare,
         F::EnvAmbientOcclusion => data.environment?.ambient_occlusion,
+        F::EnvBloom => data.environment?.post.bloom,
+        F::EnvContrast => data.environment?.post.contrast,
+        F::EnvSaturation => data.environment?.post.saturation,
+        F::EnvTemperature => data.environment?.post.temperature,
+        F::EnvTint => data.environment?.post.tint,
+        F::EnvLift(i) => data.environment?.post.lift[axis(i)],
+        F::EnvGamma(i) => data.environment?.post.gamma[axis(i)],
+        F::EnvGain(i) => data.environment?.post.gain[axis(i)],
+        F::EnvVignette => data.environment?.post.vignette,
+        F::EnvGrain => data.environment?.post.grain,
+        F::EnvChromatic => data.environment?.post.chromatic_aberration,
         F::EnvFogDensity => data.environment?.fog_density,
         F::EnvFogStart => data.environment?.fog_start,
         F::WaterSize(i) => data.water?.size[usize::from(i.min(1))],
@@ -407,10 +440,17 @@ pub fn range(field: Field) -> (f32, f32) {
         | F::EnvFogColor(_)
         | F::EnvZenith(_)
         | F::EnvClouds
+        | F::EnvVignette
+        | F::EnvGrain
+        | F::EnvChromatic
         | F::WaterDeep(_)
         | F::WaterShallow(_)
         | F::WaterFoam
         | F::WaterWind => (0.0, 1.0),
+        F::EnvTemperature | F::EnvTint | F::EnvLift(_) => (-1.0, 1.0),
+        F::EnvContrast => (0.25, 3.0),
+        F::EnvSaturation | F::EnvGain(_) => (0.0, 3.0),
+        F::EnvGamma(_) => (0.1, 4.0),
         F::PointRadius | F::SpotRadius => (0.01, 5.0),
         F::SpotInner => (0.0, automata_renderer::SpotCone::MAX_ANGLE),
         F::SpotOuter => (1.0, automata_renderer::SpotCone::MAX_ANGLE),
@@ -445,7 +485,7 @@ pub fn range(field: Field) -> (f32, f32) {
         }
         F::CameraFov => (1.0, 179.0),
         F::CharacterSlope => (0.0, 89.0),
-        F::AudioVolume | F::EnvSunGlow | F::EnvLensFlare => (0.0, 4.0),
+        F::AudioVolume | F::EnvSunGlow | F::EnvLensFlare | F::EnvBloom => (0.0, 4.0),
         F::AudioPitch => (0.05, 4.0),
         F::AudioRange => (0.5, 10_000.0),
         F::CameraNear => (0.001, 1_000.0),
@@ -483,6 +523,7 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::WaterWaveDirection => 0.5,
         F::ParticleMax => 2.0,
         F::EnvFogDensity => 0.0005,
+        F::EnvLift(_) => 0.001,
         F::ParticleColor(_)
         | F::ParticleEndColor(_)
         | F::ParticleStretch
@@ -507,6 +548,16 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::EnvSunGlow
         | F::EnvLensFlare
         | F::EnvAmbientOcclusion
+        | F::EnvBloom
+        | F::EnvContrast
+        | F::EnvSaturation
+        | F::EnvTemperature
+        | F::EnvTint
+        | F::EnvGamma(_)
+        | F::EnvGain(_)
+        | F::EnvVignette
+        | F::EnvGrain
+        | F::EnvChromatic
         | F::WaterDeep(_)
         | F::WaterShallow(_)
         | F::WaterFoam
@@ -622,6 +673,17 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
         | F::EnvClouds
         | F::EnvLensFlare
         | F::EnvAmbientOcclusion
+        | F::EnvBloom
+        | F::EnvContrast
+        | F::EnvSaturation
+        | F::EnvTemperature
+        | F::EnvTint
+        | F::EnvLift(_)
+        | F::EnvGamma(_)
+        | F::EnvGain(_)
+        | F::EnvVignette
+        | F::EnvGrain
+        | F::EnvChromatic
         | F::EnvFogDensity
         | F::EnvFogStart => match &mut data.environment {
             Some(env) => match field {
@@ -636,6 +698,17 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
                 F::EnvClouds => env.clouds = v,
                 F::EnvLensFlare => env.lens_flare = v,
                 F::EnvAmbientOcclusion => env.ambient_occlusion = v,
+                F::EnvBloom => env.post.bloom = v,
+                F::EnvContrast => env.post.contrast = v,
+                F::EnvSaturation => env.post.saturation = v,
+                F::EnvTemperature => env.post.temperature = v,
+                F::EnvTint => env.post.tint = v,
+                F::EnvLift(i) => env.post.lift[axis(i)] = v,
+                F::EnvGamma(i) => env.post.gamma[axis(i)] = v,
+                F::EnvGain(i) => env.post.gain[axis(i)] = v,
+                F::EnvVignette => env.post.vignette = v,
+                F::EnvGrain => env.post.grain = v,
+                F::EnvChromatic => env.post.chromatic_aberration = v,
                 F::EnvFogDensity => env.fog_density = v,
                 _ => env.fog_start = v,
             },
@@ -1485,6 +1558,23 @@ mod tests {
             cycle(&mut d, Choice::MeshSurface),
             "Custom cycles to a preset"
         );
+    }
+
+    #[test]
+    fn post_effects_are_editable_fields() {
+        let mut d = entity();
+        assert_eq!(get(&d, Field::EnvSaturation), None);
+        crate::doc::ComponentKind::Environment.add_to(&mut d);
+        assert!((get(&d, Field::EnvBloom).unwrap() - 1.0).abs() < 1e-6);
+        assert!(set(&mut d, Field::EnvSaturation, 0.4));
+        assert!(set(&mut d, Field::EnvGain(1), 1.3));
+        assert!(set(&mut d, Field::EnvLift(2), -5.0));
+        assert!(set(&mut d, Field::EnvVignette, 3.0));
+        let post = d.environment.unwrap().post;
+        assert!((post.saturation - 0.4).abs() < 1e-6);
+        assert_eq!(post.gain, [1.0, 1.3, 1.0]);
+        assert!((post.lift[2] + 1.0).abs() < 1e-6, "clamped to -1");
+        assert!((post.vignette - 1.0).abs() < 1e-6, "clamped to 1");
     }
 
     #[test]

@@ -295,6 +295,61 @@ How it combines with the sun:
 - An Environment is staged data like any other component. It's saved in
   scene files and edited in [Oberon's Graphics tab](../oberon/graphics.md).
 
+### Post effects and colour grading
+
+After tone mapping, the Environment grades the finished frame like a
+colourist would. It runs on `MEDIUM` and up (`LOW` stays untouched and as
+cheap as before), and adds bloom from `HIGH` up:
+
+```python
+look = at.Environment.preset("daylight").with_post(
+    "vivid",            # start from a named look (or None to keep the current one)
+    saturation=1.4,     # ...then change single fields
+    vignette=0.2,
+)
+```
+
+The same keywords work in the constructor:
+`at.Environment(..., post="bleached", grain=0.0)`.
+`at.Environment.post_presets()` lists the looks:
+
+| Look | What it does |
+|---|---|
+| `"neutral"` | The default: no grade, normal bloom |
+| `"bleached"` | Overexposed and washed out: half the saturation, raised blacks, strong soft bloom, a little grain and colour fringing |
+| `"vivid"` | Warm and saturated sunshine: rich greens and blues, golden highlights |
+| `"film"` | A touch of contrast and warmth, lifted blue shadows, grain and a vignette |
+| `"noir"` | Black and white, hard contrast, heavy vignette and grain |
+
+![The Lagoon on High: before, then the Neutral, Bleached, Vivid, Film and Noir looks](../../assets/rendering/post_looks.jpg)
+
+| Field | Range | Meaning |
+|---|---|---|
+| `bloom` | 0..4 (1) | Glow around bright things. `HIGH` and `ULTRA` get a cheap quarter-resolution bloom; `BEAUTIFUL` keeps its HDR bloom, scaled by this |
+| `temperature` | -1..1 (0) | White balance: cool blue to warm orange |
+| `tint` | -1..1 (0) | White balance: green to magenta |
+| `lift` | per channel (0, 0, 0) | Added to the shadows. Positive values wash blacks out; a little blue gives cool shadows |
+| `gamma` | per channel (1, 1, 1) | Midtone power: above 1 brightens the midtones |
+| `gain` | per channel (1, 1, 1) | Highlight multiplier: above 1 overexposes |
+| `contrast` | 0.25..3 (1) | Spread around mid grey |
+| `saturation` | 0..3 (1) | 0 is black and white |
+| `vignette` | 0..1 (0) | Darkens the corners |
+| `grain` | 0..1 (0) | Animated film grain |
+| `chromatic_aberration` | 0..1 (0) | Red and blue fringes toward the edges of the frame |
+
+They apply in that order: white balance, then lift, gamma and gain, then
+contrast and saturation, then the vignette and grain. Two recipes:
+
+- **Bleached, overexposed sun:** `gain` around 1.2, `saturation` 0.5,
+  `lift` 0.05, `contrast` 0.9, `bloom` 2. Pair it with a bright sun and
+  a pale sky.
+- **Warm, saturated adventure:** `temperature` 0.15, `saturation` 1.35,
+  `contrast` 1.1, a slightly warm `gain` like `(1.04, 1.02, 0.98)`.
+
+A neutral grade with no bloom costs nothing: the frame is drawn straight
+to the screen as before. Otherwise the grade is one extra full-screen
+pass.
+
 ## Sky and quality
 
 ```python
@@ -303,13 +358,13 @@ class MyGame(at.Game):
     graphics = at.GraphicsQuality.HIGH
 ```
 
-| Preset | Shadows | Shadow maps | Glow lights with shadows |
-|---|---|---|---|
-| `GraphicsQuality.LOW` | off | — | none |
-| `GraphicsQuality.MEDIUM` | on | 1 × 1024px | none |
-| `GraphicsQuality.HIGH` (default) | crisp | 2 cascades × 2048px | 2 (384px) |
-| `GraphicsQuality.ULTRA` | crisp | 3 cascades × 2048px | 4 (512px) |
-| `GraphicsQuality.BEAUTIFUL` | soft | 4 cascades × 2048px | 4 (512px, soft) |
+| Preset | Shadows | Shadow maps | Glow lights with shadows | Post effects |
+|---|---|---|---|---|
+| `GraphicsQuality.LOW` | off | — | none | — |
+| `GraphicsQuality.MEDIUM` | on | 1 × 1024px | none | grading |
+| `GraphicsQuality.HIGH` (default) | crisp | 2 cascades × 2048px | 2 (384px) | grading, bloom |
+| `GraphicsQuality.ULTRA` | crisp | 3 cascades × 2048px | 4 (512px) | grading, bloom |
+| `GraphicsQuality.BEAUTIFUL` | soft | 4 cascades × 2048px | 4 (512px, soft) | grading, HDR bloom |
 
 `LOW` is also a *style*: pure flat-color faces with no shadow shading reads
 as clean minimalism. Finer-grained knobs (render scale, MSAA) build on this
@@ -331,7 +386,8 @@ same setting as the renderer grows.
 - **Physically based light** (GGX specular) and fog that glows toward the
   sun.
 - **HDR with bloom**: bright highlights (sun glints on water, white
-  surfaces in full sun) bleed softly. Then the tone mapper runs, and FXAA
+  surfaces in full sun) bleed softly. Then the tone mapper runs, the
+  [colour grade](#post-effects-and-colour-grading) is applied, and FXAA
   smooths the edges.
 - **Refractive water** (see below).
 - **Lens flare** when the camera looks toward the sun (with `sky=True`).

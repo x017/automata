@@ -1,5 +1,6 @@
-// Post chain for the Beautiful preset. Prepended at build time: tonemap.wgsl.
+// Post chains. Prepended at build time: tonemap.wgsl.
 //
+// Beautiful:
 //   1. bloom: a prefilter (Karis average against fireflies and a soft-knee
 //      threshold, so only highlights glow), then a mip chain of dual-filter
 //      downsamples and upsamples added back up (Bjorge, "Bandwidth-Efficient
@@ -8,7 +9,14 @@
 //      with luma in alpha. The HDR image's alpha is surface coverage: the
 //      background (alpha 0) skips exposure and the curve, exactly like the
 //      forward path, so the clear color shows as authored.
+//      Colour grading, vignette, grain and chromatic aberration happen
+//      here too, after tone mapping.
 //   3. fxaa: edge anti-aliasing on the LDR image, written to the target
+//
+// Medium to Ultra (the forward path renders display-ready colour into an
+// intermediate image): on High and Ultra a cheap bloom (ldr_prefilter into
+// a quarter-size mip chain, then the same down / up passes), and one
+// grade pass into the target with the same grading and lens effects.
 //
 // Every pass draws one fullscreen triangle with the same bind group shape.
 
@@ -18,6 +26,11 @@ struct PostUniform {
     output: vec4<f32>, // x: encode sRGB in the shader (the target doesn't)
     sun: vec4<f32>,    // xy: sun position (uv), z: lens flare strength, w: disk radius (uv)
     sun_color: vec4<f32>, // rgb: sunlight, a: aspect ratio
+    grade: vec4<f32>,  // x: contrast, y: saturation, z: temperature, w: tint
+    lift: vec4<f32>,   // rgb: lift, a: vignette
+    gamma: vec4<f32>,  // rgb: gamma, a: film grain
+    gain: vec4<f32>,   // rgb: gain, a: chromatic aberration
+    misc: vec4<f32>,   // x: time (s), y: cheap bloom strength, z: 1 = grade
 };
 
 @group(0) @binding(0) var src: texture_2d<f32>;
@@ -200,17 +213,102 @@ fn lens_flare(uv: vec2<f32>) -> vec3<f32> {
     return c * vis * strength;
 }
 
+// --- Grading and lens effects -------------------------------------------------
+// On display-range linear colour (after tone mapping): white balance, then
+// in a perceptual (gamma 2.2) space lift / gamma / gain, contrast around
+// mid grey and saturation, the vignette and grain; linear out.
+
+fn white_balance(temperature: f32, tint: f32) -> vec3<f32> {
+    let wb = vec3<f32>(
+        1.0 + 0.32 * temperature + 0.06 * tint,
+        1.0 - 0.2 * tint,
+        1.0 - 0.32 * temperature + 0.06 * tint,
+    );
+    return wb / luma(wb); // keeps the brightness
+}
+
+fn grain_noise(px: vec2<f32>) -> f32 {
+    // A new pattern 24 times a second.
+    let frame = floor(post.misc.x * 24.0);
+    let p = fract(px * vec2<f32>(0.1031, 0.1030) + vec2<f32>(frame * 0.6180, frame * 0.4142));
+    let q = p + dot(p, p.yx + 33.33);
+    return fract((q.x + q.y) * q.x) - 0.5;
+}
+
+fn grade(c: vec3<f32>, uv: vec2<f32>, px: vec2<f32>) -> vec3<f32> {
+    let balanced = max(c, vec3<f32>(0.0)) * white_balance(post.grade.z, post.grade.w);
+    var g = pow(balanced, vec3<f32>(1.0 / 2.2));
+    g = g * post.gain.rgb + post.lift.rgb * (vec3<f32>(1.0) - g);
+    g = pow(max(g, vec3<f32>(0.0)), vec3<f32>(1.0) / max(post.gamma.rgb, vec3<f32>(0.05)));
+    g = (g - 0.5) * post.grade.x + 0.5;
+    g = mix(vec3<f32>(luma(g)), g, post.grade.y);
+    // Vignette: darker toward the corners (an ellipse matching the frame).
+    let d = length(uv - 0.5) * 1.4142;
+    g = g * (1.0 - post.lift.a * smoothstep(0.3, 1.05, d));
+    // Grain: strongest in the midtones, like film.
+    let l = clamp(luma(g), 0.0, 1.0);
+    g = g + grain_noise(px) * post.gamma.a * 0.16 * (0.35 + 2.6 * l * (1.0 - l));
+    return pow(clamp(g, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2));
+}
+
+// The source with colour fringes toward the edges: red pushed out, blue
+// pulled in (chromatic aberration). Plain when it's off.
+fn fringed(uv: vec2<f32>) -> vec3<f32> {
+    let center = tap(uv);
+    let k = post.gain.a;
+    if k <= 0.0 {
+        return center;
+    }
+    let off = (uv - 0.5) * k * 0.014;
+    return vec3<f32>(tap(uv + off).r, center.g, tap(uv - off).b);
+}
+
 @fragment
 fn fs_resolve(in: FullscreenOut) -> @location(0) vec4<f32> {
     let hdr = textureSampleLevel(src, src_sampler, in.uv, 0.0);
     let bloom = textureSampleLevel(extra, src_sampler, in.uv, 0.0).rgb;
-    let color = hdr.rgb + bloom * post.params.w + lens_flare(in.uv);
+    let color = fringed(in.uv) + bloom * post.params.w + lens_flare(in.uv);
     let lit = tonemap_with(color, post.params.y, post.params.z);
-    let mapped = clamp(mix(color, lit, hdr.a), vec3<f32>(0.0), vec3<f32>(1.0));
+    var mapped = clamp(mix(color, lit, hdr.a), vec3<f32>(0.0), vec3<f32>(1.0));
+    if post.misc.z > 0.5 {
+        mapped = grade(mapped, in.uv, in.position.xy);
+    }
     // Stored with gamma 2 (sqrt / square: an exact, cheap inverse pair that
     // spends 8 bits perceptually like sRGB). FXAA reads luma from alpha.
     let encoded = sqrt(mapped);
     return vec4<f32>(encoded, luma(encoded));
+}
+
+// Cheap bloom (High, Ultra): the display-ready image into a quarter-size
+// mip. Four bilinear taps cover the 4x4 source block, and only what's near
+// white glows (the image is already tone mapped, so that's the highlights:
+// the sun, glints, lamps, glowing things).
+const LDR_THRESHOLD: f32 = 0.82;
+const LDR_KNEE: f32 = 0.18;
+
+@fragment
+fn fs_ldr_prefilter(in: FullscreenOut) -> @location(0) vec4<f32> {
+    let t = post.texel.xy;
+    let c = (tap(in.uv + t * vec2<f32>(-1.0, -1.0)) + tap(in.uv + t * vec2<f32>(1.0, -1.0))
+        + tap(in.uv + t * vec2<f32>(-1.0, 1.0)) + tap(in.uv + t * vec2<f32>(1.0, 1.0))) * 0.25;
+    let bright = max(c.r, max(c.g, c.b));
+    var soft = clamp(bright - LDR_THRESHOLD + LDR_KNEE, 0.0, 2.0 * LDR_KNEE);
+    soft = soft * soft / (4.0 * LDR_KNEE + 1e-4);
+    return vec4<f32>(c * (max(soft, bright - LDR_THRESHOLD) / max(bright, 1e-4)), 1.0);
+}
+
+// Medium to Ultra: the intermediate image (plus the cheap bloom) graded
+// into the target. Values are linear either way: an sRGB source decodes on
+// read and an sRGB target encodes on write.
+@fragment
+fn fs_grade(in: FullscreenOut) -> @location(0) vec4<f32> {
+    var c = fringed(in.uv);
+    c = c + textureSampleLevel(extra, src_sampler, in.uv, 0.0).rgb * post.misc.y;
+    c = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    if post.misc.z > 0.5 {
+        c = grade(c, in.uv, in.position.xy);
+    }
+    return vec4<f32>(c, 1.0);
 }
 
 // FXAA (after Lottes' FXAA 3.11, "quality" variant with a short search).

@@ -131,6 +131,20 @@ impl GraphicsQuality {
         matches!(self, Self::Beautiful)
     }
 
+    /// Whether this preset applies the Environment's post effects (colour
+    /// grading, vignette, grain, chromatic aberration): Medium and up.
+    #[must_use]
+    pub fn post_effects(self) -> bool {
+        !matches!(self, Self::Low)
+    }
+
+    /// Whether this preset draws bloom: a cheap one from the brightest
+    /// pixels on High and Ultra, the full HDR one on Beautiful.
+    #[must_use]
+    pub fn bloom(self) -> bool {
+        matches!(self, Self::High | Self::Ultra | Self::Beautiful)
+    }
+
     /// Whether this preset renders shadows at all.
     #[must_use]
     pub fn shadows_enabled(self) -> bool {

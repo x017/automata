@@ -9,7 +9,7 @@
 
 #![forbid(unsafe_code)]
 
-use automata_renderer::{Environment, GraphicsQuality};
+use automata_renderer::{Environment, GraphicsQuality, PostEffects};
 
 use super::{ButtonStyle, CursorHint, Intent, PlayState, Rect, Ui};
 use crate::canvas::{Canvas, Face};
@@ -112,6 +112,7 @@ impl Ui {
         let mut y = self.renderer_group(canvas, x, y, w);
         y = self.sun_group(canvas, doc, x, y, w);
         y = self.environment_group(canvas, doc, x, y, w);
+        y = self.post_group(canvas, doc, x, y, w);
         y = self.camera_group(canvas, doc, x, y, w);
         y = self.tests_group(canvas, doc, x, y, w);
         y + 12.0
@@ -371,7 +372,11 @@ impl Ui {
                     seg - 2.0,
                     layout::FIELD_H,
                 );
-                let value = make();
+                // The look's sky, light and fog; the post effects stay.
+                let value = Environment {
+                    post: current.map_or_else(PostEffects::default, |e| e.post),
+                    ..make()
+                };
                 let style = if current == Some(value) {
                     ButtonStyle::Active
                 } else {
@@ -405,6 +410,78 @@ impl Ui {
         }
         y = self.source_note(canvas, x, y, w, env);
         y + 8.0
+    }
+
+    /// The first Environment's post effects: a row of looks, then every
+    /// setting.
+    fn post_group(&mut self, canvas: &mut Canvas, doc: &Document, x: f32, y: f32, w: f32) -> f32 {
+        let mut y = self.gfx_heading(canvas, x, y, w, "Post");
+        let Some(env) = doc.entities.iter().find(|e| e.data.environment.is_some()) else {
+            y = self.gfx_note(
+                canvas,
+                x,
+                y,
+                w,
+                "Grading, bloom, vignette and grain live on",
+            );
+            y = self.gfx_note(canvas, x, y, w, "the Environment: customize it above.");
+            return y + 8.0;
+        };
+        y = self.gfx_note(
+            canvas,
+            x,
+            y,
+            w,
+            "Medium graphics and up; bloom on High and up.",
+        );
+        // Looks: one row of quiet buttons across the panel.
+        let r = Rect::new(x, y + 4.0, w, layout::FIELD_H);
+        if self.row_visible(r) {
+            let seg = w / PostEffects::PRESETS.len() as f32;
+            let current = env.data.environment;
+            for (i, (label, make)) in PostEffects::PRESETS.iter().enumerate() {
+                let b = Rect::new(x + seg * i as f32, r.y, seg - 2.0, layout::FIELD_H);
+                let post = make();
+                let style = if current.is_some_and(|e| e.post == post) {
+                    ButtonStyle::Active
+                } else {
+                    self.editable_style(ButtonStyle::Ghost)
+                };
+                if self.button(canvas, b, label, style) {
+                    if let Some(e) = current {
+                        self.out
+                            .push(Intent::SetEnvironment(env.id, Environment { post, ..e }));
+                    }
+                }
+            }
+        }
+        y += layout::ROW_STEP + 4.0;
+        y = self.post_rows(canvas, x, y, w, env);
+        y = self.source_note(canvas, x, y, w, env);
+        y + 8.0
+    }
+
+    /// An Environment's post-effect settings (the Graphics tab and the
+    /// Inspector).
+    pub(super) fn post_rows(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        y: f32,
+        w: f32,
+        env: &EntityEntry,
+    ) -> f32 {
+        let mut y = self.float_row(canvas, x, y, w, env, "Bloom", Field::EnvBloom);
+        y = self.float_row(canvas, x, y, w, env, "Contrast", Field::EnvContrast);
+        y = self.float_row(canvas, x, y, w, env, "Saturation", Field::EnvSaturation);
+        y = self.float_row(canvas, x, y, w, env, "Temperature", Field::EnvTemperature);
+        y = self.float_row(canvas, x, y, w, env, "Tint", Field::EnvTint);
+        y = self.vec3_row(canvas, x, y, w, env, "Lift", Field::EnvLift);
+        y = self.vec3_row(canvas, x, y, w, env, "Gamma", Field::EnvGamma);
+        y = self.vec3_row(canvas, x, y, w, env, "Gain", Field::EnvGain);
+        y = self.float_row(canvas, x, y, w, env, "Vignette", Field::EnvVignette);
+        y = self.float_row(canvas, x, y, w, env, "Grain", Field::EnvGrain);
+        self.float_row(canvas, x, y, w, env, "Aberration", Field::EnvChromatic)
     }
 
     /// The background, or with the sky dome on, the sky: horizon and

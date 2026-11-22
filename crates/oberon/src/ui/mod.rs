@@ -2290,6 +2290,7 @@ impl Ui {
                 y = self.color_row(canvas, x, y, w, e, "Fog Color", ColorTarget::EnvFog);
                 y = self.float_row(canvas, x, y, w, e, "Fog Density", Field::EnvFogDensity);
                 y = self.float_row(canvas, x, y, w, e, "Fog Start", Field::EnvFogStart);
+                y = self.post_rows(canvas, x, y, w, e);
                 y += 6.0;
             }
         }
@@ -5359,6 +5360,44 @@ mod tests {
             }
         }
         assert!(found_preset, "the Night preset is clickable");
+    }
+
+    #[test]
+    fn graphics_tab_dials_in_a_post_look() {
+        let mut c = canvas();
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        ui.right_tab = RightTab::Graphics;
+        let insp = lay().inspector;
+        let env_id = doc
+            .entities
+            .iter()
+            .find(|e| e.data.environment.is_some())
+            .expect("the starter has a sky")
+            .id;
+        let bleached = automata_renderer::PostEffects::bleached();
+        let _ = ui.frame(&mut c, &doc, Pointer::default(), None);
+        // The looks row spans the panel: Bleached is the second of five.
+        let x = insp.x + layout::PAD + (insp.w - 2.0 * layout::PAD) * 0.3;
+        let mut found = false;
+        'scan: for scroll in [0.0, 300.0, 600.0, 900.0] {
+            for row in 0..70 {
+                ui.inspector_scroll = scroll;
+                let y = insp.y + layout::TITLEBAR_H + 10.0 + row as f32 * 12.0;
+                let out = click(&mut ui, &mut c, &doc, x, y);
+                ui.right_tab = RightTab::Graphics;
+                ui.picker = None;
+                ui.menu = None;
+                if out.iter().any(|i| {
+                    matches!(i, Intent::SetEnvironment(id, env)
+                        if *id == env_id && env.post == bleached)
+                }) {
+                    found = true;
+                    break 'scan;
+                }
+            }
+        }
+        assert!(found, "the Bleached look is clickable");
     }
 
     #[test]

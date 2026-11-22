@@ -2,7 +2,7 @@
 //! [`crate::scene::PyEntity`] and materialized into ECS components when the
 //! scene loads.
 
-use automata_renderer::{Camera2D, Camera3D, Environment, Tonemapping, Water};
+use automata_renderer::{Camera2D, Camera3D, Environment, PostEffects, Tonemapping, Water};
 use automata_scene::{DirectionalLight, PointLight, SpotLight, Transform};
 use glam::{EulerRot, Quat, Vec2, Vec3};
 use pyo3::exceptions::PyTypeError;
@@ -547,6 +547,18 @@ impl PyEnvironment {
         clouds=0.0,
         lens_flare=1.0,
         ambient_occlusion=1.0,
+        post=None,
+        bloom=None,
+        contrast=None,
+        saturation=None,
+        temperature=None,
+        tint=None,
+        lift=None,
+        gamma=None,
+        gain=None,
+        vignette=None,
+        grain=None,
+        chromatic_aberration=None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -566,8 +578,34 @@ impl PyEnvironment {
         clouds: f32,
         lens_flare: f32,
         ambient_occlusion: f32,
+        post: Option<&str>,
+        bloom: Option<f32>,
+        contrast: Option<f32>,
+        saturation: Option<f32>,
+        temperature: Option<f32>,
+        tint: Option<f32>,
+        lift: Option<(f32, f32, f32)>,
+        gamma: Option<(f32, f32, f32)>,
+        gain: Option<(f32, f32, f32)>,
+        vignette: Option<f32>,
+        grain: Option<f32>,
+        chromatic_aberration: Option<f32>,
     ) -> PyResult<Self> {
         let rgb = |c: (f32, f32, f32)| [c.0, c.1, c.2];
+        let post = PostArgs {
+            bloom,
+            contrast,
+            saturation,
+            temperature,
+            tint,
+            lift,
+            gamma,
+            gain,
+            vignette,
+            grain,
+            chromatic_aberration,
+        }
+        .apply(post_preset(post, PostEffects::default())?);
         Ok(Self {
             inner: Environment {
                 sky_color: rgb(sky_color),
@@ -586,8 +624,140 @@ impl PyEnvironment {
                 clouds,
                 lens_flare,
                 ambient_occlusion,
+                post,
             },
         })
+    }
+
+    /// A copy with post effects: start from the named look ``post``
+    /// (``"neutral"``, ``"bleached"``, ``"vivid"``, ``"film"``, ``"noir"``;
+    /// ``None`` keeps the current ones) and change any field by keyword.
+    #[pyo3(signature = (
+        post=None,
+        *,
+        bloom=None,
+        contrast=None,
+        saturation=None,
+        temperature=None,
+        tint=None,
+        lift=None,
+        gamma=None,
+        gain=None,
+        vignette=None,
+        grain=None,
+        chromatic_aberration=None,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn with_post(
+        &self,
+        post: Option<&str>,
+        bloom: Option<f32>,
+        contrast: Option<f32>,
+        saturation: Option<f32>,
+        temperature: Option<f32>,
+        tint: Option<f32>,
+        lift: Option<(f32, f32, f32)>,
+        gamma: Option<(f32, f32, f32)>,
+        gain: Option<(f32, f32, f32)>,
+        vignette: Option<f32>,
+        grain: Option<f32>,
+        chromatic_aberration: Option<f32>,
+    ) -> PyResult<Self> {
+        let post = PostArgs {
+            bloom,
+            contrast,
+            saturation,
+            temperature,
+            tint,
+            lift,
+            gamma,
+            gain,
+            vignette,
+            grain,
+            chromatic_aberration,
+        }
+        .apply(post_preset(post, self.inner.post)?);
+        Ok(Self {
+            inner: Environment { post, ..self.inner },
+        })
+    }
+
+    /// The names of the post-effect looks, for ``post=``.
+    #[staticmethod]
+    fn post_presets() -> Vec<String> {
+        PostEffects::PRESETS
+            .iter()
+            .map(|(name, _)| name.to_ascii_lowercase())
+            .collect()
+    }
+
+    /// Glow around bright things (High and Beautiful graphics; ``0`` = off).
+    #[getter]
+    fn bloom(&self) -> f32 {
+        self.inner.post.bloom
+    }
+
+    /// Contrast around mid grey (``1`` = unchanged).
+    #[getter]
+    fn contrast(&self) -> f32 {
+        self.inner.post.contrast
+    }
+
+    /// Colour saturation (``0`` = black and white, ``1`` = unchanged).
+    #[getter]
+    fn saturation(&self) -> f32 {
+        self.inner.post.saturation
+    }
+
+    /// White balance, ``-1`` (cool) to ``1`` (warm).
+    #[getter]
+    fn temperature(&self) -> f32 {
+        self.inner.post.temperature
+    }
+
+    /// White balance, ``-1`` (green) to ``1`` (magenta).
+    #[getter]
+    fn tint(&self) -> f32 {
+        self.inner.post.tint
+    }
+
+    /// Added to the shadows per channel (``0`` = none).
+    #[getter]
+    fn lift(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.post.lift;
+        (r, g, b)
+    }
+
+    /// Midtone power per channel (``1`` = unchanged, above 1 brightens).
+    #[getter]
+    fn gamma(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.post.gamma;
+        (r, g, b)
+    }
+
+    /// Highlight multiplier per channel (``1`` = unchanged).
+    #[getter]
+    fn gain(&self) -> (f32, f32, f32) {
+        let [r, g, b] = self.inner.post.gain;
+        (r, g, b)
+    }
+
+    /// Darkened corners, ``0`` (none) to ``1``.
+    #[getter]
+    fn vignette(&self) -> f32 {
+        self.inner.post.vignette
+    }
+
+    /// Animated film grain, ``0`` (none) to ``1``.
+    #[getter]
+    fn grain(&self) -> f32 {
+        self.inner.post.grain
+    }
+
+    /// Colour fringes toward the frame's edges, ``0`` (none) to ``1``.
+    #[getter]
+    fn chromatic_aberration(&self) -> f32 {
+        self.inner.post.chromatic_aberration
     }
 
     /// A named look: ``"neutral"``, ``"daylight"``, ``"dusk"``, or ``"night"``.
@@ -723,6 +893,54 @@ impl PyEnvironment {
             if self.inner.fog { "True" } else { "False" }
         )
     }
+}
+
+/// Post-effect fields given by keyword (None: keep).
+struct PostArgs {
+    bloom: Option<f32>,
+    contrast: Option<f32>,
+    saturation: Option<f32>,
+    temperature: Option<f32>,
+    tint: Option<f32>,
+    lift: Option<(f32, f32, f32)>,
+    gamma: Option<(f32, f32, f32)>,
+    gain: Option<(f32, f32, f32)>,
+    vignette: Option<f32>,
+    grain: Option<f32>,
+    chromatic_aberration: Option<f32>,
+}
+
+impl PostArgs {
+    fn apply(self, base: PostEffects) -> PostEffects {
+        let rgb = |c: Option<(f32, f32, f32)>, d: [f32; 3]| c.map_or(d, |c| [c.0, c.1, c.2]);
+        PostEffects {
+            bloom: self.bloom.unwrap_or(base.bloom),
+            contrast: self.contrast.unwrap_or(base.contrast),
+            saturation: self.saturation.unwrap_or(base.saturation),
+            temperature: self.temperature.unwrap_or(base.temperature),
+            tint: self.tint.unwrap_or(base.tint),
+            lift: rgb(self.lift, base.lift),
+            gamma: rgb(self.gamma, base.gamma),
+            gain: rgb(self.gain, base.gain),
+            vignette: self.vignette.unwrap_or(base.vignette),
+            grain: self.grain.unwrap_or(base.grain),
+            chromatic_aberration: self
+                .chromatic_aberration
+                .unwrap_or(base.chromatic_aberration),
+        }
+    }
+}
+
+/// The named post look, or `current` for None.
+fn post_preset(name: Option<&str>, current: PostEffects) -> PyResult<PostEffects> {
+    let Some(name) = name else {
+        return Ok(current);
+    };
+    PostEffects::preset(name).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!(
+            "unknown post look {name:?}; expected 'neutral', 'bleached', 'vivid', 'film', or 'noir'"
+        ))
+    })
 }
 
 impl PyEnvironment {

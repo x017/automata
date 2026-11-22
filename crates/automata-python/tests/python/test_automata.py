@@ -1144,6 +1144,40 @@ def test_water_component_and_presets():
         assert game.run(lambda ctx: None, max_frames=2) == 2
 
 
+def test_environment_post_effects():
+    env = at.Environment()
+    assert env.bloom == pytest.approx(1.0)
+    assert env.saturation == pytest.approx(1.0)
+    assert env.lift == pytest.approx((0.0, 0.0, 0.0))
+    assert env.gain == pytest.approx((1.0, 1.0, 1.0))
+    assert at.Environment.post_presets() == ["neutral", "bleached", "vivid", "film", "noir"]
+
+    # A look, then single fields changed by keyword.
+    bleached = at.Environment(post="bleached", vignette=0.5)
+    assert bleached.saturation < 0.7
+    assert bleached.vignette == pytest.approx(0.5)
+    graded = at.Environment.preset("daylight").with_post("vivid", grain=0.2)
+    assert graded.tonemapping == "aces"
+    assert graded.saturation > 1.2 and graded.temperature > 0.1
+    assert graded.grain == pytest.approx(0.2)
+    tweaked = graded.with_post(lift=(0.1, 0.0, 0.0))
+    assert tweaked.lift == pytest.approx((0.1, 0.0, 0.0))
+    assert tweaked.saturation == pytest.approx(graded.saturation)
+    with pytest.raises(ValueError):
+        at.Environment(post="sepia")
+
+    # Saved in scene files, and runs on every preset.
+    text = at.Scene().add(at.Entity("look").add(tweaked)).to_ron()
+    assert "post:" in text and "grain: 0.2" in text
+    assert at.Scene.from_ron(text).to_ron() == text
+    for quality in ("low", "medium", "high", "beautiful"):
+        game = at.Game(headless=True, graphics=quality, fixed_delta=1 / 60)
+        scene = at.Scene().add(at.Entity("look").add(tweaked))
+        scene.add(at.Entity("camera").add(at.Camera3D(position=(0, 1, 4), target=(0, 0, 0))))
+        game.load_scene(scene)
+        assert game.run(lambda ctx: None, max_frames=2) == 2
+
+
 def test_water_caustics_and_wind():
     water = at.Water()
     assert water.caustics == pytest.approx(1.0)

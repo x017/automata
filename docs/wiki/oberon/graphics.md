@@ -125,6 +125,47 @@ tuning.
 > different from the background. If the horizon shows a seam, nudge Fog
 > Color, or turn on **Sky & Sun**, which fades fog into the sky itself.
 
+Picking an Environment preset keeps your post effects.
+
+## Post
+
+The **Post** group grades the finished frame: colour, bloom, vignette,
+grain and colour fringes. The values live on the Environment, so click
+**Customize Environment** first. They also show in the Inspector's
+Environment section. Grading runs on Medium quality and up, and bloom on
+High and up.
+
+The row of **looks** at the top sets every field at once, and the current
+look is highlighted. Pick one, then fine-tune:
+
+| Look | Feel |
+|---|---|
+| Neutral | No grade: the default |
+| Bleached | Overexposed, washed out and pale, with strong bloom |
+| Vivid | Warm, saturated sunshine |
+| Film | Gentle contrast and warmth, grain, vignette |
+| Noir | Black and white, hard contrast |
+
+| Field | Meaning |
+|---|---|
+| Bloom | Glow around bright things, 0 off to 4. High and up |
+| Contrast | Spread around mid grey. 1 is unchanged |
+| Saturation | 0 is black and white, 1 is unchanged, up to 3 |
+| Temperature | White balance: negative is cooler (blue), positive is warmer (orange) |
+| Tint | White balance: negative is greener, positive is more magenta |
+| Lift | Added to the shadows, per channel (R, G, B). Raises the blacks |
+| Gamma | Midtone power per channel. Above 1 brightens the midtones |
+| Gain | Highlight multiplier per channel. Above 1 overexposes |
+| Vignette | Darkens the corners |
+| Grain | Animated film grain |
+| Aberration | Red and blue colour fringes toward the frame's edges |
+
+For a bleached, overexposed look, start from **Bleached** or raise Gain
+to about 1.2 and drop Saturation to 0.5. For a warm adventure look, start
+from **Vivid** or set Temperature to 0.15 and Saturation to 1.35. See
+[Post effects and colour grading](../guides/rendering-and-lights.md#post-effects-and-colour-grading)
+for the details.
+
 ## Camera
 
 This group edits the scene's first camera, the one Play renders through.

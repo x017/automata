@@ -353,6 +353,9 @@ impl Renderer {
         self.forward_pipelines.retain(|(_, s, _)| mixes.contains(s));
         self.water_pipelines
             .retain(|(_, refract, s, _)| *refract || mixes.contains(s));
+        if !quality.post_effects() || quality.is_beautiful() {
+            self.post.release_ldr();
+        }
         if !quality.is_beautiful() {
             self.post.release();
             self.ssao.release();
@@ -979,7 +982,11 @@ impl Renderer {
             self.ctx.format()
         };
         let beautiful = self.quality.is_beautiful();
+        let chain = self.ldr_chain(draw);
         self.ensure_frame_pipelines(draw, viewport, format, beautiful);
+        if chain.is_some() {
+            self.post.ensure_ldr(self.ctx.device(), viewport, format);
+        }
 
         let mut encoder =
             self.ctx
@@ -1031,6 +1038,7 @@ impl Renderer {
                     depth_view.as_ref(),
                     format,
                     offscreen,
+                    chain,
                 );
             }
         }
@@ -1195,6 +1203,16 @@ impl Renderer {
     /// The forward path: meshes, water (blended) and sprites in one pass,
     /// straight into the target.
     #[allow(clippy::too_many_arguments)]
+    /// The Medium-to-Ultra post chain this frame needs: 3D frames with an
+    /// Environment whose post effects change something on this preset.
+    fn ldr_chain(&self, draw: &DrawList) -> Option<crate::post::LdrChain> {
+        let env = draw.environment.filter(|_| draw.camera_3d.is_some())?;
+        crate::post::LdrChain::new(self.quality, &env.post, draw.time.unwrap_or(0.0))
+    }
+
+    /// The forward path (Low to Ultra), straight into `view`, or with a
+    /// post `chain` through an intermediate image graded into it.
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn record_forward(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1204,6 +1222,7 @@ impl Renderer {
         depth_view: Option<&wgpu::TextureView>,
         format: wgpu::TextureFormat,
         offscreen: bool,
+        chain: Option<crate::post::LdrChain>,
     ) {
         // Offscreen targets use pipelines built for their color format, and
         // only the shadow lookups this frame needs.
@@ -1213,13 +1232,23 @@ impl Renderer {
             Some(sprite) if offscreen => sprite,
             _ => &self.sprite_pipeline,
         };
+        // With post effects the scene goes into the chain's image first
+        // (the final pass needs a depth buffer for the HUD sprites).
+        let post_view = match (&self.post.ldr, chain, depth_view) {
+            (Some(t), Some(_), Some(_)) if t.format == format => {
+                Some(t.scene.create_view(&wgpu::TextureViewDescriptor::default()))
+            }
+            _ => None,
+        };
+        let chain = chain.filter(|_| post_view.is_some());
+        let scene_view = post_view.as_ref().unwrap_or(view);
         // Particles get a pass of their own after the scene's, reading its
         // depth (kept for them).
         let particle_depth = depth_view.filter(|_| !prepared.particle_runs.is_empty());
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("main"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
+                view: scene_view,
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
@@ -1256,14 +1285,48 @@ impl Renderer {
         if let Some(water) = self.water_pipeline(format, false, shadows) {
             self.record_waters(&mut pass, prepared, water, &self.scene_placeholder);
         }
+        let (Some(chain), Some(depth_view)) = (chain, depth_view) else {
+            if let Some(depth) = particle_depth {
+                drop(pass);
+                let mut pass = self.particle_pass(encoder, view, depth);
+                self.record_particles(&mut pass, prepared, format, depth);
+                self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
+            } else {
+                self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
+            }
+            return;
+        };
+        drop(pass);
         if let Some(depth) = particle_depth {
-            drop(pass);
-            let mut pass = self.particle_pass(encoder, view, depth);
+            let mut pass = self.particle_pass(encoder, scene_view, depth);
             self.record_particles(&mut pass, prepared, format, depth);
-            self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
-        } else {
-            self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
         }
+        let device = self.ctx.device();
+        self.post.record_ldr_bloom(device, encoder, &chain);
+        // Final: the graded image into the target, then sprites on top.
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("graded"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Discard,
+                }),
+                stencil_ops: None,
+            }),
+            ..wgpu::RenderPassDescriptor::default()
+        });
+        self.post.draw_grade(device, &mut pass, format, &chain);
+        self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
     }
 
     /// A pass drawing over `view` with `depth` attached read-only, so the
@@ -1474,6 +1537,8 @@ impl Renderer {
             env.exposure.max(0.0),
             beautiful_tonemap(draw.environment),
             flare,
+            crate::post::Grade::new(&env.post, draw.time.unwrap_or(0.0)),
+            env.post.bloom,
         );
 
         // Final: FXAA into the target, then sprites on top.
@@ -3538,6 +3603,158 @@ mod tests {
                 luma(bent) + 30 < luma(flat),
                 "{quality:?}: normal-mapped {bent:?} vs flat {flat:?}"
             );
+        }
+    }
+
+    /// A sunlit orange wall filling the view with a small white-hot cube in
+    /// the middle, under an Environment with `post`.
+    fn graded_frame(renderer: &mut Renderer, post: crate::PostEffects) -> Vec<u8> {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let wall = renderer.create_material([0.7, 0.32, 0.15, 1.0], None);
+        let lamp = renderer.create_pbr_material(
+            &crate::MaterialParams {
+                emissive: [5.0, 5.0, 5.0],
+                ..crate::MaterialParams::with_color([1.0, 1.0, 1.0, 1.0])
+            },
+            crate::MaterialTextures::default(),
+        );
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_time(1.0);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 0.0, 4.0),
+            glam::Vec3::ZERO,
+        ));
+        draw.set_sun(crate::Sun::new(glam::Vec3::new(0.2, -0.3, -1.0)));
+        draw.set_environment(crate::Environment {
+            post,
+            ..crate::Environment::default()
+        });
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::new(30.0, 30.0, 0.2),
+                glam::Quat::IDENTITY,
+                glam::Vec3::new(0.0, 0.0, -1.0),
+            ),
+            &wall,
+        );
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::splat(0.25),
+                glam::Quat::IDENTITY,
+                glam::Vec3::ZERO,
+            ),
+            &lamp,
+        );
+        renderer.render_offscreen(&draw, &target);
+        read_pixels(renderer, &target, size)
+    }
+
+    fn pixel_at(pixels: &[u8], size: (u32, u32), x: u32, y: u32) -> [u32; 3] {
+        let i = ((y * size.0 + x) * 4) as usize;
+        [
+            u32::from(pixels[i]),
+            u32::from(pixels[i + 1]),
+            u32::from(pixels[i + 2]),
+        ]
+    }
+
+    #[test]
+    fn post_effects_grade_the_image_from_medium_up() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping grading test");
+            return;
+        };
+        let size = renderer.size();
+        let plain = crate::PostEffects {
+            bloom: 0.0,
+            ..crate::PostEffects::default()
+        };
+        let grey = crate::PostEffects {
+            saturation: 0.0,
+            ..plain
+        };
+        let dark_corners = crate::PostEffects {
+            vignette: 1.0,
+            ..plain
+        };
+        let luma = |p: [u32; 3]| p[0] + p[1] + p[2];
+        for quality in GraphicsQuality::ALL {
+            renderer.set_quality(quality);
+            let neutral = graded_frame(&mut renderer, plain);
+            let wall = pixel_at(&neutral, size, 8, 32);
+            assert!(
+                wall[0] > wall[2] + 30,
+                "{quality:?}: an orange wall {wall:?}"
+            );
+            let desaturated = graded_frame(&mut renderer, grey);
+            let vignetted = graded_frame(&mut renderer, dark_corners);
+            if quality == GraphicsQuality::Low {
+                // Low skips post effects altogether.
+                assert_eq!(neutral, desaturated, "Low: no grading");
+                assert_eq!(neutral, vignetted, "Low: no vignette");
+                continue;
+            }
+            let [r, g, b] = pixel_at(&desaturated, size, 8, 32);
+            assert!(
+                r.abs_diff(g) <= 3 && g.abs_diff(b) <= 3,
+                "{quality:?}: saturation 0 is grey, got {:?}",
+                [r, g, b]
+            );
+            // The vignette darkens the corners and leaves the middle.
+            let corner = (
+                luma(pixel_at(&neutral, size, 1, 1)),
+                luma(pixel_at(&vignetted, size, 1, 1)),
+            );
+            assert!(
+                corner.1 * 2 < corner.0,
+                "{quality:?}: corner {} -> {}",
+                corner.0,
+                corner.1
+            );
+            let near = (
+                luma(pixel_at(&neutral, size, 26, 32)),
+                luma(pixel_at(&vignetted, size, 26, 32)),
+            );
+            assert!(near.0.abs_diff(near.1) <= 3, "{quality:?}: middle {near:?}");
+        }
+    }
+
+    #[test]
+    fn bloom_glows_around_bright_things_on_high_and_up() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping bloom test");
+            return;
+        };
+        let size = renderer.size();
+        let off = crate::PostEffects {
+            bloom: 0.0,
+            ..crate::PostEffects::default()
+        };
+        let strong = crate::PostEffects { bloom: 3.0, ..off };
+        let luma = |p: [u32; 3]| p[0] + p[1] + p[2];
+        for quality in [
+            GraphicsQuality::Medium,
+            GraphicsQuality::High,
+            GraphicsQuality::Beautiful,
+        ] {
+            renderer.set_quality(quality);
+            let dull = graded_frame(&mut renderer, off);
+            let glowing = graded_frame(&mut renderer, strong);
+            // Just beside the white cube, on the wall.
+            let (a, b) = (
+                luma(pixel_at(&dull, size, 32, 24)),
+                luma(pixel_at(&glowing, size, 32, 24)),
+            );
+            if quality == GraphicsQuality::Medium {
+                assert_eq!(dull, glowing, "Medium: no bloom");
+            } else {
+                assert!(b > a + 12, "{quality:?}: bloom should glow, {a} -> {b}");
+            }
         }
     }
 
