@@ -5,6 +5,9 @@
 //! animated by Gerstner waves. Every preset draws it; the
 //! [`GraphicsQuality::Beautiful`](crate::GraphicsQuality::Beautiful)
 //! preset adds refraction, depth absorption and shoreline foam.
+//!
+//! On top of the waves, a [`RippleMap`] (simulated by physics around the
+//! camera) adds the rings and wakes things leave in the water.
 
 use glam::Mat4;
 
@@ -137,6 +140,9 @@ pub(crate) struct WaterUniform {
     /// Per wave — x/y: amplitude and steepness × amplitude on the vertex
     /// grid (short waves faded out), z/w: the same per pixel (no fade).
     pub wave_amp: [[f32; 4]; WAVES],
+    /// The simulated ripple field: xy its world XZ corner, z 1 / its width,
+    /// w 1 when there is one (see [`RippleMap`]).
+    pub ripple: [f32; 4],
 }
 
 /// Per-wave constants for one draw (see [`WaterUniform`]): wave vectors
@@ -197,7 +203,17 @@ impl WaterUniform {
             ],
             wave_k,
             wave_amp,
+            ripple: [0.0; 4],
         }
+    }
+
+    /// Draws `ripples` on this surface (none: the field is off).
+    pub fn with_ripples(mut self, ripples: Option<&RippleMap>) -> Self {
+        self.ripple = ripples.map_or([0.0; 4], |r| {
+            let (corner, width) = r.extent();
+            [corner.x, corner.y, 1.0 / width.max(1e-3), 1.0]
+        });
+        self
     }
 }
 
@@ -420,6 +436,121 @@ fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// Texels per side of the simulated ripple field (see [`RippleMap`]).
+pub const RIPPLE_FIELD_SIZE: u32 = 256;
+
+/// The simulated ripples around the camera at one moment, ready for the
+/// GPU: rings spreading where things hit the water, wakes behind what
+/// moves through it, and the foam they whip up. Physics simulates them
+/// (`automata_physics`); the draw list carries a snapshot
+/// ([`crate::DrawList::set_ripples`]) and the renderer uploads it only
+/// when it changed.
+///
+/// The field is a square of `size`² texels, `cell` metres each, centred
+/// on `center` (world XZ). Each texel holds, as half floats, the ripple
+/// height (m), its slope along X and Z, and foam (0..1).
+#[derive(Debug, Clone)]
+pub struct RippleMap {
+    /// World XZ of the field's centre.
+    pub center: glam::Vec2,
+    /// Metres per texel.
+    pub cell: f32,
+    /// Texels per side.
+    pub size: u32,
+    /// `size`² RGBA half floats, rows along +Z: height, dh/dx, dh/dz, foam.
+    pub texels: std::sync::Arc<[u16]>,
+    /// Bumped by the simulation whenever the texels change.
+    pub version: u64,
+}
+
+impl RippleMap {
+    /// Packs a simulated field: `height` (m) and `foam` (0..1), `size`²
+    /// values each in rows along +Z, slopes taken by central differences.
+    ///
+    /// # Panics
+    /// If `height` or `foam` doesn't hold `size`² values.
+    #[must_use]
+    pub fn new(
+        center: glam::Vec2,
+        cell: f32,
+        size: u32,
+        height: &[f32],
+        foam: &[f32],
+        version: u64,
+    ) -> Self {
+        let n = size as usize;
+        assert!(height.len() == n * n && foam.len() == n * n, "field size");
+        let inv = 0.5 / cell.max(1e-6);
+        let mut texels = Vec::with_capacity(n * n * 4);
+        for z in 0..n {
+            let row = z * n;
+            let up = if z > 0 { row - n } else { row };
+            let down = if z + 1 < n { row + n } else { row };
+            for x in 0..n {
+                let left = row + x.saturating_sub(1);
+                let right = row + (x + 1).min(n - 1);
+                let dx = (height[right] - height[left]) * inv;
+                let dz = (height[down + x] - height[up + x]) * inv;
+                texels.extend_from_slice(&[
+                    f16_bits(height[row + x].clamp(-16.0, 16.0)),
+                    f16_bits(dx.clamp(-16.0, 16.0)),
+                    f16_bits(dz.clamp(-16.0, 16.0)),
+                    f16_bits(foam[row + x].clamp(0.0, 1.0)),
+                ]);
+            }
+        }
+        Self {
+            center,
+            cell,
+            size,
+            texels: texels.into(),
+            version,
+        }
+    }
+
+    /// World XZ of the field's corner (texel 0's outer corner) and its
+    /// width in metres.
+    #[must_use]
+    pub fn extent(&self) -> (glam::Vec2, f32) {
+        #[allow(clippy::cast_precision_loss)] // a few hundred texels
+        let width = self.size as f32 * self.cell;
+        (self.center - glam::Vec2::splat(width * 0.5), width)
+    }
+}
+
+/// `v` as IEEE half-float bits, rounded to nearest (inputs are clamped to
+/// a small range by the callers; out-of-range values become infinity).
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap
+)] // bit fields
+pub(crate) fn f16_bits(v: f32) -> u16 {
+    let x = v.to_bits();
+    let sign = ((x >> 16) & 0x8000) as u16;
+    if v.is_nan() {
+        return 0x7e00;
+    }
+    let exp = ((x >> 23) & 0xff) as i32 - 127 + 15;
+    let mant = x & 0x007f_ffff;
+    if exp >= 31 {
+        return sign | 0x7c00;
+    }
+    if exp <= 0 {
+        if exp < -10 {
+            return sign;
+        }
+        // Subnormal: the implicit 1 joins the mantissa, shifted down.
+        let m = (mant | 0x0080_0000) >> (14 - exp) as u32;
+        let round = ((mant | 0x0080_0000) >> (13 - exp) as u32) & 1;
+        return sign | (m + round) as u16;
+    }
+    let bits = ((exp as u32) << 10) | (mant >> 13);
+    let round = (mant >> 12) & 1;
+    // A carry out of the mantissa correctly bumps the exponent.
+    sign | (bits + round) as u16
+}
+
 /// Side of the baked ripple texture (texels).
 pub(crate) const RIPPLE_SIZE: u32 = 128;
 
@@ -551,6 +682,47 @@ pub(crate) fn grid_index_count() -> u32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn half_floats_round_trip_the_ripple_range() {
+        // Exact values, signs, zero, rounding, subnormals and overflow.
+        assert_eq!(f16_bits(0.0), 0);
+        assert_eq!(f16_bits(1.0), 0x3c00);
+        assert_eq!(f16_bits(-2.0), 0xc000);
+        assert_eq!(f16_bits(0.5), 0x3800);
+        assert_eq!(f16_bits(65504.0), 0x7bff);
+        assert_eq!(f16_bits(1e6), 0x7c00);
+        assert_eq!(f16_bits(f32::NAN), 0x7e00);
+        assert_eq!(f16_bits(2.0_f32.powi(-24)), 1);
+        assert_eq!(f16_bits(1e-9), 0);
+        // 1 + 2^-11 is halfway between halves: rounds up (to the odd one).
+        assert_eq!(f16_bits(1.0 + 2.0_f32.powi(-11)), 0x3c01);
+        // Back again, for a value inside the ripple range.
+        let bits = f16_bits(0.123);
+        let back = f32::from(bits & 0x3ff) / 1024.0 + 1.0;
+        let back = back * 2.0_f32.powi(i32::from((bits >> 10) & 0x1f) - 15);
+        assert!((back - 0.123).abs() < 1e-4, "{back}");
+    }
+
+    #[test]
+    fn ripple_maps_pack_heights_slopes_and_foam() {
+        let n = 4usize;
+        // A ramp rising 0.1 m per texel along +X, foam in one corner.
+        let height: Vec<f32> = (0..n * n).map(|i| (i % n) as f32 * 0.1).collect();
+        let mut foam = vec![0.0; n * n];
+        foam[0] = 0.5;
+        let map = RippleMap::new(glam::Vec2::new(10.0, -4.0), 0.5, 4, &height, &foam, 7);
+        assert_eq!(map.texels.len(), n * n * 4);
+        let (corner, width) = map.extent();
+        assert_eq!((corner, width), (glam::Vec2::new(9.0, -5.0), 2.0));
+        // Texel (1, 2): height 0.1, slope 0.1 m per 0.5 m along X, flat in Z.
+        let t = &map.texels[(2 * n + 1) * 4..(2 * n + 2) * 4];
+        assert_eq!(t[0], f16_bits(0.1));
+        assert_eq!(t[1], f16_bits(0.2));
+        assert_eq!(t[2], 0);
+        assert_eq!(map.texels[3], f16_bits(0.5));
+        assert_eq!(map.version, 7);
+    }
+
     use super::*;
 
     #[test]

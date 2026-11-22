@@ -62,6 +62,13 @@ pub enum PhysicsOp {
         /// Impulse vector.
         impulse: Vec3,
     },
+    /// A splash in the water (see `PhysicsWorld3D::splash`).
+    Splash {
+        /// Where (its X and Z).
+        position: Vec3,
+        /// How hard: 1 is about a crate dropped from a couple of metres.
+        strength: f32,
+    },
 }
 
 /// A queued raycast, resolved after the update callback.
@@ -128,6 +135,7 @@ pub fn apply_physics_ops(
             }
             PhysicsOp::SetGravity3D { gravity } => world3d.set_gravity(gravity),
             PhysicsOp::Impulse2D { entity, impulse } => world2d.apply_impulse(entity, impulse),
+            PhysicsOp::Splash { position, strength } => world3d.splash(position, strength),
         }
     }
     let mut results = HashMap::new();
@@ -259,6 +267,17 @@ impl PyPhysics {
     /// (what floating bodies ride), or `None` where there's no water.
     fn water_height(&self, x: f32, z: f32) -> Option<f32> {
         self.water.iter().find_map(|s| s.height_at(x, z))
+    }
+
+    /// Make a splash in the water at `position`: rings spread from it and
+    /// foam gathers. `strength` 1 is about a crate dropped from a couple of
+    /// metres (0 to 10). Shows from the next physics step.
+    #[pyo3(signature = (position, strength = 1.0))]
+    fn splash(&mut self, position: (f32, f32, f32), strength: f32) {
+        self.queue.borrow_mut().ops.push(PhysicsOp::Splash {
+            position: Vec3::new(position.0, position.1, position.2),
+            strength,
+        });
     }
 
     /// Queue a raycast; returns a result key. The hit is readable **next

@@ -378,6 +378,10 @@ glowing through wave crests. It receives shadows.
 the way to the horizon, so a sea doesn't end in a visible edge. Waves,
 foam and buoyancy stay within `size`; put the action there.
 
+Things that cross the surface leave rings and wakes in it, with foam on
+their crests, on every preset (see
+[Physics → Ripples and wakes](physics.md#ripples-and-wakes)).
+
 Water is also physics: dynamic bodies float in it and ride its waves (see
 [Physics → Water](physics.md#water)). The surface isn't a solid collider,
 so give the water a floor if sinking things should stop.

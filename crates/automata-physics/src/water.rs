@@ -7,7 +7,9 @@
 //!   volume`, applied where the body is submerged, so bodies settle at the
 //!   depth their density gives (half under at half the water's density),
 //!   and tilt to follow the waves;
-//! - **drag**: velocity and spin lost in proportion to how submerged it is.
+//! - **drag**: velocity and spin lost in proportion to how submerged it is;
+//! - a **dent** in the ripple field (see [`crate::ripples`]) while it
+//!   crosses the surface, so it sends out rings and leaves a wake.
 //!
 //! The surface comes from [`WaterSurface`], the same waves the GPU draws.
 //!
@@ -28,12 +30,14 @@
 //! sampler evaluates all four waves at once in SIMD lanes with a branchless
 //! `sin_cos` (see `automata_renderer::WaterSurface`).
 
-use automata_renderer::{Water, WaterSurface};
+use automata_renderer::{RippleMap, Water, WaterSurface};
 use automata_scene::{GlobalTransform, SceneWorld, Transform};
 use glam::{Quat, Vec3};
+use rapier3d::dynamics::RigidBodyHandle;
 use rapier3d::math::Vector;
 
 use super::PhysicsWorld3D;
+use crate::ripples::Dent;
 
 /// Bodies whose bounding box is smaller than this (metres, largest side)
 /// are sampled at their centre only.
@@ -42,6 +46,9 @@ const SMALL_BODY: f32 = 0.6;
 /// Velocity lost per second, fully submerged, at `Water::drag` 1. Enough
 /// that a floating crate settles after two or three bobs, like in water.
 const DRAG_RATE: f32 = 4.0;
+
+/// How fast (m/s) a body must hit the water to splash.
+const SPLASH_SPEED: f32 = 1.5;
 
 /// A collider's bounding box in the world: centre, rotated axes, half size.
 struct Bounds {
@@ -134,11 +141,18 @@ impl PhysicsWorld3D {
             return;
         }
         let water = &self.water;
+        // Each awake body's dent in the ripples this step (None: it's not
+        // crossing the surface), and how fast it's moving down into it.
+        let mut dents = Vec::new();
         for handle in self.islands.active_bodies() {
+            dents.push((handle, None, 0.0));
             let Some(body) = self.bodies.get_mut(handle) else {
                 continue;
             };
-            if !body.is_dynamic() {
+            // Kinematic bodies (script-driven boats, characters wading)
+            // dent the ripples too, but the water doesn't push them.
+            let dynamic = body.is_dynamic();
+            if !dynamic && !body.is_kinematic() {
                 continue;
             }
             let Some(collider) = body
@@ -154,25 +168,10 @@ impl PhysicsWorld3D {
             // Density gives the volume from Rapier's cached mass (shape
             // volumes are recomputed per call for hulls and meshes).
             let density = collider.density();
-            if density <= 0.0 {
+            if dynamic && density <= 0.0 {
                 continue;
             }
-            let pose = collider.position();
-            let rot = Quat::from_xyzw(
-                pose.rotation.x,
-                pose.rotation.y,
-                pose.rotation.z,
-                pose.rotation.w,
-            );
-            let origin = Vec3::new(pose.translation.x, pose.translation.y, pose.translation.z);
-            let local = collider.shape().compute_local_aabb();
-            let (mid, ext) = (local.center(), local.half_extents());
-            let (center, half) = (
-                Vec3::new(mid.x, mid.y, mid.z),
-                Vec3::new(ext.x, ext.y, ext.z),
-            );
-            let (ax, ay, az) = (rot * Vec3::X, rot * Vec3::Y, rot * Vec3::Z);
-            let world_center = origin + rot * center;
+            let (world_center, half, [ax, ay, az]) = world_box(collider);
             let world_half = ax.abs() * half.x + ay.abs() * half.y + az.abs() * half.z;
 
             // Cheap rejection: above every crest, or off every rectangle.
@@ -192,6 +191,21 @@ impl PhysicsWorld3D {
                 continue;
             }
             let calm = surface.max_height() <= surface.level();
+            // Crossing the surface: it pushes the ripples about.
+            let level = if calm {
+                surface.level()
+            } else {
+                surface.height_unchecked(world_center.x, world_center.z)
+            };
+            if lo.y < level && hi.y > level {
+                if let Some(last) = dents.last_mut() {
+                    last.1 = Some(Dent::of_body(world_center, world_half, level));
+                    last.2 = -body.linvel().y;
+                }
+            }
+            if !dynamic {
+                continue;
+            }
             let com = body.center_of_mass();
             let shape = Bounds {
                 center: world_center,
@@ -225,6 +239,86 @@ impl PhysicsWorld3D {
                 body.set_angvel(body.angvel() * angular, wake);
             }
         }
+        self.dig_dents(dents);
+    }
+
+    /// Moves each body's ripple dent to where it is now (`None`: out of
+    /// the water). Bodies that just hit the water faster than
+    /// `SPLASH_SPEED` (`sinking`, m/s downward) splash too.
+    fn dig_dents(&mut self, dents: Vec<(RigidBodyHandle, Option<Dent>, f32)>) {
+        for (handle, dent, sinking) in dents {
+            let old = match dent {
+                Some(dent) => self.dents.insert(handle, dent),
+                None => self.dents.remove(&handle),
+            };
+            // Hitting the water hard splashes, on top of the water pushed
+            // aside: harder and bigger, bigger splash.
+            if let (None, Some(dent)) = (old, dent) {
+                if sinking > SPLASH_SPEED {
+                    let size = (dent.radius / 0.7).powi(2);
+                    let strength = (sinking - SPLASH_SPEED) * 0.3 * size;
+                    let at = Vec3::new(dent.center.x, 0.0, dent.center.y);
+                    self.ripples.splash(at, strength.min(10.0));
+                }
+            }
+            if old != dent {
+                if let Some(old) = old {
+                    self.ripples.fill(old);
+                }
+                if let Some(dent) = dent {
+                    self.ripples.dig(dent);
+                }
+            }
+        }
+    }
+
+    /// Advances the ripples by one step of `dt` seconds (after
+    /// [`Self::apply_water`] dug this step's dents).
+    pub(super) fn step_ripples(&mut self, dt: f32) {
+        // Bodies that were removed take their dents with them.
+        let bodies = &self.bodies;
+        let ripples = &mut self.ripples;
+        self.dents.retain(|handle, dent| {
+            let alive = bodies.contains(*handle);
+            if !alive {
+                ripples.fill(*dent);
+            }
+            alive
+        });
+        if self.water.is_empty() {
+            // No water, no ripples (pending splashes have nowhere to go).
+            self.ripples.calm();
+            return;
+        }
+        self.ripples.step(dt);
+    }
+
+    /// Makes a splash in the water at `position` (its X and Z): rings that
+    /// spread from it, and foam. A `strength` of 1 is about a crate dropped
+    /// from a couple of metres (0 to 10). Shows from the next step.
+    pub fn splash(&mut self, position: Vec3, strength: f32) {
+        self.ripples.splash(position, strength);
+    }
+
+    /// Keeps the ripple simulation (64 m across) around what a camera at
+    /// `eye` looking at `target` sees. Call it each frame with the camera
+    /// the scene is drawn from; ripples beyond the field aren't simulated.
+    pub fn set_ripple_view(&mut self, eye: Vec3, target: Vec3) {
+        self.ripples.follow(eye, target);
+    }
+
+    /// The ripples to draw (pass them to `DrawList::set_ripples`), or
+    /// `None` while the water is undisturbed. Cheap to call every frame:
+    /// a new snapshot is packed only after the ripples changed.
+    pub fn ripples(&mut self) -> Option<RippleMap> {
+        self.ripples.snapshot()
+    }
+
+    /// The ripple height (m, above or below the waves) at world `(x, z)`;
+    /// 0 where the water is undisturbed or beyond the simulated field.
+    #[must_use]
+    pub fn ripple_height(&self, x: f32, z: f32) -> f32 {
+        self.ripples.height_at(x, z)
     }
 
     /// The clock the water's waves run on: simulated seconds since the
@@ -249,4 +343,28 @@ impl PhysicsWorld3D {
     pub fn water_surfaces(&self) -> &[WaterSurface] {
         &self.water
     }
+}
+
+/// A collider's box in the world: its centre, half extents along its own
+/// axes, and those axes.
+fn world_box(collider: &rapier3d::geometry::Collider) -> (Vec3, Vec3, [Vec3; 3]) {
+    let pose = collider.position();
+    let rot = Quat::from_xyzw(
+        pose.rotation.x,
+        pose.rotation.y,
+        pose.rotation.z,
+        pose.rotation.w,
+    );
+    let origin = Vec3::new(pose.translation.x, pose.translation.y, pose.translation.z);
+    let local = collider.shape().compute_local_aabb();
+    let (mid, ext) = (local.center(), local.half_extents());
+    let (center, half) = (
+        Vec3::new(mid.x, mid.y, mid.z),
+        Vec3::new(ext.x, ext.y, ext.z),
+    );
+    (
+        origin + rot * center,
+        half,
+        [rot * Vec3::X, rot * Vec3::Y, rot * Vec3::Z],
+    )
 }

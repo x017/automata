@@ -281,7 +281,8 @@ impl PlaySession {
         }
     }
 
-    /// Applies a whole runner reply: entity writes, sounds, HUD, cursor.
+    /// Applies a whole runner reply: entity writes, sounds, splashes, HUD,
+    /// cursor.
     pub fn apply_frame(&mut self, reply: &FrameReply) {
         self.apply_script_writes(&reply.writes);
         for s in &reply.sounds {
@@ -291,6 +292,9 @@ impl PlaySession {
                 pitch: s.pitch,
                 position: s.position.map(Vec3::from),
             });
+        }
+        for &(position, strength) in &reply.splashes {
+            self.physics.splash(Vec3::from(position), strength);
         }
         self.hud.clone_from(&reply.hud);
         if reply.lock.is_some() {
@@ -467,6 +471,23 @@ impl PlaySession {
     #[must_use]
     pub fn water_time(&self) -> f32 {
         self.physics.water_time()
+    }
+
+    /// Keeps the ripple simulation around what a camera at `eye` looking at
+    /// `target` sees (the camera Play draws through).
+    pub fn set_ripple_view(&mut self, eye: Vec3, target: Vec3) {
+        self.physics.set_ripple_view(eye, target);
+    }
+
+    /// The ripples to draw, or `None` while the water is undisturbed.
+    pub fn ripples(&mut self) -> Option<automata_renderer::RippleMap> {
+        self.physics.ripples()
+    }
+
+    /// Makes a splash in the water at `position` (see
+    /// `PhysicsWorld3D::splash`).
+    pub fn splash(&mut self, position: Vec3, strength: f32) {
+        self.physics.splash(position, strength);
     }
 
     /// The scene's camera (the first entity with one), as the simulation
@@ -1212,7 +1233,7 @@ mod tests {
     }
 
     /// Water in play mode: a crate floats at the surface, and scripts read
-    /// the surface height through the real bridge.
+    /// the surface height and splash the water through the real bridge.
     #[test]
     fn crates_float_and_scripts_read_the_water_height() {
         use crate::bridge::{BridgeMsg, ScriptBridge};
@@ -1225,7 +1246,11 @@ mod tests {
             "def update(entity, ctx):\n\
              \x20   h = ctx.physics.water_height(1.0, 2.0)\n\
              \x20   entity.attributes['in'] = h if h is not None else -99.0\n\
-             \x20   entity.attributes['out'] = ctx.physics.water_height(40, 0) is None\n",
+             \x20   entity.attributes['out'] = ctx.physics.water_height(40, 0) is None\n\
+             \x20   entity.attributes['same'] = ctx.water.height(1.0, 2.0) == h\n\
+             \x20   if not entity.attributes.get('splashed'):\n\
+             \x20       ctx.water.splash((-5.0, 0.5, -5.0), 2.0)\n\
+             \x20       entity.attributes['splashed'] = True\n",
         )
         .unwrap();
         let mut doc = Document::starter();
@@ -1323,6 +1348,17 @@ mod tests {
             other => panic!("in: {other:?}"),
         }
         assert_eq!(probe.data.attributes.get("out"), Some(&A::Bool(true)));
+        assert_eq!(probe.data.attributes.get("same"), Some(&A::Bool(true)));
+        // The splash dug into the water where the script asked.
+        let dip = (-8..=8)
+            .flat_map(|i| (-8..=8).map(move |j| (i, j)))
+            .map(|(i, j)| {
+                let (dx, dz) = (i as f32 * 0.25, j as f32 * 0.25);
+                play.physics.ripple_height(-5.0 + dx, -5.0 + dz).abs()
+            })
+            .fold(0.0, f32::max);
+        assert!(dip > 0.02, "splash ripples {dip}");
+        assert!(play.ripples().is_some());
     }
 
     /// The shipped FPS example, played through the real bridge: the player

@@ -111,15 +111,27 @@ PIER_START, PIER_END = 6.0, 22.0
 
 # Floating things: name, position, rotation, size, model or colour, and
 # collider density. Water is density 2, so 1.0 floats half under, 0.5 a
-# quarter under; above 2 it sinks.
+# quarter under; above 2 it sinks. Crate 1 starts in the air: it drops in
+# when Play starts, and rings spread from the splash.
 FLOATING = [
-    ("Boat", (-5.6, 0.15, 20.5), (0.0, 0.2, 0.0), (1.6, 0.6, 3.8), HULL, 0.5),
-    ("Crate 1", (6.0, -0.3, 19.0), (0.1, 0.5, 0.0), (0.8, 0.8, 0.8), "models/crate.obj", 1.0),
+    ("Crate 1", (6.0, 4.0, 19.0), (0.1, 0.5, 0.0), (0.8, 0.8, 0.8), "models/crate.obj", 1.0),
     ("Crate 2", (8.2, -0.28, 22.5), (0.0, 1.3, 0.15), (0.7, 0.7, 0.7), "models/crate.obj", 1.0),
-    ("Buoy 1", (-1.0, 0.1, 26.0), (0.0, 0.0, 0.0), (0.5, 0.7, 0.5), BUOY, 0.8),
-    ("Buoy 2", (15.0, 0.1, 21.0), (0.0, 0.0, 0.0), (0.5, 0.7, 0.5), BUOY, 0.8),
-    ("Buoy 3", (-17.0, 0.1, 22.0), (0.0, 0.0, 0.0), (0.5, 0.7, 0.5), BUOY, 0.8),
+    ("Buoy 1", (-2.5, 0.1, 21.5), (0.0, 0.0, 0.0), (0.5, 0.7, 0.5), BUOY, 0.8),
+    ("Buoy 2", (13.0, 0.1, 16.0), (0.0, 0.0, 0.0), (0.5, 0.7, 0.5), BUOY, 0.8),
+    ("Buoy 3", (-19.5, 0.1, 24.0), (0.0, 0.0, 0.0), (0.5, 0.7, 0.5), BUOY, 0.8),
 ]
+
+# The boat cruises an ellipse round the island (scripts/motor_boat.py),
+# clear of the pier, the rocks and the buoys, and leaves a wake.
+BOAT_LOOP = {
+    "center": (0.0, 0.0, 2.0),
+    "radius_x": 24.0,
+    "radius_z": 25.0,
+    "speed": 4.5,
+    "draft": 0.18,
+}
+BOAT_SIZE = (1.6, 0.6, 3.8)
+BOAT_START_ANGLE = -0.3  # radians round the loop (0 = due +Z of its centre)
 
 CAMERA = {"target": (0.0, 0.5, 4.0), "distance": 32.0, "yaw": 0.35, "pitch": 0.33, "spin": 0.05}
 
@@ -226,6 +238,25 @@ def build():
             .add(at.RigidBody.dynamic())
             .add(collider.density(density))
         )
+
+    # The boat: a kinematic body the script steers (the water doesn't push
+    # it, but it pushes the water, and anything floating in its way).
+    cx, _, cz = BOAT_LOOP["center"]
+    rx, rz = BOAT_LOOP["radius_x"], BOAT_LOOP["radius_z"]
+    a = BOAT_START_ANGLE
+    boat_at = (cx + rx * math.sin(a), 0.15, cz + rz * math.cos(a))
+    boat_yaw = math.atan2(rx * math.cos(a), -rz * math.sin(a))
+    boat = (
+        at.Entity("Boat")
+        .add(at.Transform(position=boat_at, rotation_euler=(0.0, boat_yaw, 0.0), scale=BOAT_SIZE))
+        .add(at.MeshRenderer.cube(size=1.0, color=HULL))
+        .add(at.RigidBody.kinematic_position())
+        .add(at.Collider3D.cuboid(*BOAT_SIZE))
+    )
+    boat.script = "scripts/motor_boat.py"
+    for key, value in BOAT_LOOP.items():
+        boat.attributes[key] = value
+    scene.add(boat)
 
     # Start where orbit_camera.py will place it, so the editor shows the
     # same view as the first frame of Play.

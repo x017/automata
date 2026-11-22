@@ -1222,6 +1222,51 @@ def test_scene_scripts_read_the_water_height(tmp_path):
     assert seen["dry"] is True
 
 
+def test_scene_scripts_splash_the_water(tmp_path):
+    (tmp_path / "splasher.py").write_text(
+        "def update(entity, ctx):\n"
+        "    entity.attributes['h'] = ctx.water.height(1, 1)\n"
+        "    ctx.water.splash(entity, 2.0)\n"
+        "    ctx.water.splash((3.0, 0.0, 3.0))\n"
+        "    ctx.water.splash((0.0, 0.0, 0.0), 0)\n"
+        "    try:\n"
+        "        ctx.water.splash((1.0, 2.0))\n"
+        "    except ValueError:\n"
+        "        entity.attributes['checked'] = True\n"
+    )
+    scene = at.Scene()
+    scene.add(at.Entity("sea").add(at.Transform(position=(0, -0.5, 0))).add(at.Water(wave_height=0)))
+    splasher = at.Entity("splasher").add(at.Transform(position=(1.0, 0.0, 1.0)))
+    splasher.script = "splasher.py"
+    scene.add(splasher)
+    (tmp_path / "level.ron").write_text(scene.to_ron())
+    seen = {}
+
+    def after(ctx):
+        seen.update(ctx.scene["splasher"].attributes)
+
+    at.run_scene(str(tmp_path / "level.ron"), headless=True, max_frames=3, update=after)
+    assert seen["h"] == pytest.approx(-0.5, abs=1e-4)
+    assert seen["checked"] is True
+
+
+def test_engine_scripts_splash_the_water():
+    game = at.Game(headless=True, fixed_delta=1 / 60)
+    game.load_scene(
+        at.Scene().add(at.Entity("pool").add(at.Transform()).add(at.Water(wave_height=0.0)))
+    )
+    frames = []
+
+    def update(ctx):
+        ctx.physics.splash((1.0, 0.0, 2.0), 1.5)
+        ctx.physics.splash((1.0, 0.0, 2.0))
+        frames.append(ctx.physics.water_height(1.0, 2.0))
+
+    game.run(update, max_frames=3)
+    # Ripples ride on top: the waves' height (what floats) is unchanged.
+    assert frames[-1] == pytest.approx(0.0, abs=1e-4)
+
+
 def test_scene_ron_round_trip_staged():
     scene = _kitchen_sink_scene()
     text = scene.to_ron()

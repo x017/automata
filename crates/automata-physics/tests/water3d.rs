@@ -161,3 +161,80 @@ fn floating_bodies_sleep_on_calm_water_but_not_on_waves() {
         "a crate on waves must keep riding them"
     );
 }
+
+#[test]
+fn a_crate_dropped_in_sends_rings_outward() {
+    let mut scene = SceneWorld::new();
+    calm_pool(&mut scene);
+    let mut physics = PhysicsWorld3D::new();
+    physics.set_ripple_view(Vec3::new(0.0, 10.0, 10.0), Vec3::ZERO);
+    step_n(&mut physics, &mut scene, 5);
+    assert!(physics.ripples().is_none(), "undisturbed water");
+
+    crate_at(&mut scene, Vec3::new(1.0, 2.0, 1.0), 1.0);
+    // It falls 1.5 m (about half a second), hits, and the ring spreads.
+    let mut reached = Vec::new();
+    for _ in 0..4 {
+        step_n(&mut physics, &mut scene, 30);
+        // How far out from the crate the water is moving, along +X.
+        let edge = (1..60)
+            .rev()
+            .map(|i| i as f32 * 0.25)
+            .find(|d| physics.ripple_height(1.0 + d, 1.0).abs() > 2e-3)
+            .unwrap_or(0.0);
+        reached.push(edge);
+    }
+    assert!(reached[3] > reached[1] + 1.0, "rings spread: {reached:?}");
+    let map = physics.ripples().expect("rippling water to draw");
+    // The field sits around the view, which looks at the splash.
+    assert!(map.center.distance(glam::Vec2::new(0.0, 10.0)) < 20.0);
+}
+
+#[test]
+fn a_moving_body_leaves_a_wake_and_a_still_one_does_not() {
+    let mut scene = SceneWorld::new();
+    calm_pool(&mut scene);
+    // Settle a floating crate, then the water calms.
+    let boat = crate_at(&mut scene, Vec3::new(-6.0, 0.0, 0.0), 1.0);
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 60 * 40);
+    assert!(
+        physics.ripples().is_none(),
+        "a crate at rest makes no ripples"
+    );
+
+    // Push it along +X at 4 m/s (faster than ripples spread).
+    for _ in 0..90 {
+        physics.set_velocity(boat, Vec3::new(4.0, 0.0, 0.0));
+        step_n(&mut physics, &mut scene, 1);
+    }
+    let x = position(&scene, boat).x;
+    // Behind it the water is churned up; well ahead it's still flat.
+    let behind: f32 = (-8..=8)
+        .map(|i| physics.ripple_height(x - 3.0, i as f32 * 0.25).abs())
+        .sum();
+    let ahead: f32 = (-8..=8)
+        .map(|i| physics.ripple_height(x + 3.0, i as f32 * 0.25).abs())
+        .sum();
+    assert!(
+        behind > 0.05 && ahead < behind * 0.1,
+        "behind {behind}, ahead {ahead}"
+    );
+}
+
+#[test]
+fn scripts_can_splash_the_water() {
+    let mut scene = SceneWorld::new();
+    calm_pool(&mut scene);
+    let mut physics = PhysicsWorld3D::new();
+    physics.splash(Vec3::new(2.0, 0.0, 2.0), 1.0);
+    step_n(&mut physics, &mut scene, 1);
+    assert!(physics.ripple_height(2.0, 2.0) < -0.1);
+    assert!(physics.ripples().is_some());
+    // Without water there is nothing to splash.
+    let mut dry = SceneWorld::new();
+    let mut physics = PhysicsWorld3D::new();
+    physics.splash(Vec3::ZERO, 1.0);
+    step_n(&mut physics, &mut dry, 1);
+    assert!(physics.ripples().is_none());
+}

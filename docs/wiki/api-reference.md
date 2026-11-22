@@ -320,6 +320,7 @@ ctx.physics.body_count() -> int
 key = ctx.physics.cast_ray(origin, direction, max_distance=1000.0, exclude=None)
 ctx.physics.ray_result(key) -> (entity_id, point, normal, distance) | None
 ctx.physics.water_height(x, z) -> float | None   # surface height, waves included
+ctx.physics.splash((x, y, z), strength=1.0)      # rings and foam, from the next step
 ```
 
 `ctx.physics2d`: `apply_impulse(entity, (x, y))`, `grounded(entity)`,
@@ -427,6 +428,7 @@ returns the number of frames run.
 | `scene` | Script entities: `["Name"]`, `find`, `by_id`, `in`, iteration |
 | `input` | Keys with the aliases `"shift"`, `"ctrl"`, `"alt"` (either side) and `"left"`/`"right"`/`"up"`/`"down"`; `axis(neg, pos)`; mouse buttons, `mouse_delta`, `lock_mouse` |
 | `physics` | `grounded`, `raycast`, `water_height(x, z)`; the rest of the engine's physics, which also accepts script entities |
+| `water` | `height(x, z)` (same as `physics.water_height`), `splash(position_or_entity, strength=1.0)`: rings and foam at that point (strength 0–10; 1 is about a crate dropped from a couple of metres) |
 | `audio`, `hud` | One-shot sounds; HUD images, rectangles and text (`hud.text(text, x, y, size=24, color, align, shadow, outline)`) |
 | `camera` | The first `Camera3D` in the scene as a `ScriptCamera` |
 | `events`, `resources`, `screen`, `raw`, `quit()` | Engine extras (`run_scene` only). `screen.measure_text(text, size)` gives text's pixel size |

@@ -244,6 +244,9 @@ class _EngineBackend(api.Backend):
     def water_height(self, x: float, z: float) -> Any:
         return self.ctx.physics.water_height(x, z)
 
+    def splash(self, position: Any, strength: float) -> None:
+        self.ctx.physics.splash(tuple(position), strength)
+
     def grounded(self, entity: Any) -> bool:
         try:
             return bool(self.ctx.physics.grounded(_unwrap(entity)))

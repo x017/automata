@@ -564,6 +564,14 @@ impl Application {
             // exercise the same scene-to-renderer bridge as windowed ones.
             automata_scene::record_draw_list(self.world.scene.world(), &mut draw);
             draw.set_time(self.world.physics3d.water_time());
+            if let Some(camera) = draw.camera_3d() {
+                self.world
+                    .physics3d
+                    .set_ripple_view(camera.position, camera.target);
+            }
+            if let Some(ripples) = self.world.physics3d.ripples() {
+                draw.set_ripples(ripples);
+            }
             input.end_frame();
 
             if let Some(fps) = self.config.target_fps {

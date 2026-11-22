@@ -8,6 +8,11 @@
 //!
 //! `quality` is `low`, `medium`, `high` (default), `ultra` or `beautiful`.
 //! Without the camera arguments the editor's default orbit view is used.
+//!
+//! With `PLAY=seconds` in the environment it plays the scene that long
+//! first (physics and scripts, through the real script runner) and renders
+//! that moment of Play: through the scene's camera, or the given view when
+//! the camera arguments are present.
 
 #![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 
@@ -65,6 +70,16 @@ fn main() {
             std::process::exit(1);
         });
     let mut viewport = ViewportRenderer::new();
+    if let Some(seconds) = std::env::var("PLAY")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok())
+    {
+        let view = (nums.len() == 6).then_some(cam);
+        let (rgba, fw, fh) = render_play(&mut gpu, &mut viewport, &doc, seconds, view, (w, h));
+        image::save_buffer(out, &rgba, fw, fh, image::ColorType::Rgba8).expect("write png");
+        println!("{out}: {fw}x{fh} {quality:?}, after {seconds} s of Play");
+        return;
+    }
     // Warm up (pipelines, uploads), then time a few frames.
     let _ = viewport.render(Some(&mut gpu), &doc, cam, w, h);
     let start = Instant::now();
@@ -76,4 +91,74 @@ fn main() {
     let (rgba, fw, fh) = viewport.render(Some(&mut gpu), &doc, cam, w, h);
     image::save_buffer(out, rgba, fw, fh, image::ColorType::Rgba8).expect("write png");
     println!("{out}: {fw}x{fh} {quality:?}, {ms:.1} ms/frame (incl. readback)");
+}
+
+/// Plays `doc` for `seconds` (scripts run in lockstep with physics) and
+/// renders the moment: through `view` if given, else the scene's camera.
+fn render_play(
+    gpu: &mut Renderer,
+    viewport: &mut ViewportRenderer,
+    doc: &Document,
+    seconds: f32,
+    view: Option<ViewCamera>,
+    (w, h): (u32, u32),
+) -> (Vec<u8>, u32, u32) {
+    use oberon::bridge::{BridgeMsg, ScriptBridge};
+    use oberon::play::{PlaySession, TIMESTEP};
+
+    let mut play = PlaySession::start(doc);
+    let root = doc.base_dir();
+    let has_scripts = doc.entities.iter().any(|e| e.data.script.is_some());
+    let mut bridge = has_scripts
+        .then(|| {
+            ScriptBridge::start(
+                oberon::bridge::default_python(),
+                &root.join(".oberon"),
+                &root,
+            )
+        })
+        .and_then(Result::ok);
+    let steps = (seconds / TIMESTEP).round() as usize;
+    for _ in 0..steps {
+        if let Some(b) = bridge.as_mut() {
+            // One script frame per physics step: send, then wait for it.
+            let input = play.frame_input();
+            let states = play.script_states(|rel| doc.resolve(rel));
+            let answered = b.answered;
+            if b.send_frame_with(TIMESTEP, play.elapsed, &[], &states, &input) {
+                let deadline = Instant::now() + std::time::Duration::from_secs(10);
+                while b.answered == answered && Instant::now() < deadline {
+                    for msg in b.poll() {
+                        match msg {
+                            BridgeMsg::Frame(reply) => play.apply_frame(&reply),
+                            BridgeMsg::Error { msg, traceback, .. } => {
+                                eprintln!("script error: {msg}\n{traceback}");
+                            }
+                            _ => {}
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_micros(200));
+                }
+            }
+        }
+        play.update(TIMESTEP);
+    }
+    if let Some(b) = bridge {
+        drop(b.stop());
+    }
+    // The orbit view applies only when the scene has no camera of its own.
+    let cam = view.unwrap_or_default();
+    if view.is_some() {
+        let world = play.scene_mut().world_mut();
+        let cameras: Vec<_> = world
+            .query::<(automata_scene::Entity, &automata_renderer::Camera3D)>()
+            .iter()
+            .map(|(e, _)| e)
+            .collect();
+        for e in cameras {
+            let _ = world.remove_one::<automata_renderer::Camera3D>(e);
+        }
+    }
+    let (rgba, fw, fh) = viewport.render_play(Some(gpu), &mut play, cam, w, h);
+    (rgba.to_vec(), fw, fh)
 }

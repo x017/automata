@@ -114,17 +114,42 @@ outside, and a blocker shades it on presets with point shadows. Demo:
 `examples/oberon/night_lights` (a torch on a wall and two headlights, all
 shadowed, with no light from a glowing mesh).
 
-### A5. Water interaction I: ripples and wakes ⬜ M
-- A ripple heightfield simulated around the camera (a 256² grid
-  following the view), stamped by physics bodies crossing the surface.
-  `automata-physics/src/water.rs` already finds them (`collect_water`)
-  for buoyancy.
-- `water.wgsl` adds ripple normals and height on top of the Gerstner
-  waves. Moving bodies leave V-shaped wakes, and foam gathers on ripple
-  crests.
-- Script API: `ctx.water.splash(position, strength)`.
+### A5. Water interaction I: ripples and wakes ✅ M
+Done. `automata_physics::ripples::RippleField`: a 256² damped wave
+equation, 0.25 m per cell (64 m across), with an edge sponge, scrolled in
+whole cells to follow the view (centred 0.3 of its width ahead of the eye).
+`apply_water` gives every dynamic **and kinematic** body crossing the
+surface a dent (a cosine bump of its waterplane radius, as deep as its
+draft); each step the field loses the new dent and gets the old one back,
+so dropping in, bobbing and moving all make waves. Faster than the ripple
+speed (1.6 m/s), moving makes a Mach-cone V (close to Kelvin's 19.5° at
+boat speeds). Hitting the water faster than 1.5 m/s adds a splash. Foam
+comes from how fast a dent moves the water and fades over a few seconds.
+Calm water costs nothing; running, ~0.25 ms per step in release.
+`PhysicsWorld3D::{splash, set_ripple_view, ripples, ripple_height}`; the
+engine drivers and Oberon Play aim it at the drawn camera and hand a
+`RippleMap` snapshot (RGBA half floats: height, slopes, foam) to
+`DrawList::set_ripples`. The renderer uploads it to a new water binding
+only when it changes. `water.wgsl` adds its height to the vertices and its
+slopes (×3) to the normal, fading it at the field's edges, plus foam from
+the field and on ripple crests, on every preset. Script API:
+`ctx.water.splash(position_or_entity, strength)` and `ctx.water.height`
+(shared API, so Oberon too, over the bridge as `splashes`), and
+`ctx.physics.splash` for engine scripts. The Lagoon's crate now drops in
+at Play start and its boat is kinematic, steered round the island by
+`scripts/motor_boat.py`, riding the waves. `render_still` gained
+`PLAY=seconds` to render a moment of Play. Tests: the ring speed and
+symmetry, calming down, still dents making no waves, a V wake and calm
+water ahead, the field following the view, a dropped crate's rings, a
+moving body's wake, splashes (Rust, Python, the Oberon bridge), half-float
+packing, and a GPU test that rings and foam change the water on Low and
+Beautiful.
+- Spec was: a ripple heightfield simulated around the camera, stamped by
+  bodies crossing the surface; ripple normals and height in `water.wgsl`;
+  V-shaped wakes and foam on crests; `ctx.water.splash(position,
+  strength)`.
 - **Done when:** dropping a crate in the Lagoon sends rings outward, and
-  the boat leaves a wake.
+  the boat leaves a wake. ✅
 
 ### A6. Particles ⬜ L
 Needed for splashes, dust, fire and smoke, and for NieR's dust motes.

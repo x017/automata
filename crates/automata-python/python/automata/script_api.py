@@ -595,6 +595,36 @@ class Physics:
         return self._host.backend.extra("physics", name)
 
 
+class Water:
+    """``ctx.water``: the scene's water."""
+
+    def __init__(self, host):
+        self._host = host
+
+    def height(self, x, z):
+        """The height of the water surface at world ``(x, z)``, waves
+        included, or None where there's no water (same as
+        ``ctx.physics.water_height``)."""
+        h = self._host.backend.water_height(float(x), float(z))
+        return None if h is None else float(h)
+
+    def splash(self, position, strength=1.0):
+        """Makes a splash at ``position`` (a point or an entity; its X and
+        Z): rings spread out from it and foam gathers. ``strength`` 1 is
+        about a crate dropped from a couple of metres (0 to 10). Things
+        that fall in or move through the water make their own ripples;
+        this is for everything else (a cannonball, a jumping fish)."""
+        if hasattr(position, "transform"):
+            position = position.transform.position
+        pos = _vec(tuple(position)[:3], 3)
+        strength = min(max(float(strength), 0.0), 10.0)
+        if strength > 0.0:
+            self._host.backend.splash(pos, strength)
+
+    def __getattr__(self, name):
+        return self._host.backend.extra("water", name)
+
+
 class Audio:
     """``ctx.audio``: one-shot sounds by file name."""
 
@@ -717,6 +747,7 @@ class Context:
         self.input = Input(input_source)
         self.time = Time()
         self.physics = Physics(host)
+        self.water = Water(host)
         self.scene = SceneView(host)
         self.audio = Audio(host)
         self.hud = Hud()
@@ -779,6 +810,10 @@ class Backend:
     def water_height(self, x, z):
         """The water's surface height at ``(x, z)``, or None."""
         return None
+
+    def splash(self, position, strength):
+        """A splash in the water at ``position`` (x, y, z); ``strength``
+        is 0..10. Drivers without water ignore it."""
 
     def source_playing(self, entity):
         return False

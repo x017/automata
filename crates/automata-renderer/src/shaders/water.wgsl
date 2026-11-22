@@ -2,6 +2,9 @@
 //
 // A flat grid displaced by four Gerstner waves (vertex), with per-pixel
 // normals from the same waves plus two scrolling layers of noise ripples.
+// On top, the simulated ripple field around the camera (rings where things
+// hit the water, wakes behind what moves through it, and their foam)
+// raises the surface and bends its normal.
 // Shading: Fresnel between the water body and the reflected sky, a GGX sun
 // glint, backlit crests. Beautiful adds refraction of the scene below,
 // depth-based absorption and shoreline foam (it reads a copy of the scene's
@@ -23,11 +26,16 @@ struct WaterUniform {
     // pixel — each pair is (amplitude, steepness * amplitude).
     wave_k: array<vec4<f32>, 4>,
     wave_amp: array<vec4<f32>, 4>,
+    // The simulated ripple field: xy its world XZ corner, z 1 / its width
+    // (m), w 1 when there is one.
+    ripple: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> water: WaterUniform;
 // Tiling ripples baked once (water.rs ripple_texels): rg slope, b height.
 @group(1) @binding(1) var ripple_map: texture_2d<f32>;
 @group(1) @binding(2) var ripple_sampler: sampler;
+// Simulated ripples (water.rs RippleMap): height (m), dh/dx, dh/dz, foam.
+@group(1) @binding(3) var ripple_field: texture_2d<f32>;
 
 @group(2) @binding(0) var scene_color: texture_2d<f32>;
 @group(2) @binding(1) var scene_depth: texture_depth_2d;
@@ -46,6 +54,28 @@ struct VertexOutput {
     @location(2) crest: f32,
 };
 
+// Texels per side of the ripple field (water.rs RIPPLE_FIELD_SIZE).
+const RIPPLE_FIELD_SIZE: f32 = 256.0;
+// The simulated ripples bend the normal more than their true slope: a
+// ring a few centimetres high would otherwise vanish among the waves
+// seen from any distance.
+const RIPPLE_NORMAL_GAIN: f32 = 3.0;
+
+// The simulated ripples at world `xz` (height, slope x/z, foam), faded to
+// nothing toward the field's edges so it never ends in a visible seam.
+fn ripple_at(xz: vec2<f32>) -> vec4<f32> {
+    if water.ripple.w < 0.5 {
+        return vec4<f32>(0.0);
+    }
+    let uv = (xz - water.ripple.xy) * water.ripple.z;
+    let edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+    let fade = smoothstep(0.0, 0.12, edge);
+    if fade <= 0.0 {
+        return vec4<f32>(0.0);
+    }
+    return textureSampleLevel(ripple_field, ripple_sampler, uv, 0.0) * fade;
+}
+
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -61,6 +91,9 @@ fn vs_main(in: VertexInput) -> VertexOutput {
         let d = wk.xy / wk.w;
         offset = offset + vec3<f32>(wa.y * d.x * c, wa.x * sin(phase), wa.y * d.y * c);
     }
+    // Ripples lift the surface too (where the grid is fine enough to
+    // show it; their normals carry them everywhere else).
+    offset.y = offset.y + ripple_at(base.xz).x;
     let world = base.xyz + offset;
     out.clip_position = camera.view_proj * vec4<f32>(world, 1.0);
     out.world_position = world;
@@ -177,6 +210,8 @@ struct WaterShade {
     ambient: vec3<f32>,
     sunlit: vec3<f32>,
     foam_noise: f32,
+    // Foam whipped up by the simulated ripples (0..1).
+    ripple_foam: f32,
 };
 
 fn water_shade(in: VertexOutput, shadow: f32, point_shadows: bool) -> WaterShade {
@@ -200,8 +235,17 @@ fn water_shade(in: VertexOutput, shadow: f32, point_shadows: bool) -> WaterShade
     // Ripples fade with distance too (mipmaps alone keep a grainy sheen
     // at grazing angles).
     let ripple_fade = clamp(1.5 - footprint * 4.0, 0.0, 1.0);
-    var n = normalize(wave_slope(in.base_xz, footprint) - vec3<f32>(ripple.x, 0.0, ripple.y) * ripple_fade);
+    // The simulated ripples, faded once a pixel spans several texels.
+    let field = ripple_at(in.base_xz);
+    let field_fade = clamp(2.0 - footprint * RIPPLE_FIELD_SIZE * water.ripple.z * 0.5, 0.0, 1.0);
+    var n = normalize(wave_slope(in.base_xz, footprint)
+        - vec3<f32>(ripple.x, 0.0, ripple.y) * ripple_fade
+        - vec3<f32>(field.y, 0.0, field.z) * field_fade * RIPPLE_NORMAL_GAIN);
     out.foam_noise = r2.z;
+    // Foam: what the simulation left (wakes, splashes) plus the ripples'
+    // crests, broken up by the baked noise.
+    let crest_foam = smoothstep(0.04, 0.14, field.x);
+    out.ripple_foam = clamp((field.w + crest_foam * 0.7) * smoothstep(0.15, 0.6, r1.z + 0.35 * field.w), 0.0, 1.0);
     if dot(n, v) < 0.0 {
         n = normalize(n + v * (0.01 - dot(n, v)));
     }
@@ -272,8 +316,9 @@ fn forward(in: VertexOutput, sun_shadows: bool, point_shadows: bool) -> vec4<f32
         shadow = water_shadow(in.world_position);
     }
     let w = water_shade(in, shadow, point_shadows);
-    let color = mix(w.body, w.reflection, w.fresnel) + w.glint;
-    let alpha = mix(0.8, 1.0, w.fresnel);
+    var color = mix(w.body, w.reflection, w.fresnel) + w.glint;
+    color = mix(color, vec3<f32>(0.95) * (w.ambient + w.sunlit), w.ripple_foam);
+    let alpha = mix(mix(0.8, 1.0, w.fresnel), 1.0, w.ripple_foam);
     return vec4<f32>(finish_forward(apply_fog(color, in.world_position)), alpha);
 }
 
@@ -335,7 +380,7 @@ fn fs_refract(in: VertexOutput) -> @location(0) vec4<f32> {
     let foam_band = 1.0 - smoothstep(0.0, 0.35, column);
     let pattern = smoothstep(0.35, 0.75, w.foam_noise
         + 0.35 * sin(column * 18.0 - t * 2.0));
-    let foam = clamp(foam_band * pattern * water.shallow.a * 1.5, 0.0, 1.0);
+    let foam = clamp(foam_band * pattern * water.shallow.a * 1.5 + w.ripple_foam, 0.0, 1.0);
     let foam_color = vec3<f32>(0.95) * (w.ambient + w.sunlit);
     color = mix(color, foam_color, foam);
     // Soft edge where the water meets the shore.

@@ -263,7 +263,7 @@ impl ViewportRenderer {
                 let editor_cam = session.scene_camera().is_none().then(|| cam.to_camera3d());
                 let root = session.doc.base_dir();
                 let hud = self.hud_sprites(renderer, &root, &session.hud);
-                let time = Some(session.water_time());
+                let water = Some(Self::water_frame(session, editor_cam));
                 let world = session.scene_mut().world_mut();
                 // Uploads only visuals not yet materialized (first frame).
                 automata_scene::materialize_visuals(world, renderer);
@@ -275,7 +275,7 @@ impl ViewportRenderer {
                     editor_cam,
                     (width, height),
                     hud,
-                    time,
+                    water,
                 );
             }
             None => {
@@ -322,7 +322,7 @@ impl ViewportRenderer {
         let editor_cam = session.scene_camera().is_none().then(|| cam.to_camera3d());
         let root = session.doc.base_dir();
         let hud = self.hud_sprites(renderer, &root, &session.hud);
-        let time = Some(session.water_time());
+        let water = Some(Self::water_frame(session, editor_cam));
         let world = session.scene_mut().world_mut();
         automata_scene::materialize_visuals(world, renderer);
         self.meshes = Self::draw_scene(
@@ -332,7 +332,7 @@ impl ViewportRenderer {
             editor_cam,
             (width.max(1), height.max(1)),
             hud,
-            time,
+            water,
         );
         self.meshes
     }
@@ -342,6 +342,22 @@ impl ViewportRenderer {
     #[must_use]
     pub fn scene_texture(&self) -> Option<&RenderTarget> {
         self.target.as_ref().map(|(t, _)| t)
+    }
+
+    /// The water as Play draws it this frame: the physics clock and the
+    /// ripples, which are simulated around the camera drawn through (the
+    /// scene's own, or `editor_cam` when it has none).
+    fn water_frame(
+        session: &mut PlaySession,
+        editor_cam: Option<automata_renderer::Camera3D>,
+    ) -> WaterFrame {
+        if let Some(camera) = editor_cam.or_else(|| session.scene_camera()) {
+            session.set_ripple_view(camera.position, camera.target);
+        }
+        WaterFrame {
+            time: session.water_time(),
+            ripples: session.ripples(),
+        }
     }
 
     /// Records `world`, renders it offscreen and reads the pixels back.
@@ -355,9 +371,9 @@ impl ViewportRenderer {
         camera: Option<automata_renderer::Camera3D>,
         size: (u32, u32),
         overlay: Vec<Sprite>,
-        time: Option<f32>,
+        water: Option<WaterFrame>,
     ) -> usize {
-        let meshes = Self::draw_scene(renderer, target, world, camera, size, overlay, time);
+        let meshes = Self::draw_scene(renderer, target, world, camera, size, overlay, water);
         if let Some((texture, _)) = target.as_ref() {
             renderer.read_texture_rgba_into(texture, size, frame);
         }
@@ -373,7 +389,7 @@ impl ViewportRenderer {
         camera: Option<automata_renderer::Camera3D>,
         size: (u32, u32),
         overlay: Vec<Sprite>,
-        time: Option<f32>,
+        water: Option<WaterFrame>,
     ) -> usize {
         // Reuse the render target across frames (recreate on resize).
         if target.as_ref().map(|(_, s)| *s) != Some(size) {
@@ -387,8 +403,11 @@ impl ViewportRenderer {
         automata_scene::record_draw_list(world, &mut draw);
         // Play mode runs the waves on the physics clock, so what floats
         // rides exactly the waves that are drawn.
-        if let Some(time) = time {
-            draw.set_time(time);
+        if let Some(water) = water {
+            draw.set_time(water.time);
+            if let Some(ripples) = water.ripples {
+                draw.set_ripples(ripples);
+            }
         }
         // The editor's orbit camera overrides any scene camera so the
         // viewport is freely navigable regardless of scene contents.
@@ -402,6 +421,13 @@ impl ViewportRenderer {
         renderer.render_offscreen(&draw, texture);
         draw.mesh_count()
     }
+}
+
+/// What Play hands the renderer about the water: the clock its waves run
+/// on and the ripples on top.
+struct WaterFrame {
+    time: f32,
+    ripples: Option<automata_renderer::RippleMap>,
 }
 
 fn wgpu_color(r: f64, g: f64, b: f64, a: f64) -> automata_renderer::Color {

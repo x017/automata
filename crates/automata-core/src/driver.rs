@@ -155,6 +155,14 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
         // Waves run on the physics clock, so floating bodies ride exactly
         // the waves that are drawn.
         self.draw.set_time(self.world.physics3d_ref().water_time());
+        // Ripples are simulated around what the camera sees.
+        let physics = self.world.physics3d();
+        if let Some(camera) = self.draw.camera_3d() {
+            physics.set_ripple_view(camera.position, camera.target);
+        }
+        if let Some(ripples) = physics.ripples() {
+            self.draw.set_ripples(ripples);
+        }
 
         if *self.quit_requested {
             event_loop.exit();

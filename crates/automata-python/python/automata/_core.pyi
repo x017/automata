@@ -771,6 +771,11 @@ class Physics:
     def water_height(self, x: float, z: float) -> Optional[float]:
         """The water surface height at world (x, z), waves included, or None."""
         ...
+    def splash(self, position: tuple[float, float, float], strength: float = 1.0) -> None:
+        """A splash in the water at ``position`` (rings and foam), from the
+        next physics step. ``strength`` 1 is about a crate dropped from a
+        couple of metres (0 to 10)."""
+        ...
     def apply_impulse(
         self, entity: int | EntityView, impulse: tuple[float, float, float]
     ) -> None: ...

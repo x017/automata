@@ -39,7 +39,8 @@ def test_level_file_is_up_to_date():
 @pytest.fixture(scope="module")
 def played():
     """Ten seconds of the real scene, headless: every floating thing's
-    position each frame, plus the water height beside the pier."""
+    position each frame, the water height beside the pier and far out,
+    the boat's position and the clock."""
     frames = []
 
     def record(ctx):
@@ -48,6 +49,8 @@ def played():
                 {name: ctx.scene[name].transform.position for name in FLOATING},
                 ctx.physics.water_height(-8.5, 24.0),
                 ctx.physics.water_height(500.0, 0.0),
+                ctx.scene["Boat"].transform.position,
+                ctx.time.elapsed,
             )
         )
 
@@ -79,6 +82,35 @@ def test_scripts_see_the_moving_surface(played):
     assert all(h is not None for h in heights)
     assert max(heights) - min(heights) > 0.1
     assert all(frame[2] is None for frame in played)
+
+
+def test_the_boat_cruises_its_loop_on_the_waves(played):
+    loop = build_level.BOAT_LOOP
+    cx, _, cz = loop["center"]
+    rx, rz = loop["radius_x"], loop["radius_z"]
+    boats = [frame[3] for frame in played]
+    travelled = sum(
+        ((b[0] - a[0]) ** 2 + (b[2] - a[2]) ** 2) ** 0.5 for a, b in zip(boats, boats[1:])
+    )
+    # At its speed (headless frames run on the wall clock).
+    seconds = played[-1][4] - played[0][4]
+    assert travelled == pytest.approx(loop["speed"] * seconds, rel=0.1)
+    for x, y, z in boats[60:]:
+        # On the loop, and riding the swell at the waterline.
+        assert ((x - cx) / rx) ** 2 + ((z - cz) / rz) ** 2 == pytest.approx(1.0, abs=0.02)
+        assert -0.6 < y < 0.8
+    ys = [b[1] for b in boats[60:]]
+    assert max(ys) - min(ys) > 0.1
+
+
+def test_the_boat_loop_clears_the_floating_things():
+    loop = build_level.BOAT_LOOP
+    cx, _, cz = loop["center"]
+    rx, rz = loop["radius_x"], loop["radius_z"]
+    for name, (x, _, z), *_ in build_level.FLOATING:
+        # How far inside or outside the ellipse, roughly in metres.
+        off = (((x - cx) / rx) ** 2 + ((z - cz) / rz) ** 2) ** 0.5 - 1.0
+        assert abs(off) * min(rx, rz) > 2.0, (name, off)
 
 
 def test_quality_cycle_wraps():

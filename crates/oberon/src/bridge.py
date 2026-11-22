@@ -395,6 +395,7 @@ class BridgeBackend(api.Backend):
         self.playing = set()
         self.index = None
         self.water = []
+        self.splashes = []  # sent back with the frame's reply
 
     def set_shapes(self, shapes):
         self.shapes = shapes
@@ -416,6 +417,9 @@ class BridgeBackend(api.Backend):
             if h is not None:
                 return h
         return None
+
+    def splash(self, position, strength):
+        self.splashes.append([*position, strength])
 
     def log(self, level, message):
         send({"op": "log", "level": level, "msg": message})
@@ -486,6 +490,9 @@ class Runner:
             reply["hud"] = out.hud
         if out.lock is not None:
             reply["lock"] = out.lock
+        if self.backend.splashes:
+            reply["splashes"] = self.backend.splashes
+            self.backend.splashes = []
         send(reply)
 
     def stop(self):

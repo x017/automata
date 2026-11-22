@@ -35,6 +35,7 @@ pub struct DrawList {
     pub(crate) waters: Vec<crate::water::WaterDraw>,
     pub(crate) point_lights: Vec<crate::PointLight>,
     pub(crate) time: Option<f32>,
+    pub(crate) ripples: Option<crate::RippleMap>,
 }
 
 impl DrawList {
@@ -138,6 +139,12 @@ impl DrawList {
         self.time = Some(seconds);
     }
 
+    /// Sets the simulated ripples drawn on this frame's water (see
+    /// [`crate::RippleMap`]; physics simulates them).
+    pub fn set_ripples(&mut self, ripples: crate::RippleMap) {
+        self.ripples = Some(ripples);
+    }
+
     /// The number of water surfaces recorded so far.
     #[must_use]
     pub fn water_count(&self) -> usize {
@@ -198,6 +205,7 @@ impl DrawList {
         self.waters.clear();
         self.point_lights.clear();
         self.time = None;
+        self.ripples = None;
         // The clear color intentionally persists across frames.
     }
 }
@@ -220,6 +228,7 @@ impl Default for DrawList {
             waters: Vec::new(),
             point_lights: Vec::new(),
             time: None,
+            ripples: None,
         }
     }
 }

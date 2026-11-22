@@ -49,6 +49,7 @@
 pub mod components;
 pub mod events;
 pub mod model_shape;
+pub mod ripples;
 pub mod world;
 pub mod world2d_impl;
 pub mod world3d_impl;

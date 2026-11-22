@@ -233,6 +233,8 @@ pub struct FrameReply {
     pub hud: Vec<HudItem>,
     /// A cursor lock request.
     pub lock: Option<bool>,
+    /// Splashes in the water (`ctx.water.splash`): position and strength.
+    pub splashes: Vec<([f32; 3], f32)>,
     /// How long the scripts took to run this frame, in milliseconds (as
     /// the runner measured it, without the trip over the pipe).
     pub script_ms: Option<f32>,
@@ -803,6 +805,13 @@ fn parse_sound(v: &Json) -> Option<OneShot> {
     })
 }
 
+/// `[x, y, z, strength]`.
+fn parse_splash(v: &Json) -> Option<([f32; 3], f32)> {
+    let a = v.as_arr()?;
+    let n = |i: usize| a.get(i).and_then(num).filter(|v| v.is_finite());
+    Some(([n(0)?, n(1)?, n(2)?], n(3)?.clamp(0.0, 10.0)))
+}
+
 fn parse_hud(v: &Json) -> Option<HudItem> {
     let field = |k: &str| v.get(k).and_then(num);
     let kind = match v.get("k")?.as_str()? {
@@ -869,6 +878,7 @@ pub fn parse_msg(line: &str) -> Option<BridgeMsg> {
                 writes: list("writes").iter().filter_map(parse_write).collect(),
                 sounds: list("sounds").iter().filter_map(parse_sound).collect(),
                 hud: list("hud").iter().filter_map(parse_hud).collect(),
+                splashes: list("splashes").iter().filter_map(parse_splash).collect(),
                 lock: match v.get("lock") {
                     Some(Json::Bool(b)) => Some(*b),
                     _ => None,
@@ -981,6 +991,18 @@ mod tests {
         assert_eq!(attrs["tint"], AttributeValue::Color([1.0, 0.0, 0.0, 1.0]));
         assert!(parse_msg("not json").is_none());
         assert!(parse_msg(r#"{"op":"???"}"#).is_none());
+    }
+
+    #[test]
+    fn splashes_cross_the_bridge() {
+        let msg = parse_msg(
+            r#"{"op":"frame","frame":1,"writes":[],"splashes":[[1,0.5,-2,2.0],[0,0,0,99],["x",0,0,1]]}"#,
+        );
+        let Some(BridgeMsg::Frame(FrameReply { splashes, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        // Strength is clamped to 0..10; malformed entries are skipped.
+        assert_eq!(splashes, vec![([1.0, 0.5, -2.0], 2.0), ([0.0; 3], 10.0)]);
     }
 
     #[test]

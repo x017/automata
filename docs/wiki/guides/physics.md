@@ -72,6 +72,7 @@ ctx.physics.body_count()
 key = ctx.physics.cast_ray(origin, direction, max_distance=100.0, exclude=player)
 hit = ctx.physics.ray_result(key)   # (entity_id, point, normal, distance) or None
 ctx.physics.water_height(x, z)      # water surface height there, or None
+ctx.water.splash(entity, 2.0)       # rings and foam (scene scripts; see Water)
 ```
 
 `ctx.physics2d` mirrors the essentials for the 2D world (`apply_impulse`,
@@ -123,7 +124,41 @@ It's built to be cheap:
 
 The surface isn't solid: give the water a floor if sinking things should
 stop. The [Lagoon example](../../../examples/oberon/lagoon/README.md)
-floats a boat, crates and buoys.
+floats crates and buoys, and runs a boat round the island.
+
+### Ripples and wakes
+
+On top of the waves, a small wave simulation runs around the camera: a
+256 × 256 grid, a quarter metre per cell (64 m across), that follows the
+view. Anything crossing the surface pushes it about, dynamic and kinematic
+bodies alike:
+
+- A body that **drops in** splashes: rings spread out from it, and foam.
+  The harder and bigger, the bigger the splash.
+- A body that **bobs** sends out small rings as it bobs.
+- A body that **moves** pushes ripples ahead and leaves a V-shaped
+  **wake** behind it, with a trail of foam. Ripples spread at 1.6 m/s, so
+  anything faster than that (a boat) gets a proper V.
+- Scripts make their own: `ctx.water.splash(position, strength)` (scene
+  scripts, Oberon included) or `ctx.physics.splash((x, y, z), strength)`
+  (engine scripts). `position` can be an entity; `strength` runs from 0 to
+  10, and 1 is about a crate dropped from a couple of metres.
+
+```python
+def update(entity, ctx):
+    if ctx.input.just_pressed("space"):
+        ctx.water.splash(entity, 3.0)   # a cannonball lands here
+```
+
+Ripples are only drawn; they don't move bodies (those ride the waves).
+They fade over about ten seconds. Beyond the 64 m around the view there are
+none, and the field fades out toward its edges so it never ends in a seam.
+
+It costs nothing until something disturbs the water and nothing again once
+it calms down. While it runs, about 0.25 ms per physics step in a release
+build. The engine and Oberon point it at the camera that draws the frame;
+with your own `PhysicsWorld3D` in Rust, call `set_ripple_view(eye,
+target)` each frame and hand `ripples()` to `DrawList::set_ripples`.
 
 ## The character controller
 

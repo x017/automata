@@ -42,7 +42,7 @@ pub use quality::GraphicsQuality;
 pub use renderer::Renderer;
 pub use text::{TextAlign, TextAtlas, TextStyle};
 pub use texture::Texture;
-pub use water::{Water, WaterSurface};
+pub use water::{RippleMap, Water, WaterSurface, RIPPLE_FIELD_SIZE};
 
 pub use wgpu::Color;
 pub use wgpu::Texture as RenderTarget;

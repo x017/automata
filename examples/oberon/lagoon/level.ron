@@ -952,40 +952,9 @@
             )),
         ),
         (
-            name: Some("Boat"),
-            transform: Some((
-                position: (-5.6, 0.15, 20.5),
-                rotation_euler: (-0.0, 0.20000002, -0.0),
-                scale: (1.6, 0.6, 3.8),
-            )),
-            mesh_visual: Some((
-                primitive: Cube(
-                    size: 1.0,
-                ),
-                color: (0.62, 0.14, 0.09, 1.0),
-            )),
-            rigid_body: Some((
-                body_type: Dynamic,
-                gravity_scale: 1.0,
-                linear_damping: 0.0,
-                angular_damping: 0.0,
-                enabled: true,
-            )),
-            collider_3d: Some((
-                shape: Cuboid(
-                    extents: (1.6, 0.6, 3.8),
-                ),
-                density: 0.5,
-                friction: 0.5,
-                restitution: 0.0,
-                sensor: false,
-                enabled: true,
-            )),
-        ),
-        (
             name: Some("Crate 1"),
             transform: Some((
-                position: (6.0, -0.3, 19.0),
+                position: (6.0, 4.0, 19.0),
                 rotation_euler: (0.1, 0.50000006, -0.0),
                 scale: (0.8, 0.8, 0.8),
             )),
@@ -1047,7 +1016,7 @@
         (
             name: Some("Buoy 1"),
             transform: Some((
-                position: (-1.0, 0.1, 26.0),
+                position: (-2.5, 0.1, 21.5),
                 rotation_euler: (0.0, 0.0, 0.0),
                 scale: (0.5, 0.7, 0.5),
             )),
@@ -1081,7 +1050,7 @@
         (
             name: Some("Buoy 2"),
             transform: Some((
-                position: (15.0, 0.1, 21.0),
+                position: (13.0, 0.1, 16.0),
                 rotation_euler: (0.0, 0.0, 0.0),
                 scale: (0.5, 0.7, 0.5),
             )),
@@ -1115,7 +1084,7 @@
         (
             name: Some("Buoy 3"),
             transform: Some((
-                position: (-17.0, 0.1, 22.0),
+                position: (-19.5, 0.1, 24.0),
                 rotation_euler: (0.0, 0.0, 0.0),
                 scale: (0.5, 0.7, 0.5),
             )),
@@ -1144,6 +1113,47 @@
                 restitution: 0.0,
                 sensor: false,
                 enabled: true,
+            )),
+        ),
+        (
+            name: Some("Boat"),
+            transform: Some((
+                position: (-7.092485, 0.15, 25.883411),
+                rotation_euler: (-0.0, 1.2590761, -0.0),
+                scale: (1.6, 0.6, 3.8),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.62, 0.14, 0.09, 1.0),
+            )),
+            rigid_body: Some((
+                body_type: KinematicPosition,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (1.6, 0.6, 3.8),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+            attributes: {
+                "center": Vec3((0.0, 0.0, 2.0)),
+                "draft": Float(0.18),
+                "radius_x": Float(24.0),
+                "radius_z": Float(25.0),
+                "speed": Float(4.5),
+            },
+            script: Some((
+                path: "scripts/motor_boat.py",
             )),
         ),
         (

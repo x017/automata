@@ -98,6 +98,12 @@ pub struct Renderer {
     material_sampler: wgpu::Sampler,
     /// Tiling ripple normals/heights for water (baked once).
     water_ripples: Texture,
+    /// The simulated ripple field ([`crate::RippleMap`]), re-uploaded only
+    /// when the draw list carries a different snapshot.
+    ripple_field: wgpu::TextureView,
+    ripple_field_texture: wgpu::Texture,
+    /// Which snapshot `ripple_field` holds: its texels' address and version.
+    ripple_field_key: Option<(usize, u64)>,
     depth_texture: Option<wgpu::Texture>,
     shadow_texture: wgpu::Texture,
     shadow_sampler: wgpu::Sampler,
@@ -240,6 +246,9 @@ impl Renderer {
             false,
             wgpu::TextureFormat::Rgba8Unorm,
         );
+        let ripple_field_texture = create_ripple_field(device);
+        let ripple_field =
+            ripple_field_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let depth_texture = Some(create_depth_texture(device, size));
         let shadow_pipeline = pipeline::create_shadow_pipelines(device, &shared);
         let compositor = Compositor::new(device);
@@ -259,6 +268,9 @@ impl Renderer {
             linear_white_texture,
             material_sampler,
             water_ripples,
+            ripple_field,
+            ripple_field_texture,
+            ripple_field_key: None,
             depth_texture,
             shadow_texture: shadow.texture,
             shadow_sampler: shadow.sampler,
@@ -1544,6 +1556,39 @@ impl Renderer {
 
     /// Each water surface's uniform/ripple bind group and how many indices
     /// to draw (endless ones include the horizon skirt).
+    /// Uploads a ripple snapshot the GPU doesn't hold yet.
+    fn upload_ripples(&mut self, ripples: Option<&crate::RippleMap>) {
+        let Some(r) = ripples else { return };
+        let key = (r.texels.as_ptr() as usize, r.version);
+        let size = crate::water::RIPPLE_FIELD_SIZE;
+        if self.ripple_field_key == Some(key)
+            || r.size != size
+            || r.texels.len() != (size * size * 4) as usize
+        {
+            return;
+        }
+        self.ripple_field_key = Some(key);
+        self.ctx.queue().write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.ripple_field_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&r.texels),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(8 * size),
+                rows_per_image: Some(size),
+            },
+            wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
     fn water_bind_groups(
         &self,
         draw: &DrawList,
@@ -1553,7 +1598,8 @@ impl Renderer {
         draw.waters
             .iter()
             .map(|w| {
-                let uniform = WaterUniform::new(w, beautiful, time);
+                let uniform =
+                    WaterUniform::new(w, beautiful, time).with_ripples(draw.ripples.as_ref());
                 let device = self.ctx.device();
                 let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("water"),
@@ -1581,6 +1627,10 @@ impl Renderer {
                         wgpu::BindGroupEntry {
                             binding: 2,
                             resource: wgpu::BindingResource::Sampler(&ripples.sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::TextureView(&self.ripple_field),
                         },
                     ],
                 });
@@ -1664,6 +1714,7 @@ impl Renderer {
         );
         let (light_bind, beautiful_light_bind) =
             self.light_bind_group(&sun, &env, &shadows, render_shadows, &frame, &points);
+        self.upload_ripples(draw.ripples.as_ref());
         let water_binds = self.water_bind_groups(draw, beautiful, time);
 
         PreparedFrame {
@@ -1934,6 +1985,26 @@ impl Renderer {
 }
 
 /// Creates the depth buffer for the given size (no-op for empty sizes).
+/// The GPU side of [`crate::RippleMap`]: half-float RGBA, zero until the
+/// first snapshot arrives.
+fn create_ripple_field(device: &wgpu::Device) -> wgpu::Texture {
+    let size = crate::water::RIPPLE_FIELD_SIZE;
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("ripple field"),
+        size: wgpu::Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
+
 fn create_depth_texture(device: &wgpu::Device, size: (u32, u32)) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("depth"),
@@ -3093,6 +3164,12 @@ mod tests {
     /// the center pixel.
     fn water_center(renderer: &mut Renderer) -> [u8; 4] {
         let size = renderer.size();
+        center_pixel(&water_frame(renderer, None), size)
+    }
+
+    /// A 20 m pool over a dark floor, seen from above, with `ripples`.
+    fn water_frame(renderer: &mut Renderer, ripples: Option<crate::RippleMap>) -> Vec<u8> {
+        let size = renderer.size();
         let target = target(renderer.context().device(), size);
         let cube = renderer.create_mesh(&MeshData::cube(1.0));
         let floor = renderer.create_material([0.05, 0.05, 0.05, 1.0], None);
@@ -3118,8 +3195,39 @@ mod tests {
             ..crate::Water::default()
         };
         draw.water(water, glam::Mat4::IDENTITY);
+        if let Some(ripples) = ripples {
+            draw.set_ripples(ripples);
+        }
         renderer.render_offscreen(&draw, &target);
-        center_pixel(&read_pixels(renderer, &target, size), size)
+        read_pixels(renderer, &target, size)
+    }
+
+    /// A ripple field with a ring of `height` (m) and foam `foam` around
+    /// the world origin, as the physics simulation would hand it over.
+    #[allow(clippy::many_single_char_names)]
+    fn ring_ripples(height: f32, foam: f32, version: u64) -> crate::RippleMap {
+        let n = crate::RIPPLE_FIELD_SIZE as usize;
+        let cell = 0.25;
+        let mut h = vec![0.0; n * n];
+        let mut f = vec![0.0; n * n];
+        for z in 0..n {
+            for x in 0..n {
+                #[allow(clippy::cast_precision_loss)] // small
+                let p = glam::Vec2::new(x as f32 + 0.5, z as f32 + 0.5) * cell
+                    - glam::Vec2::splat(32.0);
+                let r = p.length();
+                h[z * n + x] = height * (r * 4.0).sin() * (-(r - 2.0).powi(2)).exp();
+                f[z * n + x] = if r < 1.5 { foam } else { 0.0 };
+            }
+        }
+        crate::RippleMap::new(
+            glam::Vec2::ZERO,
+            cell,
+            crate::RIPPLE_FIELD_SIZE,
+            &h,
+            &f,
+            version,
+        )
     }
 
     /// A frame of empty sky through a camera looking along `look`, the
@@ -3644,6 +3752,51 @@ mod tests {
             frame_point_lights(&draw, &camera, 100, 0).len(),
             crate::MAX_POINT_LIGHTS
         );
+    }
+
+    #[test]
+    fn simulated_ripples_shape_and_foam_the_water_on_every_preset() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping ripple test");
+            return;
+        };
+        let size = renderer.size();
+        for quality in [GraphicsQuality::Low, GraphicsQuality::Beautiful] {
+            renderer.set_quality(quality);
+            let calm = water_frame(&mut renderer, None);
+            // A flat field changes nothing.
+            let flat = water_frame(&mut renderer, Some(ring_ripples(0.0, 0.0, 1)));
+            let diff = |a: &[u8], b: &[u8]| {
+                a.iter()
+                    .zip(b)
+                    .map(|(&x, &y)| u64::from(x.abs_diff(y)))
+                    .sum::<u64>()
+            };
+            assert_eq!(diff(&calm, &flat), 0, "{quality:?}");
+            // A ring bends the light; foam at its heart turns it white.
+            let ringed = water_frame(&mut renderer, Some(ring_ripples(0.08, 0.0, 2)));
+            assert!(
+                diff(&calm, &ringed) > 2000,
+                "{quality:?}: the ring should show"
+            );
+            let foamy = water_frame(&mut renderer, Some(ring_ripples(0.0, 1.0, 3)));
+            let [r, g, b, _] = center_pixel(&foamy, size);
+            let [r0, g0, b0, _] = center_pixel(&calm, size);
+            assert!(
+                u32::from(r) + u32::from(g) + u32::from(b)
+                    > u32::from(r0) + u32::from(g0) + u32::from(b0) + 120,
+                "{quality:?}: foam should whiten the water, {:?} vs {:?}",
+                [r, g, b],
+                [r0, g0, b0]
+            );
+        }
+        // The same snapshot isn't uploaded twice.
+        let ripples = ring_ripples(0.05, 0.0, 9);
+        renderer.upload_ripples(Some(&ripples));
+        let key = renderer.ripple_field_key;
+        assert_eq!(key, Some((ripples.texels.as_ptr() as usize, 9)));
+        renderer.upload_ripples(Some(&ripples.clone()));
+        assert_eq!(renderer.ripple_field_key, key);
     }
 
     #[test]

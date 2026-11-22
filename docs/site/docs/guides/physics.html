@@ -84,7 +84,8 @@ ctx.physics.body_count()
 
 key = ctx.physics.cast_ray(origin, direction, max_distance=<span class="tok-n">100.0</span>, exclude=player)
 hit = ctx.physics.ray_result(key)   <span class="tok-c"># (entity_id, point, normal, distance) or None</span>
-ctx.physics.water_height(x, z)      <span class="tok-c"># water surface height there, or None</span></code></pre></div>
+ctx.physics.water_height(x, z)      <span class="tok-c"># water surface height there, or None</span>
+ctx.water.splash(entity, <span class="tok-n">2.0</span>)       <span class="tok-c"># rings and foam (scene scripts; see Water)</span></code></pre></div>
 <p><code>ctx.physics2d</code> mirrors the essentials for the 2D world (<code>apply_impulse</code>,
 <code>grounded</code>, <code>body_count</code>).</p>
 <h2 id="water">Water<a class="anchor" href="#water" aria-label="Link to this section">#</a></h2>
@@ -120,7 +121,30 @@ hulls pitch and roll). About 0.25 µs per floating body per step on waves,
 measured on one core.</li></ul>
 <p>The surface isn't solid: give the water a floor if sinking things should
 stop. The <a href="https://github.com/x017/automata/blob/main/examples/oberon/lagoon/README.md" rel="noopener">Lagoon example</a>
-floats a boat, crates and buoys.</p>
+floats crates and buoys, and runs a boat round the island.</p>
+<h3 id="ripples-and-wakes">Ripples and wakes<a class="anchor" href="#ripples-and-wakes" aria-label="Link to this section">#</a></h3>
+<p>On top of the waves, a small wave simulation runs around the camera: a
+256 × 256 grid, a quarter metre per cell (64 m across), that follows the
+view. Anything crossing the surface pushes it about, dynamic and kinematic
+bodies alike:</p>
+<ul><li>A body that <strong>drops in</strong> splashes: rings spread out from it, and foam.
+The harder and bigger, the bigger the splash.</li><li>A body that <strong>bobs</strong> sends out small rings as it bobs.</li><li>A body that <strong>moves</strong> pushes ripples ahead and leaves a V-shaped
+<strong>wake</strong> behind it, with a trail of foam. Ripples spread at 1.6 m/s, so
+anything faster than that (a boat) gets a proper V.</li><li>Scripts make their own: <code>ctx.water.splash(position, strength)</code> (scene
+scripts, Oberon included) or <code>ctx.physics.splash((x, y, z), strength)</code>
+(engine scripts). <code>position</code> can be an entity; <code>strength</code> runs from 0 to
+10, and 1 is about a crate dropped from a couple of metres.</li></ul>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    <span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;space&quot;</span>):
+        ctx.water.splash(entity, <span class="tok-n">3.0</span>)   <span class="tok-c"># a cannonball lands here</span></code></pre></div>
+<p>Ripples are only drawn; they don't move bodies (those ride the waves).
+They fade over about ten seconds. Beyond the 64 m around the view there are
+none, and the field fades out toward its edges so it never ends in a seam.</p>
+<p>It costs nothing until something disturbs the water and nothing again once
+it calms down. While it runs, about 0.25 ms per physics step in a release
+build. The engine and Oberon point it at the camera that draws the frame;
+with your own <code>PhysicsWorld3D</code> in Rust, call `set_ripple_view(eye,
+target)<code>each frame and hand</code>ripples()<code>to</code>DrawList::set_ripples`.</p>
 <h2 id="the-character-controller">The character controller<a class="anchor" href="#the-character-controller" aria-label="Link to this section">#</a></h2>
 <p>The platformer recipe — tight movement that still collides and climbs
 slopes:</p>
@@ -157,7 +181,7 @@ try <code>friction(0.2)</code> on the wall or clamp velocity yourself.</li></ul>
     <footer class="pager"><a class="prev" href="input.html"><small>Previous</small>Input</a><a class="next" href="events-and-resources.html"><small>Next</small>Events &amp; resources</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/physics.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#bodies">Bodies</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l3"><a href="#colliders-from-models">Colliders from models</a></li><li class="l2"><a href="#the-per-frame-toolbox">The per-frame toolbox</a></li><li class="l2"><a href="#water">Water</a></li><li class="l2"><a href="#the-character-controller">The character controller</a></li><li class="l2"><a href="#common-pitfalls">Common pitfalls</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#bodies">Bodies</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l3"><a href="#colliders-from-models">Colliders from models</a></li><li class="l2"><a href="#the-per-frame-toolbox">The per-frame toolbox</a></li><li class="l2"><a href="#water">Water</a></li><li class="l3"><a href="#ripples-and-wakes">Ripples and wakes</a></li><li class="l2"><a href="#the-character-controller">The character controller</a></li><li class="l2"><a href="#common-pitfalls">Common pitfalls</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

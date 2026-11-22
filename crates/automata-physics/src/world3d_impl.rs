@@ -64,6 +64,10 @@ pub struct PhysicsWorld3D {
     sim_time: f64,
     /// The scene's water surfaces at `sim_time` (see `water.rs`).
     water: Vec<automata_renderer::WaterSurface>,
+    /// Ripples around the camera (see `ripples.rs`).
+    ripples: crate::ripples::RippleField,
+    /// Each body's dent in the ripples, as last dug.
+    dents: HashMap<r3::dynamics::RigidBodyHandle, crate::ripples::Dent>,
 }
 
 /// What a built model shape depends on: the loaded model (by identity, so
@@ -123,6 +127,8 @@ impl PhysicsWorld3D {
             model_shapes: HashMap::new(),
             sim_time: 0.0,
             water: Vec::new(),
+            ripples: crate::ripples::RippleField::new(),
+            dents: HashMap::new(),
         }
     }
 
@@ -553,6 +559,7 @@ impl PhysicsWorld3D {
         // Water: buoyancy and drag as impulses, before integration.
         self.collect_water(scene);
         self.apply_water(dt);
+        self.step_ripples(dt);
         self.sim_time += f64::from(dt);
 
         self.pipeline.step(
