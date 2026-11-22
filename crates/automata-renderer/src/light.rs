@@ -92,6 +92,10 @@ pub struct PointLight {
     /// Where the light has faded out completely (m), smoothly. 0 picks it
     /// from the intensity (where it would be too dim to see).
     pub range: f32,
+    /// Whether objects block this light. The quality preset decides how many
+    /// lights a frame shadows ([`GraphicsQuality::point_shadows`](crate::GraphicsQuality::point_shadows));
+    /// the brightest and nearest get them first.
+    pub shadows: bool,
 }
 
 impl PointLight {
@@ -103,6 +107,7 @@ impl PointLight {
             intensity,
             radius: 0.05,
             range: 0.0,
+            shadows: true,
         }
     }
 
@@ -138,13 +143,18 @@ impl PointLight {
             intensity: radiance.map(|c| c.max(0.0) * area * 0.25),
             radius: (area / (4.0 * std::f32::consts::PI)).sqrt(),
             range: 0.0,
+            shadows: true,
         }
     }
 
-    /// The shaders' layout: position + range, intensity + radius.
-    pub(crate) fn packed(&self) -> [f32; 8] {
+    /// The shaders' layout: position + range, intensity + radius, and the
+    /// shadow (its slot or -1, near and far planes).
+    pub(crate) fn packed(&self, shadow: Option<(usize, &PointShadow)>) -> [f32; 12] {
         let [r, g, b] = self.intensity.map(|c| c.max(0.0));
         let p = self.position;
+        #[allow(clippy::cast_precision_loss)] // a handful of slots
+        let (slot, near, far) =
+            shadow.map_or((-1.0, 0.0, 0.0), |(slot, s)| (slot as f32, s.near, s.far));
         [
             p.x,
             p.y,
@@ -154,8 +164,86 @@ impl PointLight {
             g,
             b,
             self.radius.max(0.01),
+            slot,
+            near,
+            far,
+            0.0,
         ]
     }
+}
+
+/// The most point lights a frame can shadow (the shaders' face array holds
+/// six per light).
+pub const MAX_POINT_SHADOWS: usize = 4;
+
+/// Each face of a point light's shadow cube sees a little more than 90°,
+/// so soft-shadow taps near a face's edge stay inside it.
+pub(crate) const POINT_SHADOW_FOV_DEGREES: f32 = 96.0;
+
+/// The six views a point light's shadow renders: +X, -X, +Y, -Y, +Z, -Z
+/// (the order the shaders pick faces in).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PointShadow {
+    pub faces: [glam::Mat4; 6],
+    pub near: f32,
+    pub far: f32,
+}
+
+impl PointShadow {
+    /// The shadow views of `light`. The near plane sits inside the glowing
+    /// body (which is left out of its own shadow), the far plane at the
+    /// light's range.
+    pub fn for_light(light: &PointLight) -> Self {
+        use glam::camera::rh::{proj::directx, view};
+        let near = (light.radius * 0.5).clamp(0.02, 0.5);
+        let far = light.effective_range().max(near * 2.0);
+        let proj = directx::perspective(POINT_SHADOW_FOV_DEGREES.to_radians(), 1.0, near, far);
+        let p = light.position;
+        let face = |dir: Vec3, up: Vec3| proj * view::look_at_mat4(p, p + dir, up);
+        Self {
+            faces: [
+                face(Vec3::X, Vec3::Y),
+                face(Vec3::NEG_X, Vec3::Y),
+                face(Vec3::Y, Vec3::Z),
+                face(Vec3::NEG_Y, Vec3::Z),
+                face(Vec3::Z, Vec3::Y),
+                face(Vec3::NEG_Z, Vec3::Y),
+            ],
+            near,
+            far,
+        }
+    }
+
+    /// Whether a sphere can cast into face `face`: within the light's
+    /// range and inside the face's (slightly wider than 90°) pyramid.
+    pub fn face_sees(face: usize, light: Vec3, center: Vec3, radius: f32, range: f32) -> bool {
+        let d = center - light;
+        if d.length() > range + radius {
+            return false;
+        }
+        let (forward, a, b) = match face {
+            0 => (d.x, d.y, d.z),
+            1 => (-d.x, d.y, d.z),
+            2 => (d.y, d.x, d.z),
+            3 => (-d.y, d.x, d.z),
+            4 => (d.z, d.x, d.y),
+            _ => (-d.z, d.x, d.y),
+        };
+        let t = (POINT_SHADOW_FOV_DEGREES * 0.5).to_radians().tan();
+        // Distance of the center inside each side plane, scaled by the
+        // plane normal's length.
+        let slack = radius * (1.0 + t * t).sqrt();
+        forward * t - a.abs() >= -slack && forward * t - b.abs() >= -slack
+    }
+}
+
+/// A point light as a frame shades it: the light, the mesh draw it glows
+/// from (left out of its shadow), and its shadow slot and views.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FramePoint {
+    pub light: PointLight,
+    pub source: Option<usize>,
+    pub shadow: Option<(usize, PointShadow)>,
 }
 
 /// GPU mirror of the light bind group's uniform buffer.
@@ -214,13 +302,19 @@ pub(crate) struct LightUniform {
     pub sky_sun: [f32; 4],
     /// Point lights (`PointLightData` in common.wgsl); the first
     /// `fog_params.z` are used.
-    pub points: [[f32; 8]; MAX_POINT_LIGHTS],
+    pub points: [[f32; 12]; MAX_POINT_LIGHTS],
+    /// The shadowed point lights' face view-projections, six per slot.
+    pub point_faces: [[f32; 16]; MAX_POINT_SHADOWS * 6],
+    /// x: one shadow texel in UV, y: soft filtering (Beautiful),
+    /// z: tan(face FOV / 2).
+    pub point_shadow: [f32; 4],
 }
 
 impl LightUniform {
     /// Packs the sun (`sun.shadows` gates shadow sampling), the
     /// environment, the shadow cascades (`map_size` texels per side), the
-    /// frame and its point lights (the first [`MAX_POINT_LIGHTS`]).
+    /// frame and its point lights (the first [`MAX_POINT_LIGHTS`]) with
+    /// their shadows (`point_map_size` texels per face side).
     #[must_use]
     pub fn new(
         sun: &Sun,
@@ -228,13 +322,27 @@ impl LightUniform {
         shadows: &ShadowCascades,
         map_size: u32,
         frame: &FrameView,
-        point_lights: &[PointLight],
+        point_lights: &[FramePoint],
+        point_map_size: u32,
     ) -> Self {
-        let mut points = [[0.0; 8]; MAX_POINT_LIGHTS];
+        let mut points = [[0.0; 12]; MAX_POINT_LIGHTS];
+        let mut point_faces = [[0.0; 16]; MAX_POINT_SHADOWS * 6];
         for (slot, p) in points.iter_mut().zip(point_lights) {
-            *slot = p.packed();
+            let shadow = p.shadow.filter(|(s, _)| *s < MAX_POINT_SHADOWS);
+            *slot = p.light.packed(shadow.as_ref().map(|(s, v)| (*s, v)));
+            if let Some((s, view)) = shadow {
+                for (face, m) in view.faces.iter().enumerate() {
+                    point_faces[s * 6 + face] = m.to_cols_array();
+                }
+            }
         }
         let point_count = point_lights.len().min(MAX_POINT_LIGHTS) as f32;
+        let point_shadow = [
+            1.0 / point_map_size.max(1) as f32,
+            f32::from(u8::from(frame.beautiful)),
+            (POINT_SHADOW_FOV_DEGREES * 0.5).to_radians().tan(),
+            0.0,
+        ];
         let direction = sun.normalized_direction();
         let density = if env.fog {
             env.fog_density.max(0.0)
@@ -297,6 +405,8 @@ impl LightUniform {
                 env.lens_flare.max(0.0),
             ],
             points,
+            point_faces,
+            point_shadow,
         }
     }
 }
@@ -344,6 +454,7 @@ mod tests {
             2048,
             &FrameView::default(),
             &[],
+            256,
         );
         assert_eq!(u.params[0], 1.0);
         assert!((u.params[1] - 1.0 / 2048.0).abs() < f32::EPSILON);
@@ -370,7 +481,7 @@ mod tests {
             ..light
         };
         assert!((fixed.effective_range() - 2.0).abs() < f32::EPSILON);
-        let packed = light.packed();
+        let packed = light.packed(None);
         assert_eq!(&packed[..3], &[0.0, 1.0, 0.0]);
         assert!((packed[3] - range).abs() < 1e-5);
         // A dark body has no reach worth shading.
@@ -382,10 +493,87 @@ mod tests {
             &scene_shadows(),
             2048,
             &FrameView::default(),
-            &[light, dark],
+            &[
+                FramePoint {
+                    light,
+                    source: None,
+                    shadow: None,
+                },
+                FramePoint {
+                    light: dark,
+                    source: None,
+                    shadow: Some((1, PointShadow::for_light(&dark))),
+                },
+            ],
+            256,
         );
         assert_eq!(u.fog_params[2], 2.0);
         assert_eq!(u.points[0], packed);
+        assert!(
+            (u.points[0][8] + 1.0).abs() < f32::EPSILON,
+            "no shadow slot"
+        );
+        assert!((u.points[1][8] - 1.0).abs() < f32::EPSILON, "shadow slot 1");
+        assert_eq!(
+            u.point_faces[6],
+            PointShadow::for_light(&dark).faces[0].to_cols_array()
+        );
+    }
+
+    #[test]
+    fn point_shadow_faces_cover_every_direction_once_picked_by_major_axis() {
+        let light = PointLight {
+            range: 10.0,
+            ..PointLight::new(Vec3::new(1.0, 2.0, 3.0), [1.0; 3])
+        };
+        let s = PointShadow::for_light(&light);
+        // A point along each axis lands in the middle of its face, in
+        // front of the near plane.
+        for (face, dir) in [
+            Vec3::X,
+            Vec3::NEG_X,
+            Vec3::Y,
+            Vec3::NEG_Y,
+            Vec3::Z,
+            Vec3::NEG_Z,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let clip = s.faces[face]
+                * (light.position + dir * 4.0 + dir.any_orthonormal_vector() * 0.5).extend(1.0);
+            let ndc = clip.truncate() / clip.w;
+            assert!(ndc.x.abs() < 0.5 && ndc.y.abs() < 0.5, "face {face}: {ndc}");
+            assert!(ndc.z > 0.0 && ndc.z < 1.0, "face {face} depth {}", ndc.z);
+            assert!(PointShadow::face_sees(
+                face,
+                light.position,
+                light.position + dir * 4.0,
+                0.1,
+                10.0
+            ));
+            // The opposite face never sees it.
+            assert!(!PointShadow::face_sees(
+                face ^ 1,
+                light.position,
+                light.position + dir * 4.0,
+                0.1,
+                10.0
+            ));
+        }
+        // Out of range: no face.
+        assert!(!PointShadow::face_sees(
+            0,
+            light.position,
+            light.position + Vec3::X * 12.0,
+            0.5,
+            10.0
+        ));
+        // A diagonal direction falls inside the face its major axis picks.
+        let diag = Vec3::new(1.0, 0.95, -0.9).normalize() * 3.0;
+        let clip = s.faces[0] * (light.position + diag).extend(1.0);
+        let ndc = clip.truncate() / clip.w;
+        assert!(ndc.x.abs() <= 1.0 && ndc.y.abs() <= 1.0, "{ndc}");
     }
 
     #[test]
@@ -408,7 +596,15 @@ mod tests {
             beautiful: true,
             ..FrameView::default()
         };
-        let u = LightUniform::new(&Sun::default(), &env, &scene_shadows(), 2048, &frame, &[]);
+        let u = LightUniform::new(
+            &Sun::default(),
+            &env,
+            &scene_shadows(),
+            2048,
+            &frame,
+            &[],
+            256,
+        );
         assert!((u.fog[3] - 0.5).abs() < f32::EPSILON);
         assert!((u.sky_exposure[3] - 2.0).abs() < f32::EPSILON);
         assert!((u.ground_tonemap[3] - 2.0).abs() < f32::EPSILON);
@@ -422,6 +618,7 @@ mod tests {
             2048,
             &FrameView::default(),
             &[],
+            256,
         );
         assert!(
             off.fog[3].abs() < f32::EPSILON,

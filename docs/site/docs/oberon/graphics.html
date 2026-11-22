@@ -49,7 +49,7 @@ soft cascaded shadows, physically based light, HDR bloom, FXAA and
 refractive water. It applies immediately.</li><li><strong>Stats</strong> update live: frame time in ms, fps, meshes drawn, and shadow
 map size. Use them with the <em>400 cubes</em> test scene to see what your
 scene costs.</li></ul>
-<div class="table"><table><thead><tr><th>Quality</th><th>Shadows</th><th>Shadow map</th></tr></thead><tbody><tr><td>Low</td><td>off</td><td>—</td></tr><tr><td>Medium</td><td>on</td><td>1024 px</td></tr><tr><td>High (default)</td><td>on</td><td>2048 px</td></tr><tr><td>Ultra</td><td>on</td><td>4096 px</td></tr><tr><td>Beautiful</td><td>soft, 4 cascades</td><td>4 × 2048 px</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Quality</th><th>Shadows</th><th>Shadow map</th><th>Glow lights with shadows</th></tr></thead><tbody><tr><td>Low</td><td>off</td><td>—</td><td>none</td></tr><tr><td>Medium</td><td>on</td><td>1024 px</td><td>none</td></tr><tr><td>High (default)</td><td>on</td><td>2048 px</td><td>2 nearest</td></tr><tr><td>Ultra</td><td>on</td><td>4096 px</td><td>4 nearest</td></tr><tr><td>Beautiful</td><td>soft, 4 cascades</td><td>4 × 2048 px</td><td>4 nearest, soft</td></tr></tbody></table></div>
 <p>Water is a component. Use <strong>Create → Water</strong> (it starts as a calm pond)
 or select an entity and use <strong>Add Component → Water</strong> in the Inspector.
 It has fields for size, colors, clarity, waves and foam. Tick <strong>Endless</strong>
@@ -87,7 +87,7 @@ view.</p>
 or a setting fairly. Every object they add is named <code>Test …</code>, and each
 button press is one undo step. <strong>Remove N test objects</strong> deletes them all
 at once, also as one undo step.</p>
-<div class="table"><table><thead><tr><th>Scene</th><th>Use it to</th></tr></thead><tbody><tr><td>Color chart</td><td>A sweep of hues and brightness. Switch tone mapping and watch how saturated colours and highlights behave</td></tr><tr><td>Shadows</td><td>A floor, pillars, and a floating slab. Check shadow shape, contact, and acne while you move the sun</td></tr><tr><td>Fog depth</td><td>Pillars marching out to 150 m. Tune fog density and start until the far ones fade the way you want</td></tr><tr><td>400 cubes</td><td>A 20×20 field. Watch the frame time stat at each quality level</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Scene</th><th>Use it to</th></tr></thead><tbody><tr><td>Color chart</td><td>A sweep of hues and brightness. Switch tone mapping and watch how saturated colours and highlights behave</td></tr><tr><td>Shadows</td><td>A floor, pillars, and a floating slab. Check shadow shape, contact, and acne while you move the sun</td></tr><tr><td>Fog depth</td><td>Pillars marching out to 150 m. Tune fog density and start until the far ones fade the way you want</td></tr><tr><td>400 cubes</td><td>A 20×20 field. Watch the frame time stat at each quality level</td></tr><tr><td>Lantern</td><td>A glowing lantern ringed by crates. Try it at night: on High and up the crates throw shadows outward from the lantern. Untick its <strong>Glow Shadows</strong> to compare</td></tr></tbody></table></div>
 <p>Test objects are ordinary entities. Remember to remove them before you
 save, unless you want to keep them.</p>
 <h2 id="a-tuning-workflow">A tuning workflow<a class="anchor" href="#a-tuning-workflow" aria-label="Link to this section">#</a></h2>

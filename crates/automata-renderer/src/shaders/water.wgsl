@@ -217,10 +217,12 @@ fn water_shade(in: VertexOutput, shadow: f32) -> WaterShade {
     // streak across the waves, and light on the water body below.
     var point_body = vec3<f32>(0.0);
     for (var i = 0u; i < point_count(); i = i + 1u) {
-        let p = point_light(i, world);
+        var p = point_light(i, world);
         if !any(p.radiance > vec3<f32>(0.0)) {
             continue;
         }
+        let blocked = point_shadow(i, world, vec3<f32>(0.0, 1.0, 0.0));
+        p.radiance = p.radiance * blocked;
         let pl = max(dot(n, p.l), 0.0);
         point_body = point_body + p.radiance * max(p.l.y, 0.0);
         if pl > 0.0 {

@@ -18,10 +18,12 @@ struct CameraUniform {
 struct PointLightData {
     position_range: vec4<f32>,   // xyz: position, w: where it fades out (m)
     intensity_radius: vec4<f32>, // rgb: intensity, w: glowing body radius (m)
+    shadow: vec4<f32>,           // x: shadow slot (-1 = none), y: near, z: far
 };
 
-// Must match `MAX_POINT_LIGHTS` in Rust.
+// Must match `MAX_POINT_LIGHTS` / `MAX_POINT_SHADOWS` in Rust.
 const MAX_POINT_LIGHTS: u32 = 32u;
+const MAX_POINT_SHADOWS: u32 = 4u;
 
 struct LightUniform {
     direction: vec4<f32>,      // xyz: direction the light travels, w: soft shadow radius (m)
@@ -42,11 +44,15 @@ struct LightUniform {
     sky_zenith: vec4<f32>,     // rgb: sky color straight up, a: sky dome on
     sky_sun: vec4<f32>,        // x: cos(sun radius), y: glow, z: clouds, w: lens flare
     points: array<PointLightData, MAX_POINT_LIGHTS>,
+    // Six views (+X, -X, +Y, -Y, +Z, -Z) per shadowed point light.
+    point_faces: array<mat4x4<f32>, 24>,
+    point_shadow: vec4<f32>,   // x: texel (uv), y: soft (Beautiful), z: tan(face fov / 2)
 };
 @group(3) @binding(0) var<uniform> light: LightUniform;
 @group(3) @binding(1) var shadow_map: texture_depth_2d_array;
 @group(3) @binding(2) var shadow_sampler: sampler_comparison;
 @group(3) @binding(3) var shadow_map_0: texture_depth_2d; // cascade 0 (forward path)
+@group(3) @binding(4) var point_shadow_map: texture_depth_2d_array; // point light cubes
 
 // Two variants share these helpers: the forward path (`shadow_pcf`,
 // `apply_fog`, `finish_forward`) and Beautiful (`shadow_soft`, `shade_pbr`,
@@ -200,6 +206,53 @@ fn point_light(i: u32, world: vec3<f32>) -> PointSample {
     let r = p.intensity_radius.w;
     out.radiance = p.intensity_radius.rgb * (window * window / max(d2, r * r));
     return out;
+}
+
+// How much of point light `i` reaches `world` past the objects between
+// (1 lit, 0 blocked). Each shadowed light renders six slightly wider than
+// 90° views; the direction's major axis picks one. A normal offset of about
+// a texel at that distance keeps surfaces from shadowing themselves.
+fn point_shadow(i: u32, world: vec3<f32>, n: vec3<f32>) -> f32 {
+    let p = light.points[i];
+    let slot = i32(p.shadow.x);
+    if slot < 0 {
+        return 1.0;
+    }
+    let to_frag = world - p.position_range.xyz;
+    let a = abs(to_frag);
+    var face = 0;
+    if a.x >= a.y && a.x >= a.z {
+        face = select(1, 0, to_frag.x > 0.0);
+    } else if a.y >= a.z {
+        face = select(3, 2, to_frag.y > 0.0);
+    } else {
+        face = select(5, 4, to_frag.z > 0.0);
+    }
+    let major = max(a.x, max(a.y, a.z));
+    let texel_world = 2.0 * major * light.point_shadow.z * light.point_shadow.x;
+    let l = -to_frag * inverseSqrt(max(dot(to_frag, to_frag), 1e-8));
+    let offset = world + n * (texel_world * 1.5) + l * texel_world;
+    let layer = slot * 6 + face;
+    let clip = light.point_faces[layer] * vec4<f32>(offset, 1.0);
+    let ndc = clip.xyz / clip.w;
+    let uv = clamp(ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
+    let texel = light.point_shadow.x;
+    if light.point_shadow.y > 0.5 {
+        // Beautiful: 8 filtered taps over ~3 texels.
+        var lit = 0.0;
+        for (var t = 0; t < 8; t = t + 1) {
+            lit = lit + textureSampleCompareLevel(point_shadow_map, shadow_sampler,
+                uv + POISSON[t] * texel * 1.5, layer, ndc.z);
+        }
+        return lit / 8.0;
+    }
+    // Forward path: 2x2 PCF.
+    var lit = 0.0;
+    for (var t = 0; t < 4; t = t + 1) {
+        let o = vec2<f32>(f32(t & 1) - 0.5, f32(t >> 1u) - 0.5) * texel;
+        lit = lit + textureSampleCompareLevel(point_shadow_map, shadow_sampler, uv + o, layer, ndc.z);
+    }
+    return lit * 0.25;
 }
 
 // Hemispheric ambient: sky from above, ground from below.
@@ -361,7 +414,8 @@ fn points_pbr(
     for (var i = 0u; i < point_count(); i = i + 1u) {
         let p = point_light(i, world);
         if dot(n, p.l) > 0.0 && any(p.radiance > vec3<f32>(0.0)) {
-            sum = sum + brdf_direct(albedo, n, v, p.l, roughness, f0) * p.radiance;
+            sum = sum + brdf_direct(albedo, n, v, p.l, roughness, f0) * p.radiance
+                * point_shadow(i, world, n);
         }
     }
     return sum;

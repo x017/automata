@@ -838,6 +838,11 @@ def test_mesh_renderer_surfaces():
     sign = at.MeshRenderer.quad(emissive=(0.2, 1.0, 0.4), glow_light=0.0)
     assert sign.glow_light == 0.0
     assert "glow_light: 0.0" in at.Scene().add(at.Entity("s").add(sign)).to_ron()
+    assert lamp.glow_shadows is True
+    torch = at.MeshRenderer.sphere(emissive=(1.0, 0.5, 0.1), glow_shadows=False)
+    assert torch.glow_shadows is False
+    assert "glow_shadows: false" in at.Scene().add(at.Entity("t").add(torch)).to_ron()
+    assert "glow_shadows" not in at.Scene().add(at.Entity("l").add(lamp)).to_ron()
     with pytest.raises(ValueError):
         at.MeshRenderer.cube(glow_light=-1.0)
     with pytest.raises(ValueError):

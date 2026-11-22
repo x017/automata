@@ -112,6 +112,7 @@ With a model selected, the **Mesh Renderer** section shows:
 | **Tint** | Multiplies every material's colour. Leave it white to see the model as authored. |
 | **Surface**, **Roughness**, **Metallic**, **Emission** | Leave them at Default to keep the file's materials. Setting one overrides it on every part. See [Surfaces](interface.md#surfaces). |
 | **Glow Light** | Glowing parts of the model light their surroundings. This scales that light (0 = off). |
+| **Glow Shadows** | Whether other objects block that light and cast shadows from it (High and up). |
 
 ## Import settings
 

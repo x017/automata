@@ -2197,6 +2197,7 @@ impl Ui {
                     Field::MeshEmissiveStrength,
                 );
                 y = self.float_row(canvas, x, y, w, e, "Glow Light", Field::MeshGlowLight);
+                y = self.flag_row(canvas, x, y, w, e, "Glow Shadows", Flag::MeshGlowShadows);
                 y += 6.0;
             }
         }

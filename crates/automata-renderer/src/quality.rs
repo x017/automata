@@ -63,6 +63,27 @@ impl GraphicsQuality {
         }
     }
 
+    /// How many point lights (glowing meshes included) cast shadows in a
+    /// frame: none on Low and Medium, 2 on High, 4 on Ultra and Beautiful.
+    #[must_use]
+    pub fn point_shadows(self) -> usize {
+        match self {
+            Self::Low | Self::Medium => 0,
+            Self::High => 2,
+            Self::Ultra | Self::Beautiful => crate::MAX_POINT_SHADOWS,
+        }
+    }
+
+    /// Texels per side of each face of a point light's shadow cube.
+    #[must_use]
+    pub fn point_shadow_size(self) -> u32 {
+        match self {
+            Self::Low | Self::Medium => 1,
+            Self::High => 384,
+            Self::Ultra | Self::Beautiful => 512,
+        }
+    }
+
     /// How many point lights a frame shades (glowing meshes included);
     /// the ones nearest the camera and brightest win.
     #[must_use]

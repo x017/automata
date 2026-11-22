@@ -42,6 +42,7 @@ lamp = at.MeshRenderer.quad(emissive=(1.0, 0.8, 0.5), emissive_strength=4.0)
 | `emissive` | (r, g, b), ≥ 0 | Light the surface gives off itself, unaffected by sun, shadow or fog darkness |
 | `emissive_strength` | ≥ 0 | Multiplies `emissive`. Above about 1 it blooms on Ultra and Beautiful |
 | `glow_light` | ≥ 0 | How much the glow lights nearby surfaces (see below). 1 by default, 0 turns it off |
+| `glow_shadows` | `True` / `False` | Whether objects block that light and cast shadows from it (High and up). `True` by default |
 
 Tips:
 
@@ -82,9 +83,17 @@ lamp = at.MeshRenderer.sphere(0.4, color=(0.1, 0.1, 0.1, 1),
 - **Models:** glowing parts of a model light too. An emissive texture lights
   in proportion to how much of it is lit (a few windows light less than a
   whole glowing wall).
-- **Limits:** the light passes through walls (it casts no shadows), and a
-  frame shades at most 4 (Low), 8 (Medium), 16 (High) or 32 (Ultra,
-  Beautiful) glow lights; with more, the ones nearest the camera win.
+- **Shadows:** on High and up, objects block glow light: crates around a
+  lantern throw long shadows outward across the floor, and a pillar
+  between a lamp and a wall leaves its outline on the wall. The glowing
+  mesh itself never blocks its own light. `glow_shadows=False` (Oberon:
+  untick **Glow Shadows**) lets a glow's light pass through everything,
+  which is cheaper; use it for small or unimportant glows.
+- **Limits:** a frame shades at most 4 (Low), 8 (Medium), 16 (High) or 32
+  (Ultra, Beautiful) glow lights; with more, the ones nearest the camera
+  win. Of those, the nearest 2 (High) or 4 (Ultra, Beautiful) that have
+  `glow_shadows` on cast shadows. The rest light through walls, and so
+  does every glow on Low and Medium.
 
 ## Cameras
 
@@ -216,13 +225,13 @@ class MyGame(at.Game):
     graphics = at.GraphicsQuality.HIGH
 ```
 
-| Preset | Shadows | Shadow map |
-|---|---|---|
-| `GraphicsQuality.LOW` | off | — |
-| `GraphicsQuality.MEDIUM` | on | 1024px |
-| `GraphicsQuality.HIGH` (default) | on | 2048px |
-| `GraphicsQuality.ULTRA` | on | 4096px |
-| `GraphicsQuality.BEAUTIFUL` | soft | 4 cascades × 2048px |
+| Preset | Shadows | Shadow map | Glow lights with shadows |
+|---|---|---|---|
+| `GraphicsQuality.LOW` | off | — | none |
+| `GraphicsQuality.MEDIUM` | on | 1024px | none |
+| `GraphicsQuality.HIGH` (default) | on | 2048px | 2 (384px) |
+| `GraphicsQuality.ULTRA` | on | 4096px | 4 (512px) |
+| `GraphicsQuality.BEAUTIFUL` | soft | 4 cascades × 2048px | 4 (512px, soft) |
 
 `LOW` is also a *style*: pure flat-color faces with no shadow shading reads
 as clean minimalism. Finer-grained knobs (render scale, MSAA) build on this

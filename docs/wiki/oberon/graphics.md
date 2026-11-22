@@ -22,13 +22,13 @@ scene tuned here looks the same in Play and under `at.run_scene`.
   map size. Use them with the *400 cubes* test scene to see what your
   scene costs.
 
-| Quality | Shadows | Shadow map |
-|---|---|---|
-| Low | off | — |
-| Medium | on | 1024 px |
-| High (default) | on | 2048 px |
-| Ultra | on | 4096 px |
-| Beautiful | soft, 4 cascades | 4 × 2048 px |
+| Quality | Shadows | Shadow map | Glow lights with shadows |
+|---|---|---|---|
+| Low | off | — | none |
+| Medium | on | 1024 px | none |
+| High (default) | on | 2048 px | 2 nearest |
+| Ultra | on | 4096 px | 4 nearest |
+| Beautiful | soft, 4 cascades | 4 × 2048 px | 4 nearest, soft |
 
 Water is a component. Use **Create → Water** (it starts as a calm pond)
 or select an entity and use **Add Component → Water** in the Inspector.
@@ -119,6 +119,7 @@ at once, also as one undo step.
 | Shadows | A floor, pillars, and a floating slab. Check shadow shape, contact, and acne while you move the sun |
 | Fog depth | Pillars marching out to 150 m. Tune fog density and start until the far ones fade the way you want |
 | 400 cubes | A 20×20 field. Watch the frame time stat at each quality level |
+| Lantern | A glowing lantern ringed by crates. Try it at night: on High and up the crates throw shadows outward from the lantern. Untick its **Glow Shadows** to compare |
 
 Test objects are ordinary entities. Remember to remove them before you
 save, unless you want to keep them.

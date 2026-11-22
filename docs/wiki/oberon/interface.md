@@ -160,6 +160,7 @@ Below **Color** the Mesh Renderer has the material rows:
 | **Emission** | The colour the surface glows with. Black = no glow. |
 | **Emission Strength** | Multiplies Emission. Above about 1 it blooms on Ultra and Beautiful. |
 | **Glow Light** | How much the glow lights the things around it, in its colour. 1 = like a real glowing object of this size, 0 = off, up to 10 for small glows that should throw a visible pool. |
+| **Glow Shadows** | Objects in the way block the glow's light and cast shadows (on High and up). Untick it for small glows that don't need shadows; that's cheaper. |
 
 Metal and gloss show best on a **Sphere** under a sky. On models, Default
 keeps the file's own materials. See [Rendering & Lights](../guides/rendering-and-lights.md#surfaces).

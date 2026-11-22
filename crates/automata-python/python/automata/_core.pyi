@@ -106,6 +106,8 @@ class MeshRenderer:
     """How much the glow lights nearby surfaces (1 = like a real glowing
     object of this size, 0 = not at all)."""
     glow_light: float
+    """Whether objects block the glow's light, casting shadows (HIGH and up)."""
+    glow_shadows: bool
     @classmethod
     def model(
         cls,
@@ -117,6 +119,7 @@ class MeshRenderer:
         emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
         emissive_strength: float = 1.0,
         glow_light: float = 1.0,
+        glow_shadows: bool = True,
     ) -> MeshRenderer:
         """A glTF 2.0 (.glb / .gltf) or .obj model, tinted by `color`.
 
@@ -137,10 +140,13 @@ class MeshRenderer:
         emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
         emissive_strength: float = 1.0,
         glow_light: float = 1.0,
+        glow_shadows: bool = True,
     ) -> MeshRenderer:
         """A cube `size` units a side. `roughness`/`metallic` 0..1; `emissive`
         with `emissive_strength` above 1 glows (and blooms on BEAUTIFUL), and
-        lights its surroundings (scaled by `glow_light`; 0 turns that off)."""
+        lights its surroundings (scaled by `glow_light`; 0 turns that off),
+        casting shadows from objects in the way on HIGH and up unless
+        `glow_shadows=False`."""
         ...
     @classmethod
     def sphere(
@@ -153,6 +159,7 @@ class MeshRenderer:
         emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
         emissive_strength: float = 1.0,
         glow_light: float = 1.0,
+        glow_shadows: bool = True,
     ) -> MeshRenderer:
         """A smooth sphere `size` units across."""
         ...
@@ -167,6 +174,7 @@ class MeshRenderer:
         emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
         emissive_strength: float = 1.0,
         glow_light: float = 1.0,
+        glow_shadows: bool = True,
     ) -> MeshRenderer: ...
 
 class DirectionalLight:

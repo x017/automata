@@ -496,7 +496,7 @@ impl Ui {
                 }
                 self.tip(b, t.hint());
             }
-            if i % 2 == 1 {
+            if i % 2 == 1 || i + 1 == TestScene::ALL.len() {
                 y += 34.0;
             }
         }

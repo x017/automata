@@ -55,6 +55,8 @@ struct PreparedFrame {
     /// World bounding sphere per mesh (shadow culling).
     mesh_spheres: Vec<Sphere>,
     render_shadows: bool,
+    /// The point lights shaded this frame (with their shadow slots).
+    points: Vec<crate::light::FramePoint>,
     /// One bind group per water draw.
     water_binds: Vec<(wgpu::BindGroup, u32)>,
 }
@@ -89,6 +91,9 @@ pub struct Renderer {
     shadow_layer_views: Vec<wgpu::TextureView>,
     shadow_map_size: u32,
     shadows_enabled: bool,
+    /// Point light shadow cubes: six layers per shadowed light (one 1×1
+    /// stand-in layer when the preset shadows none).
+    point_shadows: DepthArray,
     quality: GraphicsQuality,
     /// The unit grid water surfaces draw with (built on first use).
     water_mesh: Option<Mesh>,
@@ -209,6 +214,7 @@ impl Renderer {
         let shadow_pipeline = pipeline::create_shadow_pipelines(device, &shared);
         let compositor = Compositor::new(device);
         let shadow = ShadowResources::new(device, quality);
+        let point_shadows = DepthArray::for_point_shadows(device, quality);
         let post = crate::post::Post::new(device);
         let scene_placeholder = placeholder_scene_bind_group(device, &shared);
         Self {
@@ -229,6 +235,7 @@ impl Renderer {
             shadow_layer_views: shadow.layer_views,
             shadow_map_size: quality.shadow_map_size(),
             shadows_enabled: quality.shadows_enabled(),
+            point_shadows,
             quality,
             water_mesh: None,
             water_pipelines: Vec::new(),
@@ -274,6 +281,11 @@ impl Renderer {
             self.shadow_map_size = quality.shadow_map_size();
         }
         self.shadows_enabled = quality.shadows_enabled();
+        if self.point_shadows.size != quality.point_shadow_size()
+            || self.point_shadows.views.len() != DepthArray::point_layers(quality)
+        {
+            self.point_shadows = DepthArray::for_point_shadows(self.ctx.device(), quality);
+        }
         if !quality.is_beautiful() {
             self.post.release();
             self.hdr_mesh_pipeline = None;
@@ -918,6 +930,8 @@ impl Renderer {
         if prepared.render_shadows {
             self.record_shadow_passes(&mut encoder, draw, &prepared);
         }
+        // --- and six per shadowed point light ---
+        self.record_point_shadow_passes(&mut encoder, draw, &prepared);
 
         // The view borrows the surface texture only for the scope of the
         // passes; present() takes it by value afterwards.
@@ -1489,7 +1503,12 @@ impl Renderer {
             time,
             beautiful,
         };
-        let points = frame_point_lights(draw, &camera_3d, self.quality.max_point_lights());
+        let points = frame_point_lights(
+            draw,
+            &camera_3d,
+            self.quality.max_point_lights(),
+            self.quality.point_shadows(),
+        );
         let light_bind =
             self.light_bind_group(&sun, &env, &shadows, render_shadows, &frame, &points);
         let water_binds = self.water_bind_groups(draw, beautiful, time);
@@ -1503,6 +1522,7 @@ impl Renderer {
             shadows,
             mesh_spheres,
             render_shadows,
+            points,
             water_binds,
         }
     }
@@ -1517,7 +1537,7 @@ impl Renderer {
         shadows: &ShadowCascades,
         render_shadows: bool,
         frame: &FrameView,
-        points: &[crate::PointLight],
+        points: &[crate::light::FramePoint],
     ) -> wgpu::BindGroup {
         let device = self.ctx.device();
         let light_uniform = LightUniform::new(
@@ -1530,6 +1550,7 @@ impl Renderer {
             self.shadow_map_size,
             frame,
             points,
+            self.point_shadows.size,
         );
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("light"),
@@ -1555,6 +1576,10 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: wgpu::BindingResource::TextureView(&self.shadow_layer_views[0]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&self.point_shadows.array_view),
                 },
             ],
         })
@@ -1623,6 +1648,82 @@ impl Renderer {
         }
     }
 
+    /// Records the point lights' shadow cubes: per shadowed light and face,
+    /// every mesh in range inside the face's view, except the one the light
+    /// glows from (its own surface would block all its light).
+    fn record_point_shadow_passes(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        draw: &DrawList,
+        prepared: &PreparedFrame,
+    ) {
+        for point in &prepared.points {
+            let Some((slot, view)) = &point.shadow else {
+                continue;
+            };
+            let range = point.light.effective_range();
+            for (face, vp) in view.faces.iter().enumerate() {
+                let Some(layer_view) = self.point_shadows.views.get(slot * 6 + face) else {
+                    continue;
+                };
+                let light_vp_bind = self.uniform_bind_group(
+                    Some("point shadow face"),
+                    bytemuck::cast_slice(&vp.to_cols_array()),
+                    &self.shared.shadow_light_layout,
+                );
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("point shadow"),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: layer_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    ..wgpu::RenderPassDescriptor::default()
+                });
+                let mut current: Option<bool> = None;
+                let draws = draw
+                    .meshes
+                    .iter()
+                    .zip(&prepared.model_bind_groups)
+                    .zip(&prepared.mesh_spheres)
+                    .enumerate();
+                for (i, ((mesh_draw, model_bind), sphere)) in draws {
+                    if point.source == Some(i)
+                        || !crate::light::PointShadow::face_sees(
+                            face,
+                            point.light.position,
+                            sphere.center,
+                            sphere.radius,
+                            range,
+                        )
+                    {
+                        continue;
+                    }
+                    let skinned = mesh_draw.joints.is_some();
+                    if current != Some(skinned) {
+                        pass.set_pipeline(self.shadow_pipeline.get(skinned));
+                        pass.set_bind_group(0, &light_vp_bind, &[]);
+                        current = Some(skinned);
+                    }
+                    pass.set_bind_group(1, model_bind, &[]);
+                    pass.set_vertex_buffer(0, mesh_draw.mesh.inner.vertex_buffer.slice(..));
+                    if let (true, Some(skin)) = (skinned, &mesh_draw.mesh.inner.skin_buffer) {
+                        pass.set_vertex_buffer(1, skin.slice(..));
+                    }
+                    pass.set_index_buffer(
+                        mesh_draw.mesh.inner.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    pass.draw_indexed(0..mesh_draw.mesh.inner.index_count, 0, 0..1);
+                }
+            }
+        }
+    }
+
     /// Records one depth-tested mesh draw into the pass.
     fn record_mesh(
         pass: &mut wgpu::RenderPass<'_>,
@@ -1662,6 +1763,62 @@ fn create_depth_texture(device: &wgpu::Device, size: (u32, u32)) -> wgpu::Textur
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     })
+}
+
+/// A depth texture array rendered into one layer at a time and sampled
+/// whole: the point lights' shadow cubes.
+struct DepthArray {
+    size: u32,
+    array_view: wgpu::TextureView,
+    views: Vec<wgpu::TextureView>,
+}
+
+impl DepthArray {
+    /// Layers the preset's point shadows need (six per light; one stand-in
+    /// layer for none, since the light bind group always binds the array).
+    fn point_layers(quality: GraphicsQuality) -> usize {
+        (quality.point_shadows() * 6).max(1)
+    }
+
+    fn for_point_shadows(device: &wgpu::Device, quality: GraphicsQuality) -> Self {
+        let size = quality.point_shadow_size().max(1);
+        let layers = u32::try_from(Self::point_layers(quality)).unwrap_or(1);
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("point shadow maps"),
+            size: wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: layers,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: pipeline::SHADOW_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let array_view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("point shadow array"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..wgpu::TextureViewDescriptor::default()
+        });
+        let views = (0..layers)
+            .map(|layer| {
+                texture.create_view(&wgpu::TextureViewDescriptor {
+                    label: Some("point shadow face"),
+                    dimension: Some(wgpu::TextureViewDimension::D2),
+                    base_array_layer: layer,
+                    array_layer_count: Some(1),
+                    ..wgpu::TextureViewDescriptor::default()
+                })
+            })
+            .collect();
+        Self {
+            size,
+            array_view,
+            views,
+        }
+    }
 }
 
 /// The shadow map array (one layer per cascade), its views and comparison
@@ -1737,6 +1894,7 @@ impl ShadowResources {
 /// surface area. `None` for draws that don't glow (or don't light).
 fn glow_light(m: &MeshDraw) -> Option<crate::PointLight> {
     let p = &m.material.inner.params;
+    let shadows = p.glow_shadows;
     let strength = p.glow_light.max(0.0) * p.color[3].clamp(0.0, 1.0);
     let radiance = p.emissive.map(|c| c.max(0.0) * strength);
     if radiance.iter().all(|c| *c <= 1e-4) {
@@ -1753,34 +1911,53 @@ fn glow_light(m: &MeshDraw) -> Option<crate::PointLight> {
         m.model.z_axis.truncate(),
     ];
     let world_half = cols[0].abs() * half.x + cols[1].abs() * half.y + cols[2].abs() * half.z;
-    Some(crate::PointLight::from_glow(center, world_half, radiance))
+    Some(crate::PointLight {
+        shadows,
+        ..crate::PointLight::from_glow(center, world_half, radiance)
+    })
 }
 
 /// The point lights a frame shades: the draw list's plus one per glowing
-/// mesh, at most `max` of them. When there are more, the ones that light
-/// the camera's surroundings most win: brightest over distance squared
-/// from the camera, counting lights the camera is inside as at full
-/// strength.
+/// mesh, at most `max` of them, the first `shadows` of those that cast
+/// shadows getting a shadow slot. The ones that light the camera's
+/// surroundings most come first: brightest over distance squared from the
+/// camera, counting lights the camera is inside as at full strength.
 fn frame_point_lights(
     draw: &DrawList,
     camera: &crate::Camera3D,
     max: usize,
-) -> Vec<crate::PointLight> {
-    let mut lights: Vec<crate::PointLight> = draw
+    shadows: usize,
+) -> Vec<crate::light::FramePoint> {
+    let mut lights: Vec<crate::light::FramePoint> = draw
         .point_lights
         .iter()
         .copied()
         .filter(|l| l.peak() > 0.0)
-        .chain(draw.meshes.iter().filter_map(glow_light))
+        .map(|light| crate::light::FramePoint {
+            light,
+            source: None,
+            shadow: None,
+        })
+        .chain(draw.meshes.iter().enumerate().filter_map(|(i, m)| {
+            glow_light(m).map(|light| crate::light::FramePoint {
+                light,
+                source: Some(i),
+                shadow: None,
+            })
+        }))
         .collect();
-    let max = max.min(crate::MAX_POINT_LIGHTS);
-    if lights.len() > max {
-        let score = |l: &crate::PointLight| {
-            let d = (l.position.distance(camera.position) - l.effective_range()).max(0.0);
-            l.peak() / (1.0 + d * d)
-        };
-        lights.sort_by(|a, b| score(b).total_cmp(&score(a)));
-        lights.truncate(max);
+    let score = |l: &crate::PointLight| {
+        let d = (l.position.distance(camera.position) - l.effective_range()).max(0.0);
+        l.peak() / (1.0 + d * d)
+    };
+    lights.sort_by(|a, b| score(&b.light).total_cmp(&score(&a.light)));
+    lights.truncate(max.min(crate::MAX_POINT_LIGHTS));
+    let mut slot = 0;
+    for p in &mut lights {
+        if slot < shadows.min(crate::MAX_POINT_SHADOWS) && p.light.shadows {
+            p.shadow = Some((slot, crate::light::PointShadow::for_light(&p.light)));
+            slot += 1;
+        }
     }
     lights
 }
@@ -2757,6 +2934,82 @@ mod tests {
         }
     }
 
+    /// The center of a dark wall lit by a red-glowing cube off to the side,
+    /// with (or without) a plain cube halfway between them.
+    fn wall_behind_blocker(renderer: &mut Renderer, blocked: bool) -> [u8; 4] {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let grey = renderer.create_pbr_material(
+            &crate::MaterialParams::with_color([0.5, 0.5, 0.5, 1.0]),
+            crate::MaterialTextures::default(),
+        );
+        let lamp = renderer.create_pbr_material(
+            &crate::MaterialParams {
+                emissive: [6.0, 0.0, 0.0],
+                ..crate::MaterialParams::with_color([0.0, 0.0, 0.0, 1.0])
+            },
+            crate::MaterialTextures::default(),
+        );
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 0.0, 1.6),
+            glam::Vec3::ZERO,
+        ));
+        draw.set_sun(crate::Sun {
+            ambient: 0.0,
+            ..crate::Sun::new(glam::Vec3::Z)
+        });
+        draw.mesh(&cube, glam::Mat4::IDENTITY, &grey);
+        let small = |at: glam::Vec3| {
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::splat(0.15),
+                glam::Quat::IDENTITY,
+                at,
+            )
+        };
+        draw.mesh(&cube, small(glam::Vec3::new(0.5, 0.0, 1.1)), &lamp);
+        if blocked {
+            draw.mesh(&cube, small(glam::Vec3::new(0.25, 0.0, 0.8)), &grey);
+        }
+        renderer.render_offscreen(&draw, &target);
+        center_pixel(&read_pixels(renderer, &target, size), size)
+    }
+
+    #[test]
+    fn offscreen_objects_block_glow_light_on_presets_with_point_shadows() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping point shadow test");
+            return;
+        };
+        for quality in [
+            GraphicsQuality::Low,
+            GraphicsQuality::High,
+            GraphicsQuality::Ultra,
+            GraphicsQuality::Beautiful,
+        ] {
+            renderer.set_quality(quality);
+            let open = wall_behind_blocker(&mut renderer, false);
+            let shaded = wall_behind_blocker(&mut renderer, true);
+            assert!(
+                open[0] > 60,
+                "{quality:?}: the glow should reach the wall: {open:?}"
+            );
+            if quality.point_shadows() == 0 {
+                assert!(
+                    shaded[0] + 20 > open[0],
+                    "{quality:?} has no point shadows: {shaded:?} vs {open:?}"
+                );
+            } else {
+                assert!(
+                    shaded[0] + 40 < open[0],
+                    "{quality:?}: the blocker should shade the wall: {shaded:?} vs {open:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn point_lights_beyond_the_preset_cap_keep_the_ones_near_the_camera() {
         let mut draw = DrawList::new();
@@ -2771,13 +3024,15 @@ mod tests {
         }
         // An unlit light is dropped outright.
         draw.point_light(crate::PointLight::new(glam::Vec3::ZERO, [0.0; 3]));
-        let kept = frame_point_lights(&draw, &camera, 4);
+        let kept = frame_point_lights(&draw, &camera, 4, 2);
         assert_eq!(kept.len(), 4);
-        let mut xs: Vec<f32> = kept.iter().map(|l| l.position.x).collect();
-        xs.sort_by(f32::total_cmp);
-        assert_eq!(xs, [0.0, 10.0, 20.0, 30.0]);
+        let xs: Vec<f32> = kept.iter().map(|l| l.light.position.x).collect();
+        assert_eq!(xs, [0.0, 10.0, 20.0, 30.0], "nearest first");
+        // The two nearest get the shadow slots.
+        let slots: Vec<Option<usize>> = kept.iter().map(|l| l.shadow.map(|(s, _)| s)).collect();
+        assert_eq!(slots, [Some(0), Some(1), None, None]);
         assert_eq!(
-            frame_point_lights(&draw, &camera, 100).len(),
+            frame_point_lights(&draw, &camera, 100, 0).len(),
             crate::MAX_POINT_LIGHTS
         );
     }

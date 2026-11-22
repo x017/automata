@@ -136,6 +136,8 @@ pub enum Field {
 pub enum Flag {
     /// Light casts shadows.
     LightShadows,
+    /// Objects block a glowing mesh's light.
+    MeshGlowShadows,
     /// Rigid body participates in simulation.
     BodyEnabled,
     /// Collider is a trigger (sensor).
@@ -567,6 +569,7 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
 pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
     Some(match flag {
         Flag::LightShadows => data.directional_light?.shadows,
+        Flag::MeshGlowShadows => data.mesh_visual.as_ref()?.surface.glow_shadows,
         Flag::BodyEnabled => data.rigid_body.as_ref()?.enabled,
         Flag::ColliderSensor => data.collider_3d.as_ref()?.sensor,
         Flag::ColliderEnabled => data.collider_3d.as_ref()?.enabled,
@@ -584,6 +587,10 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
     match flag {
         Flag::LightShadows => match &mut data.directional_light {
             Some(l) => l.shadows = !l.shadows,
+            None => return false,
+        },
+        Flag::MeshGlowShadows => match &mut data.mesh_visual {
+            Some(m) => m.surface.glow_shadows = !m.surface.glow_shadows,
             None => return false,
         },
         Flag::BodyEnabled => match &mut data.rigid_body {
@@ -642,7 +649,13 @@ pub fn choice_label(data: &EntityData, choice: Choice) -> Option<&'static str> {
             let m = data.mesh_visual.as_ref()?;
             SURFACE_PRESETS
                 .iter()
-                .find(|(_, make)| make(m.color) == m.surface)
+                // (Whether the glow casts shadows is its own checkbox.)
+                .find(|(_, make)| {
+                    automata_scene::Surface {
+                        glow_shadows: m.surface.glow_shadows,
+                        ..make(m.color)
+                    } == m.surface
+                })
                 .map_or(CUSTOM_SURFACE, |(label, _)| label)
         }
         Choice::BodyType => match data.rigid_body.as_ref()?.body_type {
@@ -669,7 +682,10 @@ pub fn cycle(data: &mut EntityData, choice: Choice) -> bool {
                 .position(|(l, _)| *l == label)
                 .map_or(0, |i| (i + 1) % SURFACE_PRESETS.len());
             if let Some(m) = &mut data.mesh_visual {
-                m.surface = (SURFACE_PRESETS[next].1)(m.color);
+                m.surface = automata_scene::Surface {
+                    glow_shadows: m.surface.glow_shadows,
+                    ..(SURFACE_PRESETS[next].1)(m.color)
+                };
             }
         }
         // Cube → Sphere → Quad → Cube, keeping the size.
@@ -869,7 +885,10 @@ pub fn set_choice(data: &mut EntityData, choice: Choice, label: &str) -> bool {
         let preset = SURFACE_PRESETS.iter().find(|(l, _)| *l == label);
         return match (preset, &mut data.mesh_visual) {
             (Some((_, make)), Some(m)) => {
-                m.surface = make(m.color);
+                m.surface = automata_scene::Surface {
+                    glow_shadows: m.surface.glow_shadows,
+                    ..make(m.color)
+                };
                 true
             }
             _ => false,
@@ -1034,6 +1053,11 @@ mod tests {
         assert!((get(&d, Field::MeshGlowLight).unwrap() - 1.0).abs() < 1e-6);
         assert!(set(&mut d, Field::MeshGlowLight, 50.0));
         assert!((get(&d, Field::MeshGlowLight).unwrap() - 10.0).abs() < 1e-6);
+        assert_eq!(get_flag(&d, Flag::MeshGlowShadows), Some(true));
+        assert!(toggle(&mut d, Flag::MeshGlowShadows));
+        assert_eq!(get_flag(&d, Flag::MeshGlowShadows), Some(false));
+        assert!(set(&mut d, Field::MeshGlowLight, 1.0));
+        assert_eq!(choice_label(&d, Choice::MeshSurface), Some("Glowing"));
         assert!(set(&mut d, Field::MeshEmissiveStrength, 500.0));
         assert!((get(&d, Field::MeshEmissiveStrength).unwrap() - 100.0).abs() < 1e-6);
         assert!(set(&mut d, Field::MeshMetallic, 2.0));

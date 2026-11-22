@@ -46,6 +46,12 @@ A11–A13 are the big-world features after.
 ### A0. Sky, sun, lens flare, endless water ✅
 ### A0b. Materials: roughness, metal, normal maps, glow; Sphere primitive ✅
 ### A0c. Glowing objects light their surroundings ✅
+### A4. Shadows from point lights (glowing objects) ✅
+Done ahead of A1, at the user's request. High shadows the 2 nearest glow
+lights, Ultra and Beautiful the 4 nearest (six-face shadow cubes, 384 /
+512 px; soft taps on Beautiful). A "Glow Shadows" toggle is on meshes
+(`glow_shadows=`, scene `Surface`, Oberon). Spotlight shadows move to A3,
+together with spotlights.
 
 ### A1. Shadows I: crisp sun shadows on High and Ultra ⬜ M
 Today only Beautiful uses cascades; High and Ultra fit **one** map around
@@ -82,15 +88,11 @@ The light array and shading from A0c are already in place.
   cosines).
 - Oberon: the Create menu (Point Light, Spot Light), Inspector rows,
   viewport icons and a range/cone gizmo.
+- Placed lights share A4's point shadow slots and get a Cast Shadows
+  toggle. Spots get one shadow map each (a single face, using the same
+  array).
 - **Done when:** a torch on a wall and a car headlight can be made
-  without a glowing mesh.
-
-### A4. Shadows from point lights and spotlights ⬜ M
-- Up to 4 shadowed lights per frame on Ultra and Beautiful: spots use one
-  map from an atlas, points use six faces.
-- A "Cast Shadows" toggle on lights and on glowing meshes.
-- **Done when:** the night test scene's ball shadows the lamps' light on
-  the wall behind it.
+  without a glowing mesh, and both cast shadows.
 
 ### A5. Water interaction I: ripples and wakes ⬜ M
 - A ripple heightfield simulated around the camera (a 256² grid
@@ -385,32 +387,32 @@ per effort. Reorder any time by telling me.
 | 1 | A0 Sky, sun, flare, endless water | – | ✅ |
 | 2 | A0b Materials | – | ✅ |
 | 3 | A0c Glowing objects light surroundings | – | ✅ |
-| 4 | A1 Crisp shadows on High/Ultra | M | ⬜ |
-| 5 | A2 Contact-hardening shadows + AO | M | ⬜ |
-| 6 | A3 Point lights and spotlights | S | ⬜ |
-| 7 | A5 Water ripples and wakes | M | ⬜ |
-| 8 | A6 Particles | L | ⬜ |
-| 9 | A7 Splashes, underwater, caustics | M | ⬜ |
-| 10 | A8 Post chain + colour grading | M | ⬜ |
-| 11 | A9 Height fog, god rays, DoF, dust | M | ⬜ |
-| 12 | A10 Style presets | L | ⬜ |
-| 13 | B1 Animation playback | L | ⬜ |
-| 14 | B2 Spring bones | M | ⬜ |
-| 15 | A11 Culling, instancing, LOD | M | ⬜ |
-| 16 | A12 Grass and foliage | L | ⬜ |
-| 17 | C2 Tweens and timers | S | ⬜ |
-| 18 | C3 Save games and settings | S | ⬜ |
-| 19 | C1 Physics joints | M | ⬜ |
-| 20 | D1 UI widgets | M | ⬜ |
-| 21 | D2 Custom fonts | S | ⬜ |
-| 22 | D3 UI layout, focus, screens | M | ⬜ |
-| 23 | B3 Animation events, root motion | M | ⬜ |
-| 24 | B4 Animation state machine | L | ⬜ |
-| 25 | B5 Attachments and IK | M | ⬜ |
-| 26 | C4 Navigation | L | ⬜ |
-| 27 | C5 AI helpers | S | ⬜ |
-| 28 | D5 Material assets and editor | M | ⬜ |
-| 29 | A4 Point/spot light shadows | M | ⬜ |
+| 4 | A4 Point light shadows (glowing objects) | M | ✅ |
+| 5 | A1 Crisp shadows on High/Ultra | M | ⬜ |
+| 6 | A2 Contact-hardening shadows + AO | M | ⬜ |
+| 7 | A3 Point lights and spotlights (+ spot shadows) | S | ⬜ |
+| 8 | A5 Water ripples and wakes | M | ⬜ |
+| 9 | A6 Particles | L | ⬜ |
+| 10 | A7 Splashes, underwater, caustics | M | ⬜ |
+| 11 | A8 Post chain + colour grading | M | ⬜ |
+| 12 | A9 Height fog, god rays, DoF, dust | M | ⬜ |
+| 13 | A10 Style presets | L | ⬜ |
+| 14 | B1 Animation playback | L | ⬜ |
+| 15 | B2 Spring bones | M | ⬜ |
+| 16 | A11 Culling, instancing, LOD | M | ⬜ |
+| 17 | A12 Grass and foliage | L | ⬜ |
+| 18 | C2 Tweens and timers | S | ⬜ |
+| 19 | C3 Save games and settings | S | ⬜ |
+| 20 | C1 Physics joints | M | ⬜ |
+| 21 | D1 UI widgets | M | ⬜ |
+| 22 | D2 Custom fonts | S | ⬜ |
+| 23 | D3 UI layout, focus, screens | M | ⬜ |
+| 24 | B3 Animation events, root motion | M | ⬜ |
+| 25 | B4 Animation state machine | L | ⬜ |
+| 26 | B5 Attachments and IK | M | ⬜ |
+| 27 | C4 Navigation | L | ⬜ |
+| 28 | C5 AI helpers | S | ⬜ |
+| 29 | D5 Material assets and editor | M | ⬜ |
 | 30 | A13 Terrain | L | ⬜ |
 | 31 | B6 Ragdolls | M | ⬜ |
 | 32 | C6 2D toolkit | L | ⬜ |

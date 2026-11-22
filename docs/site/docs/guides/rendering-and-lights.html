@@ -53,7 +53,7 @@ objects, load a model (<code>MeshRenderer.model</code>), see <a href="../oberon/
 tile = at.MeshRenderer.cube(color=(<span class="tok-n">0.9</span>, <span class="tok-n">0.9</span>, <span class="tok-n">0.9</span>, <span class="tok-n">1</span>), roughness=<span class="tok-n">0.15</span>)  <span class="tok-c"># glossy</span>
 felt = at.MeshRenderer.cube(color=(<span class="tok-n">0.2</span>, <span class="tok-n">0.5</span>, <span class="tok-n">0.3</span>, <span class="tok-n">1</span>), roughness=<span class="tok-n">0.95</span>)  <span class="tok-c"># matte</span>
 lamp = at.MeshRenderer.quad(emissive=(<span class="tok-n">1.0</span>, <span class="tok-n">0.8</span>, <span class="tok-n">0.5</span>), emissive_strength=<span class="tok-n">4.0</span>)</code></pre></div>
-<div class="table"><table><thead><tr><th>Argument</th><th>Range</th><th>Effect</th></tr></thead><tbody><tr><td><code>roughness</code></td><td>0..1</td><td>0 is a mirror-like gloss with a tight, bright highlight; 1 is chalky with no visible highlight. Default 0.6</td></tr><tr><td><code>metallic</code></td><td>0 or 1 (in between for dusty / painted metal)</td><td>Metals have no diffuse colour: they reflect the sky and sun tinted by <code>color</code>. Default 0</td></tr><tr><td><code>emissive</code></td><td>(r, g, b), ≥ 0</td><td>Light the surface gives off itself, unaffected by sun, shadow or fog darkness</td></tr><tr><td><code>emissive_strength</code></td><td>≥ 0</td><td>Multiplies <code>emissive</code>. Above about 1 it blooms on Ultra and Beautiful</td></tr><tr><td><code>glow_light</code></td><td>≥ 0</td><td>How much the glow lights nearby surfaces (see below). 1 by default, 0 turns it off</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Argument</th><th>Range</th><th>Effect</th></tr></thead><tbody><tr><td><code>roughness</code></td><td>0..1</td><td>0 is a mirror-like gloss with a tight, bright highlight; 1 is chalky with no visible highlight. Default 0.6</td></tr><tr><td><code>metallic</code></td><td>0 or 1 (in between for dusty / painted metal)</td><td>Metals have no diffuse colour: they reflect the sky and sun tinted by <code>color</code>. Default 0</td></tr><tr><td><code>emissive</code></td><td>(r, g, b), ≥ 0</td><td>Light the surface gives off itself, unaffected by sun, shadow or fog darkness</td></tr><tr><td><code>emissive_strength</code></td><td>≥ 0</td><td>Multiplies <code>emissive</code>. Above about 1 it blooms on Ultra and Beautiful</td></tr><tr><td><code>glow_light</code></td><td>≥ 0</td><td>How much the glow lights nearby surfaces (see below). 1 by default, 0 turns it off</td></tr><tr><td><code>glow_shadows</code></td><td><code>True</code> / <code>False</code></td><td>Whether objects block that light and cast shadows from it (High and up). <code>True</code> by default</td></tr></tbody></table></div>
 <p>Tips:</p>
 <ul><li>Metals look best with a bright, saturated base colour: gold
 <code>(1.0, 0.77, 0.34)</code>, copper <code>(0.95, 0.64, 0.54)</code>, silver <code>(0.95, 0.95, 0.95)</code>.
@@ -79,9 +79,16 @@ UI-like signs, distant windows), <code>2</code>–<code>5</code> for small thing
 still throw a visible pool, like the coins in Coin Run.</li><li><strong>Night and dusk</strong> show it best. In daylight the sun outshines all but the
 brightest glows.</li><li><strong>Models:</strong> glowing parts of a model light too. An emissive texture lights
 in proportion to how much of it is lit (a few windows light less than a
-whole glowing wall).</li><li><strong>Limits:</strong> the light passes through walls (it casts no shadows), and a
-frame shades at most 4 (Low), 8 (Medium), 16 (High) or 32 (Ultra,
-Beautiful) glow lights; with more, the ones nearest the camera win.</li></ul>
+whole glowing wall).</li><li><strong>Shadows:</strong> on High and up, objects block glow light: crates around a
+lantern throw long shadows outward across the floor, and a pillar
+between a lamp and a wall leaves its outline on the wall. The glowing
+mesh itself never blocks its own light. <code>glow_shadows=False</code> (Oberon:
+untick <strong>Glow Shadows</strong>) lets a glow's light pass through everything,
+which is cheaper; use it for small or unimportant glows.</li><li><strong>Limits:</strong> a frame shades at most 4 (Low), 8 (Medium), 16 (High) or 32
+(Ultra, Beautiful) glow lights; with more, the ones nearest the camera
+win. Of those, the nearest 2 (High) or 4 (Ultra, Beautiful) that have
+<code>glow_shadows</code> on cast shadows. The rest light through walls, and so
+does every glow on Low and Medium.</li></ul>
 <h2 id="cameras">Cameras<a class="anchor" href="#cameras" aria-label="Link to this section">#</a></h2>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Camera3D(position=(<span class="tok-n">0</span>, <span class="tok-n">3.5</span>, <span class="tok-n">9</span>), target=(<span class="tok-n">0</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>), fov=<span class="tok-n">60.0</span>)
 at.Camera2D(center=(<span class="tok-n">0</span>, <span class="tok-n">0</span>), half_height=<span class="tok-n">100.0</span>)</code></pre></div>
@@ -165,7 +172,7 @@ scene files and edited in <a href="../oberon/graphics.html">Oberon's Graphics ta
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">class</span> <span class="tok-f">MyGame</span>(at.Game):
     clear_color = (<span class="tok-n">0.55</span>, <span class="tok-n">0.78</span>, <span class="tok-n">0.95</span>, <span class="tok-n">1.0</span>)   <span class="tok-c"># the &quot;sky&quot; each frame clears to</span>
     graphics = at.GraphicsQuality.HIGH</code></pre></div>
-<div class="table"><table><thead><tr><th>Preset</th><th>Shadows</th><th>Shadow map</th></tr></thead><tbody><tr><td><code>GraphicsQuality.LOW</code></td><td>off</td><td>—</td></tr><tr><td><code>GraphicsQuality.MEDIUM</code></td><td>on</td><td>1024px</td></tr><tr><td><code>GraphicsQuality.HIGH</code> (default)</td><td>on</td><td>2048px</td></tr><tr><td><code>GraphicsQuality.ULTRA</code></td><td>on</td><td>4096px</td></tr><tr><td><code>GraphicsQuality.BEAUTIFUL</code></td><td>soft</td><td>4 cascades × 2048px</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Preset</th><th>Shadows</th><th>Shadow map</th><th>Glow lights with shadows</th></tr></thead><tbody><tr><td><code>GraphicsQuality.LOW</code></td><td>off</td><td>—</td><td>none</td></tr><tr><td><code>GraphicsQuality.MEDIUM</code></td><td>on</td><td>1024px</td><td>none</td></tr><tr><td><code>GraphicsQuality.HIGH</code> (default)</td><td>on</td><td>2048px</td><td>2 (384px)</td></tr><tr><td><code>GraphicsQuality.ULTRA</code></td><td>on</td><td>4096px</td><td>4 (512px)</td></tr><tr><td><code>GraphicsQuality.BEAUTIFUL</code></td><td>soft</td><td>4 cascades × 2048px</td><td>4 (512px, soft)</td></tr></tbody></table></div>
 <p><code>LOW</code> is also a <em>style</em>: pure flat-color faces with no shadow shading reads
 as clean minimalism. Finer-grained knobs (render scale, MSAA) build on this
 same setting as the renderer grows.</p>

@@ -365,11 +365,19 @@ pub enum TestScene {
     Depth,
     /// A 20×20 field of cubes (400 draws): frame-time stress.
     Stress,
+    /// A glowing lantern ringed by crates: glow light and its shadows.
+    Lantern,
 }
 
 impl TestScene {
     /// Every test, in panel order.
-    pub const ALL: [Self; 4] = [Self::ColorChart, Self::Shadows, Self::Depth, Self::Stress];
+    pub const ALL: [Self; 5] = [
+        Self::ColorChart,
+        Self::Shadows,
+        Self::Depth,
+        Self::Stress,
+        Self::Lantern,
+    ];
 
     /// The button label.
     #[must_use]
@@ -379,6 +387,7 @@ impl TestScene {
             Self::Shadows => "Shadows",
             Self::Depth => "Fog depth",
             Self::Stress => "400 cubes",
+            Self::Lantern => "Lantern",
         }
     }
 
@@ -390,6 +399,9 @@ impl TestScene {
             Self::Shadows => "Pillars and a floating slab: check shadow shape and acne",
             Self::Depth => "Pillars out to 150 m: tune fog density and start",
             Self::Stress => "A 20×20 field of cubes: watch the frame time",
+            Self::Lantern => {
+                "A glowing lantern among crates: glow light and its shadows (High and up)"
+            }
         }
     }
 }
@@ -466,6 +478,37 @@ fn test_scene_entities(scene: TestScene) -> Vec<(String, EntityData)> {
                     test_box([x, 2.0, z], [1.0, 4.0, 1.0], [0.95, 0.95, 0.95, 1.0]),
                 ));
             }
+        }
+        TestScene::Lantern => {
+            let center = [0.0f32, 0.0, 18.0];
+            out.push((
+                "Test Floor".into(),
+                test_box(
+                    [center[0], -0.05, center[2]],
+                    [10.0, 0.1, 10.0],
+                    [0.55, 0.5, 0.45, 1.0],
+                ),
+            ));
+            for i in 0..6 {
+                let a = i as f32 * std::f32::consts::TAU / 6.0 + 0.3;
+                let h = if i % 2 == 0 { 1.4 } else { 0.5 };
+                let pos = [
+                    center[0] + 1.6 * a.cos(),
+                    h / 2.0,
+                    center[2] + 1.6 * a.sin(),
+                ];
+                out.push((
+                    "Test Crate".into(),
+                    test_box(pos, [0.5, h, 0.5], [0.6, 0.45, 0.3, 1.0]),
+                ));
+            }
+            let mut lantern = test_box([center[0], 0.6, center[2]], [1.0; 3], [0.1, 0.1, 0.1, 1.0]);
+            if let Some(m) = &mut lantern.mesh_visual {
+                m.primitive = PrimitiveData::Sphere { size: 0.3 };
+                m.surface.emissive = [1.0, 0.6, 0.25];
+                m.surface.emissive_strength = 8.0;
+            }
+            out.push(("Test Lantern".into(), lantern));
         }
         TestScene::Stress => {
             for i in 0..20 {
@@ -1767,10 +1810,11 @@ pub(crate) mod tests {
             doc.entities.iter().map(EntityEntry::name).collect();
         assert_eq!(names.len(), doc.entities.len(), "names stay unique");
         doc.spawn_test(TestScene::Shadows);
-        assert_eq!(doc.clear_tests(), 400 + 7);
+        assert_eq!(doc.spawn_test(TestScene::Lantern), 8);
+        assert_eq!(doc.clear_tests(), 400 + 7 + 8);
         assert_eq!(doc.entities.len(), before);
         assert!(doc.undo());
-        assert_eq!(doc.entities.len(), before + 407);
+        assert_eq!(doc.entities.len(), before + 415);
     }
 
     #[test]

@@ -58,6 +58,9 @@ pub struct MaterialParams {
     /// without lighting anything. Each glowing draw becomes a
     /// [`PointLight`](crate::PointLight) at its center.
     pub glow_light: f32,
+    /// Whether objects block that light (on presets that shadow point
+    /// lights).
+    pub glow_shadows: bool,
 }
 
 impl Default for MaterialParams {
@@ -69,6 +72,7 @@ impl Default for MaterialParams {
             emissive: [0.0; 3],
             normal_scale: 1.0,
             glow_light: 1.0,
+            glow_shadows: true,
         }
     }
 }

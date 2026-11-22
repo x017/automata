@@ -91,7 +91,7 @@ at.MeshRenderer.quad(size=1.0, color=(1, 1, 1, 1))
 at.MeshRenderer.model(path, color=(1, 1, 1, 1))   # .glb / .gltf / .obj
 # every constructor also takes the keyword-only surface arguments:
 #   roughness=None, metallic=None, emissive=(0, 0, 0), emissive_strength=1.0,
-#   glow_light=1.0
+#   glow_light=1.0, glow_shadows=True
 m.kind                      # "cube", "sphere", "quad" or "model"
 m.color                     # (r, g, b, a); tints a model
 m.roughness                 # 0 = mirror .. 1 = chalk, or None (default)
@@ -99,6 +99,7 @@ m.metallic                  # 0 = plastic/wood/stone, 1 = metal, or None
 m.emissive                  # (r, g, b) glow colour, (0, 0, 0) = none
 m.emissive_strength         # glow multiplier
 m.glow_light                # how much the glow lights its surroundings
+m.glow_shadows              # whether objects block that light (HIGH and up)
 m.path                      # the model file, or None
 m.bounds                    # ((min x, y, z), (max x, y, z)) or None
 
@@ -114,7 +115,9 @@ Surface arguments: `None` roughness / metallic means "default", which is
 Setting them overrides every part of a model. Roughness and metallic must be
 in `0..=1`, and emissive values must not be negative, or `ValueError` is
 raised. A glowing mesh also lights the surfaces around it like a real
-glowing object of its size; `glow_light` scales that (0 = off, no shadows).
+glowing object of its size; `glow_light` scales that (0 = off). On HIGH and
+up, objects in the way block that light and cast shadows from it, unless
+`glow_shadows=False`.
 The glow added is `emissive × emissive_strength`; above 1 it blooms
 on Ultra and Beautiful. Guide: [Rendering & Lights](guides/rendering-and-lights.md#surfaces).
 

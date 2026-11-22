@@ -220,6 +220,17 @@ impl PipelineShared {
                     },
                     count: None,
                 },
+                // Point light shadow cubes, six layers per shadowed light.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         // The shadow pass needs only the light-space transform (vertex).

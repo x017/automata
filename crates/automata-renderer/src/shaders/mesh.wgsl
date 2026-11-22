@@ -171,7 +171,7 @@ fn shade_forward(s: Surface, shadow: f32) -> vec3<f32> {
         if ndotl > 0.0 && any(p.radiance > vec3<f32>(0.0)) {
             let hp = normalize(p.l + s.v);
             let spec = pow(max(dot(s.n, hp), 1e-5), shininess) * spec_color;
-            lit = lit + (albedo + spec) * p.radiance * ndotl;
+            lit = lit + (albedo + spec) * p.radiance * ndotl * point_shadow(i, s.p, s.n);
         }
     }
     // Default (rough, non-metal) surfaces stay matte, as before.
