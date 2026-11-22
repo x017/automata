@@ -51,6 +51,8 @@ struct PreparedFrame {
     model_bind_groups: Vec<wgpu::BindGroup>,
     sprite_runs: Vec<SpriteRun>,
     light_bind: wgpu::BindGroup,
+    /// The light group plus the screen-space occlusion (Beautiful meshes).
+    beautiful_light_bind: Option<wgpu::BindGroup>,
     shadows: ShadowCascades,
     /// World bounding sphere per mesh (shadow culling).
     mesh_spheres: Vec<Sphere>,
@@ -105,6 +107,10 @@ pub struct Renderer {
     hdr_mesh_pipeline: Option<pipeline::PipelinePair>,
     /// Bloom, tone mapping and FXAA (Beautiful).
     post: crate::post::Post,
+    /// Ambient occlusion and contact shadows (Beautiful).
+    ssao: crate::ssao::Ssao,
+    /// The depth prepass that feeds them, built lazily.
+    depth_prepass_pipeline: Option<pipeline::PipelinePair>,
     /// 1x1 stand-ins for the scene copies forward-path water binds.
     scene_placeholder: wgpu::BindGroup,
     /// Animation time source when a draw list sets none.
@@ -216,6 +222,7 @@ impl Renderer {
         let shadow = ShadowResources::new(device, quality);
         let point_shadows = DepthArray::for_point_shadows(device, quality);
         let post = crate::post::Post::new(device);
+        let ssao = crate::ssao::Ssao::new(device);
         let scene_placeholder = placeholder_scene_bind_group(device, &shared);
         Self {
             shared,
@@ -242,6 +249,8 @@ impl Renderer {
             sky_pipelines: Vec::new(),
             hdr_mesh_pipeline: None,
             post,
+            ssao,
+            depth_prepass_pipeline: None,
             scene_placeholder,
             clock: std::time::Instant::now(),
             blit_scratch: Vec::new(),
@@ -285,7 +294,9 @@ impl Renderer {
         }
         if !quality.is_beautiful() {
             self.post.release();
+            self.ssao.release();
             self.hdr_mesh_pipeline = None;
+            self.depth_prepass_pipeline = None;
         }
         self.quality = quality;
     }
@@ -994,6 +1005,13 @@ impl Renderer {
         let device = self.ctx.device();
         if beautiful {
             self.post.ensure(device, viewport, format);
+            self.ssao.ensure(device, viewport);
+            if self.depth_prepass_pipeline.is_none() {
+                self.depth_prepass_pipeline = Some(pipeline::create_depth_prepass_pipelines(
+                    device,
+                    &self.shared,
+                ));
+            }
             if self.hdr_mesh_pipeline.is_none() {
                 self.hdr_mesh_pipeline = Some(pipeline::create_mesh_pipelines(
                     device,
@@ -1108,7 +1126,13 @@ impl Renderer {
             }),
             ..wgpu::RenderPassDescriptor::default()
         });
-        Self::record_meshes(&mut pass, draw, prepared, mesh_pipeline);
+        Self::record_meshes(
+            &mut pass,
+            draw,
+            prepared,
+            mesh_pipeline,
+            &prepared.light_bind,
+        );
         if depth_view.is_some() {
             self.record_sky(&mut pass, draw, prepared, format);
         }
@@ -1131,8 +1155,11 @@ impl Renderer {
         depth_view: Option<&wgpu::TextureView>,
         format: wgpu::TextureFormat,
     ) {
-        let (Some(targets), Some(mesh_pipeline)) = (&self.post.targets, &self.hdr_mesh_pipeline)
-        else {
+        let (Some(targets), Some(mesh_pipeline), Some(light_bind)) = (
+            &self.post.targets,
+            &self.hdr_mesh_pipeline,
+            &prepared.beautiful_light_bind,
+        ) else {
             return;
         };
         let device = self.ctx.device();
@@ -1145,6 +1172,7 @@ impl Renderer {
         let water = self
             .water_pipeline(pipeline::HDR_FORMAT, true)
             .filter(|_| !draw.waters.is_empty());
+        self.record_occlusion(encoder, draw, prepared);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("hdr scene"),
@@ -1175,7 +1203,7 @@ impl Renderer {
                 }),
                 ..wgpu::RenderPassDescriptor::default()
             });
-            Self::record_meshes(&mut pass, draw, prepared, mesh_pipeline);
+            Self::record_meshes(&mut pass, draw, prepared, mesh_pipeline, light_bind);
             self.record_sky(&mut pass, draw, prepared, pipeline::HDR_FORMAT);
         }
 
@@ -1295,6 +1323,71 @@ impl Renderer {
         self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
     }
 
+    /// Beautiful's screen-space occlusion: the opaque meshes' depth from
+    /// the camera, then ambient occlusion and contact shadows from it.
+    /// Skipped (the result cleared to "unoccluded") when the scene needs
+    /// neither: AO strength 0 and no sun shadows.
+    fn record_occlusion(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        draw: &DrawList,
+        prepared: &PreparedFrame,
+    ) {
+        let (Some(pipelines), Some(depth)) = (&self.depth_prepass_pipeline, self.ssao.depth_view())
+        else {
+            return;
+        };
+        let env = draw.environment.unwrap_or_default();
+        let frame = crate::ssao::SsaoFrame {
+            camera: draw.camera_3d.unwrap_or_default(),
+            sun_direction: draw.sun.unwrap_or_default().normalized_direction(),
+            ambient_occlusion: env.ambient_occlusion > 0.0,
+            contact_shadows: prepared.render_shadows,
+        };
+        if frame.active() && !draw.meshes.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("depth prepass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..wgpu::RenderPassDescriptor::default()
+            });
+            let mut current: Option<bool> = None;
+            for (mesh_draw, model_bind) in draw.meshes.iter().zip(&prepared.model_bind_groups) {
+                // See-through meshes don't hide what's behind them.
+                if mesh_draw.material.inner.params.color[3] < 1.0 {
+                    continue;
+                }
+                let skinned = mesh_draw.joints.is_some();
+                if current != Some(skinned) {
+                    pass.set_pipeline(pipelines.get(skinned));
+                    pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
+                    current = Some(skinned);
+                }
+                let mesh = &mesh_draw.mesh.inner;
+                pass.set_bind_group(1, model_bind, &[]);
+                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                if let (Some(_), Some(skin)) = (&mesh_draw.joints, &mesh.skin_buffer) {
+                    pass.set_vertex_buffer(1, skin.slice(..));
+                }
+                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+            }
+        }
+        let frame = crate::ssao::SsaoFrame {
+            ambient_occlusion: frame.ambient_occlusion && !draw.meshes.is_empty(),
+            contact_shadows: frame.contact_shadows && !draw.meshes.is_empty(),
+            ..frame
+        };
+        self.ssao.record(self.ctx.device(), encoder, &frame);
+    }
+
     /// A linear clamping sampler for the scene copies.
     fn post_sampler(&self) -> wgpu::Sampler {
         self.ctx.device().create_sampler(&wgpu::SamplerDescriptor {
@@ -1311,6 +1404,7 @@ impl Renderer {
         draw: &DrawList,
         prepared: &PreparedFrame,
         pipelines: &pipeline::PipelinePair,
+        light_bind: &wgpu::BindGroup,
     ) {
         let mut current: Option<bool> = None;
         for (mesh_draw, model_bind) in draw.meshes.iter().zip(&prepared.model_bind_groups) {
@@ -1318,7 +1412,7 @@ impl Renderer {
             if current != Some(skinned) {
                 pass.set_pipeline(pipelines.get(skinned));
                 pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
-                pass.set_bind_group(3, &prepared.light_bind, &[]);
+                pass.set_bind_group(3, light_bind, &[]);
                 current = Some(skinned);
             }
             Self::record_mesh(pass, mesh_draw, model_bind);
@@ -1502,7 +1596,7 @@ impl Renderer {
             self.quality.max_point_lights(),
             self.quality.point_shadows(),
         );
-        let light_bind =
+        let (light_bind, beautiful_light_bind) =
             self.light_bind_group(&sun, &env, &shadows, render_shadows, &frame, &points);
         let water_binds = self.water_bind_groups(draw, beautiful, time);
 
@@ -1512,6 +1606,7 @@ impl Renderer {
             model_bind_groups,
             sprite_runs,
             light_bind,
+            beautiful_light_bind,
             shadows,
             mesh_spheres,
             render_shadows,
@@ -1522,7 +1617,9 @@ impl Renderer {
 
     /// Builds the frame's light bind group (uniform + shadow map array +
     /// comparison sampler). `render_shadows` gates shadow sampling in the
-    /// shader — when false the shadow maps are bound but never read.
+    /// shader — when false the shadow maps are bound but never read. On
+    /// Beautiful, also a second group sharing it that adds the screen-space
+    /// occlusion for meshes.
     fn light_bind_group(
         &self,
         sun: &Sun,
@@ -1531,7 +1628,7 @@ impl Renderer {
         render_shadows: bool,
         frame: &FrameView,
         points: &[crate::light::FramePoint],
-    ) -> wgpu::BindGroup {
+    ) -> (wgpu::BindGroup, Option<wgpu::BindGroup>) {
         let device = self.ctx.device();
         let light_uniform = LightUniform::new(
             &Sun {
@@ -1550,28 +1647,42 @@ impl Renderer {
             contents: bytemuck::bytes_of(&light_uniform),
             usage: wgpu::BufferUsages::UNIFORM,
         });
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let mut entries = vec![
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&self.shadow_array_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(&self.point_shadows.array_view),
+            },
+        ];
+        let light = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("light"),
             layout: &self.shared.light_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&self.shadow_array_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::TextureView(&self.point_shadows.array_view),
-                },
-            ],
-        })
+            entries: &entries,
+        });
+        let occlusion = self.ssao.output_view().filter(|_| frame.beautiful);
+        let beautiful = occlusion.as_ref().map(|view| {
+            entries.push(wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::TextureView(view),
+            });
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("beautiful light"),
+                layout: &self.shared.beautiful_light_layout,
+                entries: &entries,
+            })
+        });
+        (light, beautiful)
     }
 
     /// Records the depth-only shadow passes: per cascade, every mesh that
@@ -2633,6 +2744,92 @@ mod tests {
             "the shadow should cover at least 4% of the image: {darker} darker"
         );
         assert!(lit.iter().any(|&b| b > 150), "the scene is lit");
+    }
+
+    /// Brightness (r + g + b) of a box standing on the ground lit by
+    /// ambient light only, with ambient occlusion strength `ao`.
+    fn occlusion_scene_brightness(renderer: &mut Renderer, ao: f32) -> Vec<u32> {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let white = renderer.create_material([1.0, 1.0, 1.0, 1.0], None);
+        let mut draw = DrawList::new();
+        draw.set_clear_color(wgpu::Color::BLACK);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 4.0, 5.0),
+            glam::Vec3::new(0.0, 0.5, 0.0),
+        ));
+        // No sunlight, only the (white) ambient: what AO darkens.
+        draw.set_sun(crate::Sun {
+            color: [0.0, 0.0, 0.0],
+            ambient: 0.8,
+            ..crate::Sun::default()
+        });
+        draw.set_environment(crate::Environment {
+            ambient_occlusion: ao,
+            ..crate::Environment::default()
+        });
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_scale(glam::Vec3::new(20.0, 0.2, 20.0)),
+            &white,
+        );
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::splat(2.0),
+                glam::Quat::IDENTITY,
+                glam::Vec3::new(0.0, 1.1, 0.0),
+            ),
+            &white,
+        );
+        renderer.render_offscreen(&draw, &target);
+        read_pixels(renderer, &target, size)
+            .chunks_exact(4)
+            .map(|p| u32::from(p[0]) + u32::from(p[1]) + u32::from(p[2]))
+            .collect()
+    }
+
+    #[test]
+    fn offscreen_ambient_occlusion_darkens_creases_on_beautiful_only() {
+        // Big enough that the half-resolution occlusion resolves the crease.
+        let Some(mut renderer) = pollster::block_on(Renderer::new_offscreen((160, 120))).ok()
+        else {
+            eprintln!("no GPU adapter; skipping ambient occlusion test");
+            return;
+        };
+        renderer.set_quality(GraphicsQuality::Beautiful);
+        let open = occlusion_scene_brightness(&mut renderer, 0.0);
+        let occluded = occlusion_scene_brightness(&mut renderer, 1.0);
+        let (w, _) = renderer.size();
+        assert!(
+            open.iter().zip(&occluded).all(|(o, c)| *c <= *o + 6),
+            "occlusion only removes light"
+        );
+        let darker = open
+            .iter()
+            .zip(&occluded)
+            .filter(|(o, c)| **c + 60 < **o)
+            .count();
+        assert!(
+            darker * 50 >= open.len(),
+            "the crease around the box gets clearly darker: {darker} pixels"
+        );
+        // Open ground far from the box stays as it was.
+        let corner = (w as usize) * 118 + 2;
+        assert!(
+            occluded[corner] + 12 >= open[corner],
+            "{} vs {}",
+            occluded[corner],
+            open[corner]
+        );
+
+        // High has no ambient occlusion: the setting changes nothing.
+        renderer.set_quality(GraphicsQuality::High);
+        assert_eq!(
+            occlusion_scene_brightness(&mut renderer, 0.0),
+            occlusion_scene_brightness(&mut renderer, 2.0)
+        );
     }
 
     #[test]

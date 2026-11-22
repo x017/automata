@@ -88,6 +88,47 @@ fn shader_module(device: &wgpu::Device, label: &str, source: &str) -> wgpu::Shad
     })
 }
 
+/// The light group's bindings: the sun uniform (0), the shadow cascades
+/// (1) and their comparison sampler (2), point light shadow cubes (4),
+/// and with `occlusion`, the screen-space occlusion texture (5).
+fn light_entries(occlusion: bool) -> Vec<wgpu::BindGroupLayoutEntry> {
+    let depth_array = |binding| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Depth,
+            view_dimension: wgpu::TextureViewDimension::D2Array,
+            multisampled: false,
+        },
+        count: None,
+    };
+    let mut entries = vec![
+        uniform_entry(0, wgpu::ShaderStages::FRAGMENT),
+        depth_array(1),
+        wgpu::BindGroupLayoutEntry {
+            binding: 2,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+            count: None,
+        },
+        // Point light shadow cubes, six layers per shadowed light.
+        depth_array(4),
+    ];
+    if occlusion {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 5,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        });
+    }
+    entries
+}
+
 /// All resources shared by both pipelines: shaders and bind group layouts.
 pub(crate) struct PipelineShared {
     pub camera_layout: wgpu::BindGroupLayout,
@@ -97,6 +138,9 @@ pub(crate) struct PipelineShared {
     /// The model matrix plus the joint palette, for skinned draws.
     pub skinned_model_layout: wgpu::BindGroupLayout,
     pub light_layout: wgpu::BindGroupLayout,
+    /// The light group plus the screen-space occlusion (binding 5), for
+    /// Beautiful's mesh pipelines.
+    pub beautiful_light_layout: wgpu::BindGroupLayout,
     pub shadow_light_layout: wgpu::BindGroupLayout,
     /// The water uniform (vertex + fragment).
     pub water_layout: wgpu::BindGroupLayout,
@@ -190,37 +234,14 @@ impl PipelineShared {
         // Mesh lighting: sun uniform + shadow map + comparison sampler.
         let light_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("light"),
-            entries: &[
-                uniform_entry(0, wgpu::ShaderStages::FRAGMENT),
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
-                    count: None,
-                },
-                // Point light shadow cubes, six layers per shadowed light.
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-            ],
+            entries: &light_entries(false),
         });
+        // Beautiful meshes also read the screen-space occlusion.
+        let beautiful_light_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("beautiful light"),
+                entries: &light_entries(true),
+            });
         // The shadow pass needs only the light-space transform (vertex).
         let shadow_light_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -289,6 +310,7 @@ impl PipelineShared {
             model_layout,
             skinned_model_layout,
             light_layout,
+            beautiful_light_layout,
             shadow_light_layout,
             water_layout,
             scene_layout,
@@ -579,13 +601,19 @@ fn create_mesh_pipeline(
     } else {
         &shared.model_layout
     };
+    // Beautiful (HDR) meshes read the screen-space occlusion too.
+    let light_layout = if format == HDR_FORMAT {
+        &shared.beautiful_light_layout
+    } else {
+        &shared.light_layout
+    };
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("mesh"),
         bind_group_layouts: &[
             Some(&shared.camera_layout),
             Some(model_layout),
             Some(&shared.material_layout),
-            Some(&shared.light_layout),
+            Some(light_layout),
         ],
         immediate_size: 0,
     });
@@ -628,6 +656,63 @@ fn create_mesh_pipeline(
                 blend_target(format)
             },
         }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// Both depth prepass pipelines (Beautiful's screen-space occlusion).
+pub(crate) fn create_depth_prepass_pipelines(
+    device: &wgpu::Device,
+    shared: &PipelineShared,
+) -> PipelinePair {
+    PipelinePair {
+        plain: create_depth_prepass_pipeline(device, shared, false),
+        skinned: create_depth_prepass_pipeline(device, shared, true),
+    }
+}
+
+/// Renders mesh depth from the camera with the mesh shader's own vertex
+/// stage (so it lines up with the scene), no color.
+fn create_depth_prepass_pipeline(
+    device: &wgpu::Device,
+    shared: &PipelineShared,
+    skinned: bool,
+) -> wgpu::RenderPipeline {
+    let model_layout = if skinned {
+        &shared.skinned_model_layout
+    } else {
+        &shared.model_layout
+    };
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("depth prepass"),
+        bind_group_layouts: &[Some(&shared.camera_layout), Some(model_layout)],
+        immediate_size: 0,
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("depth prepass"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shared.mesh_shader,
+            entry_point: Some(if skinned { "vs_skinned" } else { "vs_main" }),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &mesh_buffers(skinned),
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: Some(wgpu::Face::Back),
+            front_face: wgpu::FrontFace::Ccw,
+            ..wgpu::PrimitiveState::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: HDR_DEPTH_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        fragment: None,
         multiview_mask: None,
         cache: None,
     })

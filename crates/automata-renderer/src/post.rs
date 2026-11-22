@@ -581,7 +581,7 @@ impl Post {
 }
 
 /// A fullscreen-triangle pipeline for one post pass.
-fn fullscreen_pipeline(
+pub(crate) fn fullscreen_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     shader: &wgpu::ShaderModule,
@@ -623,7 +623,7 @@ fn fullscreen_pipeline(
 }
 
 /// Records one fullscreen pass.
-fn fullscreen_pass(
+pub(crate) fn fullscreen_pass(
     encoder: &mut wgpu::CommandEncoder,
     label: &str,
     target: &wgpu::TextureView,

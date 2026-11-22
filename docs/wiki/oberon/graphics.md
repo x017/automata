@@ -16,8 +16,8 @@ scene tuned here looks the same in Play and under `at.run_scene`.
 
 - **Quality**: Low / Medium / High / Ultra / Beautiful. This sets the
   shadow map resolution, or turns shadows off on Low. Beautiful switches to
-  soft cascaded shadows, physically based light, HDR bloom, FXAA and
-  refractive water. It applies immediately.
+  contact-hardening cascaded shadows, ambient occlusion, physically based
+  light, HDR bloom, FXAA and refractive water. It applies immediately.
 - **Stats** update live: frame time in ms, fps, meshes drawn, and shadow
   map size. Use them with the *400 cubes* test scene to see what your
   scene costs.
@@ -28,7 +28,7 @@ scene tuned here looks the same in Play and under `at.run_scene`.
 | Medium | on | 1 × 1024 px | none |
 | High (default) | crisp, 2 cascades | 2 × 2048 px | 2 nearest |
 | Ultra | crisp, 3 cascades | 3 × 2048 px | 4 nearest |
-| Beautiful | soft, 4 cascades | 4 × 2048 px | 4 nearest, soft |
+| Beautiful | contact-hardening, 4 cascades, plus ambient occlusion | 4 × 2048 px | 4 nearest, soft |
 
 Water is a component. Use **Create → Water** (it starts as a calm pond)
 or select an entity and use **Add Component → Water** in the Inspector.
@@ -50,7 +50,7 @@ one, **Add Directional Light** creates it.
 | Ambient | How bright the shadowed sides are (0 = black shadows, 1 = no shading) |
 | Cast Shadows | Shadow mapping for this light |
 | Shadow Distance | How far from the camera shadows reach, in metres (default 120). They fade out beyond it. Shorter is sharper |
-| Shadow Softness | How soft shadow edges are: 0 sharpest, 1 default, up to 8. Shows most on Beautiful |
+| Shadow Softness | How soft shadow edges are: 0 sharpest, 1 default, up to 8. Shows most on Beautiful, where shadows start sharp at the object and widen with distance by the Sun Size times this |
 
 Azimuth and elevation are a friendlier way to set the light's direction
 vector. The Inspector's Directional Light section shows the same two
@@ -86,6 +86,7 @@ tuning.
 | Lens Flare | Strength of the glare, starburst and ghosts when you look toward the sun. Beautiful quality only; scenery and clouds in front of the sun hide it |
 | Tone Mapping | How bright values are squeezed into the screen's range. **None**: values above 1 clip. **Reinhard**: soft and flat. **ACES**: filmic contrast and saturation. **AgX**: filmic, keeps bright colours from turning neon |
 | Exposure | Brightness multiplier applied before tone mapping. Raise it with ACES or AgX, which darken mid-tones |
+| Occlusion | Ambient occlusion strength: how much creases, corners and the ground around objects darken. 0 off, 1 default, up to 2. Beautiful quality only; it dims ambient light, so it shows most in shade |
 | Fog | Exponential distance fog |
 | Fog Color | Usually the same as Background, so distant objects melt into the sky |
 | Fog Density | How quickly fog thickens per metre. 0.01 is light haze, 0.05 is thick |

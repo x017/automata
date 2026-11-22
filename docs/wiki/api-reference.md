@@ -153,7 +153,7 @@ at.Environment(sky_color=(1, 1, 1), ground_color=(1, 1, 1),
                tonemapping="none", fog=False, fog_color=(0.5, 0.55, 0.6),
                fog_density=0.02, fog_start=0.0, sky=False,
                zenith_color=(0.16, 0.34, 0.78), sun_size=2.0, sun_glow=1.0,
-               clouds=0.0, lens_flare=1.0)
+               clouds=0.0, lens_flare=1.0, ambient_occlusion=1.0)
 at.Environment.preset("neutral" | "daylight" | "dusk" | "night")
 ```
 
@@ -165,8 +165,10 @@ distance fog. `sky=True` draws a sky dome instead of the flat background:
 a gradient from `background` (the horizon) to `zenith_color`, a sun disk
 `sun_size` degrees wide where the scene's `DirectionalLight` shines from,
 a halo (`sun_glow`), `clouds` cover from 0 to 1, and on `BEAUTIFUL` a lens
-flare (`lens_flare` strength) when the camera looks toward the sun. The
-non-neutral presets turn the sky on. All arguments are readable as properties. Unknown tone
+flare (`lens_flare` strength) when the camera looks toward the sun. Also
+on `BEAUTIFUL`, `ambient_occlusion` (0 off, 1 default, up to 2) darkens
+the ambient light in creases, corners and on the ground around objects.
+The non-neutral presets turn the sky on. All arguments are readable as properties. Unknown tone
 mapping or preset names raise `ValueError`. It's saved in scene files.
 Guide: [Rendering & Lights](guides/rendering-and-lights.md#environment).
 
@@ -373,7 +375,7 @@ All are `str` enums — members work anywhere the plain string does.
 | `at.MouseButton` | `LEFT`, `RIGHT`, `MIDDLE`, `BACK`, `FORWARD` | 5 |
 | `at.GamepadButton` | `SOUTH`, `EAST`, `NORTH`, `WEST`, triggers, thumbs, d-pad, `START`, `SELECT`… | 19 |
 | `at.GamepadAxis` | `LEFT_STICK_X/Y`, `RIGHT_STICK_X/Y`, `LEFT_Z`, `RIGHT_Z`, `DPAD_X/Y` | 8 |
-| `at.GraphicsQuality` | `LOW` (no shadows), `MEDIUM` (1 × 1024), `HIGH` (2 cascades × 2048), `ULTRA` (3 cascades × 2048), `BEAUTIFUL` (soft cascaded shadows, PBR, bloom, refractive water) | 5 |
+| `at.GraphicsQuality` | `LOW` (no shadows), `MEDIUM` (1 × 1024), `HIGH` (2 cascades × 2048), `ULTRA` (3 cascades × 2048), `BEAUTIFUL` (contact-hardening shadows, ambient occlusion, PBR, bloom, refractive water) | 5 |
 
 ## Behaviour scripts (`automata.run_scene`)
 

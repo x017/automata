@@ -556,8 +556,8 @@ specular highlight, and ambient so shadow sides aren't pitch black.
 - **Quality presets:** `LOW` disables shadows (fastest, flat look),
   `MEDIUM` uses one shadow map, `HIGH`/`ULTRA` split crisp shadows into
   2/3 cascades (sharp near the camera, reaching far), and `BEAUTIFUL`
-  adds soft cascaded shadows, physically based light, bloom and refractive
-  [water](guides/rendering-and-lights.md#water).
+  adds contact-hardening shadows, ambient occlusion, physically based
+  light, bloom and refractive [water](guides/rendering-and-lights.md#water).
 - **Mood is data:** `clear_color` + sun `color` + `ambient` is your whole
   color grade. Golden hour = warm color + low ambient + long direction.
 

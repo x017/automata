@@ -28,6 +28,7 @@
                 sun_glow: 1.0,
                 clouds: 0.6,
                 lens_flare: 1.0,
+                ambient_occlusion: 1.0,
             )),
         ),
         (

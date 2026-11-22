@@ -228,6 +228,9 @@ class Environment:
     """Cloud cover, 0 (clear) to 1 (overcast)."""
     lens_flare: float
     """Lens flare strength when looking at the sun (``"beautiful"`` only)."""
+    ambient_occlusion: float
+    """How much creases and the ground under objects darken, 0 (off) to 2
+    (``"beautiful"`` only)."""
     def __init__(
         self,
         sky_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
@@ -245,6 +248,7 @@ class Environment:
         sun_glow: float = 1.0,
         clouds: float = 0.0,
         lens_flare: float = 1.0,
+        ambient_occlusion: float = 1.0,
     ) -> None: ...
     @staticmethod
     def preset(name: str) -> Environment:

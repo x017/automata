@@ -156,7 +156,11 @@ scene.add(
   Shorter is sharper: a tight indoor or top-down game can use 30–50.
 - **`shadow_softness`** (default 1): how soft shadow edges are. 0 is as
   sharp as the shadow map allows, higher values blur the edge (Beautiful
-  shows the most difference; High and Ultra stay crisp).
+  shows the most difference; High and Ultra stay crisp). On Beautiful,
+  shadows are sharp where an object touches the ground and soften with
+  the distance to it, as much as the sun's size (`sun_size`) times the
+  softness says: a pole's shadow starts crisp at its foot and blurs
+  toward its tip.
 
 ## Environment
 
@@ -193,6 +197,7 @@ scene.add(
             sun_glow=1.0,                    # halo around the sun
             clouds=0.35,                     # 0 clear .. 1 overcast
             lens_flare=1.0,                  # Beautiful only
+            ambient_occlusion=1.0,           # Beautiful only: 0 off .. 2
         )
     )
 )
@@ -218,6 +223,11 @@ How it combines with the sun:
   a starburst, a row of coloured ghosts and a faint halo ring. It fades
   out when the sun leaves the screen, and anything in front of the sun,
   scenery or clouds, hides it.
+- **Ambient occlusion** (`BEAUTIFUL` only): nearby geometry blocks part
+  of the sky's light, so creases, inside corners and the ground around
+  and under objects get darker. It only dims ambient light, so it shows
+  most in shade. `ambient_occlusion` sets the strength: 0 off, 1 default,
+  2 strong.
 
 - Ambient is `DirectionalLight.ambient × mix(ground, sky)`, picked by how
   much a surface faces up. Keep the sky and ground colours near 1.0 in
@@ -258,8 +268,15 @@ same setting as the renderer grows.
 
 `BEAUTIFUL` is the showcase preset. On top of what `HIGH` does it adds:
 
-- **Soft cascaded shadows.** Four cascades split the view so shadows stay
-  sharp up close and still reach the horizon. Edges get a soft penumbra.
+- **Contact-hardening shadows.** Four cascades split the view so shadows
+  stay sharp up close and still reach the horizon. Each shadow is sharp
+  where the object touches the ground and softens with the distance to
+  it, scaled by the sun's size.
+- **Ambient occlusion and contact shadows.** A half-resolution
+  screen-space pass darkens creases and the ground around objects
+  (ambient light only; `Environment.ambient_occlusion` sets how much), and
+  a short ray toward the sun catches small gaps the shadow map is too
+  coarse for, like a coin resting on the ground.
 - **Physically based light** (GGX specular) and fog that glows toward the
   sun.
 - **HDR with bloom**: bright highlights (sun glints on water, white
@@ -269,8 +286,10 @@ same setting as the renderer grows.
 - **Lens flare** when the camera looks toward the sun (with `sky=True`).
 
 It's built to stay cheap. Each pixel filters only one shadow cascade (with
-dithering where cascades meet), bloom is a small dual-filter chain at half
-resolution and below, and nothing on the other presets got slower. It
+dithering where cascades meet), and sunlit pixels skip shadow filtering
+after a quick search finds nothing between them and the sun. Ambient
+occlusion and bloom run at half resolution and below. Nothing on the other
+presets got slower. It
 still costs more than `HIGH`. Offer it as a setting rather than the
 default for games that should run on low-end laptops.
 

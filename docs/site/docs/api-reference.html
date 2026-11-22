@@ -140,7 +140,7 @@ Out-of-range values raise <code>ValueError</code>. Guide:
                tonemapping=<span class="tok-s">&quot;none&quot;</span>, fog=<span class="tok-b">False</span>, fog_color=(<span class="tok-n">0.5</span>, <span class="tok-n">0.55</span>, <span class="tok-n">0.6</span>),
                fog_density=<span class="tok-n">0.02</span>, fog_start=<span class="tok-n">0.0</span>, sky=<span class="tok-b">False</span>,
                zenith_color=(<span class="tok-n">0.16</span>, <span class="tok-n">0.34</span>, <span class="tok-n">0.78</span>), sun_size=<span class="tok-n">2.0</span>, sun_glow=<span class="tok-n">1.0</span>,
-               clouds=<span class="tok-n">0.0</span>, lens_flare=<span class="tok-n">1.0</span>)
+               clouds=<span class="tok-n">0.0</span>, lens_flare=<span class="tok-n">1.0</span>, ambient_occlusion=<span class="tok-n">1.0</span>)
 at.Environment.preset(<span class="tok-s">&quot;neutral&quot;</span> | <span class="tok-s">&quot;daylight&quot;</span> | <span class="tok-s">&quot;dusk&quot;</span> | <span class="tok-s">&quot;night&quot;</span>)</code></pre></div>
 <p>The scene look. The first entity carrying one wins. It sets hemisphere
 ambient (sky above, ground below, scaled by the sun's <code>ambient</code>), the
@@ -150,8 +150,10 @@ distance fog. <code>sky=True</code> draws a sky dome instead of the flat backgro
 a gradient from <code>background</code> (the horizon) to <code>zenith_color</code>, a sun disk
 <code>sun_size</code> degrees wide where the scene's <code>DirectionalLight</code> shines from,
 a halo (<code>sun_glow</code>), <code>clouds</code> cover from 0 to 1, and on <code>BEAUTIFUL</code> a lens
-flare (<code>lens_flare</code> strength) when the camera looks toward the sun. The
-non-neutral presets turn the sky on. All arguments are readable as properties. Unknown tone
+flare (<code>lens_flare</code> strength) when the camera looks toward the sun. Also
+on <code>BEAUTIFUL</code>, <code>ambient_occlusion</code> (0 off, 1 default, up to 2) darkens
+the ambient light in creases, corners and on the ground around objects.
+The non-neutral presets turn the sky on. All arguments are readable as properties. Unknown tone
 mapping or preset names raise <code>ValueError</code>. It's saved in scene files.
 Guide: <a href="guides/rendering-and-lights.html#environment">Rendering &amp; Lights</a>.</p>
 <h3 id="water">Water<a class="anchor" href="#water" aria-label="Link to this section">#</a></h3>
@@ -295,7 +297,7 @@ at.AxisBinding.gamepad_axis(axis, scale=1.0)</code></pre></div>
 <p>Unknown key/button/axis names raise <code>KeyError</code> at bind time.</p>
 <h2 id="enums">Enums<a class="anchor" href="#enums" aria-label="Link to this section">#</a></h2>
 <p>All are <code>str</code> enums — members work anywhere the plain string does.</p>
-<div class="table"><table><thead><tr><th>Enum</th><th>Members (sample)</th><th>Full set</th></tr></thead><tbody><tr><td><code>at.Key</code></td><td><code>A</code>–<code>Z</code>, <code>DIGIT_0</code>–<code>9</code>, <code>SPACE</code>, <code>ENTER</code>, <code>ESCAPE</code>, <code>TAB</code>, arrows, <code>F1</code>–<code>F12</code>, modifiers, punctuation</td><td>80</td></tr><tr><td><code>at.MouseButton</code></td><td><code>LEFT</code>, <code>RIGHT</code>, <code>MIDDLE</code>, <code>BACK</code>, <code>FORWARD</code></td><td>5</td></tr><tr><td><code>at.GamepadButton</code></td><td><code>SOUTH</code>, <code>EAST</code>, <code>NORTH</code>, <code>WEST</code>, triggers, thumbs, d-pad, <code>START</code>, <code>SELECT</code>…</td><td>19</td></tr><tr><td><code>at.GamepadAxis</code></td><td><code>LEFT_STICK_X/Y</code>, <code>RIGHT_STICK_X/Y</code>, <code>LEFT_Z</code>, <code>RIGHT_Z</code>, <code>DPAD_X/Y</code></td><td>8</td></tr><tr><td><code>at.GraphicsQuality</code></td><td><code>LOW</code> (no shadows), <code>MEDIUM</code> (1 × 1024), <code>HIGH</code> (2 cascades × 2048), <code>ULTRA</code> (3 cascades × 2048), <code>BEAUTIFUL</code> (soft cascaded shadows, PBR, bloom, refractive water)</td><td>5</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Enum</th><th>Members (sample)</th><th>Full set</th></tr></thead><tbody><tr><td><code>at.Key</code></td><td><code>A</code>–<code>Z</code>, <code>DIGIT_0</code>–<code>9</code>, <code>SPACE</code>, <code>ENTER</code>, <code>ESCAPE</code>, <code>TAB</code>, arrows, <code>F1</code>–<code>F12</code>, modifiers, punctuation</td><td>80</td></tr><tr><td><code>at.MouseButton</code></td><td><code>LEFT</code>, <code>RIGHT</code>, <code>MIDDLE</code>, <code>BACK</code>, <code>FORWARD</code></td><td>5</td></tr><tr><td><code>at.GamepadButton</code></td><td><code>SOUTH</code>, <code>EAST</code>, <code>NORTH</code>, <code>WEST</code>, triggers, thumbs, d-pad, <code>START</code>, <code>SELECT</code>…</td><td>19</td></tr><tr><td><code>at.GamepadAxis</code></td><td><code>LEFT_STICK_X/Y</code>, <code>RIGHT_STICK_X/Y</code>, <code>LEFT_Z</code>, <code>RIGHT_Z</code>, <code>DPAD_X/Y</code></td><td>8</td></tr><tr><td><code>at.GraphicsQuality</code></td><td><code>LOW</code> (no shadows), <code>MEDIUM</code> (1 × 1024), <code>HIGH</code> (2 cascades × 2048), <code>ULTRA</code> (3 cascades × 2048), <code>BEAUTIFUL</code> (contact-hardening shadows, ambient occlusion, PBR, bloom, refractive water)</td><td>5</td></tr></tbody></table></div>
 <h2 id="behaviour-scripts-automatarun_scene">Behaviour scripts (<code>automata.run_scene</code>)<a class="anchor" href="#behaviour-scripts-automatarun_scene" aria-label="Link to this section">#</a></h2>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.run_scene(path, *, max_frames=<span class="tok-b">None</span>, update=<span class="tok-b">None</span>, **game_options) -&gt; <span class="tok-b">int</span></code></pre></div>
 <p>Plays an Oberon scene file with its behaviour scripts:

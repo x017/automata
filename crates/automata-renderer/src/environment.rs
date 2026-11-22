@@ -94,6 +94,10 @@ pub struct Environment {
     /// on the Beautiful preset only, and hidden when something blocks the
     /// sun.
     pub lens_flare: f32,
+    /// Ambient occlusion strength: how much creases, corners and the
+    /// ground under objects darken the ambient light (`0` = off, `1` =
+    /// default, up to `2`). Beautiful preset only.
+    pub ambient_occlusion: f32,
 }
 
 impl Default for Environment {
@@ -114,6 +118,7 @@ impl Default for Environment {
             sun_glow: 1.0,
             clouds: 0.0,
             lens_flare: 1.0,
+            ambient_occlusion: 1.0,
         }
     }
 }

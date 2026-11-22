@@ -63,16 +63,22 @@ Shadow Softness (scene, Python, Oberon Graphics tab and Inspector).
 Measured cost: High +0–7%, Ultra within noise. (The 8-tap rotated Poisson
 was too slow on High, at +15–24%.)
 
-### A2. Shadows II: Beautiful's contact-hardening shadows and ambient occlusion ⬜ M
-- PCSS (`shadow_soft`): shadows are sharp where an object touches the
-  ground and soften with distance, scaled by the sun's size.
-- SSAO at half resolution from the depth target `post.rs` already has
-  (normals rebuilt from depth), blurred, applied to ambient light only.
-- Screen-space contact shadows: a short ray toward the sun for the small
-  gaps the shadow map misses.
-- Graphics tab: Ambient Occlusion strength.
-- **Done when:** objects look grounded (dark creases under coins, crates
-  and trees) on Beautiful, and nothing changes on High.
+### A2. Shadows II: Beautiful's contact-hardening shadows and ambient occlusion ✅ M
+Done. PCSS in `sample_cascade`: an 8-read blocker search (sunlit pixels
+stop there), then 12 bilinear taps over a penumbra of tan(sun radius) ×
+softness × caster distance, 1–16 texels. A depth prepass of the opaque
+meshes into its own target (`ssao.rs`; the scene keeps its own depth, so
+see-through meshes draw as before) feeds one half-resolution pass:
+12-sample hemisphere AO over 1.5 m (normals from depth, squared) plus a
+12-step, 0.45 m contact ray toward the sun, and the view depth. Two
+depth-aware 7-tap blurs, then a depth-aware upsample in `fs_beautiful`.
+AO dims ambient only; contact shadows multiply the sun shadow.
+`Environment.ambient_occlusion` (0–2, default 1) in scene files, Python
+and Oberon (Graphics tab and Inspector, "Occlusion"). Beautiful meshes
+bind a separate light layout (binding 5), so High's pipelines are
+untouched; a GPU test checks the crease darkens on Beautiful and High is
+byte-identical at any strength. Measured cost: Coin Run about 2× faster
+(the blocker search skips filtering in sun), FPS about +12%.
 
 ### A3. Placeable point lights and spotlights ⬜ S
 The light array and shading from A0c are already in place.
@@ -383,7 +389,7 @@ per effort. Reorder any time by telling me.
 | 3 | A0c Glowing objects light surroundings | – | ✅ |
 | 4 | A4 Point light shadows (glowing objects) | M | ✅ |
 | 5 | A1 Crisp shadows on High/Ultra | M | ✅ |
-| 6 | A2 Contact-hardening shadows + AO | M | ⬜ |
+| 6 | A2 Contact-hardening shadows + AO | M | ✅ |
 | 7 | A3 Point lights and spotlights (+ spot shadows) | S | ⬜ |
 | 8 | A5 Water ripples and wakes | M | ⬜ |
 | 9 | A6 Particles | L | ⬜ |

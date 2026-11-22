@@ -23,6 +23,7 @@ mod post;
 mod quality;
 mod renderer;
 mod shadow;
+mod ssao;
 pub mod text;
 mod texture;
 mod water;

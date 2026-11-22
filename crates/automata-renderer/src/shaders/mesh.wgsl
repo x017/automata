@@ -194,15 +194,52 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(finish_forward(apply_fog(lit, in.world_position)), s.base.a);
 }
 
-// Beautiful: GGX sun with soft cascaded shadows, sky reflections and
-// sun-scattering fog, written as HDR for the post chain.
+// Beautiful's screen-space occlusion (ssao.wgsl), half resolution: r
+// ambient occlusion, g contact shadow, b view depth.
+@group(3) @binding(5) var occlusion_map: texture_2d<f32>;
+
+// The occlusion at full-resolution pixel `frag`: the four nearest
+// half-resolution texels, bilinearly weighted but leaving out those on
+// another surface (by view depth), so it doesn't bleed across edges.
+fn screen_occlusion(frag: vec2<f32>, world: vec3<f32>) -> vec2<f32> {
+    let dims = vec2<i32>(textureDimensions(occlusion_map));
+    let depth = dot(world - camera.view_pos.xyz, light.camera_forward.xyz);
+    // Texel i was computed at full-resolution pixel 2i.
+    let t = (frag - vec2<f32>(0.5)) * 0.5;
+    let base = vec2<i32>(floor(t));
+    let f = t - floor(t);
+    let tolerance = 0.03 * depth + 0.05;
+    var sum = vec2<f32>(0.0);
+    var total = 0.0;
+    for (var k = 0; k < 4; k = k + 1) {
+        let o = vec2<i32>(k & 1, k >> 1u);
+        let s = textureLoad(occlusion_map, clamp(base + o, vec2<i32>(0), dims - 1), 0);
+        let bilinear = select(1.0 - f.x, f.x, o.x == 1) * select(1.0 - f.y, f.y, o.y == 1);
+        let gap = abs(s.b - depth);
+        let w = (bilinear + 1e-3) * f32(gap < tolerance);
+        sum += s.rg * w;
+        total += w;
+    }
+    if total <= 0.0 {
+        // No texel on this surface: see-through meshes (not in the depth
+        // prepass) and slivers too thin for half resolution stay open.
+        return vec2<f32>(1.0);
+    }
+    return sum / total;
+}
+
+// Beautiful: GGX sun with contact-hardening cascaded shadows, ambient
+// occlusion, sky reflections and sun-scattering fog, written as HDR for
+// the post chain.
 @fragment
 fn fs_beautiful(in: VertexOutput) -> @location(0) vec4<f32> {
     let s = surface(in);
-    let shadow = shadow_soft(in.world_position, s.n, s.l, in.clip_position.xy);
+    let occ = screen_occlusion(in.clip_position.xy, in.world_position);
+    let shadow = shadow_soft(in.world_position, s.n, s.l, in.clip_position.xy) * occ.y;
     let albedo = s.base.rgb * (1.0 - s.metallic);
     let f0 = mix(vec3<f32>(0.04), s.base.rgb, s.metallic);
-    let lit = shade_pbr(albedo, s.n, s.v, s.l, shadow, s.roughness, f0)
+    let ao = pow(max(occ.x, 1e-3), light.point_shadow.w);
+    let lit = shade_pbr(albedo, s.n, s.v, s.l, shadow, s.roughness, f0, ao)
         + points_pbr(s.p, albedo, s.n, s.v, s.roughness, f0)
         + s.emissive;
     return vec4<f32>(apply_fog_scatter(lit, in.world_position), s.base.a);

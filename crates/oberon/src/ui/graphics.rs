@@ -388,6 +388,15 @@ impl Ui {
         y = self.sky_rows(canvas, x, y, w, env);
         y = self.choice_row(canvas, x, y, w, env, "Tone Mapping", Choice::Tonemapping);
         y = self.float_row(canvas, x, y, w, env, "Exposure", Field::EnvExposure);
+        y = self.float_row(
+            canvas,
+            x,
+            y,
+            w,
+            env,
+            "Occlusion",
+            Field::EnvAmbientOcclusion,
+        );
         y = self.flag_row(canvas, x, y, w, env, "Fog", Flag::EnvFog);
         if env.data.environment.is_some_and(|e| e.fog) {
             y = self.color_row(canvas, x, y, w, env, "Fog Color", ColorTarget::EnvFog);

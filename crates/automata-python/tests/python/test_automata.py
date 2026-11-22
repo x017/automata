@@ -1079,6 +1079,8 @@ def test_environment_sky_and_sun():
     env = at.Environment(sky=True, zenith_color=(0.1, 0.2, 0.6), sun_size=3.0, clouds=0.5, lens_flare=0.0)
     assert env.zenith_color == pytest.approx((0.1, 0.2, 0.6))
     assert (env.sun_size, env.clouds, env.lens_flare) == pytest.approx((3.0, 0.5, 0.0))
+    assert env.ambient_occlusion == pytest.approx(1.0)
+    assert at.Environment(ambient_occlusion=0.4).ambient_occlusion == pytest.approx(0.4)
     assert env.sun_glow == pytest.approx(1.0)
     text = at.Scene().add(at.Entity("look").add(env)).to_ron()
     assert "sky: true" in text and "clouds: 0.5" in text

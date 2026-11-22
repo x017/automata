@@ -132,7 +132,11 @@ the whole scene (or the view, if that's smaller). Shadowed regions keep
 the ambient term.</li><li><strong><code>shadow_distance</code></strong> (metres, default 120): how far shadows reach.
 Shorter is sharper: a tight indoor or top-down game can use 30–50.</li><li><strong><code>shadow_softness</code></strong> (default 1): how soft shadow edges are. 0 is as
 sharp as the shadow map allows, higher values blur the edge (Beautiful
-shows the most difference; High and Ultra stay crisp).</li></ul>
+shows the most difference; High and Ultra stay crisp). On Beautiful,
+shadows are sharp where an object touches the ground and soften with
+the distance to it, as much as the sun's size (<code>sun_size</code>) times the
+softness says: a pole's shadow starts crisp at its foot and blurs
+toward its tip.</li></ul>
 <h2 id="environment">Environment<a class="anchor" href="#environment" aria-label="Link to this section">#</a></h2>
 <p>The <code>Environment</code> component sets the look of the whole frame:</p>
 <ul><li>hemisphere ambient light (sky above, ground below)</li><li>the background colour</li><li>exposure and tone mapping</li><li>distance fog</li></ul>
@@ -157,6 +161,7 @@ shows the most difference; High and Ultra stay crisp).</li></ul>
             sun_glow=<span class="tok-n">1.0</span>,                    <span class="tok-c"># halo around the sun</span>
             clouds=<span class="tok-n">0.35</span>,                     <span class="tok-c"># 0 clear .. 1 overcast</span>
             lens_flare=<span class="tok-n">1.0</span>,                  <span class="tok-c"># Beautiful only</span>
+            ambient_occlusion=<span class="tok-n">1.0</span>,           <span class="tok-c"># Beautiful only: 0 off .. 2</span>
         )
     )
 )</code></pre></div>
@@ -171,7 +176,11 @@ seam. Move the sun (or drag <strong>Time of Day</strong> in Oberon) and the sky
 follows.</p></li><li><p><strong>Lens flare</strong> (<code>BEAUTIFUL</code> only): looking toward the sun adds glare,
 a starburst, a row of coloured ghosts and a faint halo ring. It fades
 out when the sun leaves the screen, and anything in front of the sun,
-scenery or clouds, hides it.</p></li></ul>
+scenery or clouds, hides it.</p></li><li><p><strong>Ambient occlusion</strong> (<code>BEAUTIFUL</code> only): nearby geometry blocks part
+of the sky's light, so creases, inside corners and the ground around
+and under objects get darker. It only dims ambient light, so it shows
+most in shade. <code>ambient_occlusion</code> sets the strength: 0 off, 1 default,
+2 strong.</p></li></ul>
 <ul><li>Ambient is <code>DirectionalLight.ambient × mix(ground, sky)</code>, picked by how
 much a surface faces up. Keep the sky and ground colours near 1.0 in
 brightness and control strength with <code>ambient</code>.</li><li><strong>Sky-tinted shade:</strong> with the sky dome on, the ambient from above leans
@@ -192,14 +201,22 @@ as clean minimalism. Finer-grained knobs (render scale, MSAA) build on this
 same setting as the renderer grows.</p>
 <h3 id="beautiful">Beautiful<a class="anchor" href="#beautiful" aria-label="Link to this section">#</a></h3>
 <p><code>BEAUTIFUL</code> is the showcase preset. On top of what <code>HIGH</code> does it adds:</p>
-<ul><li><strong>Soft cascaded shadows.</strong> Four cascades split the view so shadows stay
-sharp up close and still reach the horizon. Edges get a soft penumbra.</li><li><strong>Physically based light</strong> (GGX specular) and fog that glows toward the
+<ul><li><strong>Contact-hardening shadows.</strong> Four cascades split the view so shadows
+stay sharp up close and still reach the horizon. Each shadow is sharp
+where the object touches the ground and softens with the distance to
+it, scaled by the sun's size.</li><li><strong>Ambient occlusion and contact shadows.</strong> A half-resolution
+screen-space pass darkens creases and the ground around objects
+(ambient light only; <code>Environment.ambient_occlusion</code> sets how much), and
+a short ray toward the sun catches small gaps the shadow map is too
+coarse for, like a coin resting on the ground.</li><li><strong>Physically based light</strong> (GGX specular) and fog that glows toward the
 sun.</li><li><strong>HDR with bloom</strong>: bright highlights (sun glints on water, white
 surfaces in full sun) bleed softly. Then the tone mapper runs, and FXAA
 smooths the edges.</li><li><strong>Refractive water</strong> (see below).</li><li><strong>Lens flare</strong> when the camera looks toward the sun (with <code>sky=True</code>).</li></ul>
 <p>It's built to stay cheap. Each pixel filters only one shadow cascade (with
-dithering where cascades meet), bloom is a small dual-filter chain at half
-resolution and below, and nothing on the other presets got slower. It
+dithering where cascades meet), and sunlit pixels skip shadow filtering
+after a quick search finds nothing between them and the sun. Ambient
+occlusion and bloom run at half resolution and below. Nothing on the other
+presets got slower. It
 still costs more than <code>HIGH</code>. Offer it as a setting rather than the
 default for games that should run on low-end laptops.</p>
 <h2 id="water">Water<a class="anchor" href="#water" aria-label="Link to this section">#</a></h2>

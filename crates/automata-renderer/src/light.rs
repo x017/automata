@@ -335,7 +335,7 @@ pub(crate) struct LightUniform {
     /// The shadowed point lights' face view-projections, six per slot.
     pub point_faces: [[f32; 16]; MAX_POINT_SHADOWS * 6],
     /// x: one shadow texel in UV, y: soft filtering (Beautiful),
-    /// z: tan(face FOV / 2).
+    /// z: tan(face FOV / 2), w: ambient occlusion strength (Beautiful).
     pub point_shadow: [f32; 4],
 }
 
@@ -370,7 +370,12 @@ impl LightUniform {
             1.0 / point_map_size.max(1) as f32,
             f32::from(u8::from(frame.beautiful)),
             (POINT_SHADOW_FOV_DEGREES * 0.5).to_radians().tan(),
-            0.0,
+            // Ambient occlusion strength (Beautiful only).
+            if frame.beautiful {
+                env.ambient_occlusion.clamp(0.0, 2.0)
+            } else {
+                0.0
+            },
         ];
         let direction = sun.normalized_direction();
         let density = if env.fog {

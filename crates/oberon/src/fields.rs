@@ -71,6 +71,8 @@ pub enum Field {
     EnvClouds,
     /// Lens flare strength.
     EnvLensFlare,
+    /// Ambient occlusion strength (Beautiful).
+    EnvAmbientOcclusion,
     /// Water surface width (X) and length (Z): index 0..2.
     WaterSize(u8),
     /// Water deep color channel 0..3.
@@ -224,6 +226,7 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::EnvSunGlow => data.environment?.sun_glow,
         F::EnvClouds => data.environment?.clouds,
         F::EnvLensFlare => data.environment?.lens_flare,
+        F::EnvAmbientOcclusion => data.environment?.ambient_occlusion,
         F::EnvFogDensity => data.environment?.fog_density,
         F::EnvFogStart => data.environment?.fog_start,
         F::WaterSize(i) => data.water?.size[usize::from(i.min(1))],
@@ -306,7 +309,7 @@ pub fn range(field: Field) -> (f32, f32) {
         F::EnvExposure => (0.0, 16.0),
         F::MeshEmissiveStrength => (0.0, 100.0),
         F::MeshGlowLight => (0.0, 10.0),
-        F::EnvFogDensity => (0.0, 2.0),
+        F::EnvFogDensity | F::EnvAmbientOcclusion => (0.0, 2.0),
         F::EnvFogStart => (0.0, 100_000.0),
         F::MeshSize | F::ColliderRadius | F::ColliderExtents(_) | F::ColliderHalfHeight => {
             (0.001, 10_000.0)
@@ -352,6 +355,7 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::EnvClouds
         | F::EnvSunGlow
         | F::EnvLensFlare
+        | F::EnvAmbientOcclusion
         | F::WaterDeep(_)
         | F::WaterShallow(_)
         | F::WaterFoam
@@ -464,6 +468,7 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
         | F::EnvSunGlow
         | F::EnvClouds
         | F::EnvLensFlare
+        | F::EnvAmbientOcclusion
         | F::EnvFogDensity
         | F::EnvFogStart => match &mut data.environment {
             Some(env) => match field {
@@ -477,6 +482,7 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
                 F::EnvSunGlow => env.sun_glow = v,
                 F::EnvClouds => env.clouds = v,
                 F::EnvLensFlare => env.lens_flare = v,
+                F::EnvAmbientOcclusion => env.ambient_occlusion = v,
                 F::EnvFogDensity => env.fog_density = v,
                 _ => env.fog_start = v,
             },

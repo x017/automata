@@ -318,6 +318,7 @@ impl PyEnvironment {
         sun_glow=1.0,
         clouds=0.0,
         lens_flare=1.0,
+        ambient_occlusion=1.0,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -336,6 +337,7 @@ impl PyEnvironment {
         sun_glow: f32,
         clouds: f32,
         lens_flare: f32,
+        ambient_occlusion: f32,
     ) -> PyResult<Self> {
         let rgb = |c: (f32, f32, f32)| [c.0, c.1, c.2];
         Ok(Self {
@@ -355,6 +357,7 @@ impl PyEnvironment {
                 sun_glow,
                 clouds,
                 lens_flare,
+                ambient_occlusion,
             },
         })
     }
@@ -475,6 +478,13 @@ impl PyEnvironment {
     #[getter]
     fn lens_flare(&self) -> f32 {
         self.inner.lens_flare
+    }
+
+    /// Ambient occlusion strength: how much creases and the ground under
+    /// objects darken (Beautiful graphics; ``0`` = off).
+    #[getter]
+    fn ambient_occlusion(&self) -> f32 {
+        self.inner.ambient_occlusion
     }
 
     fn __repr__(&self) -> String {

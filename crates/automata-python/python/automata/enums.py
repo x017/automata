@@ -167,8 +167,8 @@ class GraphicsQuality(str, Enum):
     ``LOW`` disables shadows; ``MEDIUM`` uses one 1024 px shadow map, and
     ``HIGH``/``ULTRA`` split crisp shadows into 2/3 cascades of 2048 px
     (sharp near the camera, reaching far). ``BEAUTIFUL`` renders in HDR
-    with physically based lighting, soft cascaded shadows, refracting
-    water with foam, bloom and FXAA.
+    with physically based lighting, contact-hardening cascaded shadows,
+    ambient occlusion, refracting water with foam, bloom and FXAA.
     """
 
     LOW = "low"

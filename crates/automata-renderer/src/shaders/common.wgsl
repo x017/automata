@@ -46,7 +46,7 @@ struct LightUniform {
     points: array<PointLightData, MAX_POINT_LIGHTS>,
     // Six views (+X, -X, +Y, -Y, +Z, -Z) per shadowed point light.
     point_faces: array<mat4x4<f32>, 24>,
-    point_shadow: vec4<f32>,   // x: texel (uv), y: soft (Beautiful), z: tan(face fov / 2)
+    point_shadow: vec4<f32>,   // x: texel (uv), y: soft (Beautiful), z: tan(face fov / 2), w: AO strength
 };
 @group(3) @binding(0) var<uniform> light: LightUniform;
 @group(3) @binding(1) var shadow_map: texture_depth_2d_array;
@@ -66,6 +66,10 @@ fn ign(p: vec2<f32>) -> f32 {
 }
 
 const SOFT_TAPS: i32 = 12;
+// PCSS blocker search reads, and how far a caster can be from the surface
+// it shadows before the penumbra stops widening (m).
+const PCSS_SEARCH_TAPS: i32 = 8;
+const PCSS_MAX_CASTER_DISTANCE: f32 = 10.0;
 
 // 16-point Poisson disk in the unit circle (the soft filter uses the first
 // SOFT_TAPS, which cover it evenly).
@@ -158,9 +162,16 @@ fn shadow_forward(world: vec3<f32>, n: vec3<f32>, l: vec3<f32>) -> f32 {
     return lit;
 }
 
-// Beautiful: sunlight reaching `world` through cascade `i`, filtered by a
-// rotated Poisson disk whose radius is a fixed width in the world (a
-// constant penumbra across cascades), each tap a bilinear 2x2 compare.
+// Beautiful: sunlight reaching `world` through cascade `i`, with
+// contact-hardening penumbrae (PCSS): shadows start sharp where an object
+// meets the ground and widen with the distance to whatever casts them, as
+// much as the sun's apparent size (and the sun's softness) says.
+//
+// 1. Blocker search: 8 depth reads over the widest penumbra find the
+//    average depth of whatever lies between the surface and the sun (none:
+//    fully lit, done).
+// 2. Filter: 12 bilinear 2x2 compares on a per-pixel rotated Poisson disk
+//    as wide as that blocker distance casts the penumbra.
 fn sample_cascade(i: i32, world: vec3<f32>, n: vec3<f32>, ndotl: f32, frag: vec2<f32>) -> f32 {
     let c = cascade_coords(i, world, n, ndotl);
     if c.x < 0.0 {
@@ -169,13 +180,37 @@ fn sample_cascade(i: i32, world: vec3<f32>, n: vec3<f32>, ndotl: f32, frag: vec2
     let uv = c.xy;
     let texel = light.params.y;
     let width = light.cascade_texel[i] / texel; // the cascade's width (m)
-    let radius = clamp(light.direction.w / width, 1.5 * texel, 5.0 * texel);
+    let depth_range = light.cascade_texel[i] / max(light.cascade_bias[i], 1e-9); // (m)
+    // How fast the penumbra grows per meter between caster and receiver:
+    // tan(sun radius), scaled by the sun's softness (1 = as drawn).
+    let cos_r = clamp(light.sky_sun.x, 0.5, 1.0);
+    let spread = sqrt(1.0 - cos_r * cos_r) / cos_r * light.direction.w * 20.0;
+    let max_radius = clamp(spread * PCSS_MAX_CASTER_DISTANCE / width, 2.0 * texel, 16.0 * texel);
     let angle = ign(frag) * 2.0 * PI;
     let rot = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
     let depth = c.z;
+
+    let dims = vec2<f32>(textureDimensions(shadow_map));
+    var blockers = 0.0;
+    var blocker_depth = 0.0;
+    for (var k = 0; k < PCSS_SEARCH_TAPS; k = k + 1) {
+        let p = uv + rot * POISSON[k * 2 + 1] * max_radius;
+        let texel_pos = clamp(vec2<i32>(p * dims), vec2<i32>(0), vec2<i32>(dims) - 1);
+        let d = textureLoad(shadow_map, texel_pos, i, 0);
+        if d < depth {
+            blockers += 1.0;
+            blocker_depth += d;
+        }
+    }
+    if blockers == 0.0 {
+        return 1.0;
+    }
+    let caster_distance = max(depth - blocker_depth / blockers, 0.0) * depth_range;
+    let radius = clamp(spread * caster_distance / width, texel, max_radius);
+
     var sum = 0.0;
-    // 12 taps: each is a bilinear 2x2 compare, and the per-pixel rotation
-    // turns what banding remains into fine noise FXAA smooths.
+    // Each tap is a bilinear 2x2 compare, and the per-pixel rotation turns
+    // what banding remains into fine noise FXAA smooths.
     for (var k = 0; k < SOFT_TAPS; k = k + 1) {
         let offset = rot * POISSON[k] * radius;
         sum = sum + textureSampleCompareLevel(shadow_map, shadow_sampler, uv + offset, i, depth);
@@ -482,6 +517,7 @@ fn shade_pbr(
     shadow: f32,
     roughness: f32,
     f0: vec3<f32>,
+    ao: f32,
 ) -> vec3<f32> {
     let ndotv = max(dot(n, v), 1e-4);
     let direct = brdf_direct(albedo, n, v, l, roughness, f0) * light.color_ambient.rgb * shadow;
@@ -490,9 +526,10 @@ fn shade_pbr(
     // by the environment BRDF so rough surfaces don't turn into mirrors.
     let fr = env_brdf(f0, roughness, ndotv);
     let env = sky_radiance(reflect(-v, n));
-    // Reflections of the sky are partly blocked in shadowed creases.
-    let occlusion = mix(0.6, 1.0, shadow);
-    let ambient = (albedo * hemi(n) * (vec3<f32>(1.0) - fr) + env * fr * occlusion)
+    // Reflections of the sky are partly blocked in shadowed creases, and
+    // all ambient light by nearby geometry (`ao`, 1 = open).
+    let occlusion = mix(0.6, 1.0, shadow) * ao;
+    let ambient = (albedo * hemi(n) * (vec3<f32>(1.0) - fr) * ao + env * fr * occlusion)
         * light.color_ambient.a;
     return direct + ambient;
 }
