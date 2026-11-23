@@ -68,8 +68,8 @@ pub struct PyInput {
     pub(crate) buttons_pressed: HashSet<&'static str>,
     pub(crate) buttons_just_pressed: HashSet<&'static str>,
     pub(crate) buttons_just_released: HashSet<&'static str>,
-    /// Cursor position in logical pixels, or `None` when the cursor is
-    /// outside the window (or in headless mode).
+    /// Cursor position in physical pixels from the window's top-left, or
+    /// `None` when the cursor is outside the window (or in headless mode).
     #[pyo3(get)]
     pub cursor: Option<(f64, f64)>,
     /// Scroll wheel delta accumulated during the frame.

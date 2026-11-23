@@ -480,6 +480,7 @@ class Runner:
             mouse.get("buttons", []),
             mouse.get("delta", (0.0, 0.0)),
             mouse.get("locked", False),
+            mouse.get("pos"),
         )
         # Mesh geometry arrives once per session, keyed for "mesh" shapes.
         for key, verts, indices in msg.get("meshes", []):

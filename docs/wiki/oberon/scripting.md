@@ -134,6 +134,8 @@ for `entity` and `ctx`.
 | `ctx.input.mouse_pressed("left")` | Mouse button held (`"left"`, `"right"`, `"middle"`); also `mouse_just_pressed` and `mouse_just_released` |
 | `ctx.input.lock_mouse(True)` | Hide and capture the cursor for mouse look. `False` frees it, and Stop always frees it |
 | `ctx.input.mouse_locked` | Whether the cursor is captured |
+| `ctx.input.mouse_position` | `(x, y)` cursor position in screen pixels from the top-left (like `ctx.hud`), or `None` when the cursor is outside the game view or captured |
+| `ctx.input.mouse_over_ui` | Whether the cursor is over [`ctx.ui`](#game-ui) |
 | `ctx.physics.grounded(entity)` | Same as `entity.grounded` |
 | `ctx.physics.raycast(origin, direction, max_distance=100, ignore=None)` | The first collider along a ray, or `None`. Returns a `Hit` with `.entity`, `.point`, `.normal` and `.distance`. `ignore` skips one entity, usually the caster. Sensors are skipped |
 | `ctx.physics.water_height(x, z)` | Height of the water surface at a world point, waves included, or `None` where there's no water |
@@ -146,6 +148,7 @@ for `entity` and `ctx`.
 | `ctx.hud.rect(x, y, width, height, color)` | Draw a filled rectangle this frame, centred on `(x, y)` |
 | `ctx.hud.text("100%", x, y, size=24, color=(1,1,1,1), align="left", shadow=None, outline=None)` | Draw text this frame with the built-in font (see below) |
 | `ctx.hud.size`, `ctx.hud.center` | The game view's size in pixels, and its centre |
+| `ctx.ui.button("Play", x, y)` and friends | Buttons, labels, toggles, sliders, progress bars, panels and images ([Game UI](#game-ui)) |
 | `ctx.scene["Name"]` | Another entity by name (raises `KeyError` if missing) |
 | `ctx.scene.find("Name")` | The same, but returns `None` if missing |
 | `ctx.scene.by_id(id)` | An entity by id (as in `hit.entity.id`), or `None` |
@@ -189,6 +192,74 @@ will cover.
 `"right"`, `"up"`, `"down"`), and `"shift"` / `"ctrl"` / `"alt"`. The last
 three match either side of the keyboard; use `"shift_left"` or
 `"shift_right"` (and likewise for ctrl and alt) to require one side.
+
+## Game UI
+
+`ctx.ui` draws menus and HUD widgets over the game: buttons, labels,
+toggles, sliders, progress bars, panels and images. Call them in `update`
+every frame they should show (immediate mode). There are no widget objects
+to create or remove: whatever you call this frame is the UI.
+
+![A pause menu with Resume, Settings and Reset kicks buttons over a dusk scene of three shapes on pedestals](../../assets/ui/pause_menu.jpg)
+
+```python
+def update(entity, ctx):
+    ui = ctx.ui
+    s = entity.state
+    ui.panel(20, 20, 260, 220, title="Options")
+    if ui.button("Restart", 40, 70, 220, 44):
+        ctx.publish("restart")
+    s["music"] = ui.toggle("Music", s.get("music", True), 40, 130)
+    ctx.settings.volume = ui.slider(ctx.settings.volume, 40, 180, 220, step=0.05)
+    ui.progress(s.get("health", 80), 20, 260, 260, max=100, text=True)
+```
+
+| Widget | What it does |
+|---|---|
+| `ui.button(text, x, y, width=160, height=44, *, id=None, enabled=True, size=None)` | Returns `True` on the frame it's clicked: pressed and released on it. Sliding off before letting go cancels |
+| `ui.toggle(text, value, x, y, *, id=None, enabled=True, size=None)` | A check box with its label. Returns the new value, flipped when the box or the text is clicked |
+| `ui.slider(value, x, y, width=200, height=24, *, min=0, max=1, step=None, id=None, enabled=True)` | Drag the knob, or press anywhere on the track. Returns the new value, rounded to `step` if given |
+| `ui.progress(value, x, y, width=200, height=18, *, max=1, color=None, text=None)` | A bar filled to `value / max`. `text` is drawn on it, and `True` shows the percentage |
+| `ui.label(text, x, y, size=None, color=None, align="left", shadow=None)` | Text with its top at `y`. `align` says where `x` is, like `ctx.hud.text` |
+| `ui.panel(x, y, width, height, *, color=None, title=None)` | A background box. Clicks on it belong to the UI too |
+| `ui.image(path, x, y, width, height, color=(1,1,1,1))` | An image stretched over the box |
+| `ui.mouse_over` | The same as `ctx.input.mouse_over_ui` |
+| `ui.theme` | Colours and the default text size (below) |
+
+Rules that apply to every widget:
+- **Position:** `x, y` is the **top-left** corner in screen pixels, unlike
+  `ctx.hud` shapes, which are placed by their centre. Use `ctx.hud.size`
+  to lay out against the screen edges.
+- **States:** buttons show hover and pressed states.
+  `enabled=False` dims a widget and ignores clicks on it.
+- **Clicks stay with the UI:** a press that starts on a widget or a panel
+  is the UI's until it's released. `ctx.input.mouse_pressed`,
+  `mouse_just_pressed` and actions bound to mouse buttons don't see it, so
+  a click on a button never also fires the gun. The UI decides from where
+  things were drawn the frame before, so a widget takes clicks from the
+  second frame it's shown.
+- **Identity:** widgets are told apart by their text and the entity whose
+  script draws them. Give `id=` when the text changes (`f"Reset ({n})"`)
+  or two widgets share the same text.
+- **Touch:** in the exported game, the first finger down on a touch screen
+  acts as the left mouse button wherever it touches. Taps press buttons and
+  drags move sliders.
+
+`ctx.ui.theme` holds the colours. The default is monochrome, like Oberon:
+paper-white text and fills on dark, translucent panels. Colours are RGBA
+from 0 to 1, as a paint program shows them. Change any of them at any time:
+
+```python
+ctx.ui.theme.accent = (1.0, 0.75, 0.2, 1.0)   # fills: sliders, bars, toggles
+ctx.ui.theme.button = (0.1, 0.12, 0.2, 0.95)  # also hover, press, panel, text, text_dim, track, border
+ctx.ui.theme.text_size = 24
+```
+
+`ctx.ui` works the same way in Play, under `run_scene` and in exported games.
+`examples/oberon/pause_menu` is a complete pause menu: a settings screen
+that changes `ctx.settings` (volume, graphics preset and a toggle of its
+own), a HUD with a spin meter and a Menu button, and shapes that turn
+faster when you click in the game but not when you click the UI.
 
 ## Keys
 

@@ -1499,6 +1499,7 @@ impl EditorApp {
                  restart the scripts.",
             );
         }
+        let cursor_in_view = !self.lock_active && self.pointer_in_view() && self.ui.scene_visible();
         let (Some(play), Some(bridge)) = (&self.play, &mut self.bridge) else {
             return;
         };
@@ -1530,6 +1531,13 @@ impl EditorApp {
             dpi * self.ui.prefs.ui_scale.clamp(0.5, 3.0)
         };
         let view = self.ui.viewport_rect();
+        // The cursor in game pixels: the HUD is drawn at `view × s`.
+        if cursor_in_view {
+            frame.mouse_pos = Some([
+                self.input.cursor.0 - view.x * s,
+                self.input.cursor.1 - view.y * s,
+            ]);
+        }
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         {
             frame.screen = [

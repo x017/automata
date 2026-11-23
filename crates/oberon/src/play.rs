@@ -1303,6 +1303,88 @@ pub(crate) mod tests {
         );
     }
 
+    /// `ctx.ui` through the real runner: the cursor Oberon sends lands on
+    /// a button, the click reaches the script and not the game, and the
+    /// button is drawn into the HUD (skipped without python3).
+    #[test]
+    fn script_ui_buttons_click_through_the_bridge() {
+        use crate::bridge::{BridgeMsg, ScriptBridge};
+        use automata_core::AttributeValue as A;
+        let python = crate::bridge::default_python();
+        if std::process::Command::new(python)
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("oberon_play_ui_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("menu.py"),
+            "def update(entity, ctx):\n\
+             \x20   a = entity.attributes\n\
+             \x20   if ctx.ui.button('Play', 100, 100, 200, 50):\n\
+             \x20       a['clicks'] = a.get('clicks', 0) + 1\n\
+             \x20   if ctx.input.mouse_just_pressed('left'):\n\
+             \x20       a['fired'] = a.get('fired', 0) + 1\n\
+             \x20   a['pos'] = str(ctx.input.mouse_position)\n",
+        )
+        .unwrap();
+        let mut doc = Document::new();
+        doc.path = Some(dir.join("level.ron"));
+        let i = doc.add_entity_named("Menu");
+        let menu = doc.entities[i].id;
+        doc.modify(menu, false, |d| {
+            d.script = Some(automata_core::Script {
+                path: "menu.py".into(),
+            });
+        });
+        let mut play = PlaySession::start(&doc);
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        let mut errors = Vec::new();
+        let mut sent = 0;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while bridge.answered < 8 && std::time::Instant::now() < deadline {
+            for msg in bridge.poll() {
+                match msg {
+                    BridgeMsg::Frame(w) => play.apply_frame(&w),
+                    BridgeMsg::Error { msg, traceback, .. } => {
+                        errors.push(format!("{msg}\n{traceback}"));
+                    }
+                    _ => {}
+                }
+            }
+            let mut input = play.frame_input();
+            input.screen = [800, 600];
+            input.mouse_pos = Some([150.0, 120.0]);
+            // Held on frames 3 and 4: one press, one release.
+            if (3..5).contains(&sent) {
+                input.mouse_buttons = vec!["left"];
+            }
+            let states = play.script_states(|rel| doc.resolve(rel));
+            if bridge.send_frame_with(TIMESTEP, play.elapsed, &[], &states, &input) {
+                sent += 1;
+                play.update(TIMESTEP);
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(errors.is_empty(), "{errors:?}");
+        let e = play.doc.entities.iter().find(|e| e.id == menu).unwrap();
+        let attr = |k: &str| e.data.attributes.get(k).cloned();
+        assert_eq!(attr("clicks"), Some(A::Int(1)));
+        assert_eq!(attr("fired"), None, "the game never saw the click");
+        assert_eq!(attr("pos"), Some(A::Text("(150.0, 120.0)".into())));
+        assert!(
+            play.hud.len() >= 2,
+            "the button's box and text: {:?}",
+            play.hud
+        );
+    }
+
     /// FPS building blocks through the real runner: raycasts against the
     /// session's colliders, mouse input, cursor lock, the HUD, Audio Source
     /// playback and one-shots, and despawning (skipped without python3).

@@ -227,6 +227,13 @@ engine (wgpu sprites).
    panels, images, toggles, sliders. Hover/pressed states. Clicks on UI are
    consumed, so pressing a button doesn't also fire the blaster. Mouse and
    touch (Android).
+
+   ✅ **Done** (ROADMAP D1). `ctx.ui` is in the shared script API.
+   - A press that starts on a widget or panel is held back from
+     `ctx.input`.
+   - The engine's input turns the first finger on a touch screen into the
+     left button, which the Android player (E1) will pick up.
+   - `examples/oberon/pause_menu` is the demo.
 3. **Custom fonts:** `.ttf` / `.otf` from the project folder
    (`font="fonts/Pixel.ttf"`). They appear in the Assets tab, and export
    checks for missing fonts.

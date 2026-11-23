@@ -203,6 +203,26 @@ def test_volume_and_graphics_apply_and_persist(tmp_path):
         host2.ctx.settings.graphics = "ultr"
 
 
+def test_assigning_the_same_settings_every_frame_saves_once(tmp_path):
+    # The immediate-mode pattern: settings.volume = ctx.ui.slider(...) each frame.
+    host, _, recs = _host(tmp_path, source=(
+        "def update(entity, ctx):\n"
+        "    ctx.settings.volume = 0.5\n"
+        "    ctx.settings.graphics = 'low'\n"
+        "    ctx.settings['subtitles'] = True\n"
+    ))
+    assert _frame(host, recs).settings == {"volume": 0.5, "graphics": "low"}
+    path = tmp_path / "saves" / "settings.json"
+    assert json.loads(path.read_text())["values"] == {"subtitles": True}
+    path.unlink()
+    for _ in range(5):
+        assert _frame(host, recs).settings is None
+    assert not path.exists(), "nothing changed, so nothing was written"
+    host.ctx.settings["subtitles"] = 1  # a different value, though == True
+    _frame(host, recs)
+    assert path.exists()
+
+
 def test_settings_reset_goes_back_to_the_start(tmp_path):
     host, _, recs = _host(tmp_path, gfx="ultra")
     settings = host.ctx.settings

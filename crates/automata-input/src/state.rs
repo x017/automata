@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 
 /// A snapshot of keyboard and mouse input for the current frame.
@@ -16,6 +16,10 @@ use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 /// Physical key positions ([`KeyCode`]) are used rather than logical
 /// characters, so `W` always means "the key in the W position" regardless of
 /// keyboard layout — the right default for game controls.
+///
+/// Touch screens drive the mouse: the first finger down is the left button,
+/// held where it touches, so menus and click-to-act games work on phones
+/// and tablets unchanged. Other fingers are ignored until it lifts.
 #[derive(Debug, Default)]
 pub struct InputState {
     pressed_keys: HashSet<KeyCode>,
@@ -28,6 +32,8 @@ pub struct InputState {
     scroll_delta: (f64, f64),
     mouse_delta: (f64, f64),
     modifiers: ModifiersState,
+    /// The finger acting as the left button, if one is down.
+    touch: Option<u64>,
 }
 
 impl InputState {
@@ -69,6 +75,14 @@ impl InputState {
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.handle_modifiers(modifiers.state());
             }
+            WindowEvent::Touch(Touch {
+                phase,
+                location,
+                id,
+                ..
+            }) => {
+                self.handle_touch(*id, *phase, location.x, location.y);
+            }
             _ => {}
         }
     }
@@ -109,6 +123,28 @@ impl InputState {
     /// window's top-left corner.
     pub fn handle_cursor_moved(&mut self, x: f64, y: f64) {
         self.cursor_position = Some((x, y));
+    }
+
+    /// Records a touch, in physical pixels like the cursor. The first
+    /// finger down presses the left button and moves the cursor until it
+    /// lifts; fingers that land while it's down are ignored.
+    pub fn handle_touch(&mut self, id: u64, phase: TouchPhase, x: f64, y: f64) {
+        match phase {
+            TouchPhase::Started if self.touch.is_none() => {
+                self.touch = Some(id);
+                self.cursor_position = Some((x, y));
+                self.handle_mouse_button(MouseButton::Left, ElementState::Pressed);
+            }
+            TouchPhase::Moved if self.touch == Some(id) => {
+                self.cursor_position = Some((x, y));
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled if self.touch == Some(id) => {
+                self.touch = None;
+                self.cursor_position = Some((x, y));
+                self.handle_mouse_button(MouseButton::Left, ElementState::Released);
+            }
+            _ => {}
+        }
     }
 
     /// Accumulates scroll input. Line-based and pixel-based deltas are added
@@ -303,6 +339,43 @@ mod tests {
             Some((10.0, 20.5)),
             "cursor position persists across frames"
         );
+    }
+
+    #[test]
+    fn the_first_finger_is_the_left_button_where_it_touches() {
+        let mut input = InputState::new();
+        input.handle_touch(7, TouchPhase::Started, 100.0, 50.0);
+        assert!(input.button_just_pressed(MouseButton::Left));
+        assert_eq!(input.cursor_position(), Some((100.0, 50.0)));
+        input.end_frame();
+
+        // A second finger neither moves the cursor nor lifts the button.
+        input.handle_touch(8, TouchPhase::Started, 400.0, 300.0);
+        input.handle_touch(8, TouchPhase::Ended, 400.0, 300.0);
+        input.handle_touch(7, TouchPhase::Moved, 120.0, 60.0);
+        assert!(input.button_pressed(MouseButton::Left));
+        assert!(!input.button_just_pressed(MouseButton::Left));
+        assert_eq!(input.cursor_position(), Some((120.0, 60.0)));
+
+        input.handle_touch(7, TouchPhase::Ended, 125.0, 62.0);
+        assert!(input.button_just_released(MouseButton::Left));
+        assert!(!input.button_pressed(MouseButton::Left));
+        input.end_frame();
+
+        // Once it lifts, the next finger down takes over.
+        input.handle_touch(8, TouchPhase::Started, 10.0, 10.0);
+        assert!(input.button_just_pressed(MouseButton::Left));
+        input.handle_touch(8, TouchPhase::Cancelled, 10.0, 10.0);
+        assert!(!input.button_pressed(MouseButton::Left));
+    }
+
+    #[test]
+    fn a_tap_inside_one_frame_still_reads_as_a_press_and_release() {
+        let mut input = InputState::new();
+        input.handle_touch(1, TouchPhase::Started, 5.0, 5.0);
+        input.handle_touch(1, TouchPhase::Ended, 5.0, 5.0);
+        assert!(input.button_just_pressed(MouseButton::Left));
+        assert!(input.button_just_released(MouseButton::Left));
     }
 
     #[test]

@@ -34,6 +34,8 @@ pub enum Ty {
     Dict,
     /// `entity.camera` / `ctx.camera`.
     Camera,
+    /// `ctx.ui`.
+    Ui,
 }
 
 /// What a string argument names.
@@ -115,6 +117,18 @@ const CONTEXT: &[Member] = &[
         Some(Ty::Camera),
     ),
     prop(
+        "hud",
+        "Hud",
+        "Shapes over the game for one frame: text, rect, image (centred); size, center.",
+        None,
+    ),
+    prop(
+        "ui",
+        "Ui",
+        "Game UI for this frame: button, toggle, slider, progress, label, panel, image.",
+        Some(Ty::Ui),
+    ),
+    prop(
         "save",
         "SaveData",
         "A dict kept between runs: ctx.save[\"coins\"] = 12. Slots: use(), slots().",
@@ -181,6 +195,111 @@ const INPUT: &[Member] = &[
         "any_just_pressed",
         "() -> str | None",
         "The key that went down this frame (for rebinding screens), or None.",
+        None,
+    ),
+    meth(
+        "mouse_pressed",
+        "(button: str = \"left\") -> bool",
+        "Whether a mouse button is held: \"left\", \"right\" or \"middle\".",
+        None,
+    ),
+    meth(
+        "mouse_just_pressed",
+        "(button: str = \"left\") -> bool",
+        "True only on the frame the button went down (not on ctx.ui).",
+        None,
+    ),
+    meth(
+        "mouse_just_released",
+        "(button: str = \"left\") -> bool",
+        "True only on the frame the button went up.",
+        None,
+    ),
+    prop(
+        "mouse_delta",
+        "(dx, dy)",
+        "Mouse movement in pixels since last frame; +y is down.",
+        None,
+    ),
+    prop(
+        "mouse_position",
+        "(x, y) | None",
+        "The cursor in screen pixels from the top-left; None outside the view or captured.",
+        None,
+    ),
+    prop(
+        "mouse_over_ui",
+        "bool",
+        "Whether the cursor is over ctx.ui (whose clicks the game doesn't see).",
+        None,
+    ),
+    meth(
+        "lock_mouse",
+        "(locked: bool = True) -> None",
+        "Hides and captures the cursor for mouse look; False frees it.",
+        None,
+    ),
+    prop(
+        "mouse_locked",
+        "bool",
+        "Whether the cursor is captured.",
+        None,
+    ),
+];
+
+const UI: &[Member] = &[
+    meth(
+        "button",
+        "(text, x, y, width=160, height=44, *, id=None, enabled=True, size=None) -> bool",
+        "A button at top-left (x, y): True on the frame it's clicked.",
+        None,
+    ),
+    meth(
+        "toggle",
+        "(text, value, x, y, *, id=None, enabled=True, size=None) -> bool",
+        "A check box with a label: returns the value, flipped when clicked.",
+        None,
+    ),
+    meth(
+        "slider",
+        "(value, x, y, width=200, height=24, *, min=0, max=1, step=None, id=None, enabled=True) -> float",
+        "A horizontal slider: returns the value after dragging.",
+        None,
+    ),
+    meth(
+        "progress",
+        "(value, x, y, width=200, height=18, *, max=1, color=None, text=None) -> None",
+        "A bar filled to value / max; text=True shows the percentage.",
+        None,
+    ),
+    meth(
+        "label",
+        "(text, x, y, size=None, color=None, align=\"left\", shadow=None) -> None",
+        "Text with its top at y.",
+        None,
+    ),
+    meth(
+        "panel",
+        "(x, y, width, height, *, color=None, title=None) -> None",
+        "A background box; clicks on it belong to the UI.",
+        None,
+    ),
+    meth(
+        "image",
+        "(path, x, y, width, height, color=(1, 1, 1, 1)) -> None",
+        "An image stretched over the box.",
+        None,
+    ),
+    prop(
+        "theme",
+        "UiTheme",
+        "Colours and text size: text, panel, button, hover, press, accent, track, border, text_size.",
+        None,
+    ),
+    prop(
+        "mouse_over",
+        "bool",
+        "Whether the cursor is over a widget or panel.",
         None,
     ),
 ];
@@ -256,6 +375,12 @@ const ENTITY: &[Member] = &[
         "Camera | None",
         "This entity's Camera component, or None.",
         Some(Ty::Camera),
+    ),
+    prop(
+        "joint",
+        "Joint | None",
+        "This entity's Joint while it runs: angle, value, force, broken; motor_target, enabled.",
+        None,
     ),
 ];
 
@@ -469,6 +594,7 @@ impl Ty {
             Self::Attributes => ATTRIBUTES,
             Self::Dict => DICT,
             Self::Camera => CAMERA,
+            Self::Ui => UI,
         }
     }
 
@@ -486,6 +612,7 @@ impl Ty {
             Self::Attributes => "Attributes",
             Self::Dict => "dict",
             Self::Camera => "Camera",
+            Self::Ui => "Ui",
         }
     }
 
@@ -503,6 +630,7 @@ impl Ty {
             Self::Attributes => "Custom values set in the Inspector.",
             Self::Dict => "Per-entity storage that persists between frames.",
             Self::Camera => "A perspective camera: position, target, fov.",
+            Self::Ui => "Game UI widgets, drawn by calling them every frame.",
         }
     }
 
@@ -893,6 +1021,10 @@ mod tests {
             ("hero.", "name"),
             ("ctx.scene[\"x\"].transform.", "rotation_euler"),
             ("ctx.scene.fi", "find"),
+            ("ctx.ui.", "button"),
+            ("ctx.ui.sl", "slider"),
+            ("ctx.input.", "mouse_over_ui"),
+            ("entity.", "joint"),
         ] {
             let (b, p) = at(SCRIPT, 7, &format!("; {expr}"));
             let items = complete(&b, p, &names).unwrap_or_else(|| panic!("{expr}: no items"));

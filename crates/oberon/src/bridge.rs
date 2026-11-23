@@ -150,6 +150,9 @@ pub struct FrameInput {
     pub mouse_delta: [f32; 2],
     /// Whether the cursor is captured for mouse-look.
     pub mouse_locked: bool,
+    /// The cursor in game-view pixels from its top-left (`None` outside
+    /// the view or while captured).
+    pub mouse_pos: Option<[f32; 2]>,
     /// The game view's size in pixels (for the HUD).
     pub screen: [u32; 2],
     /// Solid colliders, for raycasts.
@@ -758,17 +761,18 @@ fn frame_input_json(msg: &mut Json, input: &FrameInput) {
     if !input.graphics.is_empty() {
         msg.set("gfx", Json::from(input.graphics));
     }
-    msg.set(
-        "mouse",
-        Json::obj([
-            (
-                "buttons",
-                Json::Arr(input.mouse_buttons.iter().map(|b| Json::from(*b)).collect()),
-            ),
-            ("delta", Json::floats(&input.mouse_delta)),
-            ("locked", Json::Bool(input.mouse_locked)),
-        ]),
-    );
+    let mut mouse = Json::obj([
+        (
+            "buttons",
+            Json::Arr(input.mouse_buttons.iter().map(|b| Json::from(*b)).collect()),
+        ),
+        ("delta", Json::floats(&input.mouse_delta)),
+        ("locked", Json::Bool(input.mouse_locked)),
+    ]);
+    if let Some(pos) = input.mouse_pos {
+        mouse.set("pos", Json::floats(&pos));
+    }
+    msg.set("mouse", mouse);
     msg.set(
         "screen",
         Json::Arr(

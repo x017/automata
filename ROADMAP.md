@@ -706,10 +706,33 @@ Different from the plan:
   starter scene, not a picker.
 - `export --target android` waits for E1.
 
-### D1. Game UI widgets ⬜ M
+### D1. Game UI widgets ✅ M
 [`NEXT_PLANS.md` #3](NEXT_PLANS.md#3-game-ui-system--decided-phase-1--done)
 phase 2: `ctx.ui.button/label/progress/panel/toggle/slider`, with
 hover/press states and clicks consumed by the UI.
+
+Done:
+- **Widgets:** `ctx.ui` has immediate-mode `button`, `toggle`, `slider`,
+  `progress`, `label`, `panel` and `image`, placed by their top-left
+  corner in screen pixels.
+- **States and identity:** widgets show hover and pressed states and take
+  `enabled=`. They're told apart by their text and owner entity, or by an
+  `id=`.
+- **Theme:** `ctx.ui.theme` is monochrome by default, like Oberon, and
+  takes sRGB colours.
+- **Clicks stay with the UI:** a press that starts on a widget or panel is
+  the UI's until it's released, so `ctx.input` mouse queries and
+  mouse-bound actions don't see it. `ctx.input.mouse_position` and
+  `mouse_over_ui` are new.
+- **Shared code:** it's all in `script_api.py`, so Play, `run_scene` and
+  exports behave the same. Oberon now sends the cursor to scripts.
+- **Touch:** the engine's input treats the first finger down as the left
+  button where it touches.
+- **Settings:** assigning an unchanged value to `ctx.settings` no longer
+  writes it again.
+- **Demo:** `examples/oberon/pause_menu` has a pause menu, a settings
+  screen and a HUD with a Menu button over shapes that a click in the
+  game kicks. `render_still` gained `CURSOR=` and `CLICK=` to picture it.
 
 ### D2. Custom fonts ⬜ S
 #3 phase 3: `.ttf`/`.otf` files from the project, shown in Assets and
@@ -822,7 +845,7 @@ per effort. Reorder any time by telling me.
 | 22 | C2 Tweens and timers | S | ✅ |
 | 23 | C3 Save games and settings | S | ✅ |
 | 24 | C1 Physics joints | M | ✅ |
-| 25 | D1 UI widgets | M | ⬜ |
+| 25 | D1 UI widgets | M | ✅ |
 | 26 | D2 Custom fonts | S | ⬜ |
 | 27 | D3 UI layout, focus, screens | M | ⬜ |
 | 28 | B4 Animation state machine | L | ⬜ |

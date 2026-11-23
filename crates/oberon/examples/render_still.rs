@@ -18,6 +18,9 @@
 //! moves the mouse that many pixels on the first frame. `KEYS` holds keys
 //! down over moments of Play: `KEYS=tab@0-0.1,w@0.5-1.5,space@1.2-1.3`
 //! (key names as scripts see them; a bare `name@t` is one step).
+//! `CURSOR=x,y` puts the cursor at that pixel of the picture for all of
+//! Play (for `ctx.ui` hover states); `CLICK=1.0,2.5` clicks the left
+//! button there at those seconds (held for one script frame).
 //! `FRAMES=n` times that many frames after a warm-up one and prints the
 //! median time a frame takes (`ms/frame`), in the editor view and in Play
 //! alike: `examples/bench/forest.py` reads it.
@@ -136,13 +139,25 @@ fn render_play(
         let (x, y) = s.split_once(',')?;
         Some([x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?])
     });
+    let cursor = std::env::var("CURSOR").ok().and_then(|s| {
+        let (x, y) = s.split_once(',')?;
+        Some([x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?])
+    });
+    let clicks: Vec<f32> = std::env::var("CLICK")
+        .map(|s| s.split(',').filter_map(|t| t.trim().parse().ok()).collect())
+        .unwrap_or_default();
     let held = held_keys();
     for step in 0..steps {
         if let Some(b) = bridge.as_mut() {
             // One script frame per physics step: send, then wait for it.
             let mut input = play.frame_input();
+            input.screen = [w, h];
+            input.mouse_pos = cursor;
+            let elapsed = play.elapsed;
+            if clicks.iter().any(|&t| (elapsed - t).abs() < TIMESTEP * 0.5) {
+                input.mouse_buttons = vec!["left"];
+            }
             if let Some(at) = shoot_at {
-                input.screen = [w, h];
                 input.mouse_locked = true;
                 if play.elapsed >= at {
                     input.mouse_buttons = vec!["left"];

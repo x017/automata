@@ -102,6 +102,12 @@ class _EngineKeys:
     def mouse_locked(self) -> bool:
         return bool(self._screen.cursor_locked)
 
+    def mouse_position(self) -> Any:
+        # A captured cursor has no position worth clicking with.
+        if self._screen.cursor_locked:
+            return None
+        return self.raw.cursor
+
 
 class _ViewRecord:
     """One entity's start-of-frame values, read lazily from its view."""

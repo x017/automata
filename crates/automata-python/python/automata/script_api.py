@@ -812,13 +812,15 @@ class KeySource:
         self.prev_buttons = set()
         self.delta = (0.0, 0.0)
         self.locked = False
+        self.pos = None
         self.raw = None
 
-    def update(self, keys, buttons=(), delta=(0.0, 0.0), locked=False):
+    def update(self, keys, buttons=(), delta=(0.0, 0.0), locked=False, pos=None):
         self.prev, self.down = self.down, set(keys)
         self.prev_buttons, self.buttons = self.buttons, set(buttons)
         self.delta = (float(delta[0]), float(delta[1]))
         self.locked = bool(locked)
+        self.pos = None if pos is None else (float(pos[0]), float(pos[1]))
 
     def key_down(self, k):
         return k in self.down
@@ -844,6 +846,9 @@ class KeySource:
     def mouse_locked(self):
         return self.locked
 
+    def mouse_position(self):
+        return self.pos
+
 
 class Input:
     """``ctx.input``: keys, mouse buttons, mouse movement and capture."""
@@ -852,8 +857,18 @@ class Input:
         self._src = source
         self._lock_request = None
         self._settings: Settings | None = None  # ctx.settings, for action names
+        self._ui: Ui | None = None  # ctx.ui, which keeps clicks on widgets
+
+    def _game(self, on_button):
+        """``on_button`` minus the buttons ``ctx.ui`` took (pressed on a
+        widget or panel, until released)."""
+        ui = self._ui
+        if ui is None or not ui._captured:
+            return on_button
+        return lambda b: b not in ui._captured and on_button(b)
 
     def _any(self, key, on_key, on_button):
+        on_button = self._game(on_button)
         settings = self._settings
         if settings is not None and isinstance(key, str) and settings.is_action(key):
             for k in settings.keys(key):
@@ -896,13 +911,34 @@ class Input:
         return None
 
     def mouse_pressed(self, button: str = "left") -> bool:
-        return self._src.button_down(str(button).lower())
+        """The mouse button is held. A press that began on ``ctx.ui``
+        (a button, slider, panel…) belongs to the UI: it reads False
+        here until it's released, so clicking a button doesn't also fire."""
+        return self._game(self._src.button_down)(str(button).lower())
 
     def mouse_just_pressed(self, button: str = "left") -> bool:
-        return self._src.button_pressed(str(button).lower())
+        """The button went down this frame (not on ``ctx.ui``)."""
+        return self._game(self._src.button_pressed)(str(button).lower())
 
     def mouse_just_released(self, button: str = "left") -> bool:
-        return self._src.button_released(str(button).lower())
+        return self._game(self._src.button_released)(str(button).lower())
+
+    @property
+    def mouse_position(self) -> tuple[float, float] | None:
+        """Where the cursor is, in screen pixels from the top-left (the
+        same space as ``ctx.hud`` and ``ctx.ui``). None when it's outside
+        the game view or captured (``lock_mouse``)."""
+        fn = getattr(self._src, "mouse_position", None)
+        pos = fn() if fn is not None else None
+        if pos is None:
+            return None
+        return (float(pos[0]), float(pos[1]))
+
+    @property
+    def mouse_over_ui(self) -> bool:
+        """The cursor is over ``ctx.ui`` drawn last frame (a widget or a
+        panel), or dragging one of its sliders."""
+        return self._ui is not None and self._ui._over
 
     @property
     def mouse_delta(self) -> tuple[float, float]:
@@ -1240,6 +1276,388 @@ class Hud:
             if value is not None and value is not False:
                 item[key] = list(_vec(value, 4))
         self._items.append(item)
+
+
+Color = tuple[float, float, float, float]
+
+
+class UiTheme:
+    """``ctx.ui.theme``: the widgets' colours and text size. Change any
+    field, at any time; it applies from the next widget drawn. Colours
+    are RGBA from 0 to 1 as a paint program shows them (sRGB), like every
+    colour given to ``ctx.ui``::
+
+        ctx.ui.theme.accent = (1.0, 0.75, 0.2, 1.0)
+        ctx.ui.theme.text_size = 24
+    """
+
+    __slots__ = ("text", "text_dim", "panel", "button", "hover", "press", "accent",
+                 "on_accent", "track", "border", "text_size")
+
+    def __init__(self):
+        #: Labels and button text.
+        self.text: Color = (0.95, 0.94, 0.92, 1.0)
+        #: Disabled text and hints.
+        self.text_dim: Color = (0.6, 0.6, 0.6, 1.0)
+        #: Panel backgrounds.
+        self.panel: Color = (0.05, 0.05, 0.06, 0.9)
+        #: Buttons at rest, hovered and held.
+        self.button: Color = (0.15, 0.15, 0.17, 0.94)
+        self.hover: Color = (0.24, 0.24, 0.27, 0.96)
+        self.press: Color = (0.09, 0.09, 0.1, 0.98)
+        #: Filled parts: progress, slider, a toggle that's on.
+        self.accent: Color = (0.95, 0.94, 0.92, 1.0)
+        #: Text drawn on the accent.
+        self.on_accent: Color = (0.03, 0.03, 0.03, 1.0)
+        #: Empty progress bars, slider tracks and toggle boxes.
+        self.track: Color = (0.0, 0.0, 0.0, 0.6)
+        #: The thin edge around buttons and panels.
+        self.border: Color = (1.0, 1.0, 1.0, 0.16)
+        #: Text height in pixels when a widget isn't given a ``size``.
+        self.text_size: float = 20.0
+
+
+def _dim(c, k=0.45):
+    return (c[0], c[1], c[2], c[3] * k)
+
+
+class Ui:
+    """``ctx.ui``: buttons, labels, toggles, sliders, progress bars, panels
+    and images over the game, drawn by calling them every frame
+    (immediate mode)::
+
+        def update(entity, ctx):
+            ctx.ui.panel(20, 20, 220, 170)
+            if ctx.ui.button("Restart", 40, 40, 180, 44):
+                restart()
+            entity.state["music"] = ctx.ui.toggle("Music", entity.state["music"], 40, 100)
+            entity.state["vol"] = ctx.ui.slider(entity.state["vol"], 40, 140, 180)
+
+    Positions are screen pixels and ``x, y`` is a widget's **top-left**
+    corner (``ctx.hud`` shapes are placed by their centre). A press that
+    starts on a widget or panel belongs to the UI: ``ctx.input`` doesn't
+    see it, so clicking a button doesn't also fire a weapon. The UI
+    decides that from where things were drawn the frame before, so a
+    widget takes clicks from the second frame it's shown. On a touch
+    screen the first finger down is the left button.
+
+    A widget is known from frame to frame by its text (and which entity's
+    script draws it). Give ``id=`` when the text changes while it's held,
+    or when two widgets share a text.
+    """
+
+    def __init__(self, host, hud, input):
+        self._host = host
+        self._hud = hud
+        self._input = input
+        input._ui = self
+        #: Colours and text size (see :class:`UiTheme`).
+        self.theme = UiTheme()
+        self._rects = []  # this frame's widgets and panels: (x, y, w, h)
+        self._prev = []  # last frame's: what the mouse is over
+        self._active = None  # the widget being pressed or dragged
+        self._live = False  # it was drawn this frame
+        self._seen = {}
+        self._pos = None
+        self._over = False
+        self._captured = set()
+        self._down = False
+        self._pressed = False
+        self._released = False
+
+    # -- frame bookkeeping (the host calls these) --
+
+    def _begin(self):
+        src = self._input._src
+        fn = getattr(src, "mouse_position", None)
+        self._pos = fn() if fn is not None else None
+        self._down = bool(src.button_down("left"))
+        self._pressed = bool(src.button_pressed("left"))
+        self._released = bool(src.button_released("left"))
+        pos = self._pos
+        self._over = self._active is not None or (
+            pos is not None and any(_inside(pos, r) for r in self._prev))
+        for b in ("left", "right", "middle"):
+            if src.button_pressed(b):
+                # Each press is decided where it starts.
+                if self._over:
+                    self._captured.add(b)
+                else:
+                    self._captured.discard(b)
+            elif b in self._captured and not src.button_down(b) and not src.button_released(b):
+                self._captured.discard(b)
+
+    def _end(self):
+        self._prev, self._rects = self._rects, []
+        self._seen.clear()
+        if not self._live:
+            self._active = None
+        self._live = False
+
+    def _id(self, kind, label, given):
+        running = self._host._running
+        owner = running[1].id if running else None
+        base = (owner, kind, label if given is None else ("id", given))
+        n = self._seen.get(base, 0)
+        self._seen[base] = n + 1
+        return base + (n,)
+
+    def _press(self, wid, rect, enabled):
+        """Hover / press tracking for one widget: (hovered, held, clicked)."""
+        self._rects.append(rect)
+        pos = self._pos
+        free = self._active is None or self._active == wid
+        hot = enabled and free and pos is not None and _inside(pos, rect)
+        clicked = False
+        if hot and self._pressed:
+            self._active = wid
+        if self._active == wid:
+            self._live = True
+            if not self._down:
+                clicked = hot
+                self._active = None
+        return hot, self._active == wid, clicked
+
+    # -- drawing helpers --
+
+    def _box(self, x, y, w, h, fill, border=True):
+        if border:
+            self._rect(x + w / 2, y + h / 2, w, h, self.theme.border)
+            self._rect(x + w / 2, y + h / 2, max(w - 2, 0), max(h - 2, 0), fill)
+        else:
+            self._rect(x + w / 2, y + h / 2, w, h, fill)
+
+    def _size(self, size, height=None):
+        if size is not None:
+            return float(size)
+        t = float(self.theme.text_size)
+        return t if height is None else min(t, height * 0.5)
+
+    def _rect(self, x, y, w, h, color):
+        self._hud.rect(x, y, w, h, _linear(color))
+
+    def _text(self, text, x, y, size, color, align, shadow=None, outline=None):
+        if shadow is not None and shadow is not True and shadow is not False:
+            shadow = _linear(shadow)
+        if outline is not None and outline is not True and outline is not False:
+            outline = _linear(outline)
+        self._hud.text(text, x, y, size, _linear(color), align, shadow, outline)
+
+    # -- widgets --
+
+    @property
+    def mouse_over(self) -> bool:
+        """The cursor is over a widget or panel (as drawn last frame), or
+        a slider is being dragged. Same as ``ctx.input.mouse_over_ui``."""
+        return self._over
+
+    def label(
+        self,
+        text: str,
+        x: float,
+        y: float,
+        size: float | None = None,
+        color: Color | None = None,
+        align: str = "left",
+        shadow: Any = None,
+    ) -> None:
+        """Text whose first line's top is at ``y``. ``align`` says where
+        ``x`` is: ``"left"``, ``"center"`` or ``"right"``. Labels don't
+        take clicks."""
+        size = self._size(size)
+        lines = str(text).count("\n") + 1
+        self._text(text, x, y + size * lines / 2.0, size,
+                   self.theme.text if color is None else color, align, shadow)
+
+    def button(
+        self,
+        text: str,
+        x: float,
+        y: float,
+        width: float = 160.0,
+        height: float = 44.0,
+        *,
+        id: Any = None,
+        enabled: bool = True,
+        size: float | None = None,
+    ) -> bool:
+        """A button; True on the frame it's clicked (pressed and released
+        on it). Disabled buttons are dimmed and never click."""
+        x, y, w, h = float(x), float(y), float(width), float(height)
+        hot, held, clicked = self._press(self._id("button", text, id), (x, y, w, h),
+                                         bool(enabled))
+        t = self.theme
+        if not enabled:
+            fill = _dim(t.button, 0.6)
+        elif held and hot:
+            fill = t.press
+        elif hot or held:
+            fill = t.hover
+        else:
+            fill = t.button
+        self._box(x, y, w, h, fill)
+        size = self._size(size, h)
+        nudge = 1.0 if held and hot else 0.0
+        self._text(text, x + w / 2, y + h / 2 + nudge, size,
+                   t.text if enabled else t.text_dim, "center")
+        return clicked
+
+    def toggle(
+        self,
+        text: str,
+        value: bool,
+        x: float,
+        y: float,
+        *,
+        id: Any = None,
+        enabled: bool = True,
+        size: float | None = None,
+    ) -> bool:
+        """A checkbox with ``text`` beside it. Returns the value after this
+        frame: flipped when it's clicked (on the box or the text)."""
+        size = self._size(size)
+        box = size * 1.2
+        x, y = float(x), float(y)
+        # The text can't be measured on every runner; estimate its width.
+        w = box + size * 0.5 + len(str(text)) * size * 0.55
+        hot, held, clicked = self._press(self._id("toggle", text, id), (x, y, w, box),
+                                         bool(enabled))
+        value = bool(value) != clicked
+        t = self.theme
+        edge = t.hover if hot else t.border
+        self._rect(x + box / 2, y + box / 2, box, box, edge if enabled else _dim(edge))
+        self._rect(x + box / 2, y + box / 2, box - 2, box - 2, t.track)
+        if value:
+            inner = box * 0.6
+            self._rect(x + box / 2, y + box / 2, inner, inner,
+                       t.accent if enabled else _dim(t.accent))
+        self._text(text, x + box + size * 0.5, y + box / 2, size,
+                   t.text if enabled else t.text_dim, "left")
+        return value
+
+    def slider(
+        self,
+        value: float,
+        x: float,
+        y: float,
+        width: float = 200.0,
+        height: float = 24.0,
+        *,
+        min: float = 0.0,
+        max: float = 1.0,
+        step: float | None = None,
+        id: Any = None,
+        enabled: bool = True,
+    ) -> float:
+        """A horizontal slider from ``min`` to ``max``: press or drag on it
+        to set the value. Returns the value after this frame, clamped (and
+        rounded to ``step`` if given). Label it with :meth:`label`."""
+        lo, hi = float(min), float(max)
+        if not hi > lo:
+            raise ValueError("slider max must be more than min")
+        x, y, w, h = float(x), float(y), float(width), float(height)
+        knob = h * 0.6
+        hot, held, _ = self._press(self._id("slider", None, id), (x, y, w, h), bool(enabled))
+        v = float(value)
+        if held and self._pos is not None:
+            span = w - knob
+            k = 0.0 if span <= 0 else (self._pos[0] - x - knob / 2) / span
+            v = lo + (hi - lo) * k
+        if step:
+            v = lo + round((v - lo) / float(step)) * float(step)
+        v = lo if v < lo else hi if v > hi else v
+        t = self.theme
+        k = (v - lo) / (hi - lo)
+        track_h = h / 4
+        cy = y + h / 2
+        self._rect(x + w / 2, cy, w, track_h, t.track)
+        fill = (w - knob) * k + knob / 2
+        accent = t.accent if enabled else _dim(t.accent)
+        self._rect(x + fill / 2, cy, fill, track_h, accent)
+        kx = x + knob / 2 + (w - knob) * k
+        self._rect(kx, cy, knob, h, t.hover if (hot or held) and enabled else t.border)
+        self._rect(kx, cy, knob - 2, h - 2, accent)
+        return v
+
+    def progress(
+        self,
+        value: float,
+        x: float,
+        y: float,
+        width: float = 200.0,
+        height: float = 18.0,
+        *,
+        max: float = 1.0,
+        color: Color | None = None,
+        text: Any = None,
+    ) -> None:
+        """A bar filled ``value / max`` of the way (a health bar, a loading
+        bar). ``text`` is drawn on it; True shows the percentage. Progress
+        bars don't take clicks."""
+        x, y, w, h = float(x), float(y), float(width), float(height)
+        top = float(max)
+        k = 0.0 if top <= 0 else float(value) / top
+        k = 0.0 if k < 0 else 1.0 if k > 1 else k
+        t = self.theme
+        self._box(x, y, w, h, t.track)
+        if k > 0:
+            fw = (w - 4) * k
+            self._rect(x + 2 + fw / 2, y + h / 2, fw, h - 4,
+                       t.accent if color is None else color)
+        if text is True:
+            text = f"{round(k * 100)}%"
+        if text:
+            self._text(str(text), x + w / 2, y + h / 2, self._size(None, h * 1.5),
+                       t.text, "center", outline=(0.0, 0.0, 0.0, 0.85))
+
+    def panel(
+        self,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        *,
+        color: Color | None = None,
+        title: str | None = None,
+    ) -> None:
+        """A backdrop for a group of widgets (draw it first). Clicks on it
+        belong to the UI, like clicks on its widgets."""
+        x, y, w, h = float(x), float(y), float(width), float(height)
+        self._rects.append((x, y, w, h))
+        t = self.theme
+        self._box(x, y, w, h, t.panel if color is None else color)
+        if title:
+            size = self._size(None)
+            self._text(title, x + 14, y + 10 + size / 2, size, t.text_dim, "left")
+
+    def image(
+        self,
+        path: str,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        color: Color = (1.0, 1.0, 1.0, 1.0),
+    ) -> None:
+        """An image (project-relative path) stretched over the rectangle.
+        Images don't take clicks; put a :meth:`button` behind one for that."""
+        w, h = float(width), float(height)
+        self._hud.image(path, float(x) + w / 2, float(y) + h / 2, (w, h), _linear(color))
+
+
+def _linear(c):
+    """An sRGB colour as the linear one the HUD blends with."""
+    r, g, b, a = _vec(c, 4)
+
+    def ch(v):
+        return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+
+    return (ch(r), ch(g), ch(b), a)
+
+
+def _inside(pos, rect):
+    x, y, w, h = rect
+    return x <= pos[0] < x + w and y <= pos[1] < y + h
 
 
 class SceneView:
@@ -2539,8 +2957,11 @@ class Settings:
         v = float(v)
         if not math.isfinite(v):
             raise ValueError(f"volume is 0 to 1, not {v!r}")
-        self._load()._volume = min(max(v, 0.0), 1.0)
-        self._apply["volume"] = self._volume
+        v = min(max(v, 0.0), 1.0)
+        if self._load()._volume == v:
+            return  # unchanged: safe to assign every frame (``ctx.ui.slider``)
+        self._volume = v
+        self._apply["volume"] = v
         self._dirty = True
 
     @property
@@ -2560,7 +2981,9 @@ class Settings:
             raise ValueError(f"there's no graphics preset {quality!r}"
                              f"{_did_you_mean(q, GRAPHICS_PRESETS)} "
                              f"(presets: {', '.join(GRAPHICS_PRESETS)})")
-        self._load()._graphics = q
+        if self._load()._graphics == q:
+            return
+        self._graphics = q
         self._apply["graphics"] = q
         self._dirty = True
 
@@ -2636,7 +3059,12 @@ class Settings:
     def __setitem__(self, key: str, value: Any) -> None:
         if not isinstance(key, str):
             raise TypeError(f"setting names are strings, not {key!r}")
-        self._load()._values[key] = _plain(value, f"ctx.settings[{key!r}]")
+        v = _plain(value, f"ctx.settings[{key!r}]")
+        values = self._load()._values
+        old = values.get(key, _MISSING)
+        if type(old) is type(v) and old == v:
+            return  # unchanged: nothing to save
+        values[key] = v
         self._dirty = True
 
     def __delitem__(self, key: str) -> None:
@@ -2684,6 +3112,8 @@ class Context:
         self.scene = SceneView(host)
         self.audio = Audio(host)
         self.hud = Hud()
+        #: Buttons, toggles, sliders, progress bars, panels (see :class:`Ui`).
+        self.ui = Ui(host, self.hud, self.input)
         store = _Store(host.save_dir, host.backend.log)
         #: The current save slot (see :class:`SaveData`).
         self.save = SaveData(store)
@@ -3027,6 +3457,7 @@ class ScriptHost:
         t.delta, t.elapsed, t.frame = float(delta), float(elapsed), int(frame)
         if screen:
             self.ctx.hud.size = (int(screen[0]), int(screen[1]))
+        self.ctx.ui._begin()
         self._sync(records)
         if self.hot_reload and (elapsed - self._last_check > 0.4 or elapsed < self._last_check):
             self._last_check = elapsed
@@ -3330,6 +3761,7 @@ class ScriptHost:
         self.ctx.audio._queue = []
         self.ctx.hud._items = []
         self.ctx.input._lock_request = None
+        self.ctx.ui._end()
         return out
 
     def stop(self):
