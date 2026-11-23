@@ -37,6 +37,7 @@ pub mod palette;
 pub mod picker;
 pub mod project_panel;
 pub mod settings;
+pub mod springs;
 
 use dialogs::Dialog;
 pub use graphics::{FrameStats, RightTab};
@@ -618,9 +619,9 @@ enum EditTarget {
     AttrValue(usize, u8),
     /// A Settings text field.
     Setting(settings::SettingText),
-    /// A model's import setting: 0 = scale, 1..=3 = rotation X/Y/Z. The
-    /// file is kept in `Ui::import_edit`.
-    Import(u8),
+    /// A number of a model's import settings. The file is kept in
+    /// `Ui::import_edit`.
+    Import(springs::ImportField),
     /// The Assets browser's filter.
     AssetQuery,
     /// A Files panel row being renamed in place.
@@ -1136,12 +1137,9 @@ impl Ui {
             EditTarget::Import(which) => {
                 let (model, mut settings) = self.import_edit.take()?;
                 let value = eval_number(&edit.buffer)?;
-                match which {
-                    0 if value.abs() > 1e-6 => settings.scale = value,
-                    0 => return None,
-                    i => settings.rotation[usize::from(i - 1).min(2)] = value,
-                }
-                Some(Intent::SetImport { model, settings })
+                which
+                    .apply(&mut settings, value)
+                    .then_some(Intent::SetImport { model, settings })
             }
             EditTarget::AttrKey(_) => {
                 let (from, _) = edit.attr?;
@@ -3222,8 +3220,11 @@ impl Ui {
             y += 16.0;
         }
         y += 4.0;
-        if loaded.is_ok() {
+        if let Ok(model) = &loaded {
             y = self.import_rows(canvas, x, y, w, e.id, &file, editing);
+            if let Some(rig) = model.rig.as_ref().filter(|r| !r.joints.is_empty()) {
+                y = self.springs_rows(canvas, x, y, w, e.id, &file, rig, editing);
+            }
         }
         let bw = (label_w - 6.0) / 2.0;
         let change = Rect::new(x + layout::LABEL_W, y, bw, 22.0);
@@ -3317,7 +3318,17 @@ impl Ui {
             let qw = 44.0;
             let field_w = (fw - (qw + 4.0) * quick.len() as f32).max(40.0);
             let r = Rect::new(fx, y, field_w, layout::FIELD_H);
-            self.import_field(canvas, r, id, 0, settings.scale, file, settings, editing);
+            let scale = springs::ImportField::Scale;
+            self.import_field(
+                canvas,
+                r,
+                id,
+                scale,
+                settings.scale,
+                file,
+                &settings,
+                editing,
+            );
             for (i, (label, k)) in quick.iter().enumerate() {
                 let b = Rect::new(
                     fx + field_w + 4.0 + (qw + 4.0) * i as f32,
@@ -3332,7 +3343,7 @@ impl Ui {
                 };
                 self.tip(b, "Multiply the scale (centimetres ↔ metres, tiny kits)");
                 if self.button(canvas, b, label, style) && editing {
-                    let mut s = settings;
+                    let mut s = settings.clone();
                     s.scale *= k;
                     self.out.push(Intent::SetImport {
                         model: file.to_path_buf(),
@@ -3350,7 +3361,8 @@ impl Ui {
             for i in 0..3u8 {
                 let r = Rect::new(fx + (cw + 4.0) * f32::from(i), y, cw, layout::FIELD_H);
                 let v = settings.rotation[usize::from(i)];
-                self.import_field(canvas, r, id, i + 1, v, file, settings, editing);
+                let which = springs::ImportField::Rotation(i);
+                self.import_field(canvas, r, id, which, v, file, &settings, editing);
             }
             let b = Rect::new(fx + fw - turn_w, y, turn_w, layout::FIELD_H);
             let style = if editing {
@@ -3360,7 +3372,7 @@ impl Ui {
             };
             self.tip(b, "Turn 90° around Y (models facing the wrong way)");
             if self.button(canvas, b, "+90°", style) && editing {
-                let mut s = settings;
+                let mut s = settings.clone();
                 s.rotation[1] = (s.rotation[1] + 90.0 + 180.0).rem_euclid(360.0) - 180.0;
                 self.out.push(Intent::SetImport {
                     model: file.to_path_buf(),
@@ -3390,7 +3402,7 @@ impl Ui {
                 };
                 self.tip(b, pivot.label());
                 if self.button(canvas, b, label, style) && editing && settings.pivot != pivot {
-                    let mut s = settings;
+                    let mut s = settings.clone();
                     s.pivot = pivot;
                     self.out.push(Intent::SetImport {
                         model: file.to_path_buf(),
@@ -3409,10 +3421,10 @@ impl Ui {
         canvas: &mut Canvas,
         r: Rect,
         id: u64,
-        which: u8,
+        which: springs::ImportField,
         value: f32,
         file: &Path,
-        settings: automata_assets::import::ImportSettings,
+        settings: &automata_assets::import::ImportSettings,
         editing: bool,
     ) {
         let active = self.is_editing(id, EditTarget::Import(which))
@@ -3446,7 +3458,7 @@ impl Ui {
                 if let Some(intent) = self.commit_edit() {
                     self.out.push(intent);
                 }
-                self.import_edit = Some((file.to_path_buf(), settings));
+                self.import_edit = Some((file.to_path_buf(), settings.clone()));
                 self.edit = Some(TextEdit {
                     id,
                     target: EditTarget::Import(which),
@@ -5364,6 +5376,128 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Clicks down the Inspector at `x`, scrolling, until `found` says
+    /// yes. Every click starts from a fresh `make()` (a stray click on a
+    /// header would fold the section away), so the Ui that found it is
+    /// returned too.
+    fn sweep_inspector(
+        make: impl Fn() -> Ui,
+        c: &mut Canvas,
+        doc: &Document,
+        x: f32,
+        found: impl Fn(&Ui, &[Intent]) -> bool,
+    ) -> Option<(Ui, Vec<Intent>)> {
+        let insp = lay().inspector;
+        for scroll in [0.0, 400.0] {
+            for row in 0..((insp.h / 10.0) as usize) {
+                let mut ui = make();
+                ui.inspector_scroll = scroll;
+                ui.frame(c, doc, Pointer::default(), None);
+                let y = insp.y + layout::TITLEBAR_H + 5.0 + row as f32 * 10.0;
+                let out = click(&mut ui, c, doc, x, y);
+                if found(&ui, &out) {
+                    return Some((ui, out));
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn the_springs_section_picks_bones_and_edits_chains() {
+        use automata_assets::import::{read_settings, write_settings};
+        use springs::{ChainField, ImportField};
+        let root = std::env::temp_dir().join(format!("oberon-ui-springs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let model = root.join("runner.glb");
+        std::fs::copy(
+            "../../examples/oberon/ponytail_park/models/runner.glb",
+            &model,
+        )
+        .unwrap();
+        let mut c = canvas();
+        let mut doc = Document::new();
+        let id = doc.create_model(&model.to_string_lossy(), "Runner", [0.0; 3]);
+        doc.select(Some(id));
+        let make = || {
+            let mut ui = Ui::new();
+            ui.project_root = root.clone();
+            ui
+        };
+        let insp = lay().inspector;
+
+        // "+ Chain" opens the bone picker, likely roots first.
+        let x = insp.x + layout::PAD + layout::LABEL_W + 16.0;
+        let chain_picker = |ui: &Ui, _: &[Intent]| {
+            ui.palette.as_ref().and_then(|p| p.placeholder)
+                == Some("Choose the first bone of the chain…")
+        };
+        let (mut ui, _) = sweep_inspector(make, &mut c, &doc, x, chain_picker).expect("+ Chain");
+        let matches = ui.palette.as_ref().unwrap().matches();
+        let top: Vec<(&str, &str)> = matches
+            .iter()
+            .take(3)
+            .map(|i| (i.label.as_str(), i.group))
+            .collect();
+        assert_eq!(top[..2], [("Hair1", "Suggested"), ("Skirt", "Suggested")]);
+        assert_eq!(top[2].1, "Bone");
+        ui.palette_key(palette::PaletteKey::Enter, &doc);
+        let out = ui.frame(&mut c, &doc, Pointer::default(), None);
+        let Some(Intent::SetImport { model: m, settings }) = out
+            .iter()
+            .find(|i| matches!(i, Intent::SetImport { .. }))
+            .cloned()
+        else {
+            panic!("{out:?}");
+        };
+        assert_eq!(m, model);
+        assert_eq!(
+            settings.springs.chains,
+            [automata_assets::springs::SpringChain::new("Hair1")]
+        );
+        write_settings(&model, &settings).unwrap();
+
+        // Typing a chain's value commits just that value.
+        ui.import_edit = Some((model.clone(), settings.clone()));
+        ui.edit = Some(TextEdit {
+            id,
+            target: EditTarget::Import(ImportField::Chain(0, ChainField::Stiffness)),
+            buffer: "0.8".into(),
+            rect: Rect::default(),
+            fresh: false,
+            attr: None,
+        });
+        let Some(Intent::SetImport {
+            settings: stiffer, ..
+        }) = ui.commit_edit()
+        else {
+            panic!("no commit");
+        };
+        assert_eq!(stiffer.springs.chains[0].stiffness, 0.8);
+        assert_eq!(
+            stiffer.springs.chains[0].drag,
+            settings.springs.chains[0].drag
+        );
+
+        // The chain's × removes it.
+        let removed = |_: &Ui, out: &[Intent]| {
+            out.iter().any(|i| {
+                matches!(i, Intent::SetImport { settings, .. }
+                    if settings.is_identity())
+            })
+        };
+        let close_x = insp.x + insp.w - layout::PAD - 11.0;
+        let found = sweep_inspector(make, &mut c, &doc, close_x, removed).is_some();
+        assert!(found, "the chain has a remove button");
+        assert_eq!(
+            read_settings(&model).springs.chains.len(),
+            1,
+            "UI only asks"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn the_model_picker_lists_project_models_and_imports() {
         let (root, model) = model_project("picker");
@@ -5526,14 +5660,14 @@ mod tests {
             pivot: Pivot::BottomCenter,
             ..Default::default()
         };
-        for want in [turned, bigger, bottom] {
+        for want in [turned.clone(), bigger, bottom] {
             assert!(saved.contains(&want), "{want:?} in {saved:?}");
         }
         // Typing a value commits the edited field only.
-        ui.import_edit = Some((model.clone(), turned));
+        ui.import_edit = Some((model.clone(), turned.clone()));
         ui.edit = Some(TextEdit {
             id,
-            target: EditTarget::Import(0),
+            target: EditTarget::Import(springs::ImportField::Scale),
             buffer: "0.5".into(),
             rect: Rect::default(),
             fresh: false,

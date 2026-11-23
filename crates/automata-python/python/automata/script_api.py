@@ -380,6 +380,16 @@ class EntityAnimation:
         """Every clip the model has."""
         return tuple(self._st().get("clips") or ())
 
+    @property
+    def springs(self):
+        """Whether the model has spring bones (set up in its import settings)."""
+        return bool(self._st().get("springs"))
+
+    def reset_springs(self):
+        """Puts the spring bones back at rest, as if the entity had just
+        appeared (after moving it somewhere new, say)."""
+        self._e._anim_cmd(["reset_springs"])
+
     def length(self, clip=None):
         """A clip's length in seconds (default: the current clip's)."""
         if clip is None:

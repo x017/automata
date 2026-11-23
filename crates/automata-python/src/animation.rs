@@ -211,6 +211,20 @@ impl PyAnimationRef {
         self.state.clips.clone()
     }
 
+    /// Whether the model has spring bones (hair, skirts, tails that swing
+    /// on their own; set up in its import settings).
+    #[getter]
+    fn springs(&self) -> bool {
+        self.state.springs
+    }
+
+    /// Puts the spring bones back at rest, as if the entity had just
+    /// appeared (after moving it somewhere new, say). Big jumps are
+    /// noticed on their own; this is for small ones.
+    fn reset_springs(&self) {
+        self.push(AnimationCommand::ResetSprings);
+    }
+
     /// A clip's length in seconds (default: the current clip's). Raises
     /// `KeyError` for an unknown clip.
     #[pyo3(signature = (clip=None))]

@@ -119,7 +119,7 @@ mid-fade blends on from the current pose. <code>loop=False</code> plays once.
 <code>anim.playing</code> turns False when it ends, so you can tell when to move on.
 <code>speed=</code> sets the rate, and <code>restart=True</code> starts a clip that's already
 playing over.</p>
-<div class="table"><table><thead><tr><th>Member</th><th>Meaning</th></tr></thead><tbody><tr><td><code>play(clip, loop=True, fade=0.0, speed=None, restart=False)</code></td><td>Switch clips. An unknown name raises <code>KeyError</code> (names are case-sensitive; see <code>clips</code>)</td></tr><tr><td><code>stop(fade=0.0)</code></td><td>Blend back to the rest pose</td></tr><tr><td><code>clip</code>, <code>time</code>, <code>duration</code></td><td>The clip, seconds into it, and its length. Assign <code>time</code> to jump</td></tr><tr><td><code>playing</code>, <code>looping</code>, <code>speed</code></td><td>Assign <code>speed</code> to change it mid-clip</td></tr><tr><td><code>clips</code>, <code>length(clip)</code></td><td>Every clip name, in file order, and any clip's length</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Member</th><th>Meaning</th></tr></thead><tbody><tr><td><code>play(clip, loop=True, fade=0.0, speed=None, restart=False)</code></td><td>Switch clips. An unknown name raises <code>KeyError</code> (names are case-sensitive; see <code>clips</code>)</td></tr><tr><td><code>stop(fade=0.0)</code></td><td>Blend back to the rest pose</td></tr><tr><td><code>clip</code>, <code>time</code>, <code>duration</code></td><td>The clip, seconds into it, and its length. Assign <code>time</code> to jump</td></tr><tr><td><code>playing</code>, <code>looping</code>, <code>speed</code></td><td>Assign <code>speed</code> to change it mid-clip</td></tr><tr><td><code>clips</code>, <code>length(clip)</code></td><td>Every clip name, in file order, and any clip's length</td></tr><tr><td><code>springs</code>, <code>reset_springs()</code></td><td>Whether the model has <a href="#spring-bones">spring bones</a>, and put them back at rest</td></tr></tbody></table></div>
 <p>Reads see your own requests made earlier in the frame. The pose updates
 after every script has run.</p>
 <h3 id="from-python">From Python<a class="anchor" href="#from-python" aria-label="Link to this section">#</a></h3>
@@ -151,6 +151,55 @@ as it is. The settings apply wherever the model is used: in Play, under
 <p>Commit these files with your models. A model without one is used exactly
 as the file describes it. Fitted colliders use the model's size after the
 import settings, so press <strong>Fit Collider</strong> after changing them.</p>
+<h2 id="spring-bones">Spring bones<a class="anchor" href="#spring-bones" aria-label="Link to this section">#</a></h2>
+<p><img src="../../../assets/models/spring_bones.jpg" alt="The runner without and with spring bones: running, her ponytail streams out behind and her skirt flares; just after she stops, both swing on forwards" loading="lazy" decoding="async"></p>
+<p>Hair, skirts, tails, capes and antennae don't need to be animated by hand.
+Make their bones <strong>spring bones</strong> and they swing on their own whenever the
+character moves: they trail behind when it runs, swing on when it stops,
+then settle back into place. They also follow the animation, so a head turn
+swings the ponytail too.</p>
+<p>Spring bones are part of a model's import settings, under <strong>Springs</strong> in
+the Import block (rigged models only). Like the rest of the import settings
+they apply to every entity using the file, in Play, under <code>run_scene</code> and
+in exported games.</p>
+<p><img src="../../../assets/models/spring_editor.jpg" alt="The bone picker, listing Hair1 and Skirt as suggestions, next to the Springs settings" loading="lazy" decoding="async"></p>
+<p><strong>+ Chain</strong> opens a searchable list of the model's bones. Bones that look
+like the start of hair or cloth (names like <em>hair</em>, <em>tail</em>, <em>skirt</em>, <em>cape</em>)
+come first under <strong>Suggested</strong>. Pick one and it and every bone below it
+swing. A bone with several children, like a skirt's waistband, stays put
+and each branch below it swings on its own, so one chain covers a whole
+skirt.</p>
+<div class="table"><table><thead><tr><th>Chain setting</th><th>What it does</th></tr></thead><tbody><tr><td><strong>Stiffness</strong></td><td>How strongly the bones spring back to their animated pose: 0 is limp, 1 is stiff.</td></tr><tr><td><strong>Drag</strong></td><td>How quickly swinging dies down, like air resistance: 0 swings longest, 1 barely swings. Running also streams the chain out behind against the drag.</td></tr><tr><td><strong>Gravity</strong></td><td>How much gravity pulls the chain down (1 is full gravity). Long hair wants more, a stiff tail less.</td></tr><tr><td><strong>Thickness</strong></td><td>The bones' radius when they bump into colliders, in metres.</td></tr><tr><td><strong>Wind</strong></td><td>A steady wind in m/s² along X, Y and Z (world directions). It gusts a little around this.</td></tr></tbody></table></div>
+<p><strong>+ Collider</strong> puts a sphere or capsule on a body bone that chains can't
+pass through: a head the fringe can't go into, a chest for the ponytail,
+thighs that push the skirt out of the way. Body bones (<em>head</em>, <em>chest</em>,
+<em>spine</em>, <em>thigh</em>, …) come first in the list.</p>
+<div class="table"><table><thead><tr><th>Collider setting</th><th>What it does</th></tr></thead><tbody><tr><td><strong>Radius</strong></td><td>The sphere's radius, in metres.</td></tr><tr><td><strong>Length</strong></td><td>0 for a sphere. Otherwise a capsule this long along the bone's Y axis (negative goes the other way, down a leg).</td></tr><tr><td><strong>Offset</strong></td><td>Where the sphere sits relative to the bone's origin, in the bone's own frame.</td></tr></tbody></table></div>
+<p>Sizes are in metres on the imported model (after <strong>Scale</strong>), and grow with
+the entity's scale. A chain or collider naming a bone the model doesn't
+have shows its name in red and is skipped. The <strong>×</strong> removes it.</p>
+<p>The settings are saved in the model's <code>.import.ron</code> with the others:</p>
+<div class="codeblock" data-lang="ron"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>(
+    scale: <span class="tok-n">1.0</span>,
+    rotation: (<span class="tok-n">0.0</span>, <span class="tok-n">0.0</span>, <span class="tok-n">0.0</span>),
+    pivot: <span class="tok-t">File</span>,
+    springs: (
+        chains: [
+            (root: <span class="tok-s">&quot;Hair1&quot;</span>, stiffness: <span class="tok-n">0.3</span>, drag: <span class="tok-n">0.25</span>, gravity: <span class="tok-n">0.6</span>, radius: <span class="tok-n">0.03</span>),
+            (root: <span class="tok-s">&quot;Skirt&quot;</span>, stiffness: <span class="tok-n">0.6</span>, drag: <span class="tok-n">0.4</span>, gravity: <span class="tok-n">0.3</span>, radius: <span class="tok-n">0.025</span>),
+        ],
+        colliders: [
+            (bone: <span class="tok-s">&quot;Head&quot;</span>, offset: (<span class="tok-n">0.0</span>, <span class="tok-n">0.09</span>, <span class="tok-n">0.0</span>), radius: <span class="tok-n">0.13</span>),
+            (bone: <span class="tok-s">&quot;ThighL&quot;</span>, radius: <span class="tok-n">0.07</span>, length: -<span class="tok-n">0.38</span>),
+        ],
+    ),
+)</code></pre></div>
+<p>Spring bones run while the game plays and in the Animation <strong>Preview</strong>; in
+the editor the model holds still. They move with the entity, so a script
+moving the transform, a Character Controller and physics all swing them.
+A big jump (a teleport, a respawn) puts them back at rest by itself. For a
+small one, call <code>entity.animation.reset_springs()</code>. A model with spring
+bones but no clips gets them too, without an Animation component.</p>
 <h2 id="colliders">Colliders<a class="anchor" href="#colliders" aria-label="Link to this section">#</a></h2>
 <p><strong>Add Collider</strong> picks a shape from the model:</p>
 <div class="table"><table><thead><tr><th>The model</th><th>Shape</th></tr></thead><tbody><tr><td>Fills at least 90% of its bounding box (crates, slabs)</td><td><strong>Box</strong>, fitted to the bounds</td></tr><tr><td>Anything else, with no rigid body or a static one</td><td><strong>Mesh</strong>: the model's own triangles</td></tr><tr><td>Anything else, on a dynamic or kinematic body</td><td><strong>Convex Hull</strong>: shrink-wrapped around the model</td></tr></tbody></table></div>
@@ -221,6 +270,12 @@ between Idle, Walking, Running, Jump and Wave. The others dance, sit, wave
 when you come near, and walk in slow motion. Open it and pick clips for
 them in the Inspector:</p>
 <div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>cargo run -p oberon --release examples/oberon/robot_plaza/level.ron</code></pre></div>
+<p><code>examples/oberon/ponytail_park/</code> shows spring bones: a runner whose
+ponytail and skirt are spring chains. One jogs up the track and stops dead
+at each end, one strolls round a flowerbed, and you run around as another
+(Shift runs). Select one and open <strong>Springs</strong> in the Import block to tune
+them while it plays:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>cargo run -p oberon --release examples/oberon/ponytail_park/level.ron</code></pre></div>
 <p><code>examples/oberon/fps/</code> uses ten of Kenney's CC0 models, three of them with
 import settings. See the <a href="../tutorials/fps.html">FPS tutorial</a>.</p>
 <p><code>examples/models/</code> has a two-material glTF tree with an embedded texture,
@@ -230,12 +285,12 @@ a textured OBJ crate, and <code>scene.ron</code> placing them. Open it:</p>
 colliders cover the meshes, not the pivots. <code>make_models.py</code> regenerates
 the files.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="anchor" href="#troubleshooting" aria-label="Link to this section">#</a></h2>
-<div class="table"><table><thead><tr><th>Symptom</th><th>Fix</th></tr></thead><tbody><tr><td>File row red, <em>File not found</em></td><td>The model moved or the scene was saved elsewhere. <strong>Change…</strong> to re-pick it.</td></tr><tr><td><em>…mesh compression, which isn't supported</em></td><td>Re-export without mesh compression. These glTF extensions aren't supported.</td></tr><tr><td>Clip row is red</td><td>The model has no clip with that name (names are case-sensitive), or no animations at all. Pick one from the menu.</td></tr><tr><td>Animated model doesn't move in Play</td><td>Check the Animation's <strong>Play On Start</strong>, and that a script isn't calling <code>stop()</code>.</td></tr><tr><td>Model is huge or tiny</td><td>Modelling tools disagree on units. Set <strong>Import → Scale</strong> (×0.01 for centimetres), or export from Blender with <strong>Apply Unit</strong> checked. glTF is always metres.</td></tr><tr><td>Model faces the wrong way</td><td>glTF's forward is +Z. Press <strong>Import → Rotation → +90°</strong> until it faces the right way.</td></tr><tr><td>Model floats or sinks when placed</td><td>Its origin isn't at its base. Set <strong>Import → Pivot</strong> to <strong>Bottom</strong>.</td></tr><tr><td>Looks inside-out</td><td>The mesh's faces point inward. Recalculate normals in the modelling tool (Blender: <strong>Mesh → Normals → Recalculate Outside</strong>).</td></tr><tr><td>Untextured but should be</td><td>Only the base colour texture is read. Check the image is PNG or JPEG and that the path in the <code>.mtl</code> / <code>.gltf</code> exists.</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Symptom</th><th>Fix</th></tr></thead><tbody><tr><td>File row red, <em>File not found</em></td><td>The model moved or the scene was saved elsewhere. <strong>Change…</strong> to re-pick it.</td></tr><tr><td><em>…mesh compression, which isn't supported</em></td><td>Re-export without mesh compression. These glTF extensions aren't supported.</td></tr><tr><td>Clip row is red</td><td>The model has no clip with that name (names are case-sensitive), or no animations at all. Pick one from the menu.</td></tr><tr><td>Hair or cloth passes through the body</td><td>Add a <strong>Collider</strong> on the body bone it goes through, or make the chain's <strong>Thickness</strong> bigger.</td></tr><tr><td>A chain swings on for too long</td><td>Raise its <strong>Drag</strong>. Raise <strong>Stiffness</strong> to keep it nearer its animated shape.</td></tr><tr><td>A chain or collider name is red</td><td>The model has no bone by that name (it was renamed in the modelling tool). Remove it and pick the bone again.</td></tr><tr><td>Animated model doesn't move in Play</td><td>Check the Animation's <strong>Play On Start</strong>, and that a script isn't calling <code>stop()</code>.</td></tr><tr><td>Model is huge or tiny</td><td>Modelling tools disagree on units. Set <strong>Import → Scale</strong> (×0.01 for centimetres), or export from Blender with <strong>Apply Unit</strong> checked. glTF is always metres.</td></tr><tr><td>Model faces the wrong way</td><td>glTF's forward is +Z. Press <strong>Import → Rotation → +90°</strong> until it faces the right way.</td></tr><tr><td>Model floats or sinks when placed</td><td>Its origin isn't at its base. Set <strong>Import → Pivot</strong> to <strong>Bottom</strong>.</td></tr><tr><td>Looks inside-out</td><td>The mesh's faces point inward. Recalculate normals in the modelling tool (Blender: <strong>Mesh → Normals → Recalculate Outside</strong>).</td></tr><tr><td>Untextured but should be</td><td>Only the base colour texture is read. Check the image is PNG or JPEG and that the path in the <code>.mtl</code> / <code>.gltf</code> exists.</td></tr></tbody></table></div>
     </article>
     <footer class="pager"><a class="prev" href="code-editor.html"><small>Previous</small>The code editor</a><a class="next" href="audio.html"><small>Next</small>Audio</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/models.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l3"><a href="#animated-models">Animated models</a></li><li class="l2"><a href="#add-a-model-to-the-scene">Add a model to the scene</a></li><li class="l2"><a href="#the-assets-tab">The Assets tab</a></li><li class="l3"><a href="#what-importing-copies">What importing copies</a></li><li class="l2"><a href="#give-a-model-to-an-existing-entity">Give a model to an existing entity</a></li><li class="l2"><a href="#the-inspector">The Inspector</a></li><li class="l2"><a href="#animation">Animation</a></li><li class="l3"><a href="#from-a-script">From a script</a></li><li class="l3"><a href="#from-python">From Python</a></li><li class="l2"><a href="#import-settings">Import settings</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#editing-a-model-while-oberon-is-open">Editing a model while Oberon is open</a></li><li class="l2"><a href="#scene-files-and-paths">Scene files and paths</a></li><li class="l2"><a href="#from-python-1">From Python</a></li><li class="l2"><a href="#try-it">Try it</a></li><li class="l2"><a href="#troubleshooting">Troubleshooting</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l3"><a href="#animated-models">Animated models</a></li><li class="l2"><a href="#add-a-model-to-the-scene">Add a model to the scene</a></li><li class="l2"><a href="#the-assets-tab">The Assets tab</a></li><li class="l3"><a href="#what-importing-copies">What importing copies</a></li><li class="l2"><a href="#give-a-model-to-an-existing-entity">Give a model to an existing entity</a></li><li class="l2"><a href="#the-inspector">The Inspector</a></li><li class="l2"><a href="#animation">Animation</a></li><li class="l3"><a href="#from-a-script">From a script</a></li><li class="l3"><a href="#from-python">From Python</a></li><li class="l2"><a href="#import-settings">Import settings</a></li><li class="l2"><a href="#spring-bones">Spring bones</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#editing-a-model-while-oberon-is-open">Editing a model while Oberon is open</a></li><li class="l2"><a href="#scene-files-and-paths">Scene files and paths</a></li><li class="l2"><a href="#from-python-1">From Python</a></li><li class="l2"><a href="#try-it">Try it</a></li><li class="l2"><a href="#troubleshooting">Troubleshooting</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

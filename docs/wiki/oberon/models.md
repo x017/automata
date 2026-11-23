@@ -163,6 +163,7 @@ playing over.
 | `clip`, `time`, `duration` | The clip, seconds into it, and its length. Assign `time` to jump |
 | `playing`, `looping`, `speed` | Assign `speed` to change it mid-clip |
 | `clips`, `length(clip)` | Every clip name, in file order, and any clip's length |
+| `springs`, `reset_springs()` | Whether the model has [spring bones](#spring-bones), and put them back at rest |
 
 Reads see your own requests made earlier in the frame. The pose updates
 after every script has run.
@@ -213,6 +214,80 @@ Settings are saved next to the model as `<file>.import.ron`. For example,
 Commit these files with your models. A model without one is used exactly
 as the file describes it. Fitted colliders use the model's size after the
 import settings, so press **Fit Collider** after changing them.
+
+## Spring bones
+
+![The runner without and with spring bones: running, her ponytail streams out behind and her skirt flares; just after she stops, both swing on forwards](../../assets/models/spring_bones.jpg)
+
+Hair, skirts, tails, capes and antennae don't need to be animated by hand.
+Make their bones **spring bones** and they swing on their own whenever the
+character moves: they trail behind when it runs, swing on when it stops,
+then settle back into place. They also follow the animation, so a head turn
+swings the ponytail too.
+
+Spring bones are part of a model's import settings, under **Springs** in
+the Import block (rigged models only). Like the rest of the import settings
+they apply to every entity using the file, in Play, under `run_scene` and
+in exported games.
+
+![The bone picker, listing Hair1 and Skirt as suggestions, next to the Springs settings](../../assets/models/spring_editor.jpg)
+
+**+ Chain** opens a searchable list of the model's bones. Bones that look
+like the start of hair or cloth (names like *hair*, *tail*, *skirt*, *cape*)
+come first under **Suggested**. Pick one and it and every bone below it
+swing. A bone with several children, like a skirt's waistband, stays put
+and each branch below it swings on its own, so one chain covers a whole
+skirt.
+
+| Chain setting | What it does |
+|---|---|
+| **Stiffness** | How strongly the bones spring back to their animated pose: 0 is limp, 1 is stiff. |
+| **Drag** | How quickly swinging dies down, like air resistance: 0 swings longest, 1 barely swings. Running also streams the chain out behind against the drag. |
+| **Gravity** | How much gravity pulls the chain down (1 is full gravity). Long hair wants more, a stiff tail less. |
+| **Thickness** | The bones' radius when they bump into colliders, in metres. |
+| **Wind** | A steady wind in m/s² along X, Y and Z (world directions). It gusts a little around this. |
+
+**+ Collider** puts a sphere or capsule on a body bone that chains can't
+pass through: a head the fringe can't go into, a chest for the ponytail,
+thighs that push the skirt out of the way. Body bones (*head*, *chest*,
+*spine*, *thigh*, …) come first in the list.
+
+| Collider setting | What it does |
+|---|---|
+| **Radius** | The sphere's radius, in metres. |
+| **Length** | 0 for a sphere. Otherwise a capsule this long along the bone's Y axis (negative goes the other way, down a leg). |
+| **Offset** | Where the sphere sits relative to the bone's origin, in the bone's own frame. |
+
+Sizes are in metres on the imported model (after **Scale**), and grow with
+the entity's scale. A chain or collider naming a bone the model doesn't
+have shows its name in red and is skipped. The **×** removes it.
+
+The settings are saved in the model's `.import.ron` with the others:
+
+```ron
+(
+    scale: 1.0,
+    rotation: (0.0, 0.0, 0.0),
+    pivot: File,
+    springs: (
+        chains: [
+            (root: "Hair1", stiffness: 0.3, drag: 0.25, gravity: 0.6, radius: 0.03),
+            (root: "Skirt", stiffness: 0.6, drag: 0.4, gravity: 0.3, radius: 0.025),
+        ],
+        colliders: [
+            (bone: "Head", offset: (0.0, 0.09, 0.0), radius: 0.13),
+            (bone: "ThighL", radius: 0.07, length: -0.38),
+        ],
+    ),
+)
+```
+
+Spring bones run while the game plays and in the Animation **Preview**; in
+the editor the model holds still. They move with the entity, so a script
+moving the transform, a Character Controller and physics all swing them.
+A big jump (a teleport, a respawn) puts them back at rest by itself. For a
+small one, call `entity.animation.reset_springs()`. A model with spring
+bones but no clips gets them too, without an Animation component.
 
 ## Colliders
 
@@ -316,6 +391,16 @@ them in the Inspector:
 cargo run -p oberon --release examples/oberon/robot_plaza/level.ron
 ```
 
+`examples/oberon/ponytail_park/` shows spring bones: a runner whose
+ponytail and skirt are spring chains. One jogs up the track and stops dead
+at each end, one strolls round a flowerbed, and you run around as another
+(Shift runs). Select one and open **Springs** in the Import block to tune
+them while it plays:
+
+```console
+cargo run -p oberon --release examples/oberon/ponytail_park/level.ron
+```
+
 `examples/oberon/fps/` uses ten of Kenney's CC0 models, three of them with
 import settings. See the [FPS tutorial](../tutorials/fps.md).
 
@@ -337,6 +422,9 @@ the files.
 | File row red, *File not found* | The model moved or the scene was saved elsewhere. **Change…** to re-pick it. |
 | *…mesh compression, which isn't supported* | Re-export without mesh compression. These glTF extensions aren't supported. |
 | Clip row is red | The model has no clip with that name (names are case-sensitive), or no animations at all. Pick one from the menu. |
+| Hair or cloth passes through the body | Add a **Collider** on the body bone it goes through, or make the chain's **Thickness** bigger. |
+| A chain swings on for too long | Raise its **Drag**. Raise **Stiffness** to keep it nearer its animated shape. |
+| A chain or collider name is red | The model has no bone by that name (it was renamed in the modelling tool). Remove it and pick the bone again. |
 | Animated model doesn't move in Play | Check the Animation's **Play On Start**, and that a script isn't calling `stop()`. |
 | Model is huge or tiny | Modelling tools disagree on units. Set **Import → Scale** (×0.01 for centimetres), or export from Blender with **Apply Unit** checked. glTF is always metres. |
 | Model faces the wrong way | glTF's forward is +Z. Press **Import → Rotation → +90°** until it faces the right way. |

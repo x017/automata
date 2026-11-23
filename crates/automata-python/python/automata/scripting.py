@@ -154,7 +154,7 @@ class _ViewRecord:
             return {
                 "clip": a.clip, "time": a.time, "len": a.duration, "playing": a.playing,
                 "speed": a.speed, "loop": a.looping, "clips": clips,
-                "lens": [a.length(c) for c in clips],
+                "lens": [a.length(c) for c in clips], "springs": a.springs,
             }
         if key == "view":
             return v
@@ -221,6 +221,8 @@ class _EngineBackend(api.Backend):
                     anim.time = cmd[1]
                 elif cmd[0] == "speed":
                     anim.speed = cmd[1]
+                elif cmd[0] == "reset_springs":
+                    anim.reset_springs()
             if w.get("despawn"):
                 view.despawn()
         for path, volume, pitch, pos in out.sounds:

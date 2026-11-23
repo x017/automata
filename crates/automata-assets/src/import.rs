@@ -50,7 +50,7 @@ impl Pivot {
 }
 
 /// How a model file is adjusted when it loads.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ImportSettings {
     /// Uniform scale (`0.01` turns centimetres into metres).
@@ -59,6 +59,9 @@ pub struct ImportSettings {
     pub rotation: [f32; 3],
     /// Where the origin goes.
     pub pivot: Pivot,
+    /// Bones that swing on their own (see [`crate::springs`]).
+    #[serde(skip_serializing_if = "crate::springs::Springs::is_unset")]
+    pub springs: crate::springs::Springs,
 }
 
 impl Default for ImportSettings {
@@ -67,14 +70,21 @@ impl Default for ImportSettings {
             scale: 1.0,
             rotation: [0.0; 3],
             pivot: Pivot::File,
+            springs: crate::springs::Springs::default(),
         }
     }
 }
 
 impl ImportSettings {
-    /// Whether these settings change nothing.
+    /// Whether these settings change nothing (no file needed).
     #[must_use]
     pub fn is_identity(&self) -> bool {
+        self.keeps_geometry() && self.springs.is_unset()
+    }
+
+    /// Whether the scale, rotation and pivot leave the geometry as it is.
+    #[must_use]
+    pub fn keeps_geometry(&self) -> bool {
         (self.scale - 1.0).abs() < 1e-6
             && self.rotation.iter().all(|r| r.abs() < 1e-6)
             && self.pivot == Pivot::File
@@ -83,7 +93,7 @@ impl ImportSettings {
     /// Bakes the settings into `parts`, returning the transform applied
     /// (rigs apply it after posing).
     pub(crate) fn apply(&self, parts: &mut [ModelPart]) -> Mat4 {
-        if self.is_identity() {
+        if self.keeps_geometry() {
             return Mat4::IDENTITY;
         }
         let scale = if self.scale.is_finite() && self.scale.abs() > 1e-6 {
@@ -207,6 +217,7 @@ mod tests {
             scale: 2.0,
             rotation: [0.0, 180.0, 0.0],
             pivot: Pivot::BottomCenter,
+            ..ImportSettings::default()
         }
         .apply(&mut parts);
         let v = &parts[0].mesh.vertices;
@@ -252,6 +263,7 @@ mod tests {
             scale: -2.0,
             rotation: [0.0, 90.0, 0.0],
             pivot: Pivot::BottomCenter,
+            ..ImportSettings::default()
         };
         write_settings(&model, &settings).unwrap();
         let loaded = crate::load_file(&model).unwrap();
@@ -279,6 +291,10 @@ mod tests {
             scale: 0.01,
             rotation: [90.0, 0.0, 0.0],
             pivot: Pivot::Center,
+            springs: crate::springs::Springs {
+                chains: vec![crate::springs::SpringChain::new("Tail")],
+                colliders: vec![],
+            },
         };
         write_settings(&model, &s).unwrap();
         assert_eq!(read_settings(&model), s);

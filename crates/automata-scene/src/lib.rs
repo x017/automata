@@ -27,6 +27,7 @@ mod particles;
 mod render;
 mod resources;
 mod scene;
+mod springs;
 mod transform;
 
 pub use animation::{
@@ -47,6 +48,7 @@ pub use render::{
 };
 pub use resources::Resources;
 pub use scene::{EntityId, Name, Scene, SceneWorld};
+pub use springs::SpringSim;
 pub use transform::{propagate_transforms, GlobalTransform, Parent, Transform};
 
 pub use hecs::Entity;

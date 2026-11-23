@@ -41,6 +41,15 @@ pub enum PaletteAction {
         /// The entity whose Audio Source gets it.
         target: Option<u64>,
     },
+    /// Start a spring chain at a bone of a model, or put a collider on it.
+    SpringBone {
+        /// The model file (its import settings get the chain).
+        model: PathBuf,
+        /// The bone's name.
+        bone: String,
+        /// Chain or collider.
+        pick: super::springs::SpringPick,
+    },
 }
 
 /// One searchable entry.
@@ -375,7 +384,33 @@ impl Ui {
                 Some(id) => Intent::SetAudioClip { id, path },
                 None => Intent::AddSound { path, at: None },
             }),
+            PaletteAction::SpringBone { model, bone, pick } => {
+                self.out.push(super::springs::add_bone(model, bone, pick));
+            }
         }
+    }
+
+    /// The bone picker: `rig`'s bones, likely ones first, to start a
+    /// spring chain at one or put a collider on one (`pick`).
+    pub fn open_bone_picker(
+        &mut self,
+        model: &Path,
+        rig: &automata_assets::Rig,
+        pick: super::springs::SpringPick,
+    ) {
+        use super::springs::SpringPick;
+        self.menu = None;
+        self.picker = None;
+        self.palette = Some(Palette {
+            query: String::new(),
+            selected: 0,
+            items: super::springs::bone_items(model, rig, pick),
+            files_only: true,
+            placeholder: Some(match pick {
+                SpringPick::Chain => "Choose the first bone of the chain…",
+                SpringPick::Collider => "Choose a body bone for the collider…",
+            }),
+        });
     }
 
     /// The sound picker: the project's sound files by name, plus "Import

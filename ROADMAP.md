@@ -347,7 +347,7 @@ and Wave, a greeter that waves when you come near, and robots that dance,
 sit (a one-shot holding its last frame) and walk in slow motion. Docs:
 [Models → Animation](docs/wiki/oberon/models.md#animation).
 
-### B2. Spring bones: hair, cloth, tails ⬜ M
+### B2. Spring bones: hair, cloth, tails ✅ M
 - Verlet chains on chosen bones (stiffness, drag, gravity, wind), with
   sphere and capsule colliders on the body so hair doesn't pass through
   shoulders.
@@ -355,6 +355,26 @@ sit (a one-shot holding its last frame) and walk in slow motion. Docs:
   Oberon editor that picks the chain roots.
 - **Done when:** a character's ponytail and skirt swing and settle as it
   runs and stops.
+
+Done: `ImportSettings.springs` holds chains (root bone, stiffness, drag,
+gravity, wind, thickness) and sphere/capsule colliders (bone, offset,
+radius, length), saved in `<model>.import.ron` and copied into the rig.
+`automata_scene::SpringSim` simulates each swinging bone's tip with Verlet
+in world space (substepped, the entity's move spread across substeps),
+springs it towards its animated place, keeps the bone's length, projects it
+out of colliders onto the reachable circle, and turns the bone to follow.
+Forks (a skirt's waistband) stay put while their branches swing; teleports
+reset. Springs damp in proportion to their rate so long chains settle
+instead of whipping. The `Animator` runs it after the clip with the
+entity's `GlobalTransform`, and models with springs but no clips get one.
+Scripts get `entity.animation.springs` and `.reset_springs()`. Oberon's
+Import block has a Springs section (+ Chain, + Collider, per-chain and
+per-collider numbers, × to remove), with bones picked from a searchable
+palette that lists likely roots first. `examples/oberon/ponytail_park` has
+a generated CC0 runner with a ponytail and an eight-panel skirt; a Rust
+test runs it, stops it and checks the hair trails, swings forward, stays
+out of the head and settles. Docs:
+[Models → Spring bones](docs/wiki/oberon/models.md#spring-bones).
 
 ### B3. Animation events and root motion ⬜ M
 NEXT_PLANS #4 phase 3:
@@ -531,8 +551,8 @@ per effort. Reorder any time by telling me.
 | 11 | A8 Post chain + colour grading | M | ✅ |
 | 12 | A9 Height fog, god rays, DoF, dust | M | ✅ |
 | 13 | A10 Style presets | L | ✅ |
-| 14 | B1 Animation playback | L | ⬜ |
-| 15 | B2 Spring bones | M | ⬜ |
+| 14 | B1 Animation playback | L | ✅ |
+| 15 | B2 Spring bones | M | ✅ |
 | 16 | A11 Culling, instancing, LOD | M | ⬜ |
 | 17 | A12 Grass and foliage | L | ⬜ |
 | 18 | C2 Tweens and timers | S | ⬜ |

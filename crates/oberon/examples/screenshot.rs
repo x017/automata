@@ -53,7 +53,7 @@ fn main() {
 
     // Optional scene: `picker`, `menu`, `dialog`, `project`, `code`,
     // `code-complete`, `code-api`, `settings`, `build`, `build-menu`, `palette`,
-    // `assets`, `assets-sounds`.
+    // `assets`, `assets-sounds`, `bone-picker`.
     let scene = std::env::args().nth(2).unwrap_or_default();
     let selected = doc.selected;
     let pointer = Pointer {
@@ -62,6 +62,21 @@ fn main() {
         ..Pointer::default()
     };
     let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+    // `OBERON_SCROLL=<pixels>` scrolls the Inspector down first.
+    if let Some(px) = std::env::var("OBERON_SCROLL")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok())
+    {
+        let insp = Layout::compute(w as f32, h as f32).inspector;
+        let wheel = Pointer {
+            x: insp.x + insp.w / 2.0,
+            y: insp.y + insp.h / 2.0,
+            scroll: -px / 48.0,
+            ..Pointer::default()
+        };
+        let _ = ui.frame(&mut canvas, &doc, wheel, Some((&frame, fw, fh)));
+        let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+    }
     match scene.as_str() {
         "picker" => {
             if let Some(id) = selected {
@@ -245,6 +260,20 @@ fn main() {
             // Thumbnails fill in a few per frame.
             for _ in 0..6 {
                 let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+            }
+        }
+        "bone-picker" => {
+            // The spring chain bone picker for the selected model, as if it
+            // had no chains yet (so the suggestions show).
+            let entity = selected.and_then(|id| doc.entities.iter().find(|e| e.id == id));
+            if let Some(e) = entity {
+                let rig = oberon::doc::model_rig(&e.data);
+                let path = oberon::doc::model_path(&e.data).map(|p| doc.base_dir().join(p));
+                if let (Some(rig), Some(path)) = (rig, path) {
+                    let mut bare = (*rig).clone();
+                    bare.springs = automata_assets::springs::Springs::default();
+                    ui.open_bone_picker(&path, &bare, oberon::ui::springs::SpringPick::Chain);
+                }
             }
         }
         "palette" => {

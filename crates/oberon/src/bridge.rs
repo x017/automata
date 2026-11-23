@@ -787,7 +787,8 @@ fn state_json(e: &EntityState) -> Json {
     obj
 }
 
-/// `{"clip", "time", "len", "playing", "speed", "loop", "clips", "lens"}`
+/// `{"clip", "time", "len", "playing", "speed", "loop", "clips", "lens",
+/// "springs"}`
 /// (see the script API's frame model).
 fn anim_json(a: &automata_scene::AnimationState) -> Json {
     Json::obj([
@@ -802,11 +803,13 @@ fn anim_json(a: &automata_scene::AnimationState) -> Json {
             Json::Arr(a.clips.iter().map(|c| Json::from(c.as_str())).collect()),
         ),
         ("lens", Json::floats(&a.lengths)),
+        ("springs", Json::Bool(a.springs)),
     ])
 }
 
 /// One `entity.animation` request: `["play", clip, loop, fade, speed or
-/// null, restart]`, `["stop", fade]`, `["seek", t]` or `["speed", s]`.
+/// null, restart]`, `["stop", fade]`, `["seek", t]`, `["speed", s]` or
+/// `["reset_springs"]`.
 fn parse_anim(v: &Json) -> Option<automata_scene::AnimationCommand> {
     use automata_scene::{AnimationCommand as C, PlayOptions};
     let a = v.as_arr()?;
@@ -824,6 +827,7 @@ fn parse_anim(v: &Json) -> Option<automata_scene::AnimationCommand> {
         "stop" => C::Stop(n(1).unwrap_or(0.0).max(0.0)),
         "seek" => C::Seek(n(1)?),
         "speed" => C::Speed(n(1)?),
+        "reset_springs" => C::ResetSprings,
         _ => return None,
     })
 }
@@ -1159,7 +1163,8 @@ mod tests {
         let msg = parse_msg(concat!(
             r#"{"op":"frame","frame":1,"writes":[{"id":3,"anim":["#,
             r#"["play","Walking",true,0.2,null,false],["play","Jump",false,0,1.5,true],"#,
-            r#"["stop",0.5],["seek",1.25],["speed",-1],["seek","x"],["dance"],[]]}]}"#
+            r#"["stop",0.5],["seek",1.25],["speed",-1],["seek","x"],["dance"],[],"#,
+            r#"["reset_springs"]]}]}"#
         ));
         let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
             panic!("{msg:?}");
@@ -1186,6 +1191,7 @@ mod tests {
                 C::Stop(0.5),
                 C::Seek(1.25),
                 C::Speed(-1.0),
+                C::ResetSprings,
             ],
             "malformed requests are skipped"
         );
@@ -1199,6 +1205,7 @@ mod tests {
                 looping: true,
                 clips: vec!["Idle".into(), "Wave".into()],
                 lengths: vec![2.0, 1.5],
+                springs: false,
             }),
             ..EntityState::default()
         };

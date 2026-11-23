@@ -21,6 +21,7 @@ mod gltf;
 pub mod import;
 pub mod json;
 mod obj;
+pub mod springs;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -461,9 +462,11 @@ fn load_uncached(path: &Path) -> Result<(Model, Vec<PathBuf>), ModelError> {
     })?;
     let mut parts = loaded.parts;
     let mut rig = loaded.rig;
-    let import = import::read_settings(path).apply(&mut parts);
+    let settings = import::read_settings(path);
+    let import = settings.apply(&mut parts);
     if let Some(rig) = &mut rig {
         rig.import = import;
+        rig.springs = settings.springs;
     }
     let model = Model::new(path.to_path_buf(), parts).with_rig(rig);
     if model.parts.is_empty() {

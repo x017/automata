@@ -1111,6 +1111,7 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
         joints,
         import: Mat4::IDENTITY,
         clips,
+        springs: crate::springs::Springs::default(),
     });
     // Parts draw their rest pose until something animates them; a rig with
     // too many joints for the GPU keeps only that.

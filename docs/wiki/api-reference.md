@@ -305,6 +305,13 @@ All four are readable properties. Saved in scene files. While the game runs,
 `view.animation` controls it (below). Guide:
 [Models → Animation](oberon/models.md#animation).
 
+Spring bones (hair, skirts and tails that swing on their own) aren't a
+component: they're set up in the model's import settings
+(`<model>.import.ron`), so every entity showing the model gets them.
+`view.animation.springs` says whether it has any, and
+`view.animation.reset_springs()` puts them back at rest. Guide:
+[Models → Spring bones](oberon/models.md#spring-bones).
+
 ### Physics components
 
 ```text
@@ -529,7 +536,7 @@ returns the number of frames run.
 | `attributes` | Dict-like, saved in the scene |
 | `camera` | `ScriptCamera` or `None` |
 | `audio` | `play()`, `stop()`, `playing`, `source` |
-| `animation` | `play(clip, loop=True, fade=0.0, speed=None, restart=False)`, `stop(fade=0.0)`, `clip`, `time` (settable), `duration`, `length(clip)`, `playing`, `speed` (settable), `looping`, `clips`, or `None` without an Animation. Reads include this frame's requests |
+| `animation` | `play(clip, loop=True, fade=0.0, speed=None, restart=False)`, `stop(fade=0.0)`, `clip`, `time` (settable), `duration`, `length(clip)`, `playing`, `speed` (settable), `looping`, `clips`, `springs`, `reset_springs()`, or `None` without an Animation. Reads include this frame's requests |
 | `camera_3d` | The camera as a `Camera3D` (get/set) |
 | `view` | The engine's `EntityView` for this frame |
 | `despawn()` | At the end of the frame |

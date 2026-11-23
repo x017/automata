@@ -273,6 +273,8 @@ pub struct Rig {
     pub import: Mat4,
     /// The animations, in file order.
     pub clips: Vec<Clip>,
+    /// Spring bones from the import settings (see [`crate::springs`]).
+    pub springs: crate::springs::Springs,
 }
 
 impl Rig {
@@ -464,6 +466,7 @@ mod tests {
             joints: vec![(1, child_rest.matrix().inverse())],
             import: Mat4::from_scale(Vec3::splat(2.0)),
             clips: Vec::new(),
+            springs: crate::springs::Springs::default(),
         };
         // At rest a joint matrix is the import transform alone.
         let rest = rig.rest_palette();

@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::render::{MeshRenderer, MeshVisual};
 use crate::scene::SceneWorld;
+use crate::springs::SpringSim;
+use crate::transform::GlobalTransform;
 
 /// What an animated model plays (also its ECS component and its record in
 /// scene files). The model itself comes from the entity's mesh.
@@ -153,6 +155,7 @@ pub struct Animator {
     pub playing: bool,
     fade: Option<Fade>,
     pose: Pose,
+    springs: Option<SpringSim>,
 }
 
 impl Animator {
@@ -160,6 +163,7 @@ impl Animator {
     #[must_use]
     pub fn new(rig: Arc<Rig>) -> Self {
         let pose = rig.rest_pose();
+        let springs = SpringSim::new(&rig);
         Self {
             rig,
             clip: None,
@@ -169,6 +173,7 @@ impl Animator {
             playing: false,
             fade: None,
             pose,
+            springs,
         }
     }
 
@@ -352,8 +357,43 @@ impl Animator {
 
     /// Advances time by `dt` seconds (scaled by [`Self::speed`]) and
     /// samples the pose, blending in any crossfade. A clip that doesn't
-    /// loop holds its last frame and stops playing.
+    /// loop holds its last frame and stops playing. Spring bones (if the
+    /// model has any) swing as if the entity stood still at the origin;
+    /// [`Self::advance_in`] gives them the entity's place.
     pub fn advance(&mut self, dt: f32) {
+        self.advance_in(dt, Mat4::IDENTITY);
+    }
+
+    /// [`Self::advance`] with the entity at `world`, so spring bones swing
+    /// as it moves.
+    pub fn advance_in(&mut self, dt: f32, world: Mat4) {
+        self.advance_clip(dt);
+        if let Some(springs) = &mut self.springs {
+            springs.update(&self.rig, &mut self.pose, world, dt);
+        }
+    }
+
+    /// Whether the model has spring bones.
+    #[must_use]
+    pub fn has_springs(&self) -> bool {
+        self.springs.is_some()
+    }
+
+    /// The spring bones' state, if the model has any.
+    #[must_use]
+    pub fn springs(&self) -> Option<&SpringSim> {
+        self.springs.as_ref()
+    }
+
+    /// Stops spring bones swinging: they start again from the animated
+    /// pose (after moving the entity somewhere else at once, say).
+    pub fn reset_springs(&mut self) {
+        if let Some(springs) = &mut self.springs {
+            springs.reset();
+        }
+    }
+
+    fn advance_clip(&mut self, dt: f32) {
         if let Some(clip) = self.clip {
             let mut layer = Layer {
                 clip,
@@ -417,6 +457,7 @@ impl Animator {
             looping: self.looping,
             clips: self.clip_names().into_iter().map(str::to_string).collect(),
             lengths: self.rig.clips.iter().map(|c| c.duration).collect(),
+            springs: self.has_springs(),
         }
     }
 }
@@ -440,6 +481,8 @@ pub struct AnimationState {
     pub clips: Vec<String>,
     /// Each clip's length in seconds (in the order of `clips`).
     pub lengths: Vec<f32>,
+    /// Whether the model has spring bones.
+    pub springs: bool,
 }
 
 /// A script's request to an entity's animation.
@@ -458,6 +501,8 @@ pub enum AnimationCommand {
     Seek(f32),
     /// Change the playback rate.
     Speed(f32),
+    /// Put the spring bones back at rest (see [`Animator::reset_springs`]).
+    ResetSprings,
 }
 
 /// A new animator for `entity`'s rigged model (set up from its
@@ -476,14 +521,19 @@ fn new_animator(world: &SceneWorld, entity: Entity, autoplay: bool) -> Option<An
     })
 }
 
-/// Gives every entity with an [`Animation`] and a rigged model its
-/// [`Animator`] (if it has none yet), playing its clip when `autoplay`.
+/// Gives every entity with an [`Animation`] and a rigged model, or a model
+/// with spring bones, its [`Animator`] (if it has none yet), playing its
+/// clip when `autoplay`.
 /// [`animate`] does this itself; editors call it with `autoplay` off to
 /// show each model's first frame. Returns how many were added.
 pub fn attach_animators(world: &mut SceneWorld, autoplay: bool) -> usize {
     let pending: Vec<Entity> = world
-        .query::<hecs::Without<(Entity, &Animation, &MeshVisual), &Animator>>()
+        .query::<hecs::Without<(Entity, &MeshVisual, Option<&Animation>), &Animator>>()
         .iter()
+        .filter(|(_, visual, animation)| {
+            let rig = visual.model.as_ref().and_then(|m| m.rig.as_ref());
+            rig.is_some_and(|rig| animation.is_some() || !rig.springs.is_empty())
+        })
         .map(|(e, _, _)| e)
         .collect();
     let mut added = 0;
@@ -532,6 +582,10 @@ pub fn command_animation(
             }
             speed.is_finite()
         }
+        AnimationCommand::ResetSprings => {
+            animator.reset_springs();
+            true
+        }
     }
 }
 
@@ -551,8 +605,12 @@ pub fn animation_state(world: &SceneWorld, entity: Entity) -> Option<AnimationSt
 /// with an [`Animation`] get their animator here the first time.
 pub fn animate(world: &mut SceneWorld, dt: f32) {
     attach_animators(world, true);
-    for (animator, renderer) in world.query_mut::<(&mut Animator, Option<&mut MeshRenderer>)>() {
-        animator.advance(dt);
+    for (animator, renderer, place) in world.query_mut::<(
+        &mut Animator,
+        Option<&mut MeshRenderer>,
+        Option<&GlobalTransform>,
+    )>() {
+        animator.advance_in(dt, place.map_or(Mat4::IDENTITY, |g| g.0));
         if let Some(renderer) = renderer {
             renderer.joints = Some(animator.palette());
         }
@@ -589,6 +647,7 @@ mod tests {
             joints: vec![(0, Mat4::IDENTITY)],
             import: Mat4::IDENTITY,
             clips: vec![slide("slide", 2.0), slide("back", -2.0)],
+            springs: automata_assets::springs::Springs::default(),
         })
     }
 
@@ -723,6 +782,59 @@ mod tests {
             model: Some(Arc::new(model)),
             ..MeshVisual::cube(1.0, [1.0; 4])
         }
+    }
+
+    #[test]
+    fn models_with_spring_bones_swing_where_the_entity_is() {
+        use automata_assets::springs::{SpringChain, Springs};
+        let node = |name: &str, parent, z| RigNode {
+            name: String::from(name),
+            parent,
+            rest: Trs {
+                translation: Vec3::new(0.0, 0.0, z),
+                ..Trs::IDENTITY
+            },
+        };
+        let rig = Rig {
+            nodes: vec![
+                node("Body", None, 0.0),
+                node("Tail", Some(0), 0.0),
+                node("Tip", Some(1), -1.0),
+            ],
+            joints: (0..3).map(|i| (i, Mat4::IDENTITY)).collect(),
+            import: Mat4::IDENTITY,
+            clips: Vec::new(),
+            springs: Springs {
+                chains: vec![SpringChain {
+                    stiffness: 0.0,
+                    gravity: 1.0,
+                    ..SpringChain::new("Tail")
+                }],
+                colliders: Vec::new(),
+            },
+        };
+        let mut model = Model::new("tail.glb".into(), Vec::new());
+        model.rig = Some(Arc::new(rig));
+        let visual = MeshVisual {
+            model: Some(Arc::new(model)),
+            ..MeshVisual::cube(1.0, [1.0; 4])
+        };
+        let mut scene = crate::Scene::new();
+        let at = Vec3::new(5.0, 2.0, 0.0);
+        let e = scene.spawn((visual, GlobalTransform(Mat4::from_translation(at))));
+        for _ in 0..120 {
+            animate(scene.world_mut(), 1.0 / 60.0);
+        }
+        let animator = scene.world().get::<&Animator>(e).unwrap();
+        assert!(animator.has_springs(), "no Animation needed for springs");
+        let (_, tip) = animator.springs().unwrap().tips()[0];
+        assert!(
+            tip.distance(at + Vec3::new(0.0, -1.0, 0.0)) < 0.05,
+            "hangs: {tip}"
+        );
+        // The pose (and so the palette) shows the tail hanging too.
+        let g = animator.rig().globals(animator.pose());
+        assert!(g[2].transform_point3(Vec3::ZERO).y < -0.95);
     }
 
     #[test]
