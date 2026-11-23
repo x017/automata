@@ -142,6 +142,7 @@ impl FileDialog {
             DialogKind::ImportModel(Some(_)) => "Choose Model",
             DialogKind::ImportSound(None) => "Import Sound",
             DialogKind::ImportSound(Some(_)) => "Choose Sound",
+            DialogKind::ImportFont => "Import Font",
             DialogKind::BuildScene => "Choose Start Scene",
             DialogKind::BuildOutput => "Choose Output Folder",
             DialogKind::PythonInterpreter => "Choose Python Interpreter",
@@ -156,6 +157,7 @@ impl FileDialog {
             DialogKind::OpenScript | DialogKind::NewScript | DialogKind::AttachScript(_) => "py",
             DialogKind::ImportModel(_) => "glb",
             DialogKind::ImportSound(_) => "ogg",
+            DialogKind::ImportFont => "ttf",
             DialogKind::BuildOutput | DialogKind::PythonInterpreter => "",
             _ => "ron",
         }
@@ -166,6 +168,7 @@ impl FileDialog {
         match self.kind {
             DialogKind::ImportModel(_) => ".glb .gltf .obj",
             DialogKind::ImportSound(_) => ".ogg .wav .mp3 .flac",
+            DialogKind::ImportFont => ".ttf .otf",
             DialogKind::SavePrefab(_) | DialogKind::InstantiatePrefab => ".prefab",
             DialogKind::OpenScript | DialogKind::NewScript | DialogKind::AttachScript(_) => ".py",
             DialogKind::BuildOutput => "folders",
@@ -181,6 +184,7 @@ impl FileDialog {
             DialogKind::ImportSound(_) => {
                 automata_core::audio_source::is_audio_path(Path::new(name))
             }
+            DialogKind::ImportFont => crate::fonts::is_font_path(Path::new(name)),
             DialogKind::BuildOutput => false,
             DialogKind::PythonInterpreter => true,
             _ => {
@@ -213,6 +217,7 @@ impl FileDialog {
                 | DialogKind::OpenScript
                 | DialogKind::ImportModel(_)
                 | DialogKind::ImportSound(_)
+                | DialogKind::ImportFont
                 | DialogKind::BuildScene
                 | DialogKind::PythonInterpreter
         )
@@ -230,7 +235,9 @@ impl FileDialog {
             DialogKind::InstantiatePrefab => "Instantiate",
             DialogKind::NewScript => "Create",
             DialogKind::AttachScript(_) => "Attach",
-            DialogKind::ImportModel(None) | DialogKind::ImportSound(None) => "Import",
+            DialogKind::ImportModel(None)
+            | DialogKind::ImportSound(None)
+            | DialogKind::ImportFont => "Import",
             DialogKind::ImportModel(Some(_))
             | DialogKind::ImportSound(Some(_))
             | DialogKind::BuildScene
@@ -247,6 +254,7 @@ impl FileDialog {
             DialogKind::PythonInterpreter => "python",
             DialogKind::ImportModel(_) => "model",
             DialogKind::ImportSound(_) => "sound",
+            DialogKind::ImportFont => "font",
             _ => self.extension(),
         }
     }
@@ -588,6 +596,7 @@ impl Ui {
             }
             DialogKind::ImportModel(_) => Some(crate::models::MODELS_DIR),
             DialogKind::ImportSound(_) => Some(crate::sounds::SOUNDS_DIR),
+            DialogKind::ImportFont => Some(crate::fonts::FONTS_DIR),
             DialogKind::PythonInterpreter => {
                 if Path::new("/usr/bin").is_dir() {
                     return PathBuf::from("/usr/bin");
@@ -1175,6 +1184,7 @@ impl Ui {
             DialogKind::ImportModel(Some(id)) => Intent::SetModel { id, path },
             DialogKind::ImportSound(None) => Intent::AddSound { path, at: None },
             DialogKind::ImportSound(Some(id)) => Intent::SetAudioClip { id, path },
+            DialogKind::ImportFont => Intent::ImportFont(path),
             DialogKind::BuildScene | DialogKind::BuildOutput => {
                 let which = if fd.kind == DialogKind::BuildScene {
                     SettingText::BuildScene

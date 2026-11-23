@@ -676,6 +676,7 @@ impl EditorApp {
                 }
             }
             Intent::PreviewSound(path) => self.preview_clip(&path),
+            Intent::ImportFont(path) => self.import_font(&path),
             Intent::SetImport { model, settings } => self.set_import(&model, &settings),
             Intent::FitCollider(id) => {
                 if self.doc.fit_collider(id) {
@@ -859,13 +860,17 @@ impl EditorApp {
     /// A file dropped on the window from the system file manager: models
     /// are imported and added where they were dropped.
     fn dropped_file(&mut self, path: &std::path::Path) {
+        if crate::fonts::is_font_path(path) {
+            self.import_font(path);
+            return;
+        }
         let sound = automata_core::audio_source::is_audio_path(path);
         if !sound && !automata_assets::is_model_path(path) {
             self.ui.log(
                 LogLevel::Warn,
                 format!(
-                    "Can't import {}: drop .glb, .gltf or .obj models, or .ogg, .wav, .mp3 \
-                     or .flac sounds",
+                    "Can't import {}: drop .glb, .gltf or .obj models, .ogg, .wav, .mp3 \
+                     or .flac sounds, or .ttf or .otf fonts",
                     path.display()
                 ),
             );
@@ -955,6 +960,39 @@ impl EditorApp {
             self.ui.log(LogLevel::Info, format!("Imported {rel}"));
         }
         Some(rel)
+    }
+
+    /// Brings a font into the project (copying it into `fonts/` when it
+    /// lives outside), shows it in the Assets tab, and copies the path a
+    /// script names it by.
+    fn import_font(&mut self, path: &std::path::Path) {
+        let root = self.doc.base_dir();
+        let dest = match crate::fonts::import_font(path, &root) {
+            Ok(dest) => dest,
+            Err(e) => {
+                self.ui.log(LogLevel::Error, format!("Import failed: {e}"));
+                self.ui.show_console();
+                return;
+            }
+        };
+        let rel = crate::fonts::script_path(&dest, &root);
+        self.ui.code.clipboard.set(&rel);
+        if dest == path {
+            self.ui.log(
+                LogLevel::Info,
+                format!("Copied {rel} (use it as font=\"{rel}\")"),
+            );
+        } else {
+            self.ui.files_changed(Some(&dest));
+            self.ui.show_fonts();
+            self.ui.log(
+                LogLevel::Info,
+                format!(
+                    "Imported {rel}. Scripts use it with font=\"{rel}\" (copied), \
+                     e.g. ctx.hud.text(\"Hi\", 20, 20, font=\"{rel}\")"
+                ),
+            );
+        }
     }
 
     /// Adds an entity whose Audio Source plays the sound at `path`, at the
@@ -2073,6 +2111,9 @@ impl EditorApp {
                     // composited under the UI at present time.
                     Some(r) => {
                         viewport.render_play_gpu(r, session, cam, vw, vh);
+                        for e in viewport.take_hud_font_errors() {
+                            ui.log(LogLevel::Warn, format!("{e}; using the built-in font"));
+                        }
                         ui.frame_composited(canvas, &session.doc, pointer, (vw, vh))
                     }
                     None => {

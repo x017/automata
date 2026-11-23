@@ -146,7 +146,7 @@ for `entity` and `ctx`.
 | `ctx.audio.play("sounds/hit.ogg", volume=1, pitch=1, position=None)` | Play a sound once. With a `position` (a point or an entity) it fades with distance |
 | `ctx.hud.image("sprites/crosshair.png", x, y, size=None, color=(1,1,1,1))` | Draw an image this frame, centred on `(x, y)` in screen pixels |
 | `ctx.hud.rect(x, y, width, height, color)` | Draw a filled rectangle this frame, centred on `(x, y)` |
-| `ctx.hud.text("100%", x, y, size=24, color=(1,1,1,1), align="left", shadow=None, outline=None)` | Draw text this frame with the built-in font (see below) |
+| `ctx.hud.text("100%", x, y, size=24, color=(1,1,1,1), align="left", shadow=None, outline=None, font=None)` | Draw text this frame, in the built-in font or a [font file](#fonts) (see below) |
 | `ctx.hud.size`, `ctx.hud.center` | The game view's size in pixels, and its centre |
 | `ctx.ui.button("Play", x, y)` and friends | Buttons, labels, toggles, sliders, progress bars, panels and images ([Game UI](#game-ui)) |
 | `ctx.scene["Name"]` | Another entity by name (raises `KeyError` if missing) |
@@ -168,7 +168,8 @@ HUD shapes last one frame, so draw them in `update` every frame you want
 them shown. Image paths are relative to the scene folder. Each call draws on
 top of the previous one.
 
-**Text** uses the built-in font (Geist Medium):
+**Text** uses the built-in font (Geist Medium) unless you give `font=`
+([Fonts](#fonts)):
 - `size` is the line height in pixels.
 - `align` says where `x` sits on each line: `"left"` (its left edge),
   `"center"` or `"right"`.
@@ -183,8 +184,42 @@ ctx.hud.text("ARENA CLEAR", *ctx.hud.center, size=56, align="center", outline=Tr
 
 Text looks the same in Play and in the exported game, because both draw it
 with the engine's own glyph atlas. Under `run_scene`,
-`ctx.screen.measure_text(text, size)` returns the `(width, height)` text
-will cover.
+`ctx.screen.measure_text(text, size, font=None)` returns the
+`(width, height)` text will cover.
+
+### Fonts
+
+Put `.ttf` or `.otf` files in the project, usually in a `fonts/` folder,
+and name one with `font=`. The path is relative to the scene's folder,
+like image paths:
+
+```python
+PIXEL = "fonts/PressStart2P-Regular.ttf"
+ctx.hud.text(f"SCORE {score}", 24, 24, size=16, font=PIXEL)
+ctx.ui.label("PAUSED", x, y, size=28, align="center", font=PIXEL)
+ctx.ui.theme.font = PIXEL   # every widget's text from now on
+```
+
+- **Getting fonts in:** drop font files on Oberon's window, or use
+  **Import…** in the Assets tab with **Fonts** chosen (also under
+  GameObject ▸ Import Font…). Each file is copied into `fonts/`, and the
+  path to write in scripts is put on the clipboard. Double-click a font
+  in the Assets tab to copy its path again.
+- **Missing characters** (accents, symbols a pixel font lacks) are drawn
+  with the built-in font, so text never shows empty boxes.
+- **Mistakes:** `font=` must be a string ending in `.ttf` or `.otf`
+  (otherwise `TypeError` or `ValueError`). A file that's missing or isn't a
+  font is reported once in the Console, and the text is drawn in the
+  built-in font. `measure_text` raises `ValueError` for it instead.
+- **Export** looks through the scripts that ship for strings ending in
+  `.ttf` or `.otf`. It stops with an error if a font is missing, isn't a
+  font, sits outside the project, or is excluded from the build. Paths
+  built at runtime (f-strings) can't be checked.
+- **Licences:** most free fonts (such as the SIL Open Font License ones on
+  Google Fonts) may ship inside games. Keep the licence file next to the
+  font.
+
+![The Assets tab with Fonts chosen: "Aa" previews of Geist Medium and Press Start 2P](../../assets/ui/assets_fonts.jpg)
 
 **Key names** are lowercase: `"a"`–`"z"`, `"0"`–`"9"`, `"space"`,
 `"enter"`, `"escape"`, `"tab"`, `"backspace"`, the arrows `"arrow_left"`,
@@ -220,11 +255,11 @@ def update(entity, ctx):
 | `ui.toggle(text, value, x, y, *, id=None, enabled=True, size=None)` | A check box with its label. Returns the new value, flipped when the box or the text is clicked |
 | `ui.slider(value, x, y, width=200, height=24, *, min=0, max=1, step=None, id=None, enabled=True)` | Drag the knob, or press anywhere on the track. Returns the new value, rounded to `step` if given |
 | `ui.progress(value, x, y, width=200, height=18, *, max=1, color=None, text=None)` | A bar filled to `value / max`. `text` is drawn on it, and `True` shows the percentage |
-| `ui.label(text, x, y, size=None, color=None, align="left", shadow=None)` | Text with its top at `y`. `align` says where `x` is, like `ctx.hud.text` |
+| `ui.label(text, x, y, size=None, color=None, align="left", shadow=None, font=None)` | Text with its top at `y`. `align` says where `x` is, like `ctx.hud.text`. `font` defaults to `ui.theme.font` |
 | `ui.panel(x, y, width, height, *, color=None, title=None)` | A background box. Clicks on it belong to the UI too |
 | `ui.image(path, x, y, width, height, color=(1,1,1,1))` | An image stretched over the box |
 | `ui.mouse_over` | The same as `ctx.input.mouse_over_ui` |
-| `ui.theme` | Colours and the default text size (below) |
+| `ui.theme` | Colours, the default text size and font (below) |
 
 Rules that apply to every widget:
 - **Position:** `x, y` is the **top-left** corner in screen pixels, unlike
@@ -253,13 +288,15 @@ from 0 to 1, as a paint program shows them. Change any of them at any time:
 ctx.ui.theme.accent = (1.0, 0.75, 0.2, 1.0)   # fills: sliders, bars, toggles
 ctx.ui.theme.button = (0.1, 0.12, 0.2, 0.95)  # also hover, press, panel, text, text_dim, track, border
 ctx.ui.theme.text_size = 24
+ctx.ui.theme.font = "fonts/Pixel.ttf"            # None: the built-in font
 ```
 
 `ctx.ui` works the same way in Play, under `run_scene` and in exported games.
 `examples/oberon/pause_menu` is a complete pause menu: a settings screen
 that changes `ctx.settings` (volume, graphics preset and a toggle of its
 own), a HUD with a spin meter and a Menu button, and shapes that turn
-faster when you click in the game but not when you click the UI.
+faster when you click in the game but not when you click the UI. Its
+titles and HUD numbers use a pixel font from its `fonts/` folder.
 
 ## Keys
 

@@ -182,3 +182,16 @@ def test_settings_change_volume_meter_and_graphics(play):
     play.step()
     assert not any("rad/s" in t for t in play.texts()), "the spin meter is off"
     assert play.menu["kicks"] == 0, "none of those clicks reached the game"
+
+
+def test_titles_and_hud_numbers_use_the_projects_pixel_font(play):
+    def fonts():
+        return {i["text"]: i.get("font") for i in play.out.hud if i["k"] == "text"}
+
+    pixel = "fonts/PressStart2P-Regular.ttf"
+    assert os.path.isfile(os.path.join(GAME, pixel)), "the font ships with the scene"
+    assert fonts()["PAUSED"] == pixel
+    assert fonts()["Resume"] is None, "buttons keep the built-in font"
+    play.click(RESUME)
+    play.step()
+    assert fonts()["KICKS 0"] == pixel and fonts()["SPIN"] == pixel

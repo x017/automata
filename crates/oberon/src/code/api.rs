@@ -36,6 +36,10 @@ pub enum Ty {
     Camera,
     /// `ctx.ui`.
     Ui,
+    /// `ctx.hud`.
+    Hud,
+    /// `ctx.ui.theme`.
+    UiTheme,
 }
 
 /// What a string argument names.
@@ -120,7 +124,7 @@ const CONTEXT: &[Member] = &[
         "hud",
         "Hud",
         "Shapes over the game for one frame: text, rect, image (centred); size, center.",
-        None,
+        Some(Ty::Hud),
     ),
     prop(
         "ui",
@@ -247,6 +251,64 @@ const INPUT: &[Member] = &[
     ),
 ];
 
+const HUD: &[Member] = &[
+    meth(
+        "text",
+        "(text, x, y, size=24, color=(1, 1, 1, 1), align=\"left\", shadow=None, outline=None, font=None) -> None",
+        "Text this frame, its lines centred on y. font: a .ttf/.otf path relative to the scene folder, like \"fonts/Pixel.ttf\".",
+        None,
+    ),
+    meth(
+        "rect",
+        "(x, y, width, height, color) -> None",
+        "A filled rectangle this frame, centred on (x, y).",
+        None,
+    ),
+    meth(
+        "image",
+        "(path, x, y, size=None, color=(1, 1, 1, 1), rotation=0) -> None",
+        "An image this frame, centred on (x, y).",
+        None,
+    ),
+    prop("size", "tuple[int, int]", "The game view's size in pixels.", None),
+    prop("center", "tuple[float, float]", "The middle of the game view.", None),
+];
+
+const UI_THEME: &[Member] = &[
+    prop(
+        "font",
+        "str | None",
+        "Widgets' font: a .ttf/.otf path relative to the scene folder (None: built-in).",
+        None,
+    ),
+    prop(
+        "text_size",
+        "float",
+        "Widgets' default text size in pixels.",
+        None,
+    ),
+    prop("text", "Color", "Text colour.", None),
+    prop("text_dim", "Color", "Disabled and secondary text.", None),
+    prop("panel", "Color", "Panel background.", None),
+    prop("button", "Color", "Button fill.", None),
+    prop("hover", "Color", "Button fill under the mouse.", None),
+    prop("press", "Color", "Button fill while pressed.", None),
+    prop(
+        "accent",
+        "Color",
+        "Fills: sliders, progress bars, toggles.",
+        None,
+    ),
+    prop(
+        "on_accent",
+        "Color",
+        "Text and marks drawn on the accent.",
+        None,
+    ),
+    prop("track", "Color", "Empty slider and progress tracks.", None),
+    prop("border", "Color", "Outlines.", None),
+];
+
 const UI: &[Member] = &[
     meth(
         "button",
@@ -274,8 +336,8 @@ const UI: &[Member] = &[
     ),
     meth(
         "label",
-        "(text, x, y, size=None, color=None, align=\"left\", shadow=None) -> None",
-        "Text with its top at y.",
+        "(text, x, y, size=None, color=None, align=\"left\", shadow=None, font=None) -> None",
+        "Text with its top at y. font: a .ttf/.otf path (None: theme.font).",
         None,
     ),
     meth(
@@ -293,8 +355,8 @@ const UI: &[Member] = &[
     prop(
         "theme",
         "UiTheme",
-        "Colours and text size: text, panel, button, hover, press, accent, track, border, text_size.",
-        None,
+        "Colours, text size and font: text, panel, button, accent, text_size, font…",
+        Some(Ty::UiTheme),
     ),
     prop(
         "mouse_over",
@@ -595,6 +657,8 @@ impl Ty {
             Self::Dict => DICT,
             Self::Camera => CAMERA,
             Self::Ui => UI,
+            Self::Hud => HUD,
+            Self::UiTheme => UI_THEME,
         }
     }
 
@@ -613,6 +677,8 @@ impl Ty {
             Self::Dict => "dict",
             Self::Camera => "Camera",
             Self::Ui => "Ui",
+            Self::Hud => "Hud",
+            Self::UiTheme => "UiTheme",
         }
     }
 
@@ -631,6 +697,8 @@ impl Ty {
             Self::Dict => "Per-entity storage that persists between frames.",
             Self::Camera => "A perspective camera: position, target, fov.",
             Self::Ui => "Game UI widgets, drawn by calling them every frame.",
+            Self::Hud => "Text, rectangles and images over the game for one frame.",
+            Self::UiTheme => "The colours, text size and font ctx.ui draws with.",
         }
     }
 
@@ -1023,6 +1091,8 @@ mod tests {
             ("ctx.scene.fi", "find"),
             ("ctx.ui.", "button"),
             ("ctx.ui.sl", "slider"),
+            ("ctx.hud.", "text"),
+            ("ctx.ui.theme.", "font"),
             ("ctx.input.", "mouse_over_ui"),
             ("entity.", "joint"),
         ] {

@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use automata_renderer::{Renderer, Sprite, TextAlign, TextAtlas, TextStyle, Texture};
+use automata_renderer::{FontId, Renderer, Sprite, TextAlign, TextAtlas, TextStyle, Texture};
 use glam::Vec2;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -41,15 +41,18 @@ pub enum HudItem {
         /// Fill colour.
         color: [f32; 4],
     },
-    /// A string in the built-in font, anchored at `anchor` (see
+    /// A string, anchored at `anchor` (see
     /// [`automata_renderer::text::layout`]).
     Text {
         /// The string (`\n` starts a new line).
         text: String,
         /// Anchor in pixels.
         anchor: (f32, f32),
-        /// Size, colour, alignment and effects.
+        /// Size, colour, alignment and effects (its `font` is set when
+        /// drawing, from `font` below).
         style: TextStyle,
+        /// A `.ttf` / `.otf` file, or `None` for the built-in font.
+        font: Option<PathBuf>,
     },
 }
 
@@ -99,6 +102,40 @@ impl PyScreen {
 
 fn color4(c: (f32, f32, f32, f32)) -> [f32; 4] {
     [c.0, c.1, c.2, c.3]
+}
+
+impl PyScreen {
+    /// A path from a script, relative to the scene folder.
+    fn resolve(&self, path: &str) -> PathBuf {
+        let rel = Path::new(path);
+        match &self.root {
+            Some(root) if rel.is_relative() => path
+                .replace('\\', "/")
+                .split('/')
+                .fold(root.clone(), |p, part| p.join(part)),
+            _ => rel.to_path_buf(),
+        }
+    }
+
+    /// A script's `font=`: checked to be a font file by name.
+    fn font_path(&self, font: Option<&str>) -> PyResult<Option<PathBuf>> {
+        let Some(font) = font else {
+            return Ok(None);
+        };
+        let path = self.resolve(font);
+        if !automata_renderer::text::is_font_path(&path) {
+            return Err(PyValueError::new_err(format!(
+                "font must be a .ttf or .otf file, not {font:?}"
+            )));
+        }
+        Ok(Some(path))
+    }
+}
+
+thread_local! {
+    /// Fonts `measure_text` has read, by path.
+    static MEASURE_FONTS: RefCell<HashMap<PathBuf, automata_renderer::text::FontArc>> =
+        RefCell::new(HashMap::new());
 }
 
 #[pymethods]
@@ -156,14 +193,7 @@ impl PyScreen {
         color: (f32, f32, f32, f32),
         rotation: f32,
     ) {
-        let rel = Path::new(path);
-        let path = match &self.root {
-            Some(root) if rel.is_relative() => path
-                .replace('\\', "/")
-                .split('/')
-                .fold(root.clone(), |p, part| p.join(part)),
-            _ => rel.to_path_buf(),
-        };
+        let path = self.resolve(path);
         self.queue.borrow_mut().items.push(HudItem::Image {
             path,
             center: (x, y),
@@ -194,12 +224,15 @@ impl PyScreen {
         Ok(())
     }
 
-    /// Draws `text` this frame with the built-in font. `size` is the line
-    /// height in pixels. `align` says where `x` sits on each line:
-    /// `"left"` (its left edge), `"center"` or `"right"`. Lines (split on
-    /// `\n`) are centred vertically on `y`. `shadow` and `outline` are
-    /// colours, or `None` for no effect.
-    #[pyo3(signature = (text, x, y, size=24.0, color=(1.0, 1.0, 1.0, 1.0), align="left", shadow=None, outline=None))]
+    /// Draws `text` this frame. `size` is the line height in pixels.
+    /// `align` says where `x` sits on each line: `"left"` (its left edge),
+    /// `"center"` or `"right"`. Lines (split on `\n`) are centred
+    /// vertically on `y`. `shadow` and `outline` are colours, or `None`
+    /// for no effect. `font` is a `.ttf` / `.otf` file relative to the
+    /// scene folder (`None`: the built-in font); characters it lacks are
+    /// drawn with the built-in font, and a file that won't load is logged
+    /// once and drawn with the built-in font.
+    #[pyo3(signature = (text, x, y, size=24.0, color=(1.0, 1.0, 1.0, 1.0), align="left", shadow=None, outline=None, font=None))]
     #[allow(clippy::too_many_arguments)]
     fn text(
         &self,
@@ -211,6 +244,7 @@ impl PyScreen {
         align: &str,
         shadow: Option<(f32, f32, f32, f32)>,
         outline: Option<(f32, f32, f32, f32)>,
+        font: Option<&str>,
     ) -> PyResult<()> {
         let align = TextAlign::parse(align).ok_or_else(|| {
             PyValueError::new_err(format!(
@@ -220,6 +254,7 @@ impl PyScreen {
         if !size.is_finite() || size <= 0.0 {
             return Err(PyValueError::new_err("text size must be a positive number"));
         }
+        let font = self.font_path(font)?;
         self.queue.borrow_mut().items.push(HudItem::Text {
             text: text.to_string(),
             anchor: (x, y),
@@ -229,16 +264,33 @@ impl PyScreen {
                 align,
                 shadow: shadow.map(color4),
                 outline: outline.map(color4),
+                font: FontId::BUILTIN,
             },
+            font,
         });
         Ok(())
     }
 
-    /// The `(width, height)` in pixels that `text(text, ..., size)` covers.
-    #[pyo3(signature = (text, size=24.0))]
-    #[allow(clippy::unused_self)] // a method so scripts find it on ctx.screen
-    fn measure_text(&self, text: &str, size: f32) -> (f32, f32) {
-        automata_renderer::text::measure(text, size)
+    /// The `(width, height)` in pixels that `text(text, ..., size, font=font)`
+    /// covers. Raises `ValueError` when the font file can't be read.
+    #[pyo3(signature = (text, size=24.0, font=None))]
+    fn measure_text(&self, text: &str, size: f32, font: Option<&str>) -> PyResult<(f32, f32)> {
+        let Some(path) = self.font_path(font)? else {
+            return Ok(automata_renderer::text::measure(text, size));
+        };
+        MEASURE_FONTS.with(|fonts| {
+            let mut fonts = fonts.borrow_mut();
+            if !fonts.contains_key(&path) {
+                let loaded = automata_renderer::text::load_font_file(&path)
+                    .map_err(PyValueError::new_err)?;
+                fonts.insert(path.clone(), loaded);
+            }
+            Ok(automata_renderer::text::measure_font(
+                &fonts[&path],
+                text,
+                size,
+            ))
+        })
     }
 
     fn __repr__(&self) -> String {
@@ -280,28 +332,44 @@ impl HudTextures {
 
     /// Turns recorded HUD items into sprites.
     pub fn sprites(&mut self, renderer: &Renderer, items: &[HudItem]) -> Vec<Sprite> {
-        let mut texts = items
-            .iter()
-            .filter_map(|item| match item {
-                HudItem::Text { text, style, .. } => Some((text.as_str(), style.size)),
-                _ => None,
-            })
-            .peekable();
-        if texts.peek().is_some() {
-            self.text
-                .get_or_insert_with(TextAtlas::new)
-                .prepare(renderer, texts);
+        // Each text item's font, loading new font files.
+        let mut fonts = Vec::new();
+        for item in items {
+            if let HudItem::Text { font, .. } = item {
+                let atlas = self.text.get_or_insert_with(TextAtlas::new);
+                fonts.push(font.as_deref().map_or(FontId::BUILTIN, |f| atlas.font(f)));
+            }
+        }
+        if let Some(atlas) = &mut self.text {
+            for e in atlas.take_font_errors() {
+                tracing::warn!("HUD text: {e}; using the built-in font");
+            }
+            let texts = items
+                .iter()
+                .filter_map(|item| match item {
+                    HudItem::Text { text, style, .. } => Some((text.as_str(), style.size)),
+                    _ => None,
+                })
+                .zip(fonts.iter().copied())
+                .map(|((text, size), font)| (text, size, font));
+            if !fonts.is_empty() {
+                atlas.prepare(renderer, texts);
+            }
         }
         let mut out = Vec::new();
+        let mut fonts = fonts.into_iter();
         for item in items {
             match item {
                 HudItem::Text {
                     text,
                     anchor,
                     style,
+                    ..
                 } => {
+                    let font = fonts.next().unwrap_or_default();
                     if let Some(atlas) = &self.text {
-                        out.extend(atlas.sprites(text, anchor.0, anchor.1, style));
+                        let style = TextStyle { font, ..*style };
+                        out.extend(atlas.sprites(text, anchor.0, anchor.1, &style));
                     }
                 }
                 other => out.extend(self.shape_sprite(renderer, other)),

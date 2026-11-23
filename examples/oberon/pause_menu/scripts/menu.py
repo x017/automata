@@ -5,8 +5,13 @@ and a click anywhere in the game gives them a kick. Clicks on the HUD's
 Menu button belong to the UI, so they never kick. Settings changes the
 volume and graphics through ``ctx.settings``, which keeps them between runs,
 along with a "Spin meter" toggle stored there too.
+
+Titles and the HUD's numbers use a pixel font from the project's
+``fonts/`` folder; everything else keeps the built-in font.
 """
 
+#: Press Start 2P (SIL Open Font License, see fonts/PressStart2P-OFL.txt).
+PIXEL = "fonts/PressStart2P-Regular.ttf"
 PANEL_W = 380
 BUTTON_W, BUTTON_H = 300, 52
 PRESETS = ("low", "medium", "high", "ultra")
@@ -46,10 +51,10 @@ def playing_hud(entity, ctx):
     w, h = ctx.hud.size
     if ctx.settings.get("spin_meter", True):
         spin = ctx.scene["Cube"].state.get("speed", 0.0)
-        ui.label("Spin", 24, 20, size=18, shadow=True)
-        ui.label(f"{spin:.1f} rad/s", 284, 20, size=18, align="right", shadow=True)
+        ui.label("SPIN", 24, 22, size=14, shadow=True, font=PIXEL)
+        ui.label(f"{spin:.1f} rad/s", 284, 22, size=14, align="right", shadow=True, font=PIXEL)
         ui.progress(spin, 24, 46, 260, 14, max=8.0)
-        ui.label(f"Kicks: {entity.state['kicks']}", 24, 72, size=18, shadow=True)
+        ui.label(f"KICKS {entity.state['kicks']}", 24, 74, size=14, shadow=True, font=PIXEL)
     if ui.button("Menu", w - 144, 20, 120, 44):
         entity.state["screen"] = "menu"
     ui.label("Click anywhere to kick the shapes. P opens the menu.", w / 2, h - 44,
@@ -60,7 +65,7 @@ def pause_menu(entity, ctx):
     ui = ctx.ui
     x, y = centred(ctx, 300)
     ui.panel(x, y, PANEL_W, 300)
-    ui.label("PAUSED", x + PANEL_W / 2, y + 24, size=30, align="center")
+    ui.label("PAUSED", x + PANEL_W / 2, y + 28, size=28, align="center", font=PIXEL)
     bx = x + (PANEL_W - BUTTON_W) / 2
     if ui.button("Resume", bx, y + 82, BUTTON_W, BUTTON_H):
         entity.state["screen"] = None
@@ -78,7 +83,7 @@ def settings_screen(entity, ctx):
     x, y = centred(ctx, 400)
     left, inner = x + 40, PANEL_W - 80
     ui.panel(x, y, PANEL_W, 400)
-    ui.label("SETTINGS", x + PANEL_W / 2, y + 24, size=30, align="center")
+    ui.label("SETTINGS", x + PANEL_W / 2, y + 28, size=28, align="center", font=PIXEL)
 
     ui.label("Volume", left, y + 84)
     ui.label(f"{round(settings.volume * 100)}%", left + inner, y + 84, align="right",

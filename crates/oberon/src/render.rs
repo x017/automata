@@ -13,7 +13,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use automata_renderer::{DrawList, RenderTarget, Renderer, Sprite, TextAtlas, TextStyle, Texture};
+use automata_renderer::{
+    DrawList, FontId, RenderTarget, Renderer, Sprite, TextAtlas, TextStyle, Texture,
+};
 use automata_scene::{Scene, SceneWorld};
 use glam::Vec2;
 
@@ -46,10 +48,22 @@ pub struct ViewportRenderer {
     hud_textures: HashMap<PathBuf, Option<Texture>>,
     /// Glyphs for HUD text (the engine's atlas, so text matches the game).
     hud_text: Option<TextAtlas>,
+    /// Font files that wouldn't load, for the Console (each once).
+    hud_font_errors: Vec<String>,
     /// The edit-time world's entities, in document order.
     entities: Vec<automata_scene::Entity>,
     /// The entity the Inspector's animation preview last posed.
     previewed: Option<automata_scene::Entity>,
+}
+
+/// A path a script gave (`"sprites/x.png"`), relative to the scene folder.
+fn scene_path(root: &Path, rel: &str) -> PathBuf {
+    if Path::new(rel).is_absolute() {
+        PathBuf::from(rel)
+    } else {
+        rel.split(['/', '\\'])
+            .fold(root.to_path_buf(), |p, part| p.join(part))
+    }
 }
 
 /// Moves a playing preview `dt` seconds (at most 0.1, so a stalled frame
@@ -111,6 +125,7 @@ impl ViewportRenderer {
             preview_frame: Vec::new(),
             hud_textures: HashMap::new(),
             hud_text: None,
+            hud_font_errors: Vec::new(),
             entities: Vec::new(),
             previewed: None,
         }
@@ -119,19 +134,33 @@ impl ViewportRenderer {
     /// Turns a script HUD into sprites (screen pixels, top-left origin).
     /// Image paths are relative to `root`, the scene folder.
     fn hud_sprites(&mut self, renderer: &Renderer, root: &Path, items: &[HudItem]) -> Vec<Sprite> {
-        let mut texts = items
-            .iter()
-            .filter_map(|item| match &item.kind {
-                HudKind::Text { text, size, .. } => Some((text.as_str(), *size)),
-                _ => None,
-            })
-            .peekable();
-        if texts.peek().is_some() {
-            self.hud_text
-                .get_or_insert_with(TextAtlas::new)
-                .prepare(renderer, texts);
+        // Each text item's font (font files load the first time).
+        let mut fonts = Vec::new();
+        for item in items {
+            if let HudKind::Text { font, .. } = &item.kind {
+                let atlas = self.hud_text.get_or_insert_with(TextAtlas::new);
+                fonts.push(
+                    font.as_deref()
+                        .map_or(FontId::BUILTIN, |f| atlas.font(&scene_path(root, f))),
+                );
+            }
+        }
+        if let Some(atlas) = &mut self.hud_text {
+            self.hud_font_errors.extend(atlas.take_font_errors());
+            if !fonts.is_empty() {
+                let texts = items
+                    .iter()
+                    .filter_map(|item| match &item.kind {
+                        HudKind::Text { text, size, .. } => Some((text.as_str(), *size)),
+                        _ => None,
+                    })
+                    .zip(fonts.iter().copied())
+                    .map(|((text, size), font)| (text, size, font));
+                atlas.prepare(renderer, texts);
+            }
         }
         let mut out = Vec::new();
+        let mut fonts = fonts.into_iter();
         for item in items {
             if let HudKind::Text {
                 text,
@@ -139,8 +168,10 @@ impl ViewportRenderer {
                 align,
                 shadow,
                 outline,
+                ..
             } = &item.kind
             {
+                let font = fonts.next().unwrap_or_default();
                 if let Some(atlas) = &self.hud_text {
                     let style = TextStyle {
                         size: *size,
@@ -148,6 +179,7 @@ impl ViewportRenderer {
                         align: *align,
                         shadow: *shadow,
                         outline: *outline,
+                        font,
                     };
                     out.extend(atlas.sprites(text, item.x, item.y, &style));
                 }
@@ -165,12 +197,7 @@ impl ViewportRenderer {
                 HudKind::Rect => renderer.white_texture(),
                 HudKind::Text { .. } => return None,
                 HudKind::Image(rel) => {
-                    let path = if Path::new(rel).is_absolute() {
-                        PathBuf::from(rel)
-                    } else {
-                        rel.split('/')
-                            .fold(root.to_path_buf(), |p, part| p.join(part))
-                    };
+                    let path = scene_path(root, rel);
                     self.hud_textures
                         .entry(path)
                         .or_insert_with_key(|path| {
@@ -191,9 +218,17 @@ impl ViewportRenderer {
         })
     }
 
-    /// Forgets loaded HUD images (a file changed, or Play stopped).
+    /// Forgets loaded HUD images and fonts (a file changed, or Play
+    /// stopped).
     pub fn clear_hud_cache(&mut self) {
         self.hud_textures.clear();
+        self.hud_text = None;
+    }
+
+    /// HUD font files that failed to load since the last call (each file
+    /// once per Play), for the Console.
+    pub fn take_hud_font_errors(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.hud_font_errors)
     }
 
     /// Meshes drawn by the last scene-view render (0 for the wireframe).

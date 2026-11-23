@@ -61,6 +61,8 @@ pub enum DialogKind {
     /// Import a sound file (from anywhere) into the scene, or onto an
     /// entity's Audio Source.
     ImportSound(Option<u64>),
+    /// Import a font file (from anywhere) into the project's `fonts/`.
+    ImportFont,
     /// Settings ▸ Build: pick the start scene.
     BuildScene,
     /// Settings ▸ Build: pick the output folder.
@@ -411,6 +413,12 @@ impl Ui {
                     "",
                     UiAction::Dialog(DialogKind::ImportSound(None)),
                     editing,
+                ));
+                items.push(MenuItem::ui(
+                    "Import Font…",
+                    "",
+                    UiAction::Dialog(DialogKind::ImportFont),
+                    true,
                 ));
                 items
             }

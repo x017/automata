@@ -452,6 +452,9 @@ pub enum Intent {
         /// The new settings.
         settings: automata_assets::import::ImportSettings,
     },
+    /// Bring a font into the project (copying it into `fonts/` when it's
+    /// outside) and put its path, as scripts write it, on the clipboard.
+    ImportFont(PathBuf),
     /// Create an entity with an Audio Source playing a sound file. `at` is
     /// the drop point in the scene view (`None`: where the camera looks).
     AddSound {

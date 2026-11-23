@@ -237,6 +237,10 @@ engine (wgpu sprites).
 3. **Custom fonts:** `.ttf` / `.otf` from the project folder
    (`font="fonts/Pixel.ttf"`). They appear in the Assets tab, and export
    checks for missing fonts.
+
+   ✅ **Done** (ROADMAP D2). `font=` also works on `ctx.ui` widgets, through
+   `ctx.ui.theme.font`. Characters a font lacks fall back to the built-in
+   font.
 4. **Layout and focus:**
    - anchors (top-left, centre, bottom-right…) and sizes relative to the
      screen, so the UI fits any resolution, with UI scale for high-DPI and

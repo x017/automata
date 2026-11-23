@@ -3730,7 +3730,7 @@ mod tests {
         let size = renderer.size();
         let target = target(renderer.context().device(), size);
         let mut atlas = crate::text::TextAtlas::new();
-        atlas.prepare(&renderer, [("H", 48.0)]);
+        atlas.prepare(&renderer, [("H", 48.0, crate::text::FontId::BUILTIN)]);
         let style = crate::text::TextStyle {
             size: 48.0,
             color: [1.0, 0.0, 0.0, 1.0],
@@ -3759,6 +3759,56 @@ mod tests {
         assert!(red(2, 2) < 16 && red(61, 61) < 16, "corners stay black");
         let bar: Vec<u8> = (0..64).map(|y| red(32, y)).collect();
         assert!(bar.iter().any(|&v| v > 128), "the crossbar: {bar:?}");
+    }
+
+    #[test]
+    fn offscreen_hud_text_draws_a_font_file_and_falls_back_for_missing_glyphs() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping font render test");
+            return;
+        };
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let mut atlas = crate::text::TextAtlas::new();
+        let font = atlas.font(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/oberon/pause_menu/fonts/PressStart2P-Regular.ttf"),
+        );
+        assert_eq!(atlas.take_font_errors(), Vec::<String>::new());
+        // "ẞ" isn't in the pixel font, so it's drawn with the built-in one.
+        let text = "I\u{1e9e}";
+        atlas.prepare(&renderer, [(text, 24.0, font)]);
+        let style = crate::text::TextStyle {
+            size: 24.0,
+            color: [1.0, 0.0, 0.0, 1.0],
+            font,
+            ..crate::text::TextStyle::default()
+        };
+        let sprites = atlas.sprites(text, 8.0, 32.0, &style);
+        assert_eq!(sprites.len(), 2, "both glyphs drawn");
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        for sprite in sprites {
+            draw.sprite(sprite);
+        }
+        renderer.render_offscreen(&draw, &target);
+        let pixels = read_pixels(&renderer, &target, size);
+        let lit = |x0: usize, x1: usize| {
+            (x0..x1)
+                .flat_map(|x| (20..44).map(move |y| (x, y)))
+                .filter(|&(x, y)| pixels[(y * 64 + x) * 4] > 128)
+                .count()
+        };
+        // Press Start 2P's glyphs are 24 px wide at this size: "I" in the
+        // first cell, the fallback glyph after it.
+        assert!(lit(8, 32) > 20, "the pixel-font I");
+        assert!(lit(32, 56) > 20, "the fallback glyph");
+        // Pixel-font edges are hard: almost every lit pixel is fully lit.
+        let soft = (8..32)
+            .flat_map(|x| (20..44).map(move |y| (x, y)))
+            .filter(|&(x, y)| (32..224).contains(&pixels[(y * 64 + x) * 4]))
+            .count();
+        assert!(soft * 4 < lit(8, 32), "{soft} soft pixels");
     }
 
     /// Renders the shadow test scene with the given sun, returning each

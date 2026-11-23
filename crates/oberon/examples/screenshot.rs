@@ -53,7 +53,7 @@ fn main() {
 
     // Optional scene: `picker`, `menu`, `dialog`, `project`, `code`,
     // `code-complete`, `code-api`, `settings`, `build`, `build-menu`, `palette`,
-    // `assets`, `assets-sounds`, `bone-picker`, `clip-picker`.
+    // `assets`, `assets-sounds`, `assets-fonts`, `bone-picker`, `clip-picker`.
     let scene = std::env::args().nth(2).unwrap_or_default();
     let selected = doc.selected;
     let pointer = Pointer {
@@ -252,10 +252,12 @@ fn main() {
             ui.build_last = Some((true, "Build finished in 1.4 s → build".to_string()));
         }
         "build-menu" => ui.open_bar_menu(5, &doc),
-        "assets" | "assets-sounds" => {
+        "assets" | "assets-sounds" | "assets-fonts" => {
             ui.toggle_assets();
             if scene == "assets-sounds" {
                 ui.assets.filter = oberon::ui::assets_panel::AssetFilter::Sounds;
+            } else if scene == "assets-fonts" {
+                ui.assets.filter = oberon::ui::assets_panel::AssetFilter::Fonts;
             }
             // Thumbnails fill in a few per frame.
             for _ in 0..6 {

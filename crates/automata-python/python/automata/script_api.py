@@ -1250,14 +1250,18 @@ class Hud:
         align: str = "left",
         shadow: Any = None,
         outline: Any = None,
+        font: str | None = None,
     ) -> None:
-        """Draws ``text`` with the built-in font this frame.
+        """Draws ``text`` this frame.
 
         ``size`` is the line height in pixels. ``align`` says where ``x``
         sits on each line: ``"left"`` (its left edge), ``"center"`` or
         ``"right"``. Lines (split on ``\\n``) are centred vertically on
         ``y``. ``shadow`` and ``outline`` take a colour, or True for
-        translucent / solid black.
+        translucent / solid black. ``font`` is a ``.ttf`` or ``.otf`` file
+        relative to the scene folder, like ``"fonts/Pixel.ttf"`` (None:
+        the built-in font). Characters the font lacks are drawn with the
+        built-in font.
         """
         a = str(align).lower()
         if a == "centre":
@@ -1269,6 +1273,8 @@ class Hud:
             raise ValueError("text size must be a positive number")
         item = {"k": "text", "text": str(text), "x": float(x), "y": float(y), "size": size,
                 "c": list(_vec(color, 4)), "align": a}
+        if font is not None:
+            item["font"] = _font_path(font)
         for key, value, default in (("shadow", shadow, (0.0, 0.0, 0.0, 0.6)),
                                     ("outline", outline, (0.0, 0.0, 0.0, 1.0))):
             if value is True:
@@ -1279,6 +1285,16 @@ class Hud:
 
 
 Color = tuple[float, float, float, float]
+
+
+def _font_path(font):
+    """A ``font=`` argument: a .ttf / .otf path, with forward slashes."""
+    if not isinstance(font, str) or not font.strip():
+        raise TypeError(f'font is a path like "fonts/Pixel.ttf", not {font!r}')
+    path = font.strip().replace("\\", "/")
+    if not path.lower().endswith((".ttf", ".otf")):
+        raise ValueError(f"font must be a .ttf or .otf file, not {font!r}")
+    return path
 
 
 class UiTheme:
@@ -1292,7 +1308,7 @@ class UiTheme:
     """
 
     __slots__ = ("text", "text_dim", "panel", "button", "hover", "press", "accent",
-                 "on_accent", "track", "border", "text_size")
+                 "on_accent", "track", "border", "text_size", "font")
 
     def __init__(self):
         #: Labels and button text.
@@ -1315,6 +1331,9 @@ class UiTheme:
         self.border: Color = (1.0, 1.0, 1.0, 0.16)
         #: Text height in pixels when a widget isn't given a ``size``.
         self.text_size: float = 20.0
+        #: A ``.ttf`` / ``.otf`` file for every widget's text, relative to
+        #: the scene folder (None: the built-in font).
+        self.font: str | None = None
 
 
 def _dim(c, k=0.45):
@@ -1436,12 +1455,14 @@ class Ui:
     def _rect(self, x, y, w, h, color):
         self._hud.rect(x, y, w, h, _linear(color))
 
-    def _text(self, text, x, y, size, color, align, shadow=None, outline=None):
+    def _text(self, text, x, y, size, color, align, shadow=None, outline=None, font=None):
         if shadow is not None and shadow is not True and shadow is not False:
             shadow = _linear(shadow)
         if outline is not None and outline is not True and outline is not False:
             outline = _linear(outline)
-        self._hud.text(text, x, y, size, _linear(color), align, shadow, outline)
+        if font is None:
+            font = self.theme.font
+        self._hud.text(text, x, y, size, _linear(color), align, shadow, outline, font)
 
     # -- widgets --
 
@@ -1460,14 +1481,16 @@ class Ui:
         color: Color | None = None,
         align: str = "left",
         shadow: Any = None,
+        font: str | None = None,
     ) -> None:
         """Text whose first line's top is at ``y``. ``align`` says where
-        ``x`` is: ``"left"``, ``"center"`` or ``"right"``. Labels don't
-        take clicks."""
+        ``x`` is: ``"left"``, ``"center"`` or ``"right"``. ``font`` is a
+        ``.ttf`` / ``.otf`` file (None: ``theme.font``). Labels don't take
+        clicks."""
         size = self._size(size)
         lines = str(text).count("\n") + 1
         self._text(text, x, y + size * lines / 2.0, size,
-                   self.theme.text if color is None else color, align, shadow)
+                   self.theme.text if color is None else color, align, shadow, font=font)
 
     def button(
         self,

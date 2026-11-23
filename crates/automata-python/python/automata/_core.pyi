@@ -1162,8 +1162,11 @@ class Screen:
         align: str = "left",
         shadow: Optional[tuple[float, float, float, float]] = None,
         outline: Optional[tuple[float, float, float, float]] = None,
+        font: Optional[str] = None,
     ) -> None: ...
-    def measure_text(self, text: str, size: float = 24.0) -> tuple[float, float]: ...
+    def measure_text(
+        self, text: str, size: float = 24.0, font: Optional[str] = None
+    ) -> tuple[float, float]: ...
 
 class Physics:
     """3D physics queries for the current frame (ctx.physics)."""

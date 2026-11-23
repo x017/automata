@@ -124,6 +124,8 @@ pub enum AssetKind {
     Model,
     /// A sound (`.ogg`, `.wav`, `.mp3`, `.flac`).
     Audio,
+    /// A font (`.ttf`, `.otf`) for script text.
+    Font,
     /// Anything else.
     Other,
 }
@@ -153,6 +155,7 @@ pub fn asset_kind(path: &Path, dir: bool) -> AssetKind {
         Some("py") => AssetKind::Script,
         Some("glb" | "gltf" | "obj") => AssetKind::Model,
         Some("ogg" | "wav" | "mp3" | "flac") => AssetKind::Audio,
+        Some("ttf" | "otf") => AssetKind::Font,
         _ => AssetKind::Other,
     }
 }
@@ -169,6 +172,7 @@ pub fn open_intent(path: &Path, dir: bool) -> Option<Intent> {
             at: None,
         }),
         AssetKind::Audio => Some(Intent::PreviewSound(path.to_path_buf())),
+        AssetKind::Font => Some(Intent::ImportFont(path.to_path_buf())),
         AssetKind::Folder | AssetKind::Other => None,
     }
 }
@@ -637,6 +641,12 @@ impl Ui {
                     });
                 }
             }
+            AssetKind::Font => {
+                menu.push(item_menu(
+                    "Copy Path for Scripts",
+                    open_intent(&item.path, false),
+                ));
+            }
             AssetKind::Folder | AssetKind::Other => {}
         }
         if !menu.is_empty() {
@@ -979,8 +989,21 @@ pub fn draw_tree_icon(canvas: &mut Canvas, kind: AssetKind, cx: f32, cy: f32) {
         }
         AssetKind::Model => draw_model_icon(canvas, cx, cy, color::accent_soft()),
         AssetKind::Audio => draw_sound_icon(canvas, cx, cy, color::accent_soft()),
+        AssetKind::Font => draw_font_icon(canvas, cx, cy, color::accent_soft()),
         AssetKind::Other => super::draw_small_file_icon(canvas, cx, cy, false),
     }
+}
+
+/// A serif "A": the font file icon.
+pub fn draw_font_icon(canvas: &mut Canvas, cx: f32, cy: f32, c: tiny_skia::Color) {
+    canvas.polyline(
+        &[(cx - 5.0, cy + 5.5), (cx, cy - 5.5), (cx + 5.0, cy + 5.5)],
+        c,
+        1.3,
+    );
+    canvas.fill_rect(cx - 2.6, cy + 1.0, 5.2, 1.2, c);
+    canvas.fill_rect(cx - 6.5, cy + 5.0, 3.0, 1.1, c);
+    canvas.fill_rect(cx + 3.5, cy + 5.0, 3.0, 1.1, c);
 }
 
 /// A speaker with one sound wave: the sound file icon.
@@ -1047,6 +1070,10 @@ mod tests {
         );
         assert_eq!(asset_kind(Path::new("player.py"), false), AssetKind::Script);
         assert_eq!(asset_kind(Path::new("tree.GLB"), false), AssetKind::Model);
+        assert_eq!(
+            asset_kind(Path::new("fonts/Pixel.TTF"), false),
+            AssetKind::Font
+        );
         assert!(matches!(
             open_intent(Path::new("rock.obj"), false),
             Some(Intent::AddModel { at: None, .. })

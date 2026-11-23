@@ -308,9 +308,9 @@ impl Message {
     }
 }
 
-/// Checks a project before exporting: the start scene loads, every script
-/// and model it names exists inside the project (only the project folder
-/// ships), and a start point is set.
+/// Checks a project before exporting: the start scene loads, every script,
+/// model, sound and font it names exists inside the project (only the
+/// project folder ships), and a start point is set.
 #[must_use]
 pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
     let mut out = Vec::new();
@@ -377,8 +377,154 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
             "Nothing to start: set a start scene or a main script (Build Settings).",
         )),
     }
+    // Scripts name fonts relative to the scene's folder.
+    let base = match (&cfg.main_script, &cfg.start_scene) {
+        (None, Some(scene)) => project
+            .join(scene)
+            .parent()
+            .map_or_else(|| project.to_path_buf(), Path::to_path_buf),
+        _ => project.to_path_buf(),
+    };
+    check_fonts(project, &base, &Skip::new(cfg), &mut out);
     if cfg.targets.is_empty() {
         out.push(Message::error("No target platforms selected."));
+    }
+    out
+}
+
+/// Checks the fonts scripts name: every string literal ending in `.ttf` or
+/// `.otf` in a shipped `.py` file must be a font file inside the project
+/// that ships. (A game with a missing font still runs, drawing with the
+/// built-in one, which is easy to miss.)
+fn check_fonts(project: &Path, base: &Path, skip: &Skip, out: &mut Vec<Message>) {
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let root = canon(project);
+    let mut seen = std::collections::HashSet::new();
+    for (script, line, font) in font_literals(project, skip) {
+        if !seen.insert(font.clone()) {
+            continue;
+        }
+        let who = format!("{script}:{line}");
+        let file = if Path::new(&font).is_absolute() {
+            PathBuf::from(&font)
+        } else {
+            automata_assets::join_relative(base, &font)
+        };
+        if !file.is_file() {
+            out.push(Message::error(format!(
+                "{who}: font {font} not found (fonts are named relative to the scene's \
+                 folder, e.g. fonts/Pixel.ttf)"
+            )));
+            continue;
+        }
+        let shipped = canon(&file)
+            .strip_prefix(&root)
+            .ok()
+            .map(archive::slash_path);
+        match shipped {
+            None => out.push(Message::error(format!(
+                "{who}: font {font} is outside the project folder and won't ship \
+                 (drop it into the editor to import it into fonts/)"
+            ))),
+            Some(rel) if skip.excluded(&rel) => out.push(Message::error(format!(
+                "{who}: font {font} is excluded from the build (build.ron: exclude)"
+            ))),
+            Some(_) if !is_font_file(&file) => out.push(Message::error(format!(
+                "{who}: {font} isn't a TrueType or OpenType font"
+            ))),
+            Some(_) => {}
+        }
+    }
+}
+
+/// Whether `path` starts like a TrueType / OpenType font (or collection).
+fn is_font_file(path: &Path) -> bool {
+    let mut head = [0u8; 4];
+    std::fs::File::open(path)
+        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut head))
+        .is_ok()
+        && matches!(&head, [0, 1, 0, 0] | b"OTTO" | b"true" | b"ttcf")
+}
+
+/// Every `.ttf` / `.otf` string literal in the project's shipped `.py`
+/// files: (script, line, literal), in a stable order.
+fn font_literals(project: &Path, skip: &Skip) -> Vec<(String, usize, String)> {
+    let mut scripts = Vec::new();
+    let mut stack = vec![project.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(items) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for item in items.flatten() {
+            let path = item.path();
+            let rel = archive::slash_path(path.strip_prefix(project).unwrap_or(&path));
+            if skip.excluded(&rel) || scripts.len() > 5000 {
+                continue;
+            }
+            match item.file_type() {
+                Ok(t) if t.is_dir() => stack.push(path),
+                Ok(_)
+                    if path
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("py")) =>
+                {
+                    scripts.push((rel, path));
+                }
+                _ => {}
+            }
+        }
+    }
+    scripts.sort();
+    let mut found = Vec::new();
+    for (rel, path) in scripts {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for (i, line) in text.lines().enumerate() {
+            for literal in string_literals(line) {
+                let font = Path::new(&literal).extension().is_some_and(|e| {
+                    e.eq_ignore_ascii_case("ttf") || e.eq_ignore_ascii_case("otf")
+                });
+                // f-strings and format templates can't be checked.
+                if font && !literal.contains('{') {
+                    found.push((rel.clone(), i + 1, literal.replace('\\', "/")));
+                }
+            }
+        }
+    }
+    found
+}
+
+/// The single-line string literals of one line of Python (comments
+/// skipped; escapes kept as written, which is fine for paths).
+fn string_literals(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '#' => break,
+            '"' | '\'' => {
+                let mut text = String::new();
+                let mut closed = false;
+                while let Some(d) = chars.next() {
+                    if d == '\\' {
+                        text.push(d);
+                        if let Some(e) = chars.next() {
+                            text.push(e);
+                        }
+                    } else if d == c {
+                        closed = true;
+                        break;
+                    } else {
+                        text.push(d);
+                    }
+                }
+                if closed {
+                    out.push(text);
+                }
+            }
+            _ => {}
+        }
     }
     out
 }
@@ -1369,6 +1515,86 @@ mod tests {
             has(Level::Warning, "Mute: the Audio Source has no clip"),
             "{problems:?}"
         );
+    }
+
+    #[test]
+    fn python_string_literals_are_found_and_comments_skipped() {
+        assert_eq!(
+            string_literals(r#"ctx.hud.text("Hi", 1, 2, font='fonts/A.ttf')  # "b.otf""#),
+            vec!["Hi".to_string(), "fonts/A.ttf".to_string()]
+        );
+        assert_eq!(
+            string_literals(r#"x = "it's" + 'say "hi"'"#),
+            vec!["it's".to_string(), "say \"hi\"".to_string()]
+        );
+        assert_eq!(string_literals("x = 'open"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn validation_checks_fonts_scripts_name() {
+        let dir = project("fonts");
+        let ttf = |p: &Path, head: &[u8]| {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, [head, &[0u8; 60]].concat()).unwrap();
+        };
+        ttf(&dir.join("fonts/Pixel.ttf"), &[0, 1, 0, 0]);
+        ttf(&dir.join("fonts/Round.OTF"), b"OTTO");
+        ttf(&dir.join("fonts/fake.ttf"), b"PK\x03\x04");
+        ttf(&dir.join("tests/Only.ttf"), &[0, 1, 0, 0]);
+        let outside =
+            std::env::temp_dir().join(format!("automata-export-font-{}", std::process::id()));
+        ttf(&outside.join("Far.ttf"), &[0, 1, 0, 0]);
+        let far = outside
+            .join("Far.ttf")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        let scene = automata_core::scene_file::SceneFile {
+            version: 1,
+            entities: vec![],
+        };
+        std::fs::write(dir.join("s.ron"), scene.to_ron().unwrap()).unwrap();
+        std::fs::write(
+            dir.join("scripts/hud.py"),
+            format!(
+                "def update(ctx, dt):\n\
+                 \x20   ctx.hud.text('Hi', 0, 0, font=\"fonts/Pixel.ttf\")\n\
+                 \x20   ctx.ui.theme.font = 'fonts/Round.OTF'\n\
+                 \x20   ctx.hud.text('x', 0, 0, font='fonts\\\\Pixel.ttf')  # 'fonts/Gone.ttf'\n\
+                 \x20   ctx.hud.text('x', 0, 0, font='fonts/Gone.ttf')\n\
+                 \x20   ctx.hud.text('x', 0, 0, font='fonts/fake.ttf')\n\
+                 \x20   ctx.hud.text('x', 0, 0, font='tests/Only.ttf')\n\
+                 \x20   ctx.hud.text('x', 0, 0, font='{far}')\n\
+                 \x20   ctx.hud.text('x', 0, 0, font=f'fonts/{{name}}.ttf')\n"
+            ),
+        )
+        .unwrap();
+        // Test scripts don't ship, so their fonts aren't checked.
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        std::fs::write(dir.join("tests/test_x.py"), "F = 'fonts/Nope.ttf'\n").unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("s.ron".into()),
+            ..BuildConfig::default()
+        };
+        let problems = validate(&dir, &cfg);
+        let fonts: Vec<&str> = problems
+            .iter()
+            .filter(|m| m.text.contains("font") || m.text.contains("TrueType"))
+            .map(|m| {
+                assert_eq!(m.level, Level::Error, "{m:?}");
+                m.text.as_str()
+            })
+            .collect();
+        assert_eq!(fonts.len(), 4, "{fonts:#?}");
+        assert!(fonts[0].starts_with("scripts/hud.py:5: font fonts/Gone.ttf not found"));
+        assert!(fonts[1].starts_with("scripts/hud.py:6: fonts/fake.ttf isn't a TrueType"));
+        assert!(fonts[2].contains("tests/Only.ttf is excluded from the build"));
+        assert!(
+            fonts[3].contains("is outside the project folder"),
+            "{}",
+            fonts[3]
+        );
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]

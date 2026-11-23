@@ -18,6 +18,11 @@ While playing, a click anywhere in the game gives the shapes a kick
 on the Menu button, or on any menu, never kick: a press that starts on the
 UI is the UI's.
 
+The titles and the HUD's numbers are drawn in Press Start 2P, a pixel font
+in `fonts/` (`font="fonts/PressStart2P-Regular.ttf"`, under the SIL Open
+Font License in `fonts/PressStart2P-OFL.txt`). The buttons keep the
+built-in font.
+
 ![Playing: the spin meter and kick count at the top left, a Menu button at the top right](../../../docs/assets/ui/pause_hud.jpg)
 
 ```sh

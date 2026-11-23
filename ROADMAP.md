@@ -734,9 +734,31 @@ Done:
   screen and a HUD with a Menu button over shapes that a click in the
   game kicks. `render_still` gained `CURSOR=` and `CLICK=` to picture it.
 
-### D2. Custom fonts ⬜ S
+### D2. Custom fonts ✅ S
 #3 phase 3: `.ttf`/`.otf` files from the project, shown in Assets and
 checked on export.
+
+Done:
+- **Scripts:** `font="fonts/Pixel.ttf"` works on `ctx.hud.text`,
+  `ctx.screen.text`, `ctx.screen.measure_text` and `ctx.ui.label`, and
+  `ctx.ui.theme.font` sets it for every widget. Paths are relative to the
+  scene folder, like images.
+- **Renderer:** the text atlas holds several fonts. Each file loads once.
+  Characters a font lacks come from the built-in Geist, and a bad file is
+  reported once and drawn with Geist. The same code runs in Play,
+  `run_scene` and exports.
+- **Oberon:**
+  - The Assets tab has a **Fonts** filter with "Aa" previews and an
+    Import… button (also GameObject ▸ Import Font…).
+  - Dropping a font on the window copies it into `fonts/` and puts its
+    script path on the clipboard.
+  - The Files tree has a font icon and *Copy Path for Scripts*.
+  - Completions now cover `ctx.hud.` and `ctx.ui.theme.`.
+- **Export:** validation finds `.ttf`/`.otf` string literals in the
+  shipped scripts. A font that's missing, outside the project, excluded or
+  not a font is an error.
+- **Demo:** `examples/oberon/pause_menu` draws its titles and HUD numbers
+  in Press Start 2P (OFL) from its `fonts/` folder.
 
 ### D3. UI layout, focus and screens ⬜ M
 #3 phase 4:
@@ -846,7 +868,7 @@ per effort. Reorder any time by telling me.
 | 23 | C3 Save games and settings | S | ✅ |
 | 24 | C1 Physics joints | M | ✅ |
 | 25 | D1 UI widgets | M | ✅ |
-| 26 | D2 Custom fonts | S | ⬜ |
+| 26 | D2 Custom fonts | S | ✅ |
 | 27 | D3 UI layout, focus, screens | M | ⬜ |
 | 28 | B4 Animation state machine | L | ⬜ |
 | 29 | B5 Attachments and IK | M | ⬜ |

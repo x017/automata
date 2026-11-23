@@ -1,6 +1,6 @@
-//! The Assets tab of the bottom dock: every model and sound in the project
-//! as a grid of tiles. Models show a rendered thumbnail, sounds their
-//! waveform and length.
+//! The Assets tab of the bottom dock: every model, sound and font in the
+//! project as a grid of tiles. Models show a rendered thumbnail, sounds
+//! their waveform and length, fonts "Aa" in the font.
 //!
 //! Tiles behave like rows of the Files panel: drag one onto the scene to add
 //! it, onto an entity in the Inspector to swap its model or clip;
@@ -27,6 +27,8 @@ pub enum AssetFilter {
     Models,
     /// Sound files (`.ogg`, `.wav`, `.mp3`, `.flac`).
     Sounds,
+    /// Font files (`.ttf`, `.otf`) for script text.
+    Fonts,
 }
 
 /// The Assets browser's state.
@@ -39,10 +41,30 @@ pub struct AssetBrowser {
     /// The highlighted tile.
     pub selected: Option<PathBuf>,
     scroll: f32,
-    /// Listing: project root, when read, models, sounds.
-    listing: Option<(PathBuf, Instant, Vec<PathBuf>, Vec<PathBuf>)>,
+    /// Listing: project root, when read, and the models, sounds and fonts.
+    listing: Option<(PathBuf, Instant, Listing)>,
     /// Rendered model thumbnails.
     pub thumbs: ThumbCache,
+    /// "Aa" previews of fonts.
+    fonts: crate::fonts::FontPreviews,
+}
+
+/// The project's assets by kind.
+#[derive(Default)]
+struct Listing {
+    models: Vec<PathBuf>,
+    sounds: Vec<PathBuf>,
+    fonts: Vec<PathBuf>,
+}
+
+impl Listing {
+    fn of(&self, filter: AssetFilter) -> &[PathBuf] {
+        match filter {
+            AssetFilter::Models => &self.models,
+            AssetFilter::Sounds => &self.sounds,
+            AssetFilter::Fonts => &self.fonts,
+        }
+    }
 }
 
 impl AssetBrowser {
@@ -51,21 +73,21 @@ impl AssetBrowser {
         self.listing = None;
     }
 
-    /// The project's models and sounds, re-read every few seconds.
-    fn lists(&mut self, root: &Path) -> (&[PathBuf], &[PathBuf]) {
+    /// The project's models, sounds and fonts, re-read every few seconds.
+    fn lists(&mut self, root: &Path) -> &Listing {
         let stale = self
             .listing
             .as_ref()
-            .is_none_or(|(r, at, _, _)| r != root || at.elapsed() > RELIST);
-        if stale {
-            let models = crate::models::project_models(root, 2000);
-            let sounds = crate::sounds::project_sounds(root, 2000);
-            self.listing = Some((root.to_path_buf(), Instant::now(), models, sounds));
+            .is_none_or(|(r, at, _)| r != root || at.elapsed() > RELIST);
+        if stale || self.listing.is_none() {
+            let listing = Listing {
+                models: crate::models::project_models(root, 2000),
+                sounds: crate::sounds::project_sounds(root, 2000),
+                fonts: crate::fonts::project_fonts(root, 2000),
+            };
+            self.listing = Some((root.to_path_buf(), Instant::now(), listing));
         }
-        match &self.listing {
-            Some((_, _, m, s)) => (m, s),
-            None => (&[], &[]),
-        }
+        &self.listing.as_ref().expect("listed above").2
     }
 }
 
@@ -92,14 +114,23 @@ impl Ui {
         }
     }
 
+    /// Shows the Assets tab's fonts (a font was just imported).
+    pub fn show_fonts(&mut self) {
+        self.panels.show_bottom = true;
+        self.bottom_tab = super::BottomTab::Assets;
+        self.assets.filter = AssetFilter::Fonts;
+        self.assets.scroll = 0.0;
+        self.assets.invalidate();
+    }
+
     /// The Assets tab's controls in the dock's title strip, right-aligned
     /// and ending at `right`: kind toggle, filter, Import.
     pub(super) fn assets_toolbar(&mut self, canvas: &mut Canvas, doc: &Document, strip: Rect) {
         let editing = self.play == PlayState::Editing;
         let root = self.project_root.clone();
-        let (models, sounds) = {
-            let (m, s) = self.assets.lists(&root);
-            (m.len(), s.len())
+        let (models, sounds, fonts) = {
+            let l = self.assets.lists(&root);
+            (l.models.len(), l.sounds.len(), l.fonts.len())
         };
         let h = strip.h - 8.0;
         let y = strip.y + 4.0;
@@ -118,6 +149,7 @@ impl Ui {
             let kind = match self.assets.filter {
                 AssetFilter::Models => super::menus::DialogKind::ImportModel(None),
                 AssetFilter::Sounds => super::menus::DialogKind::ImportSound(None),
+                AssetFilter::Fonts => super::menus::DialogKind::ImportFont,
             };
             self.open_dialog(kind, doc);
         }
@@ -126,8 +158,9 @@ impl Ui {
         x -= fw + 8.0;
         let field = Rect::new(x, y, fw, h);
         self.asset_query_field(canvas, field);
-        // Models / Sounds.
+        // Models / Sounds / Fonts.
         for (filter, label) in [
+            (AssetFilter::Fonts, format!("Fonts {fonts}")),
             (AssetFilter::Sounds, format!("Sounds {sounds}")),
             (AssetFilter::Models, format!("Models {models}")),
         ] {
@@ -220,15 +253,13 @@ impl Ui {
                 .replace('\\', "/")
         };
         let files: Vec<PathBuf> = {
-            let (models, sounds) = self.assets.lists(&root);
-            match filter {
-                AssetFilter::Models => models,
-                AssetFilter::Sounds => sounds,
-            }
-            .iter()
-            .filter(|p| query.is_empty() || rel(p).to_lowercase().contains(&query))
-            .cloned()
-            .collect()
+            self.assets
+                .lists(&root)
+                .of(filter)
+                .iter()
+                .filter(|p| query.is_empty() || rel(p).to_lowercase().contains(&query))
+                .cloned()
+                .collect()
         };
         let inner = Rect::new(
             rect.x + 10.0,
@@ -245,6 +276,11 @@ impl Ui {
                 }
                 (AssetFilter::Sounds, true) => {
                     "No sounds yet. Drop .ogg, .wav, .mp3 or .flac files on the window, or use Import\u{2026}"
+                        .to_string()
+                }
+                (AssetFilter::Fonts, true) => {
+                    "No fonts yet. Drop .ttf or .otf files on the window, or use Import\u{2026}. \
+                     Scripts draw with them: ctx.hud.text(..., font=\"fonts/Name.ttf\")"
                         .to_string()
                 }
             };
@@ -319,6 +355,22 @@ impl Ui {
                     }
                 }
                 AssetFilter::Sounds => self.draw_sound_tile(canvas, path, pic),
+                AssetFilter::Fonts => {
+                    let ink = color::text().to_color_u8();
+                    let ink = [ink.red(), ink.green(), ink.blue()];
+                    match self.assets.fonts.get(path, px, ink) {
+                        Some(rgba) => canvas.blit_rgba(pic.x, pic.y, px, px, rgba),
+                        None => {
+                            canvas.text(
+                                pic.x + 8.0,
+                                pic.y + PIC / 2.0 - 7.0,
+                                layout::SMALL_SIZE,
+                                "Can't load",
+                                color::danger(),
+                            );
+                        }
+                    }
+                }
             }
             let name = path
                 .file_name()
@@ -345,13 +397,14 @@ impl Ui {
                     AssetFilter::Sounds => {
                         "drag onto the scene or an entity · double-click to hear it"
                     }
+                    AssetFilter::Fonts => "double-click to copy its path for font=\"…\" in scripts",
                 };
                 self.tip(tile, &format!("{}\n{hint}", rel(path)));
                 self.cursor = CursorHint::Pointer;
                 if self.p.pressed {
                     clicked = true;
                     self.assets.selected = Some(path.clone());
-                    if editing && !self.p.double_click {
+                    if editing && !self.p.double_click && filter != AssetFilter::Fonts {
                         self.file_drag = Some(FileDrag {
                             path: path.clone(),
                             origin: (self.p.x, self.p.y),
@@ -361,7 +414,7 @@ impl Ui {
                     if self.p.double_click {
                         self.file_drag = None;
                         let kind = asset_kind(path, false);
-                        let allowed = editing || kind == AssetKind::Audio;
+                        let allowed = editing || matches!(kind, AssetKind::Audio | AssetKind::Font);
                         if let Some(intent) = open_intent(path, false).filter(|_| allowed) {
                             self.out.push(intent);
                         }

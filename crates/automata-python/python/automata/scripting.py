@@ -277,6 +277,7 @@ class _EngineBackend(api.Backend):
                 ctx.screen.text(
                     item["text"], item["x"], item["y"], item["size"], color, item["align"],
                     tuple(shadow) if shadow else None, tuple(outline) if outline else None,
+                    item.get("font"),
                 )
             else:
                 ctx.screen.rect(item["x"], item["y"], item["w"], item["h"], color)
