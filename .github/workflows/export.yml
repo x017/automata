@@ -180,7 +180,18 @@ jobs:
           python-version: "3.12"
 
       - name: Build oberon
-        run: cargo build --release -p oberon
+        run: |
+          set +e
+          cargo build --release -p oberon 2>&1 | tee build.log
+          code=${PIPESTATUS[0]}
+          if [ $code -ne 0 ]; then
+            # Compiler errors as annotations: readable without the raw logs.
+            grep -n -A12 -E "^error|panicked|failed to run custom build" build.log | head -c 6000 > errors.txt || true
+            [ -s errors.txt ] || tail -c 4000 build.log > errors.txt
+            msg=$(sed -e 's/%/%25/g' -e 's/\r//g' errors.txt | sed -e ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=oberon build failed ($code)::$msg"
+          fi
+          exit $code
 
       - name: Bundle oberon + Python + wheels
         run: python scripts/bundle_oberon.py --oberon "target/release/${{ matrix.exe }}" --out dist/oberon --archive
