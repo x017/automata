@@ -50,6 +50,7 @@ events as ``<entity name>:animation:<event>`` at the start of the frame
 after the playhead passes them, just before ``update`` runs.
 """
 
+import difflib
 import fnmatch
 import importlib.util
 import math
@@ -69,7 +70,10 @@ __all__ = [
     "Hit",
     "Hud",
     "Input",
+    "ComponentRef",
+    "FieldRef",
     "KeySource",
+    "KeyStore",
     "Message",
     "ScriptHost",
     "Subscription",
@@ -1066,11 +1070,329 @@ class Subscription:
         return f"Subscription({self.pattern!r}, {name})"
 
 
+
+# --------------------------------------------------------------------------
+# Keys: ctx.get / set / scan / keys / ref
+# --------------------------------------------------------------------------
+
+
+def _wild(text):
+    return any(c in text for c in "*?[")
+
+
+def _did_you_mean(word, options):
+    near = difflib.get_close_matches(word, sorted(set(options)), n=1, cutoff=0.6)
+    return f"; did you mean {near[0]!r}?" if near else ""
+
+
+def _play_clip(anim, clip):
+    anim.play(clip)
+
+
+def _set_attr(anim, name, value):
+    setattr(anim, name, value)
+
+
+# component -> (handle getter, what's missing, {field: (getter, setter or None)})
+_ANIMATION_FIELDS = {
+    "clip": (lambda a: a.clip, _play_clip),
+    "time": (lambda a: a.time, lambda a, v: _set_attr(a, "time", v)),
+    "speed": (lambda a: a.speed, lambda a, v: _set_attr(a, "speed", v)),
+    "root_motion": (lambda a: a.root_motion, lambda a, v: _set_attr(a, "root_motion", v)),
+    "playing": (lambda a: a.playing, None),
+    "looping": (lambda a: a.looping, None),
+    "duration": (lambda a: a.duration, None),
+    "clips": (lambda a: a.clips, None),
+    "springs": (lambda a: a.springs, None),
+}
+_TRANSFORM_FIELDS = {
+    "position": (lambda t: t.position, lambda t, v: _set_attr(t, "position", v)),
+    "rotation": (lambda t: t.rotation_euler, lambda t, v: _set_attr(t, "rotation_euler", v)),
+    "scale": (lambda t: t.scale, lambda t, v: _set_attr(t, "scale", v)),
+}
+_FIELD_ALIASES = {("transform", "rotation_euler"): "rotation"}
+COMPONENTS = {
+    "animation": (lambda e: e.animation, "no Animation (or its model isn't animated)",
+                  _ANIMATION_FIELDS),
+    "transform": (lambda e: e.transform, "no Transform", _TRANSFORM_FIELDS),
+    "attr": (lambda e: e.attributes, "no attributes", None),  # fields: its attributes
+}
+
+
+class FieldRef:
+    """``ctx.ref("Player:animation:speed")``: one value, looked up again on
+    every read. ``value`` (or ``get()`` / ``set(v)``) reads and writes it."""
+
+    __slots__ = ("key", "_store", "_entity", "_component", "_field")
+
+    def __init__(self, store, key, entity, component, field):
+        self._store = store
+        self.key = key
+        self._entity = entity
+        self._component = component
+        self._field = field
+
+    def get(self):
+        return self._store._read_field(self.key, self._entity, self._component, self._field)
+
+    def set(self, value):
+        self._store._write_field(self.key, self._entity, self._component, self._field, value)
+
+    @property
+    def value(self):
+        return self.get()
+
+    @value.setter
+    def value(self, v):
+        self.set(v)
+
+    def __repr__(self):
+        return f"FieldRef({self.key!r})"
+
+
+class ComponentRef:
+    """``ctx.ref("Player:animation")``: the component's handle, looked up
+    again on every use, so it's safe to keep from ``start``. Use it like
+    the handle itself (``ref.play("Run")``, ``ref.position``)."""
+
+    __slots__ = ("key", "_store", "_entity", "_component")
+
+    def __init__(self, store, key, entity, component):
+        object.__setattr__(self, "_store", store)
+        object.__setattr__(self, "key", key)
+        object.__setattr__(self, "_entity", entity)
+        object.__setattr__(self, "_component", component)
+
+    def resolve(self):
+        """The component's handle this frame."""
+        return self._store._component_of(self.key, self._entity, self._component)
+
+    def __getattr__(self, name):
+        return getattr(self.resolve(), name)
+
+    def __setattr__(self, name, value):
+        setattr(self.resolve(), name, value)
+
+    def __getitem__(self, name):
+        return self.resolve()[name]
+
+    def __setitem__(self, name, value):
+        self.resolve()[name] = value
+
+    def __repr__(self):
+        return f"ComponentRef({self.key!r})"
+
+
+class KeyStore:
+    """Engine state by key, Redis style: ``entity:component:field``.
+
+    Components are ``animation``, ``transform`` and ``attr``::
+
+        ctx.get("Player:animation:clip")           # "Run"
+        ctx.set("Player:animation:speed", 1.5)
+        ctx.get("Player:attr:health")
+        ctx.get("Player:transform:position")
+        for anim in ctx.scan("Enemy_*:animation"):
+            anim.play("Dance", fade=0.3)
+        speed = ctx.ref("Player:animation:speed")   # keep it from start()
+
+    ``get`` / ``set`` / ``ref`` take one exact key; ``scan`` and ``keys``
+    take ``*`` and ``?`` wildcards. A name two entities share is an error
+    for ``get`` (``scan`` returns both), and a wrong key's error suggests
+    the nearest right one.
+    """
+
+    def __init__(self, host):
+        self._host = host
+        self._parsed = {}
+
+    # --- parsing and lookup -----------------------------------------------
+
+    def _split(self, key, exact):
+        parts = self._parsed.get(key)
+        if parts is None:
+            if not isinstance(key, str):
+                raise TypeError(f"keys are strings like 'Player:animation:clip', not {key!r}")
+            parts = tuple(key.split(":"))
+            if len(parts) > 3 or not all(parts):
+                raise KeyError(
+                    f"{key!r} isn't a key: keys are 'entity', 'entity:component' or "
+                    f"'entity:component:field' (components: {', '.join(COMPONENTS)})")
+            if len(self._parsed) < 4096:
+                self._parsed[key] = parts
+        if exact and _wild(key):
+            raise ValueError(f"{key!r} has a wildcard; get, set and ref take one exact key "
+                             "(use ctx.scan or ctx.keys for patterns)")
+        return parts
+
+    def _entity(self, key, name):
+        host = self._host
+        count = host._name_count.get(name, 0)
+        if count == 1:
+            found = host._by_name.get(name)
+            if found is None:  # the first of two was despawned
+                found = next(e for e in host.entities.values() if e.name == name)
+                host._by_name[name] = found
+            return found
+        if count > 1:
+            raise KeyError(f"{key!r}: {count} entities are called {name!r}; give them "
+                           "different names, or use ctx.scan to get them all")
+        names = [n for n in host._name_count if n]
+        raise KeyError(f"{key!r}: no entity is called {name!r}{_did_you_mean(name, names)}")
+
+    def _component_info(self, key, component):
+        info = COMPONENTS.get(component)
+        if info is None:
+            raise KeyError(f"{key!r}: there's no component {component!r}"
+                           f"{_did_you_mean(component, COMPONENTS)} "
+                           f"(keys know {', '.join(COMPONENTS)})")
+        return info
+
+    def _field_name(self, key, component, field, fields):
+        field = _FIELD_ALIASES.get((component, field), field)
+        if fields is not None and field not in fields:
+            raise KeyError(f"{key!r}: {component} has no field {field!r}"
+                           f"{_did_you_mean(field, fields)} (it has {', '.join(fields)})")
+        return field
+
+    def _component_of(self, key, entity, component):
+        if self._host.entities.get(entity.id) is not entity:
+            raise KeyError(f"{key!r}: {entity.name!r} is gone")
+        getter, missing, _ = COMPONENTS[component]
+        handle = getter(entity)
+        if handle is None:
+            raise KeyError(f"{key!r}: {entity.name!r} has {missing}")
+        return handle
+
+    def _read_field(self, key, entity, component, field):
+        handle = self._component_of(key, entity, component)
+        fields = COMPONENTS[component][2]
+        if fields is None:
+            if field not in handle:
+                raise KeyError(f"{key!r}: {entity.name!r} has no attribute {field!r}"
+                               f"{_did_you_mean(field, handle)}")
+            return handle[field]
+        return fields[field][0](handle)
+
+    def _write_field(self, key, entity, component, field, value):
+        handle = self._component_of(key, entity, component)
+        fields = COMPONENTS[component][2]
+        if fields is None:
+            if field not in handle:
+                raise KeyError(f"{key!r}: {entity.name!r} has no attribute {field!r}"
+                               f"{_did_you_mean(field, handle)} (add new ones with "
+                               "entity.attributes[...])")
+            handle[field] = value
+            return
+        setter = fields[field][1]
+        if setter is None:
+            writable = [f for f, (_, s) in fields.items() if s is not None]
+            raise AttributeError(f"{key!r} is read-only (you can set {', '.join(writable)})")
+        setter(handle, value)
+
+    def _resolve(self, key):
+        """(entity, component or None, field or None) for an exact key."""
+        parts = self._split(key, exact=True)
+        entity = self._entity(key, parts[0])
+        if len(parts) == 1:
+            return entity, None, None
+        component = parts[1]
+        fields = self._component_info(key, component)[2]
+        if len(parts) == 2:
+            return entity, component, None
+        return entity, component, self._field_name(key, component, parts[2], fields)
+
+    # --- the API -----------------------------------------------------------
+
+    def get(self, key):
+        entity, component, field = self._resolve(key)
+        if component is None:
+            return entity
+        if field is None:
+            return self._component_of(key, entity, component)
+        return self._read_field(key, entity, component, field)
+
+    def set(self, key, value):
+        entity, component, field = self._resolve(key)
+        if field is None:
+            raise KeyError(f"{key!r}: set needs a field, like '{key}:"
+                           f"{'speed' if component == 'animation' else 'position'}'"
+                           if component else f"{key!r}: set needs 'entity:component:field'")
+        self._write_field(key, entity, component, field, value)
+
+    def ref(self, key):
+        entity, component, field = self._resolve(key)
+        if component is None:
+            return entity  # entity handles already last the whole run
+        self._component_of(key, entity, component)  # fail now, not later
+        if field is None:
+            return ComponentRef(self, key, entity, component)
+        return FieldRef(self, key, entity, component, field)
+
+    def _matches(self, pattern):
+        """(key, entity, component, field) for every key ``pattern`` matches,
+        in scene order. Exact segments that can't match anything raise."""
+        parts = self._split(pattern, exact=False)
+        name_pat = parts[0]
+        if not _wild(name_pat) and name_pat not in self._host._name_count:
+            self._entity(pattern, name_pat)  # raises with a suggestion
+        comp_pat = parts[1] if len(parts) > 1 else None
+        field_pat = parts[2] if len(parts) > 2 else None
+        if comp_pat is not None and not _wild(comp_pat):
+            fields = self._component_info(pattern, comp_pat)[2]
+            if field_pat is not None and not _wild(field_pat):
+                field_pat = self._field_name(pattern, comp_pat, field_pat, fields)
+        out = []
+        for e in self._host.entities.values():
+            if not e.name or not fnmatch.fnmatchcase(e.name, name_pat):
+                continue
+            if comp_pat is None:
+                out.append((e.name, e, None, None))
+                continue
+            for comp, (getter, _, fields) in COMPONENTS.items():
+                if not fnmatch.fnmatchcase(comp, comp_pat):
+                    continue
+                handle = getter(e)
+                if handle is None:
+                    continue
+                if field_pat is None:
+                    out.append((f"{e.name}:{comp}", e, comp, None))
+                    continue
+                names = list(handle) if fields is None else list(fields)
+                for f in names:
+                    if fnmatch.fnmatchcase(f, field_pat):
+                        out.append((f"{e.name}:{comp}:{f}", e, comp, f))
+        if not out and field_pat is not None and not _wild(field_pat) and comp_pat == "attr":
+            seen = set()
+            for e in self._host.entities.values():
+                if e.name and fnmatch.fnmatchcase(e.name, name_pat):
+                    seen.update(e.attributes)
+            hint = _did_you_mean(field_pat, seen)
+            if hint:
+                raise KeyError(f"{pattern!r}: no match has attribute {field_pat!r}{hint}")
+        return out
+
+    def keys(self, pattern="*"):
+        return [k for k, *_ in self._matches(pattern)]
+
+    def scan(self, pattern):
+        out = []
+        for key, entity, component, field in self._matches(pattern):
+            if component is None:
+                out.append(entity)
+            elif field is None:
+                out.append(self._component_of(key, entity, component))
+            else:
+                out.append(self._read_field(key, entity, component, field))
+        return out
+
+
 class Context:
     """The ``ctx`` every script function receives."""
 
     def __init__(self, host, input_source):
         self._host = host
+        self._keys = KeyStore(host)
         self.input = Input(input_source)
         self.time = Time()
         self.physics = Physics(host)
@@ -1119,6 +1441,38 @@ class Context:
         """Sends ``data`` to every subscriber of ``channel`` now (they run
         before this returns). Returns how many received it."""
         return self._host.publish(Message(str(channel), data))
+
+    # Keys, Redis style (see KeyStore).
+
+    def get(self, key):
+        """The value at ``key``: ``"Player:animation:clip"``,
+        ``"Player:attr:health"``, ``"Player:transform:position"``.
+        ``"Player:animation"`` gives the component, ``"Player"`` the entity.
+        Raises ``KeyError`` (suggesting the nearest key) for a wrong key or a
+        name two entities share."""
+        return self._keys.get(key)
+
+    def set(self, key, value):
+        """Sets the field at ``key`` (``"Player:animation:speed"``). Setting
+        ``animation:clip`` plays that clip. Applies like any other write."""
+        self._keys.set(key, value)
+
+    def scan(self, pattern):
+        """Everything matching ``pattern`` (``*`` and ``?`` wildcards), in
+        scene order: ``ctx.scan("Enemy_*:animation")`` gives each enemy's
+        animation, ``ctx.scan("Enemy_*:attr:health")`` their health.
+        Entities without that component or field are skipped."""
+        return self._keys.scan(pattern)
+
+    def keys(self, pattern="*"):
+        """The keys matching ``pattern``: ``ctx.keys("Player:attr:*")``."""
+        return self._keys.keys(pattern)
+
+    def ref(self, key):
+        """A handle to keep (from ``start``) that looks ``key`` up again on
+        each use: a component (``ctx.ref("Player:animation").play("Run")``)
+        or a field (``ctx.ref("Player:attr:health").value``)."""
+        return self._keys.ref(key)
 
     def __getattr__(self, name):
         return self._host.backend.extra("ctx", name)
@@ -1251,6 +1605,7 @@ class ScriptHost:
         self.internal = {os.path.abspath(__file__)} | {os.path.abspath(f) for f in internal_files}
         self.entities = {}
         self._by_name = {}
+        self._name_count = {}
         self.scripts = {}
         self.started = set()
         self.ctx = Context(self, input_source if input_source is not None else KeySource())
@@ -1289,6 +1644,7 @@ class ScriptHost:
         old = self.entities
         self.entities = {}
         self._by_name = {}
+        counts = self._name_count = {}
         for record in records:
             eid = record.get("id")
             e = old.get(eid)
@@ -1296,6 +1652,7 @@ class ScriptHost:
                 e = Entity(self, eid)
             e._begin(record)
             self.entities[eid] = e
+            counts[e.name] = counts.get(e.name, 0) + 1
             if e.name and e.name not in self._by_name:
                 self._by_name[e.name] = e
         if self._subs:
@@ -1406,6 +1763,11 @@ class ScriptHost:
             del self.entities[e.id]
             if self._by_name.get(e.name) is e:
                 del self._by_name[e.name]
+            left = self._name_count.get(e.name, 1) - 1
+            if left > 0:
+                self._name_count[e.name] = left
+            else:
+                self._name_count.pop(e.name, None)
         if gone and self._subs:
             self._drop_orphans()
         out = FrameOutput(writes, self.ctx.audio._queue, self.ctx.hud._items,

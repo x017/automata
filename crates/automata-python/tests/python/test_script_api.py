@@ -8,6 +8,8 @@ the way the bridge does.
 import os
 import time
 
+import pytest
+
 from automata import script_api as api
 
 
@@ -222,3 +224,97 @@ def test_root_motion_reads_and_writes():
     assert anim.root_motion is True
     out = host._collect()
     assert out.writes == [{"id": 1, "anim": [["root_motion", True]]}]
+
+
+def _keyed_host():
+    host = api.ScriptHost(Backend())
+    host.frame([
+        {"id": 1, "name": "Player", "p": [1, 2, 3], "attrs": {"health": 10, "team": "red"},
+         "anim": _anim([], clip="Run")},
+        {"id": 2, "name": "Enemy_1", "attrs": {"health": 3}, "anim": _anim([], clip="Idle")},
+        {"id": 3, "name": "Enemy_2", "attrs": {"health": 5}},
+        {"id": 4, "name": "Crate"},
+        {"id": 5, "name": "Crate"},
+    ])
+    return host
+
+
+def test_keys_read_and_write_engine_state():
+    host = _keyed_host()
+    ctx = host.ctx
+    assert ctx.get("Player:animation:clip") == "Run"
+    assert ctx.get("Player:attr:health") == 10
+    assert ctx.get("Player:transform:position") == (1.0, 2.0, 3.0)
+    assert ctx.get("Player:transform:rotation_euler") == (0.0, 0.0, 0.0)
+    assert ctx.get("Player") is ctx.scene["Player"]
+    assert ctx.get("Player:animation").clip == "Run"
+    ctx.set("Player:animation:speed", 1.5)
+    ctx.set("Player:attr:health", 7)
+    ctx.set("Player:transform:position", (0, 1, 0))
+    ctx.set("Player:animation:clip", "Run")  # the clip that's playing: keeps going
+    # Reads see the writes, which go out like any others.
+    assert ctx.get("Player:animation:speed") == 1.5 and ctx.get("Player:attr:health") == 7
+    (w,) = [w for w in host._collect().writes if w["id"] == 1]
+    assert w["p"] == (0.0, 1.0, 0.0) and w["attrs"]["health"] == 7
+    assert ["speed", 1.5] in w["anim"] and w["anim"][-1][:2] == ["play", "Run"]
+
+
+def test_scan_and_keys_take_wildcards_and_skip_what_is_missing():
+    ctx = _keyed_host().ctx
+    assert [a.clip for a in ctx.scan("Enemy_*:animation")] == ["Idle"]
+    assert ctx.scan("Enemy_*:attr:health") == [3, 5]
+    assert ctx.keys("Enemy_?:attr:*") == ["Enemy_1:attr:health", "Enemy_2:attr:health"]
+    assert ctx.keys("Player:*") == ["Player:animation", "Player:transform", "Player:attr"]
+    assert len(ctx.scan("Crate")) == 2, "scan returns every entity with the name"
+    assert ctx.scan("Ghost_*:attr:health") == []
+    for anim in ctx.scan("*:animation"):
+        anim.speed = 2.0
+    assert ctx.get("Enemy_1:animation:speed") == 2.0
+
+
+def test_wrong_keys_explain_themselves():
+    ctx = _keyed_host().ctx
+
+    def error(fn, *args):
+        with pytest.raises((KeyError, ValueError, AttributeError)) as info:
+            fn(*args)
+        return str(info.value)
+
+    assert "did you mean 'Player'" in error(ctx.get, "Playr:animation:clip")
+    assert "did you mean 'animation'" in error(ctx.get, "Player:animaton:clip")
+    assert "did you mean 'speed'" in error(ctx.get, "Player:animation:sped")
+    assert "did you mean 'health'" in error(ctx.get, "Player:attr:helth")
+    assert "did you mean 'health'" in error(ctx.scan, "Enemy_*:attr:helth")
+    assert "2 entities are called 'Crate'" in error(ctx.get, "Crate:transform:position")
+    assert "has no Animation" in error(ctx.get, "Enemy_2:animation:clip")
+    assert "read-only" in error(ctx.set, "Player:animation:duration", 3)
+    assert "add new ones" in error(ctx.set, "Player:attr:mana", 3)
+    assert "wildcard" in error(ctx.get, "Enemy_*:attr:health")
+    assert "isn't a key" in error(ctx.get, "a:b:c:d")
+    with pytest.raises(KeyError):
+        ctx.get("Player:animation:nope")  # a KeyError, so `except KeyError` works
+
+
+def test_refs_look_their_key_up_on_every_use():
+    host = _keyed_host()
+    anim = host.ctx.ref("Player:animation")
+    health = host.ctx.ref("Player:attr:health")
+    assert anim.clip == "Run" and health.value == 10
+    host.frame([{"id": 1, "name": "Player", "attrs": {"health": 4},
+                 "anim": _anim([], clip="Walk")}])
+    assert anim.clip == "Walk" and health.get() == 4, "next frame's values"
+    health.value = 9
+    anim.speed = 0.5
+    assert host.ctx.get("Player:attr:health") == 9 and anim.speed == 0.5
+    host.frame([])
+    with pytest.raises(KeyError, match="'Player' is gone"):
+        anim.play("Run")
+
+
+def test_a_despawned_twin_frees_the_name(tmp_path):
+    script = tmp_path / "pop.py"
+    write(script, "def update(entity, ctx):\n    entity.despawn()\n")
+    host = api.ScriptHost(Backend())
+    host.frame([{"id": 1, "name": "Coin", "script": str(script)},
+                {"id": 2, "name": "Coin", "attrs": {"v": 1}}])
+    assert host.ctx.get("Coin:attr:v") == 1

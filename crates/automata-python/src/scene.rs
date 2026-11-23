@@ -39,6 +39,17 @@ pub struct StagedEntity {
 /// A game object builder. Attach components with [`Entity.add`], then place
 /// it in a scene with [`Scene.add`]. Methods chain:
 /// `Entity("cube").add(Transform())`.
+/// Refuses entity names with `:`, the separator in script keys.
+fn check_name(name: Option<&str>) -> PyResult<()> {
+    match name {
+        Some(n) if n.contains(':') => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "entity names can't contain ':' ({n:?}): it separates the parts of a key \
+             like \"Player:animation:clip\""
+        ))),
+        _ => Ok(()),
+    }
+}
+
 #[pyclass(name = "Entity", module = "automata._core", subclass)]
 #[derive(Debug, Clone, Default)]
 pub struct PyEntity {
@@ -47,16 +58,19 @@ pub struct PyEntity {
 
 #[pymethods]
 impl PyEntity {
-    /// Creates an entity with an optional name for later lookup.
+    /// Creates an entity with an optional name for later lookup. Names
+    /// can't contain `:`, which separates the parts of a script key
+    /// (`"Player:animation:clip"`).
     #[new]
     #[pyo3(signature = (name=None))]
-    fn new(name: Option<String>) -> Self {
-        Self {
+    fn new(name: Option<String>) -> PyResult<Self> {
+        check_name(name.as_deref())?;
+        Ok(Self {
             staged: StagedEntity {
                 name,
                 ..StagedEntity::default()
             },
-        }
+        })
     }
 
     /// The entity's custom attributes, used like a dict
@@ -96,8 +110,10 @@ impl PyEntity {
     /// `Entity` wrapper so subclass constructors can pass the name through
     /// `super().__init__(name)`.)
     #[setter]
-    fn set_name(&mut self, name: Option<String>) {
+    fn set_name(&mut self, name: Option<String>) -> PyResult<()> {
+        check_name(name.as_deref())?;
         self.staged.name = name;
+        Ok(())
     }
 
     /// Attaches a component (`Transform`, `Camera3D`, `Camera2D`). Returns

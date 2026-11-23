@@ -1,5 +1,5 @@
 """player: you. W A S D (or the arrows) walk, hold Shift to run, 1 waves,
-2 cheers and 3 leaps.
+2 cheers and 3 leaps. C gets the Spectator cheering.
 
 Moving sets the clip: Idle, Walk or Run. The emotes live in another file,
 ``models/anims/emotes.glb``, which the model's import settings borrow
@@ -15,6 +15,11 @@ runner's own ``land``.
 Root motion: her Animation has Root Motion on, so Leap's hips travelling
 2.4 m carry the whole entity forward, rather than snapping back when the
 clip ends. Walk and Run stay in place, so this script moves her for those.
+
+Keys: ``ctx.ref("Spectator:animation")`` in ``start`` keeps a handle to
+another entity's animation (looked up again each time it's used), so C
+can make her cheer. ``ctx.get``, ``ctx.set`` and ``ctx.scan`` read and
+write other entities the same way, by ``entity:component:field``.
 
 Nothing here touches the hair or the skirt; their swing comes from the
 spring bones in the model's import settings. Press R to put them back at
@@ -53,6 +58,7 @@ def kick_up_dust(msg):
 def start(entity, ctx):
     entity.state["yaw"] = entity.transform.rotation_euler[1]
     entity.state["landings"] = 0
+    entity.state["fan"] = ctx.ref("Spectator:animation")
     # A wildcard: footsteps of any entity, not just this one.
     ctx.subscribe("*:animation:footstep", kick_up_dust)
 
@@ -111,3 +117,5 @@ def update(entity, ctx):
         anim.play(clip_for(math.hypot(vx, vz)), fade=0.2)
     if keys.just_pressed("r"):
         anim.reset_springs()
+    if keys.just_pressed("c"):
+        entity.state["fan"].play("emotes:Cheer", loop=False, fade=0.15, restart=True)

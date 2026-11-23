@@ -863,9 +863,10 @@ impl Document {
         true
     }
 
-    /// Renames the entity with `id` (records undo).
+    /// Renames the entity with `id` (records undo). Empty names and names
+    /// with `:` (the separator in script keys) are refused.
     pub fn rename_entity(&mut self, id: u64, name: &str) -> bool {
-        if name.is_empty() {
+        if name.is_empty() || name.contains(':') {
             return false;
         }
         let Some(idx) = self.index_of(id) else {
@@ -1673,6 +1674,17 @@ impl Document {
 
 #[cfg(test)]
 pub(crate) mod tests {
+
+    #[test]
+    fn names_with_colons_are_refused() {
+        let mut doc = Document::new();
+        doc.add_entity_named("Player");
+        let id = doc.entities[0].id;
+        assert!(!doc.rename_entity(id, "Player:1"), "':' separates key parts");
+        assert!(!doc.rename_entity(id, ""));
+        assert!(doc.rename_entity(id, "Player 1"));
+        assert_eq!(doc.entities[0].name(), "Player 1");
+    }
 
     #[test]
     fn moved_files_keep_their_references() {

@@ -77,7 +77,7 @@ for `entity` and `ctx`.
 | `entity.audio.playing` | Whether the Audio Source was playing at the start of the frame |
 | `entity.animation.play("Running", loop=True, fade=0.2)` | Blend to a clip of the entity's animated model over `fade` seconds. An unknown clip raises `KeyError`. Asking for the clip that's already playing does nothing, so it's safe every frame ([Animation](models.md#animation)) |
 | `entity.animation.stop(fade=0)` | Blend back to the rest pose |
-| `entity.animation.clip` / `.time` / `.playing` / `.clips` | The current clip, seconds into it (assign to jump), whether it's playing (False once a one-shot ends), and every clip name. `.speed` can be set too |
+| `entity.animation.clip` / `.time` / `.playing` / `.clips` | The current clip, seconds into it (assign to jump), whether it's playing (False once a one-shot ends), and every clip name. `.speed` and `.root_motion` can be set too |
 | `entity.despawn()` | Remove the entity until Play stops |
 | `entity.state` | A dict of your own that persists between frames (not saved) |
 
@@ -113,6 +113,8 @@ for `entity` and `ctx`.
 | `"Name" in ctx.scene` | Whether an entity has that name |
 | `for e in ctx.scene:` | Every entity |
 | `ctx.camera` | The camera Play renders through, or `None` |
+| `ctx.get(key)`, `ctx.set(key, value)`, `ctx.scan(pattern)`, `ctx.keys(pattern)`, `ctx.ref(key)` | Other entities' state by key, like `"Player:attr:health"` ([Keys](#keys)) |
+| `ctx.subscribe(pattern, fn)`, `ctx.unsubscribe(...)`, `ctx.publish(channel, data)` | Channels: animation events and your own messages ([Channels](#channels)) |
 | `ctx.log(...)`, `ctx.warn(...)` | Write to the Console. `print()` works too |
 
 HUD shapes last one frame, so draw them in `update` every frame you want
@@ -143,6 +145,92 @@ will cover.
 `"right"`, `"up"`, `"down"`), and `"shift"` / `"ctrl"` / `"alt"`. The last
 three match either side of the keyboard; use `"shift_left"` or
 `"shift_right"` (and likewise for ctrl and alt) to require one side.
+
+## Keys
+
+Scripts can read and write any entity's state with a key, Redis style.
+A key is `entity:component:field`:
+
+```python
+ctx.get("Player:animation:clip")            # "Run"
+ctx.set("Player:animation:speed", 1.5)
+ctx.get("Player:attr:health")                # its attributes
+ctx.set("Door:transform:position", (0, 3, 0))
+
+for anim in ctx.scan("Enemy_*:animation"):   # every enemy that has one
+    anim.play("Dance", fade=0.3)
+ctx.scan("Enemy_*:attr:health")              # [30, 12, 50]
+ctx.keys("Player:attr:*")                    # ["Player:attr:health", ...]
+```
+
+| Component | Fields |
+|---|---|
+| `animation` | `clip` (setting it plays that clip), `time`, `speed`, `root_motion`; read-only `playing`, `looping`, `duration`, `clips`, `springs` |
+| `transform` | `position`, `rotation` (radians, same as `rotation_euler`), `scale` |
+| `attr` | The entity's [attributes](prefabs-and-attributes.md), by name |
+
+A shorter key gives more: `"Player:animation"` is the same handle as
+`entity.animation`, and `"Player"` is the entity. Reads and writes follow
+the [frame model](#the-frame-model), like everything else.
+
+- **`get`, `set` and `ref` take one exact key.** If two entities share the
+  name, `get` raises an error instead of guessing. `scan` returns every match,
+  in hierarchy order. It skips entities that lack the component or field,
+  and accepts `*` and `?` wildcards.
+- **A wrong key raises `KeyError` and suggests the nearest right one**:
+  `'Player:animaton:clip': there's no component 'animaton'; did you mean
+  'animation'?`. Read-only fields raise `AttributeError`. `set` won't create
+  attributes, so a typo can't make a new one; add them with
+  `entity.attributes["mana"] = 10`.
+- **`ctx.ref(key)`** makes a handle to keep, usually from `start`. It looks
+  the key up again each time it's used, so it always shows this frame's
+  values:
+
+  ```python
+  def start(entity, ctx):
+      entity.state["boss"] = ctx.ref("Boss:animation")
+      entity.state["hp"] = ctx.ref("Boss:attr:health")
+
+  def update(entity, ctx):
+      if entity.state["hp"].value < 20:
+          entity.state["boss"].play("Enraged", fade=0.2)
+  ```
+
+- **Names:** keys find entities by name, so entity names can't contain `:`.
+  Oberon refuses the rename, and `at.Entity("a:b")` raises `ValueError`.
+  When several entities share a name, the Inspector says so under the name.
+  `entity.animation.play(...)` is still the everyday way to drive your own
+  entity. Keys are for reaching the others.
+
+## Channels
+
+`ctx.subscribe(pattern, fn)` calls `fn(msg)` for every message published
+on a matching channel. A pattern is an exact name or uses `*` and `?`.
+Animation events arrive on their own, as `<entity>:animation:<event>`
+(see [Animation events](models.md#animation-events)), and scripts can
+publish their own messages:
+
+```python
+def opened(msg):
+    msg.ctx.log("door opened by", msg.data)
+
+def start(entity, ctx):
+    ctx.subscribe("door:*", opened)
+    ctx.subscribe("*:animation:footstep", lambda msg: msg.ctx.audio.play("step.ogg", position=msg.entity))
+
+# elsewhere
+ctx.publish("door:open", "Player")
+```
+
+`msg` has `channel`, `data` and `ctx`. Animation events also set `entity`,
+`event` and `clip`. `publish` delivers at once and returns how many
+subscribers got the message.
+
+Subscribing the same function to the same pattern again does nothing, so
+it's safe in `update`. A subscription ends when the entity whose script
+made it goes away. You can also end one with `ctx.unsubscribe(pattern)` or
+by calling `cancel()` on what `subscribe` returned. If a subscriber raises,
+its script pauses like any other script error.
 
 ## Hot reload
 

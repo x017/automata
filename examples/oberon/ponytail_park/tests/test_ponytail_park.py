@@ -211,3 +211,54 @@ def test_scripts_hear_animation_events_on_channels(tmp_path):
     # Run is 0.72 s with two footsteps; she starts running after 1 s.
     assert 4 <= attrs["steps"] <= 7, attrs
     assert attrs["heard"] == "Runner:animation:land emotes:Leap"
+
+
+KEYS_SCRIPT = """
+def start(entity, ctx):
+    entity.state["jog"] = ctx.ref("Jogger:animation:clip")
+
+
+def update(entity, ctx):
+    if ctx.time.frame == 30:
+        ctx.set("Stroller:animation:speed", 2.0)
+        for anim in ctx.scan("Spect*:animation"):
+            anim.play("emotes:Wave", loop=False)
+        ear = ctx.get("Ear:attr")
+        ear["runners"] = len(ctx.scan("*:animation"))
+        ear["jog"] = entity.state["jog"].value
+"""
+
+
+def test_scripts_reach_other_entities_by_key(tmp_path):
+    import shutil
+
+    for folder in ("scripts", "models"):
+        shutil.copytree(os.path.join(GAME, folder), tmp_path / folder)
+    (tmp_path / "keys.py").write_text(KEYS_SCRIPT)
+    scene = build_level.build()
+    ear = at.Entity("Ear").add(at.Transform())
+    ear.attributes["runners"] = 0
+    ear.attributes["jog"] = ""
+    ear.script = str(tmp_path / "keys.py")
+    scene.add(ear)
+    level = tmp_path / "level.ron"
+    scene.save(str(level))
+    seen = {}
+
+    def after(ctx):
+        seen["stroller"] = ctx.scene["Stroller"].animation.speed
+        seen["spectator"] = ctx.scene["Spectator"].animation.clip
+        seen["ear"] = ctx.scene["Ear"].attributes.to_dict()
+
+    at.run_scene(str(level), headless=True, max_frames=40, update=after, fixed_delta=1 / 60)
+    assert seen["stroller"] == 2.0
+    assert seen["spectator"] == "emotes:Wave"
+    assert seen["ear"] == {"runners": 4, "jog": "Idle"}
+
+
+def test_entity_names_cannot_hold_colons():
+    with pytest.raises(ValueError, match="separates the parts of a key"):
+        at.Entity("Player:1")
+    e = at.Entity("Player")
+    with pytest.raises(ValueError):
+        e.name = "a:b"

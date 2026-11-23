@@ -428,16 +428,25 @@ document's folder. Docs:
 [Models → Animation events](docs/wiki/oberon/models.md#animation-events),
 [Models → Root motion](docs/wiki/oberon/models.md#root-motion).
 
-### B3b. Key store for scripts ⬜ M
-- Read and write engine state by key, Redis style:
-  `ctx.get("player_1:animation:clip")`, `ctx.set("player_1:animation:speed", 1.5)`,
-  `ctx.scan("enemy_*:animation")`, and `ctx.ref(...)` for a handle kept
-  from `start()`. Animation, transform and attributes first.
-- Keys are `entity:component:field`. A `get` that matches two entities is
-  an error (`scan` returns all); colons aren't allowed in entity names, and
-  Oberon warns about duplicate names. A wrong key's error suggests the
-  nearest right one. `entity.animation.play` stays the main API.
-
+### B3b. Key store for scripts ✅ M
+Engine state by key, Redis style, in `script_api.KeyStore` (Oberon's Play
+and `run_scene` alike): `ctx.get` / `ctx.set` / `ctx.scan` / `ctx.keys` /
+`ctx.ref`. Keys are `entity:component:field`. The components are
+`animation` (clip, time, speed and root_motion settable; setting `clip`
+plays it), `transform` (position, rotation, scale) and `attr`. Shorter keys
+give the component handle or the entity. `get`/`set`/`ref` take one exact
+key: a shared name is an error that points to `scan`, and wildcards are
+refused. `scan`/`keys` take `*`/`?`, keep scene order and skip entities
+without the component or field. Wrong entity, component, field or attribute
+names raise `KeyError` with a difflib "did you mean". Read-only fields raise
+`AttributeError`, and `set` won't create attributes. `ctx.ref` returns a
+`ComponentRef` / `FieldRef` that re-resolves on each use and raises once
+its entity is gone. Colons are refused in entity names (`at.Entity`,
+`Entity.name`, Oberon's rename). Oberon's Inspector notes shared names
+and names with `:` under the entity name. Ponytail Park: C makes the
+Spectator cheer through `ctx.ref("Spectator:animation")`. Docs:
+[Scripting → Keys](docs/wiki/oberon/scripting.md#keys),
+[Channels](docs/wiki/oberon/scripting.md#channels).
 ### B4. Animation state machine and graph editor ⬜ L
 NEXT_PLANS #4 phase 4:
 - A `.anim.ron` graph with states, 1D blend spaces and conditional
@@ -615,7 +624,7 @@ per effort. Reorder any time by telling me.
 | 15 | B2 Spring bones | M | ✅ |
 | 16 | B2b Clips from other files | S | ✅ |
 | 17 | B3 Animation events, root motion | M | ✅ |
-| 18 | B3b Key store for scripts | M | ⬜ |
+| 18 | B3b Key store for scripts | M | ✅ |
 | 19 | A11 Culling, instancing, LOD | M | ⬜ |
 | 20 | A12 Grass and foliage | L | ⬜ |
 | 21 | C2 Tweens and timers | S | ⬜ |

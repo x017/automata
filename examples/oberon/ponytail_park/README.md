@@ -17,6 +17,7 @@ forwards, and then they settle.
 | W A S D / arrows | Walk |
 | Shift | Run |
 | 1 / 2 / 3 | Wave / cheer / leap |
+| C | The Spectator cheers |
 | R | Reset the springs |
 | Q / E | Orbit the camera |
 
@@ -121,6 +122,24 @@ def on_animation_event(entity, ctx, name):
 
 Select the Stroller: the yellow ticks on her Animation's Preview bar are
 Walk's two footsteps.
+
+### Other entities by key
+
+`player.py` reaches the Spectator through a key, Redis style
+(`entity:component:field`):
+
+```python
+def start(entity, ctx):
+    entity.state["fan"] = ctx.ref("Spectator:animation")   # kept for the whole run
+
+def update(entity, ctx):
+    if ctx.input.just_pressed("c"):
+        entity.state["fan"].play("emotes:Cheer", loop=False, fade=0.15)
+```
+
+The same keys work with `ctx.get("Jogger:animation:clip")`,
+`ctx.set("Stroller:animation:speed", 2)` and
+`ctx.scan("*:animation")` (every runner's animation).
 
 ### The leap (root motion)
 

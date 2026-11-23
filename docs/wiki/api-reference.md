@@ -53,7 +53,7 @@ at.Scene.load(path) -> Scene       # IOError on missing files
 game.scene_to_ron() -> str         # the LIVE world (post-physics) -> RON
 game.save_scene(path)              # same, straight to disk
 
-entity = at.Entity(name=None)      # name optional, used for ctx.scene lookup
+entity = at.Entity(name=None)      # name optional, used for ctx.scene lookup and keys; no ":"
 entity.add(component)              # chainable; TypeError for unknown types
 entity.name                        # get/set
 ```
@@ -572,6 +572,9 @@ events. It returns the number of frames run.
 | `subscribe(pattern, fn)` | Calls `fn(msg)` for each message on a matching channel: an exact name, or `*` and `?` wildcards. Animation events arrive as `"<entity>:animation:<event>"`. `msg` has `channel`, `data`, `ctx`, and for animation events `entity`, `event` and `clip`. Subscribing the same function again does nothing; the subscription ends with the subscribing entity. Returns a `Subscription` (`cancel()`) |
 | `unsubscribe(pattern, fn=None)` | Ends this script's subscriptions to `pattern` (or the `Subscription` passed); returns how many |
 | `publish(channel, data=None)` | Delivers to every subscriber now; returns how many got it |
+| `get(key)`, `set(key, value)` | One exact key, `entity:component:field`. Components: `animation` (`clip` (setting it plays), `time`, `speed`, `root_motion`; read-only `playing`, `looping`, `duration`, `clips`, `springs`), `transform` (`position`, `rotation`, `scale`), `attr` (attributes by name). `"Name:animation"` gives the component, `"Name"` the entity. A shared name, a wildcard or a wrong key raises `KeyError` with a suggestion; read-only fields raise `AttributeError` |
+| `scan(pattern)`, `keys(pattern="*")` | Every value / key matching a `*` / `?` pattern, in scene order, skipping entities without that component or field |
+| `ref(key)` | A `ComponentRef` (used like the handle) or a `FieldRef` (`.value`, `get()`, `set(v)`) that looks the key up on each use; keep it from `start` |
 | `log(...)`, `warn(...)` | |
 
 Reads see every write made earlier in the frame; writes apply after all

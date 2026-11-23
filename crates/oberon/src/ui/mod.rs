@@ -2176,7 +2176,8 @@ impl Ui {
             self.name_field(canvas, Rect::new(x + 24.0, y, w - 24.0, 24.0), id, e.name());
         }
         y += 30.0;
-        if self.row_visible(Rect::new(x, y, w, 14.0)) {
+        let line = Rect::new(x, y, w, 14.0);
+        if self.row_visible(line) {
             canvas.text(
                 x,
                 y,
@@ -2184,6 +2185,22 @@ impl Ui {
                 &format!("Entity #{id}"),
                 color::text_dim(),
             );
+            // Script keys ("Name:animation:clip") need one entity per name.
+            if let Some(problem) = name_problem(doc, e) {
+                let warning = Rect::new(x + 70.0, y - 2.0, w - 70.0, 16.0);
+                canvas.text_clipped(
+                    warning.x,
+                    y,
+                    layout::SMALL_SIZE,
+                    &problem,
+                    color::warn(),
+                    warning.w,
+                );
+                self.tip(
+                    warning,
+                    "Scripts find entities by name (ctx.get(\"Name:attr:health\")), so each needs its own, without ':'",
+                );
+            }
         }
         y += 22.0;
 
@@ -4444,6 +4461,21 @@ fn draw_icon(canvas: &mut Canvas, icon: Icon, cx: f32, cy: f32, c: Color) {
     }
 }
 
+/// What's wrong with an entity's name for script keys: shared with another
+/// entity, or containing `:`.
+fn name_problem(doc: &Document, e: &EntityEntry) -> Option<String> {
+    let name = e.data.name.as_deref()?;
+    if name.contains(':') {
+        return Some("name has ':' (rename it)".to_string());
+    }
+    let twins = doc
+        .entities
+        .iter()
+        .filter(|o| o.data.name.as_deref() == Some(name))
+        .count();
+    (twins > 1).then(|| format!("{twins} entities are called this"))
+}
+
 /// A small type icon: light, camera, mesh, or empty.
 fn entity_icon(canvas: &mut Canvas, cx: f32, cy: f32, d: &EntityData) {
     if d.directional_light.is_some() {
@@ -5645,6 +5677,28 @@ mod tests {
                 id,
                 clip: "Wave".into()
             }))
+        );
+    }
+
+    #[test]
+    fn shared_and_colon_names_are_flagged_for_script_keys() {
+        let mut doc = Document::new();
+        for name in ["Crate", "Crate", "Player", "Odd:One"] {
+            doc.add_entity_named(name);
+        }
+        let problems: Vec<Option<String>> = doc
+            .entities
+            .iter()
+            .map(|e| super::name_problem(&doc, e))
+            .collect();
+        assert_eq!(
+            problems,
+            [
+                Some("2 entities are called this".to_string()),
+                Some("2 entities are called this".to_string()),
+                None,
+                Some("name has ':' (rename it)".to_string()),
+            ]
         );
     }
 

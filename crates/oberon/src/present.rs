@@ -465,7 +465,17 @@ impl EditorApp {
                 doc.modify(id, true, |d| d.transform = Some(transform));
             }
             Intent::Rename { id, name } => {
-                doc.rename_entity(id, &name);
+                if name.contains(':') {
+                    self.ui.log(
+                        LogLevel::Warn,
+                        format!(
+                            "Entity names can't contain ':' ({name}): it separates the parts \
+                             of a script key like Player:animation:clip"
+                        ),
+                    );
+                } else {
+                    doc.rename_entity(id, &name);
+                }
             }
             Intent::Toggle { id, flag } => {
                 doc.modify(id, false, |d| {
