@@ -16,6 +16,7 @@
 //!   stale but harmless.
 
 mod actions;
+mod animation;
 mod attributes;
 mod audio;
 mod components;
@@ -82,6 +83,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<components::PyEnvironment>()?;
     m.add_class::<components::PyWater>()?;
     m.add_class::<components::PyAudioSource>()?;
+    m.add_class::<animation::PyAnimation>()?;
+    m.add_class::<animation::PyAnimationRef>()?;
     m.add_function(wrap_pyfunction!(components::set_asset_root, m)?)?;
     m.add_function(wrap_pyfunction!(components::asset_root, m)?)?;
     Ok(())

@@ -557,6 +557,16 @@ impl EditorApp {
                     fields::set_color(d, target, rgba);
                 });
             }
+            Intent::SetAnimationClip { id, clip } => {
+                doc.modify(id, false, |d| {
+                    if let Some(a) = &mut d.animation {
+                        a.clip.clone_from(&clip);
+                    }
+                });
+                if let Some(p) = self.ui.anim_preview.as_mut().filter(|p| p.id == id) {
+                    p.time = 0.0;
+                }
+            }
             Intent::SetChoice { id, choice, label } => {
                 doc.modify(id, false, |d| {
                     fields::set_choice(d, choice, label);
@@ -2003,6 +2013,15 @@ impl EditorApp {
                 },
                 None => {
                     viewport.tick_particles(dt);
+                    // The Inspector's animation preview follows the
+                    // selection, and plays without pressing Play.
+                    if ui.anim_preview.is_some_and(|p| Some(p.id) != doc.selected) {
+                        ui.anim_preview = None;
+                    }
+                    if let Some(r) = renderer.as_mut() {
+                        viewport.sync(r, doc);
+                        viewport.preview_animation(doc, ui.anim_preview.as_mut(), dt);
+                    }
                     // The selected camera's preview first (same world).
                     let preview = ui.camera_preview_request(doc, lw, lh, s);
                     match (preview, renderer.as_mut()) {

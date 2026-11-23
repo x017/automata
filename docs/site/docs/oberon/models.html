@@ -50,10 +50,8 @@ like the built-in cubes.</p>
 four bones per vertex, 128 bones per model) and parts moved by animated
 nodes, like a robot whose arms are separate meshes. The renderer poses
 them on the GPU, and shadows follow the pose.</p>
-<p>For now an animated model shows its rest pose in the scene view and in
-your game. Playing clips from scripts (<code>entity.animation.play(&quot;run&quot;)</code>) and
-previewing them in the Inspector come next. Rust games can already play
-clips with the <code>Animator</code> component.</p>
+<p>An entity plays its model's clips with an <strong>Animation</strong> component. See
+<a href="#animation">Animation</a> below.</p>
 <h2 id="add-a-model-to-the-scene">Add a model to the scene<a class="anchor" href="#add-a-model-to-the-scene" aria-label="Link to this section">#</a></h2>
 <p>Pick whichever way suits you:</p>
 <ul><li><strong>Pick it in the Assets tab</strong> (below). Every model in the project is
@@ -94,6 +92,45 @@ model, so the model's internal references keep working.</li><li>A model that's a
 <h2 id="the-inspector">The Inspector<a class="anchor" href="#the-inspector" aria-label="Link to this section">#</a></h2>
 <p>With a model selected, the <strong>Mesh Renderer</strong> section shows:</p>
 <div class="table"><table><thead><tr><th>Row</th><th>What it does</th></tr></thead><tbody><tr><td><strong>Primitive</strong></td><td><code>Model</code>. Switch to Cube, Sphere or Quad to go back to a primitive.</td></tr><tr><td><strong>File</strong></td><td>The model's path relative to the scene. It turns red if the file is missing or can't be read. Double-click it to show the file in the Files panel.</td></tr><tr><td><em>summary</em></td><td>Parts (one per material), triangle count, size in metres, and whether it's textured. If loading failed, this line shows the error instead.</td></tr><tr><td><strong>Change…</strong></td><td>Pick a different model.</td></tr><tr><td><strong>Add Collider / Fit Collider</strong></td><td>Adds a collider shaped for the model, or refits the existing one.</td></tr><tr><td><strong>Tint</strong></td><td>Multiplies every material's colour. Leave it white to see the model as authored.</td></tr><tr><td><strong>Surface</strong>, <strong>Roughness</strong>, <strong>Metallic</strong>, <strong>Emission</strong></td><td>Leave them at Default to keep the file's materials. Setting one overrides it on every part. See <a href="interface.html#surfaces">Surfaces</a>.</td></tr><tr><td><strong>Glow Light</strong></td><td>Glowing parts of the model light their surroundings. This scales that light (0 = off).</td></tr><tr><td><strong>Glow Shadows</strong></td><td>Whether other objects block that light and cast shadows from it (High and up).</td></tr></tbody></table></div>
+<h2 id="animation">Animation<a class="anchor" href="#animation" aria-label="Link to this section">#</a></h2>
+<p><img src="../../../assets/models/animation_clips.jpg" alt="One robot, eight clips: Idle, Walking, Running, Jump, Wave, Dance, Punch and ThumbsUp" loading="lazy" decoding="async"></p>
+<p>Add a model that has animations and Oberon gives the entity an
+<strong>Animation</strong> component set to the model's idle clip (the first clip with
+"idle" in its name, or else the first clip). Add one by hand with
+<strong>Add Component → Animation</strong>.</p>
+<div class="table"><table><thead><tr><th>Row</th><th>What it does</th></tr></thead><tbody><tr><td><strong>Clip</strong></td><td>The clip played when the game starts. The menu lists the model's clips, with <strong>None</strong> for the rest pose. It turns red if the model has no clip of that name, or no animations at all.</td></tr><tr><td><strong>Speed</strong></td><td>Playback rate: 1 is as authored, 0.5 half speed, negative backwards.</td></tr><tr><td><strong>Loop</strong></td><td>Off plays the clip once and holds its last frame (a character that sits down stays seated).</td></tr><tr><td><strong>Play On Start</strong></td><td>Off holds the first frame until a script calls <code>play</code>.</td></tr><tr><td><strong>Preview</strong></td><td>Plays the clip in the scene view without pressing Play. The button plays and pauses it. Drag the time bar to scrub, which pauses it on that frame. The preview follows Speed and Loop, and stops when you select something else.</td></tr></tbody></table></div>
+<p>While you edit, an animated model holds its clip's first frame, so you place
+it in its real pose instead of the T-pose. Press Play and every Animation
+with <strong>Play On Start</strong> starts.</p>
+<h3 id="from-a-script">From a script<a class="anchor" href="#from-a-script" aria-label="Link to this section">#</a></h3>
+<p><code>entity.animation</code> controls the clip while the game runs:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    anim = entity.animation
+    <span class="tok-k">if</span> <span class="tok-k">not</span> ctx.physics.grounded(entity):
+        anim.play(<span class="tok-s">&quot;Jump&quot;</span>, loop=<span class="tok-b">False</span>, fade=<span class="tok-n">0.1</span>)
+    <span class="tok-k">elif</span> ctx.input.pressed(<span class="tok-s">&quot;w&quot;</span>):
+        anim.play(<span class="tok-s">&quot;Running&quot;</span>, fade=<span class="tok-n">0.2</span>)      <span class="tok-c"># blend over 0.2 s</span>
+    <span class="tok-k">else</span>:
+        anim.play(<span class="tok-s">&quot;Idle&quot;</span>, fade=<span class="tok-n">0.3</span>)</code></pre></div>
+<p>Asking for the clip that's already playing does nothing, so working out the
+right clip and asking for it every frame is fine: it only changes when the
+answer does. <code>fade</code> crossfades from whatever was playing, and a new <code>play</code>
+mid-fade blends on from the current pose. <code>loop=False</code> plays once.
+<code>anim.playing</code> turns False when it ends, so you can tell when to move on.
+<code>speed=</code> sets the rate, and <code>restart=True</code> starts a clip that's already
+playing over.</p>
+<div class="table"><table><thead><tr><th>Member</th><th>Meaning</th></tr></thead><tbody><tr><td><code>play(clip, loop=True, fade=0.0, speed=None, restart=False)</code></td><td>Switch clips. An unknown name raises <code>KeyError</code> (names are case-sensitive; see <code>clips</code>)</td></tr><tr><td><code>stop(fade=0.0)</code></td><td>Blend back to the rest pose</td></tr><tr><td><code>clip</code>, <code>time</code>, <code>duration</code></td><td>The clip, seconds into it, and its length. Assign <code>time</code> to jump</td></tr><tr><td><code>playing</code>, <code>looping</code>, <code>speed</code></td><td>Assign <code>speed</code> to change it mid-clip</td></tr><tr><td><code>clips</code>, <code>length(clip)</code></td><td>Every clip name, in file order, and any clip's length</td></tr></tbody></table></div>
+<p>Reads see your own requests made earlier in the frame. The pose updates
+after every script has run.</p>
+<h3 id="from-python">From Python<a class="anchor" href="#from-python" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>robot = (
+    at.Entity(<span class="tok-s">&quot;Robot&quot;</span>)
+    .add(at.Transform())
+    .add(at.MeshRenderer.model(<span class="tok-s">&quot;models/robot.glb&quot;</span>))
+    .add(at.Animation(<span class="tok-s">&quot;Wave&quot;</span>, speed=<span class="tok-n">1.0</span>, looping=<span class="tok-b">False</span>, play_on_start=<span class="tok-b">True</span>))
+)</code></pre></div>
+<p>In a <code>Game</code> update, <code>ctx.scene[&quot;Robot&quot;].animation</code> has the same members. See
+the <a href="../api-reference.html#animation">API reference</a>.</p>
 <h2 id="import-settings">Import settings<a class="anchor" href="#import-settings" aria-label="Link to this section">#</a></h2>
 <p>Models from different tools and stores rarely agree on size, facing or
 origin. Instead of fixing every entity that uses a model, fix the model
@@ -159,7 +196,7 @@ collider_3d: <span class="tok-k">Some</span>((
 Keep models inside the project folder. <strong>Build → Build Game</strong> refuses to
 export a scene that references a missing model or one outside the project,
 and warns if a model's textures are missing.</p>
-<h2 id="from-python">From Python<a class="anchor" href="#from-python" aria-label="Link to this section">#</a></h2>
+<h2 id="from-python-1">From Python<a class="anchor" href="#from-python-1" aria-label="Link to this section">#</a></h2>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
 
 tree = (
@@ -178,6 +215,12 @@ folder, and you can call <code>at.set_asset_root(path)</code> to choose a folder
 yourself. A missing file raises <code>FileNotFoundError</code>. See the
 <a href="../api-reference.html#visuals">API reference</a>.</p>
 <h2 id="try-it">Try it<a class="anchor" href="#try-it" aria-label="Link to this section">#</a></h2>
+<p><code>examples/oberon/robot_plaza/</code> is a town square with five copies of an
+animated CC0 robot. You walk one of them around, and its script blends
+between Idle, Walking, Running, Jump and Wave. The others dance, sit, wave
+when you come near, and walk in slow motion. Open it and pick clips for
+them in the Inspector:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>cargo run -p oberon --release examples/oberon/robot_plaza/level.ron</code></pre></div>
 <p><code>examples/oberon/fps/</code> uses ten of Kenney's CC0 models, three of them with
 import settings. See the <a href="../tutorials/fps.html">FPS tutorial</a>.</p>
 <p><code>examples/models/</code> has a two-material glTF tree with an embedded texture,
@@ -187,12 +230,12 @@ a textured OBJ crate, and <code>scene.ron</code> placing them. Open it:</p>
 colliders cover the meshes, not the pivots. <code>make_models.py</code> regenerates
 the files.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="anchor" href="#troubleshooting" aria-label="Link to this section">#</a></h2>
-<div class="table"><table><thead><tr><th>Symptom</th><th>Fix</th></tr></thead><tbody><tr><td>File row red, <em>File not found</em></td><td>The model moved or the scene was saved elsewhere. <strong>Change…</strong> to re-pick it.</td></tr><tr><td><em>…mesh compression, which isn't supported</em></td><td>Re-export without mesh compression. These glTF extensions aren't supported.</td></tr><tr><td>Model is huge or tiny</td><td>Modelling tools disagree on units. Set <strong>Import → Scale</strong> (×0.01 for centimetres), or export from Blender with <strong>Apply Unit</strong> checked. glTF is always metres.</td></tr><tr><td>Model faces the wrong way</td><td>glTF's forward is +Z. Press <strong>Import → Rotation → +90°</strong> until it faces the right way.</td></tr><tr><td>Model floats or sinks when placed</td><td>Its origin isn't at its base. Set <strong>Import → Pivot</strong> to <strong>Bottom</strong>.</td></tr><tr><td>Looks inside-out</td><td>The mesh's faces point inward. Recalculate normals in the modelling tool (Blender: <strong>Mesh → Normals → Recalculate Outside</strong>).</td></tr><tr><td>Untextured but should be</td><td>Only the base colour texture is read. Check the image is PNG or JPEG and that the path in the <code>.mtl</code> / <code>.gltf</code> exists.</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Symptom</th><th>Fix</th></tr></thead><tbody><tr><td>File row red, <em>File not found</em></td><td>The model moved or the scene was saved elsewhere. <strong>Change…</strong> to re-pick it.</td></tr><tr><td><em>…mesh compression, which isn't supported</em></td><td>Re-export without mesh compression. These glTF extensions aren't supported.</td></tr><tr><td>Clip row is red</td><td>The model has no clip with that name (names are case-sensitive), or no animations at all. Pick one from the menu.</td></tr><tr><td>Animated model doesn't move in Play</td><td>Check the Animation's <strong>Play On Start</strong>, and that a script isn't calling <code>stop()</code>.</td></tr><tr><td>Model is huge or tiny</td><td>Modelling tools disagree on units. Set <strong>Import → Scale</strong> (×0.01 for centimetres), or export from Blender with <strong>Apply Unit</strong> checked. glTF is always metres.</td></tr><tr><td>Model faces the wrong way</td><td>glTF's forward is +Z. Press <strong>Import → Rotation → +90°</strong> until it faces the right way.</td></tr><tr><td>Model floats or sinks when placed</td><td>Its origin isn't at its base. Set <strong>Import → Pivot</strong> to <strong>Bottom</strong>.</td></tr><tr><td>Looks inside-out</td><td>The mesh's faces point inward. Recalculate normals in the modelling tool (Blender: <strong>Mesh → Normals → Recalculate Outside</strong>).</td></tr><tr><td>Untextured but should be</td><td>Only the base colour texture is read. Check the image is PNG or JPEG and that the path in the <code>.mtl</code> / <code>.gltf</code> exists.</td></tr></tbody></table></div>
     </article>
     <footer class="pager"><a class="prev" href="code-editor.html"><small>Previous</small>The code editor</a><a class="next" href="audio.html"><small>Next</small>Audio</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/models.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l3"><a href="#animated-models">Animated models</a></li><li class="l2"><a href="#add-a-model-to-the-scene">Add a model to the scene</a></li><li class="l2"><a href="#the-assets-tab">The Assets tab</a></li><li class="l3"><a href="#what-importing-copies">What importing copies</a></li><li class="l2"><a href="#give-a-model-to-an-existing-entity">Give a model to an existing entity</a></li><li class="l2"><a href="#the-inspector">The Inspector</a></li><li class="l2"><a href="#import-settings">Import settings</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#editing-a-model-while-oberon-is-open">Editing a model while Oberon is open</a></li><li class="l2"><a href="#scene-files-and-paths">Scene files and paths</a></li><li class="l2"><a href="#from-python">From Python</a></li><li class="l2"><a href="#try-it">Try it</a></li><li class="l2"><a href="#troubleshooting">Troubleshooting</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l3"><a href="#animated-models">Animated models</a></li><li class="l2"><a href="#add-a-model-to-the-scene">Add a model to the scene</a></li><li class="l2"><a href="#the-assets-tab">The Assets tab</a></li><li class="l3"><a href="#what-importing-copies">What importing copies</a></li><li class="l2"><a href="#give-a-model-to-an-existing-entity">Give a model to an existing entity</a></li><li class="l2"><a href="#the-inspector">The Inspector</a></li><li class="l2"><a href="#animation">Animation</a></li><li class="l3"><a href="#from-a-script">From a script</a></li><li class="l3"><a href="#from-python">From Python</a></li><li class="l2"><a href="#import-settings">Import settings</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#editing-a-model-while-oberon-is-open">Editing a model while Oberon is open</a></li><li class="l2"><a href="#scene-files-and-paths">Scene files and paths</a></li><li class="l2"><a href="#from-python-1">From Python</a></li><li class="l2"><a href="#try-it">Try it</a></li><li class="l2"><a href="#troubleshooting">Troubleshooting</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

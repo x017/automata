@@ -427,6 +427,7 @@ impl PlaySession {
                         [p.x, p.y, p.z, t.x, t.y, t.z, c.fov_y_degrees]
                     }),
                     has_audio: world.get::<&AudioSource>(entity).is_ok(),
+                    anim: automata_scene::animation_state(world, entity),
                 })
             })
             .collect()
@@ -457,6 +458,9 @@ impl PlaySession {
                 continue;
             }
             let world = self.scene.world_mut();
+            for command in &w.anim {
+                automata_scene::command_animation(world, entity, command);
+            }
             if w.position.is_some() || w.rotation.is_some() || w.scale.is_some() {
                 if let Ok(mut t) = world.get::<&mut Transform>(entity) {
                     let mut data = TransformData::from(*t);
@@ -570,6 +574,9 @@ impl PlaySession {
         if self.paused {
             return;
         }
+        // Animation runs on real time, so it stays smooth between physics
+        // steps.
+        automata_scene::animate(self.scene.world_mut(), dt.clamp(0.0, 0.25));
         self.accumulator += dt.clamp(0.0, 0.25);
         let mut steps = 0;
         while self.accumulator >= TIMESTEP && steps < MAX_STEPS {
@@ -674,7 +681,7 @@ impl PlaySession {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::doc::CreateKind;
 
@@ -872,6 +879,61 @@ mod tests {
         play.paused = true;
         play.update(1.0);
         assert_eq!(play.steps, 0);
+    }
+
+    /// The CC0 robot from the Robot Plaza example (14 clips).
+    pub(crate) const ROBOT: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/oberon/robot_plaza/models/robot.glb"
+    );
+
+    #[test]
+    fn animated_models_play_on_start_and_take_script_requests() {
+        let mut doc = Document::new();
+        let id = doc.create_model(ROBOT, "Robot", [0.0; 3]);
+        let data = &mut doc.entities[0].data;
+        assert_eq!(
+            data.animation.as_ref().map(|a| a.clip.as_str()),
+            Some("Idle"),
+            "dropped-in animated models get an Animation"
+        );
+        let mut play = PlaySession::start(&doc);
+        play.update(0.2);
+        play.update(0.2);
+        let state = |play: &PlaySession| {
+            let states = play.script_states(|p| PathBuf::from(p));
+            states
+                .into_iter()
+                .find(|s| s.id == id)
+                .unwrap()
+                .anim
+                .unwrap()
+        };
+        let s = state(&play);
+        assert_eq!(s.clip.as_deref(), Some("Idle"));
+        assert!(s.playing && (s.time - 0.4).abs() < 1e-4, "{s:?}");
+        assert_eq!(s.clips.len(), 14);
+
+        play.apply_script_writes(&[EntityWrite {
+            id,
+            anim: vec![automata_scene::AnimationCommand::Play {
+                clip: "Wave".into(),
+                options: automata_scene::PlayOptions {
+                    looping: false,
+                    fade: 0.25,
+                    ..automata_scene::PlayOptions::default()
+                },
+            }],
+            ..EntityWrite::default()
+        }]);
+        play.update(0.1);
+        let s = state(&play);
+        assert_eq!(s.clip.as_deref(), Some("Wave"));
+        assert!(!s.looping && (s.time - 0.1).abs() < 1e-4, "{s:?}");
+        for _ in 0..30 {
+            play.update(0.1);
+        }
+        assert!(!state(&play).playing, "a one-shot ends");
     }
 
     fn player_index(doc: &Document) -> usize {

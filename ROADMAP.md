@@ -317,7 +317,7 @@ Builds on A11's instancing.
 The plan is [`NEXT_PLANS.md` #4](NEXT_PLANS.md#4-skeletal-animation--in-progress-phase-1-).
 Import and GPU skinning are ✅.
 
-### B1. Animation playback ⬜ L
+### B1. Animation playback ✅ L
 NEXT_PLANS #4 phase 2:
 - An `Animation` component (default clip, speed, play on start).
 - `entity.animation.play("run", loop=True, fade=0.2)`, `.stop()`,
@@ -326,6 +326,26 @@ NEXT_PLANS #4 phase 2:
 - An Inspector clip list with a preview scrubber that plays in the
   editor.
 - A CC0 animated character example.
+
+Done: `automata_scene::Animation { clip, speed, looping, play_on_start }`
+is saved in scene files, and an `Animator` plays it with smoothstep
+crossfades (a fade interrupted mid-way blends on from the pose shown).
+Scripts get `entity.animation.play(clip, loop, fade, speed, restart)`,
+`.stop(fade)`, `.clip`, `.time` (settable), `.duration`, `.playing`,
+`.speed`, `.clips` and `.length(clip)`. An unknown clip raises `KeyError`,
+and asking for the playing clip again keeps it going, so scripts can pick
+a clip every frame. Python games get the same as `view.animation`, plus
+`at.Animation`. Oberon gives a dropped-in animated model an Animation set
+to its idle clip, holds each model on its clip's first frame while
+editing, and the Inspector's Animation section has a clip menu, Speed,
+Loop, Play On Start and a Preview row (play/pause and a scrubbing time
+bar) that animates in the scene view without pressing Play. Newly
+materialized models keep their animator's pose instead of flashing the
+rest pose. `examples/oberon/robot_plaza` uses Quaternius' CC0
+RobotExpressive: a player script that blends Idle, Walking, Running, Jump
+and Wave, a greeter that waves when you come near, and robots that dance,
+sit (a one-shot holding its last frame) and walk in slow motion. Docs:
+[Models → Animation](docs/wiki/oberon/models.md#animation).
 
 ### B2. Spring bones: hair, cloth, tails ⬜ M
 - Verlet chains on chosen bones (stiffness, drag, gravity, wind), with

@@ -744,8 +744,14 @@ pub fn materialize_visuals(
             };
             let mut component = MeshRenderer::new(mesh, material);
             component.parts.extend(parts);
-            // The rest pose until an Animator poses it.
-            component.joints = model.rig.as_ref().map(|rig| rig.rest_palette().into());
+            // An Animator that already ran keeps its pose; otherwise the
+            // rest pose until one poses it.
+            let posed = world
+                .get::<&crate::animation::Animator>(entity)
+                .ok()
+                .map(|animator| animator.palette());
+            component.joints =
+                posed.or_else(|| model.rig.as_ref().map(|rig| rig.rest_palette().into()));
             component
         } else {
             let mesh = renderer.create_mesh(&visual.data);

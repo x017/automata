@@ -24,6 +24,9 @@ with a ``get(key)`` method returning the start-of-frame value of:
 - ``v``: character velocity or None; ``g``: grounded;
 - ``cam``: ``(x, y, z, tx, ty, tz, fov)`` or None;
 - ``attrs``: attribute dict; ``snd``: the Audio Source (truthy) or None;
+- ``anim``: an animated model's playback or None: a dict with ``clip``
+  (name or None), ``time``, ``len`` (the clip's seconds), ``playing``,
+  ``speed``, ``loop``, ``clips`` (names) and ``lens`` (their seconds);
 - ``view``: the engine's own handle (run_scene only).
 
 Scripts read those values and write new ones. **Writes are visible to every
@@ -45,6 +48,7 @@ __all__ = [
     "Camera",
     "Context",
     "Entity",
+    "EntityAnimation",
     "EntityAudio",
     "FrameOutput",
     "Hit",
@@ -281,6 +285,115 @@ class EntityAudio:
         return f"Audio({self._e.name!r})"
 
 
+class EntityAnimation:
+    """``entity.animation``: plays the clips of the entity's animated model.
+
+    ``play("Walking", fade=0.2)`` crossfades to a clip; calling it every
+    frame with the same clip keeps it going. Reads see this frame's own
+    requests (``play`` then ``clip`` gives the new clip).
+    """
+
+    __slots__ = ("_e",)
+
+    def __init__(self, entity):
+        self._e = entity
+
+    def _st(self):
+        return self._e._anim_state()
+
+    def play(self, clip, loop=True, fade=0.0, speed=None, restart=False):
+        """Plays ``clip``, crossfading from the current pose over ``fade``
+        seconds. Playing the clip that's already playing keeps it going
+        unless ``restart``; ``speed`` (if given) sets the playback rate.
+        ``loop=False`` plays it once and holds the last frame. Raises
+        ``KeyError`` when the model has no such clip."""
+        st = self._st()
+        clip = str(clip)
+        clips = list(st.get("clips") or ())
+        if clip not in clips:
+            raise KeyError(f"the model has no clip {clip!r}; it has: {', '.join(clips)}")
+        speed = None if speed is None else float(speed)
+        fade = max(0.0, float(fade))
+        self._e._anim_cmd(["play", clip, bool(loop), fade, speed, bool(restart)])
+        if speed is not None:
+            st["speed"] = speed
+        st["loop"] = bool(loop)
+        if st.get("clip") == clip and st.get("playing") and not restart:
+            return
+        length = (st.get("lens") or [0.0] * len(clips))[clips.index(clip)]
+        st.update(clip=clip, len=length, playing=True)
+        st["time"] = length if float(st.get("speed") or 1.0) < 0 else 0.0
+
+    def stop(self, fade=0.0):
+        """Stops, fading back to the rest pose over ``fade`` seconds."""
+        self._e._anim_cmd(["stop", max(0.0, float(fade))])
+        self._st().update(clip=None, time=0.0, len=0.0, playing=False)
+
+    @property
+    def clip(self):
+        """The current clip's name, or None in the rest pose."""
+        return self._st().get("clip")
+
+    @property
+    def playing(self):
+        """Whether time advances (False once a one-shot clip has ended)."""
+        return bool(self._st().get("playing"))
+
+    @property
+    def time(self):
+        """Seconds into the current clip; set it to jump."""
+        return float(self._st().get("time") or 0.0)
+
+    @time.setter
+    def time(self, t):
+        t = float(t)
+        self._e._anim_cmd(["seek", t])
+        st = self._st()
+        length = float(st.get("len") or 0.0)
+        if st.get("loop") and length > 0:
+            t %= length
+        st["time"] = min(max(t, 0.0), length)
+
+    @property
+    def duration(self):
+        """The current clip's length in seconds (0 with no clip)."""
+        return float(self._st().get("len") or 0.0)
+
+    @property
+    def speed(self):
+        """Playback rate (1 is normal speed, negative plays backwards)."""
+        return float(self._st().get("speed", 1.0))
+
+    @speed.setter
+    def speed(self, v):
+        v = float(v)
+        self._e._anim_cmd(["speed", v])
+        self._st()["speed"] = v
+
+    @property
+    def looping(self):
+        """Whether the current clip loops."""
+        return bool(self._st().get("loop"))
+
+    @property
+    def clips(self):
+        """Every clip the model has."""
+        return tuple(self._st().get("clips") or ())
+
+    def length(self, clip=None):
+        """A clip's length in seconds (default: the current clip's)."""
+        if clip is None:
+            return self.duration
+        st = self._st()
+        clips = list(st.get("clips") or ())
+        if clip not in clips:
+            raise KeyError(f"the model has no clip {clip!r}")
+        return float((st.get("lens") or [0.0] * len(clips))[clips.index(clip)])
+
+    def __repr__(self):
+        return f"Animation({self._e.name!r}, clip={self.clip!r})"
+
+
 class Entity:
     """A scene entity as seen by a script.
 
@@ -300,6 +413,8 @@ class Entity:
         self._attrs = None
         self._dirty = set()
         self._audio = None
+        self._anim = None
+        self._anim_st = None
         self._despawn = False
 
     def _begin(self, record):
@@ -309,6 +424,8 @@ class Entity:
         self._attrs = None
         self._dirty = set()
         self._audio = None
+        self._anim = None
+        self._anim_st = None
         self.name = record.get("name") or ""
         self.script = record.get("script")
 
@@ -385,6 +502,26 @@ class Entity:
         return EntityAudio(self)
 
     @property
+    def animation(self):
+        """This entity's animated model: ``play(clip, loop=True, fade=0,
+        speed=None)``, ``stop(fade=0)``, ``clip``, ``time``, ``playing``,
+        ``speed``, ``clips``. None when its mesh isn't animated."""
+        return EntityAnimation(self) if self._anim_state() is not None else None
+
+    def _anim_state(self):
+        """This frame's playback (a dict our own requests update), or None."""
+        if self._anim_st is None:
+            rec = self._record.get("anim")
+            self._anim_st = False if rec is None else dict(rec)
+        return self._anim_st if self._anim_st is not False else None
+
+    def _anim_cmd(self, cmd):
+        if self._anim is None:
+            self._anim = []
+        self._anim.append(cmd)
+        self._dirty.add("anim")
+
+    @property
     def view(self):
         """The engine's own handle for the entity (``run_scene`` only)."""
         return self._record.get("view")
@@ -403,6 +540,8 @@ class Entity:
             w["despawn"] = True
         if self._audio is not None:
             w["audio"] = self._audio
+        if self._anim:
+            w["anim"] = list(self._anim)
         for key in ("p", "r", "s", "v", "cam"):
             if key in d and self._vals.get(key) is not None:
                 w[key] = self._vals[key]

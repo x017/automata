@@ -1,17 +1,142 @@
 //! Clip playback for animated models.
 //!
-//! An [`Animator`] plays one of its model's clips; [`animate`] advances
-//! every animator each frame and hands the resulting joint palette to the
-//! entity's [`MeshRenderer`], whose skinned parts then draw posed (shadows
-//! included).
+//! An [`Animator`] plays one of its model's clips, crossfading from the
+//! previous one when asked; [`animate`] advances every animator each frame
+//! and hands the resulting joint palette to the entity's [`MeshRenderer`],
+//! whose skinned parts then draw posed (shadows included).
+//!
+//! The [`Animation`] component is the saved, editable side: which clip a
+//! model plays when the scene starts, how fast, and whether it loops.
+//! [`animate`] gives each entity with an `Animation` and a rigged model
+//! its animator the first time it runs, and scripts steer it with
+//! [`AnimationCommand`]s ([`command_animation`]).
 
 use std::sync::Arc;
 
-use automata_assets::{Model, Pose, Rig};
+use automata_assets::{Clip, Model, Pose, Rig};
 use glam::Mat4;
+use hecs::Entity;
+use serde::{Deserialize, Serialize};
 
-use crate::render::MeshRenderer;
+use crate::render::{MeshRenderer, MeshVisual};
 use crate::scene::SceneWorld;
+
+/// What an animated model plays (also its ECS component and its record in
+/// scene files). The model itself comes from the entity's mesh.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Animation {
+    /// The clip shown when the scene starts (empty: the rest pose).
+    pub clip: String,
+    /// Playback rate (1 is normal speed, negative plays backwards).
+    pub speed: f32,
+    /// Whether the clip starts over when it ends.
+    pub looping: bool,
+    /// Whether the clip plays as soon as the scene runs. Off, the model
+    /// holds the clip's first frame until a script plays something.
+    pub play_on_start: bool,
+}
+
+impl Default for Animation {
+    fn default() -> Self {
+        Self {
+            clip: String::new(),
+            speed: 1.0,
+            looping: true,
+            play_on_start: true,
+        }
+    }
+}
+
+impl Animation {
+    /// Plays `clip` on start, looping at normal speed.
+    #[must_use]
+    pub fn new(clip: impl Into<String>) -> Self {
+        Self {
+            clip: clip.into(),
+            ..Self::default()
+        }
+    }
+
+    /// The clip a new Animation on `rig` should show: the first one whose
+    /// name contains "idle" (any case), else the first clip.
+    #[must_use]
+    pub fn default_clip(rig: &Rig) -> Option<&str> {
+        rig.clips
+            .iter()
+            .find(|c| c.name.to_ascii_lowercase().contains("idle"))
+            .or_else(|| rig.clips.first())
+            .map(|c| c.name.as_str())
+    }
+}
+
+/// How [`Animator::play_with`] starts a clip.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlayOptions {
+    /// Whether the clip starts over when it ends.
+    pub looping: bool,
+    /// A new playback rate, or `None` to keep the current one.
+    pub speed: Option<f32>,
+    /// Seconds to crossfade from the current pose (0 cuts straight over).
+    pub fade: f32,
+    /// Start over even when the clip is already playing (otherwise playing
+    /// the current clip again just keeps it going).
+    pub restart: bool,
+}
+
+impl Default for PlayOptions {
+    fn default() -> Self {
+        Self {
+            looping: true,
+            speed: None,
+            fade: 0.0,
+            restart: false,
+        }
+    }
+}
+
+/// One clip's playhead.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Layer {
+    clip: usize,
+    time: f32,
+    speed: f32,
+    looping: bool,
+    playing: bool,
+}
+
+impl Layer {
+    /// Moves the playhead `dt` seconds (scaled by speed). A clip that
+    /// doesn't loop holds its last (or, backwards, first) frame and stops.
+    fn step(&mut self, duration: f32, dt: f32) {
+        if !self.playing {
+            return;
+        }
+        self.time += dt * self.speed;
+        if self.looping && duration > 0.0 {
+            self.time = self.time.rem_euclid(duration);
+        } else if self.time >= duration || self.time <= 0.0 && self.speed < 0.0 {
+            self.time = self.time.clamp(0.0, duration);
+            self.playing = false;
+        }
+    }
+}
+
+/// What a crossfade blends away from.
+#[derive(Debug, Clone)]
+enum FadeFrom {
+    /// The previous clip, still playing underneath.
+    Clip(Layer),
+    /// A frozen pose (the rest pose, or a fade interrupted mid-way).
+    Pose(Pose),
+}
+
+#[derive(Debug, Clone)]
+struct Fade {
+    from: FadeFrom,
+    duration: f32,
+    elapsed: f32,
+}
 
 /// Plays an animated model's clips.
 #[derive(Debug, Clone)]
@@ -26,6 +151,7 @@ pub struct Animator {
     pub looping: bool,
     /// Whether time advances.
     pub playing: bool,
+    fade: Option<Fade>,
     pose: Pose,
 }
 
@@ -41,6 +167,7 @@ impl Animator {
             speed: 1.0,
             looping: true,
             playing: false,
+            fade: None,
             pose,
         }
     }
@@ -51,59 +178,217 @@ impl Animator {
         model.rig.clone().map(Self::new)
     }
 
+    /// An animator for `rig` set up from an [`Animation`] component:
+    /// playing its clip when `autoplay` and `play_on_start`, otherwise
+    /// holding the clip's first frame.
+    #[must_use]
+    pub fn from_component(rig: Arc<Rig>, animation: &Animation, autoplay: bool) -> Self {
+        let mut a = Self::new(rig);
+        a.speed = animation.speed;
+        a.looping = animation.looping;
+        if !animation.clip.is_empty() {
+            if autoplay && animation.play_on_start {
+                a.play(&animation.clip);
+            } else {
+                a.pose_at(&animation.clip, 0.0);
+            }
+        }
+        a
+    }
+
     /// The rig being animated.
     #[must_use]
     pub fn rig(&self) -> &Arc<Rig> {
         &self.rig
     }
 
+    /// The names of the model's clips.
+    #[must_use]
+    pub fn clip_names(&self) -> Vec<&str> {
+        self.rig.clip_names()
+    }
+
+    fn find(&self, clip: &str) -> Option<usize> {
+        self.rig.clips.iter().position(|c| c.name == clip)
+    }
+
+    fn current(&self) -> Option<&Clip> {
+        self.clip.and_then(|i| self.rig.clips.get(i))
+    }
+
     /// Starts `clip` from the beginning. Returns `false` (and changes
     /// nothing) when the model has no clip by that name.
     pub fn play(&mut self, clip: &str) -> bool {
-        let Some(index) = self.rig.clips.iter().position(|c| c.name == clip) else {
+        let looping = self.looping;
+        self.play_with(
+            clip,
+            PlayOptions {
+                looping,
+                restart: true,
+                ..PlayOptions::default()
+            },
+        )
+    }
+
+    /// Plays `clip` as `options` say, crossfading from the current pose
+    /// over `options.fade` seconds. Playing the clip that's already playing
+    /// keeps it going (taking the new loop and speed settings) unless
+    /// `options.restart`. Returns `false` (and changes nothing) when the
+    /// model has no clip by that name.
+    pub fn play_with(&mut self, clip: &str, options: PlayOptions) -> bool {
+        let Some(index) = self.find(clip) else {
             return false;
         };
+        let speed = options.speed.filter(|s| s.is_finite());
+        if self.clip == Some(index) && self.playing && !options.restart {
+            self.speed = speed.unwrap_or(self.speed);
+            self.looping = options.looping;
+            return true;
+        }
+        // The outgoing clip fades with its own speed and looping.
+        self.begin_fade(options.fade);
+        self.speed = speed.unwrap_or(self.speed);
+        self.looping = options.looping;
         self.clip = Some(index);
-        self.time = 0.0;
+        let duration = self.rig.clips[index].duration;
+        self.time = if self.speed < 0.0 { duration } else { 0.0 };
         self.playing = true;
         true
     }
 
     /// Stops playback and returns to the rest pose.
     pub fn stop(&mut self) {
+        self.stop_with(0.0);
+    }
+
+    /// Stops playback, fading back to the rest pose over `fade` seconds.
+    pub fn stop_with(&mut self, fade: f32) {
+        self.begin_fade(fade);
         self.clip = None;
         self.time = 0.0;
         self.playing = false;
     }
 
+    /// Remembers what the pose is blending away from.
+    fn begin_fade(&mut self, fade: f32) {
+        self.fade = (fade.is_finite() && fade > 0.0).then(|| Fade {
+            from: match self.clip {
+                // Mid-fade, or nothing playing: freeze what's shown.
+                Some(clip) if self.fade.is_none() => FadeFrom::Clip(Layer {
+                    clip,
+                    time: self.time,
+                    speed: self.speed,
+                    looping: self.looping,
+                    playing: self.playing,
+                }),
+                _ => FadeFrom::Pose(self.pose.clone()),
+            },
+            duration: fade,
+            elapsed: 0.0,
+        });
+    }
+
+    /// Jumps to `time` seconds into the current clip (wrapped when it
+    /// loops, clamped otherwise).
+    pub fn seek(&mut self, time: f32) {
+        let Some(duration) = self.current().map(|c| c.duration) else {
+            return;
+        };
+        if !time.is_finite() {
+            return;
+        }
+        self.time = if self.looping && duration > 0.0 {
+            time.rem_euclid(duration)
+        } else {
+            time.clamp(0.0, duration)
+        };
+        self.sample();
+    }
+
+    /// Shows `clip` frozen at `time` seconds (no fade, not playing): the
+    /// editor's preview scrubber. Returns `false` for an unknown clip.
+    pub fn pose_at(&mut self, clip: &str, time: f32) -> bool {
+        let Some(index) = self.find(clip) else {
+            return false;
+        };
+        self.clip = Some(index);
+        self.fade = None;
+        self.playing = false;
+        let duration = self.rig.clips[index].duration;
+        self.time = if time.is_finite() {
+            time.clamp(0.0, duration)
+        } else {
+            0.0
+        };
+        self.sample();
+        true
+    }
+
     /// The name of the current clip.
     #[must_use]
     pub fn clip(&self) -> Option<&str> {
-        self.clip
-            .and_then(|i| self.rig.clips.get(i))
-            .map(|c| c.name.as_str())
+        self.current().map(|c| c.name.as_str())
+    }
+
+    /// The current clip's length in seconds (0 with no clip).
+    #[must_use]
+    pub fn duration(&self) -> f32 {
+        self.current().map_or(0.0, |c| c.duration)
+    }
+
+    /// Whether a crossfade is still blending.
+    #[must_use]
+    pub fn fading(&self) -> bool {
+        self.fade.is_some()
+    }
+
+    /// Samples the current clip (or the rest pose) into `self.pose`.
+    fn sample(&mut self) {
+        self.pose = self.rig.rest_pose();
+        if let Some(clip) = self.clip.and_then(|i| self.rig.clips.get(i)) {
+            clip.sample_into(self.time, &mut self.pose);
+        }
     }
 
     /// Advances time by `dt` seconds (scaled by [`Self::speed`]) and
-    /// samples the pose. A clip that doesn't loop holds its last frame and
-    /// stops playing.
+    /// samples the pose, blending in any crossfade. A clip that doesn't
+    /// loop holds its last frame and stops playing.
     pub fn advance(&mut self, dt: f32) {
-        let Some(clip) = self.clip.and_then(|i| self.rig.clips.get(i)) else {
-            self.pose = self.rig.rest_pose();
+        if let Some(clip) = self.clip {
+            let mut layer = Layer {
+                clip,
+                time: self.time,
+                speed: self.speed,
+                looping: self.looping,
+                playing: self.playing,
+            };
+            layer.step(self.rig.clips[clip].duration, dt);
+            self.time = layer.time;
+            self.playing = layer.playing;
+        }
+        self.sample();
+        let Some(fade) = &mut self.fade else {
             return;
         };
-        if self.playing {
-            self.time += dt * self.speed;
-            let duration = clip.duration;
-            if self.looping && duration > 0.0 {
-                self.time = self.time.rem_euclid(duration);
-            } else if self.time >= duration || self.time <= 0.0 && self.speed < 0.0 {
-                self.time = self.time.clamp(0.0, duration);
-                self.playing = false;
-            }
+        fade.elapsed += dt.abs();
+        let t = (fade.elapsed / fade.duration).clamp(0.0, 1.0);
+        if t >= 1.0 {
+            self.fade = None;
+            return;
         }
-        self.pose = self.rig.rest_pose();
-        clip.sample_into(self.time, &mut self.pose);
+        let mut from = match &mut fade.from {
+            FadeFrom::Pose(pose) => pose.clone(),
+            FadeFrom::Clip(layer) => {
+                let clip = &self.rig.clips[layer.clip];
+                layer.step(clip.duration, dt);
+                let mut pose = self.rig.rest_pose();
+                clip.sample_into(layer.time, &mut pose);
+                pose
+            }
+        };
+        // Ease in and out, so the blend doesn't start or end with a jolt.
+        from.blend(&self.pose, t * t * (3.0 - 2.0 * t));
+        self.pose = from;
     }
 
     /// The current pose, one local transform per rig node.
@@ -119,11 +404,153 @@ impl Animator {
         self.rig.palette(&self.pose, &mut out);
         out.into()
     }
+
+    /// What scripts see of this animator.
+    #[must_use]
+    pub fn state(&self) -> AnimationState {
+        AnimationState {
+            clip: self.clip().map(str::to_string),
+            time: self.time,
+            duration: self.duration(),
+            playing: self.playing,
+            speed: self.speed,
+            looping: self.looping,
+            clips: self.clip_names().into_iter().map(str::to_string).collect(),
+            lengths: self.rig.clips.iter().map(|c| c.duration).collect(),
+        }
+    }
+}
+
+/// An animated entity's playback, as scripts read it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnimationState {
+    /// The current clip, or `None` in the rest pose.
+    pub clip: Option<String>,
+    /// Seconds into the current clip.
+    pub time: f32,
+    /// The current clip's length in seconds (0 with no clip).
+    pub duration: f32,
+    /// Whether time advances (false once a one-shot clip ends).
+    pub playing: bool,
+    /// Playback rate.
+    pub speed: f32,
+    /// Whether the clip starts over when it ends.
+    pub looping: bool,
+    /// Every clip the model has.
+    pub clips: Vec<String>,
+    /// Each clip's length in seconds (in the order of `clips`).
+    pub lengths: Vec<f32>,
+}
+
+/// A script's request to an entity's animation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnimationCommand {
+    /// Play a clip (see [`Animator::play_with`]).
+    Play {
+        /// The clip's name.
+        clip: String,
+        /// How to play it.
+        options: PlayOptions,
+    },
+    /// Stop, fading to the rest pose over this many seconds.
+    Stop(f32),
+    /// Jump to this many seconds into the current clip.
+    Seek(f32),
+    /// Change the playback rate.
+    Speed(f32),
+}
+
+/// A new animator for `entity`'s rigged model (set up from its
+/// [`Animation`], if any), or `None` without one.
+fn new_animator(world: &SceneWorld, entity: Entity, autoplay: bool) -> Option<Animator> {
+    let rig = world
+        .get::<&MeshVisual>(entity)
+        .ok()?
+        .model
+        .as_ref()?
+        .rig
+        .clone()?;
+    Some(match world.get::<&Animation>(entity) {
+        Ok(animation) => Animator::from_component(rig, &animation, autoplay),
+        Err(_) => Animator::new(rig),
+    })
+}
+
+/// Gives every entity with an [`Animation`] and a rigged model its
+/// [`Animator`] (if it has none yet), playing its clip when `autoplay`.
+/// [`animate`] does this itself; editors call it with `autoplay` off to
+/// show each model's first frame. Returns how many were added.
+pub fn attach_animators(world: &mut SceneWorld, autoplay: bool) -> usize {
+    let pending: Vec<Entity> = world
+        .query::<hecs::Without<(Entity, &Animation, &MeshVisual), &Animator>>()
+        .iter()
+        .map(|(e, _, _)| e)
+        .collect();
+    let mut added = 0;
+    for entity in pending {
+        if let Some(animator) = new_animator(world, entity, autoplay) {
+            if world.insert_one(entity, animator).is_ok() {
+                added += 1;
+            }
+        }
+    }
+    added
+}
+
+/// Applies a script's request to `entity`'s animation, giving a rigged
+/// model an animator first if it has none. Returns `false` when the entity
+/// can't animate or the clip doesn't exist.
+pub fn command_animation(
+    world: &mut SceneWorld,
+    entity: Entity,
+    command: &AnimationCommand,
+) -> bool {
+    if world.get::<&Animator>(entity).is_err() {
+        let Some(animator) = new_animator(world, entity, true) else {
+            return false;
+        };
+        if world.insert_one(entity, animator).is_err() {
+            return false;
+        }
+    }
+    let Ok(mut animator) = world.get::<&mut Animator>(entity) else {
+        return false;
+    };
+    match command {
+        AnimationCommand::Play { clip, options } => animator.play_with(clip, *options),
+        AnimationCommand::Stop(fade) => {
+            animator.stop_with(*fade);
+            true
+        }
+        AnimationCommand::Seek(time) => {
+            animator.seek(*time);
+            true
+        }
+        AnimationCommand::Speed(speed) => {
+            if speed.is_finite() {
+                animator.speed = *speed;
+            }
+            speed.is_finite()
+        }
+    }
+}
+
+/// `entity`'s playback as scripts see it: its animator's, or (before one
+/// is attached) its rigged model's clips at rest. `None` when the entity
+/// has no rigged model.
+#[must_use]
+pub fn animation_state(world: &SceneWorld, entity: Entity) -> Option<AnimationState> {
+    if let Ok(animator) = world.get::<&Animator>(entity) {
+        return Some(animator.state());
+    }
+    new_animator(world, entity, true).map(|a| a.state())
 }
 
 /// Advances every [`Animator`] by `dt` seconds and poses its entity's
-/// [`MeshRenderer`]. Run once per frame after the game update.
+/// [`MeshRenderer`]. Run once per frame after the game update. Entities
+/// with an [`Animation`] get their animator here the first time.
 pub fn animate(world: &mut SceneWorld, dt: f32) {
+    attach_animators(world, true);
     for (animator, renderer) in world.query_mut::<(&mut Animator, Option<&mut MeshRenderer>)>() {
         animator.advance(dt);
         if let Some(renderer) = renderer {
@@ -135,8 +562,22 @@ pub fn animate(world: &mut SceneWorld, dt: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use automata_assets::anim::{Channel, Clip, Interpolation, Property, RigNode, Trs};
+    use automata_assets::anim::{Channel, Interpolation, Property, RigNode, Trs};
     use glam::{Quat, Vec3};
+
+    fn slide(name: &str, to: f32) -> Clip {
+        Clip {
+            name: name.into(),
+            duration: 2.0,
+            channels: vec![Channel {
+                node: 0,
+                property: Property::Translation,
+                interpolation: Interpolation::Linear,
+                times: vec![0.0, 2.0],
+                values: vec![0.0, 0.0, 0.0, to, 0.0, 0.0],
+            }],
+        }
+    }
 
     fn rig() -> Arc<Rig> {
         Arc::new(Rig {
@@ -147,17 +588,7 @@ mod tests {
             }],
             joints: vec![(0, Mat4::IDENTITY)],
             import: Mat4::IDENTITY,
-            clips: vec![Clip {
-                name: "slide".into(),
-                duration: 2.0,
-                channels: vec![Channel {
-                    node: 0,
-                    property: Property::Translation,
-                    interpolation: Interpolation::Linear,
-                    times: vec![0.0, 2.0],
-                    values: vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
-                }],
-            }],
+            clips: vec![slide("slide", 2.0), slide("back", -2.0)],
         })
     }
 
@@ -189,6 +620,92 @@ mod tests {
     }
 
     #[test]
+    fn crossfades_ease_from_the_old_clip_to_the_new() {
+        let mut a = Animator::new(rig());
+        a.play("slide");
+        a.advance(1.0); // slide at +1
+        let fade = PlayOptions {
+            fade: 1.0,
+            ..PlayOptions::default()
+        };
+        assert!(a.play_with("back", fade));
+        assert!(a.fading());
+        a.advance(0.5);
+        // slide is at +1.5, back at -0.5; halfway through the eased blend.
+        assert!((x(&a) - 0.5).abs() < 1e-4, "{}", x(&a));
+        a.advance(0.6);
+        assert!(!a.fading());
+        assert!((x(&a) + 1.1).abs() < 1e-4, "only back now: {}", x(&a));
+
+        // Fading out to the rest pose, then a fade interrupted mid-way.
+        a.stop_with(1.0);
+        a.advance(0.5);
+        // back (still playing underneath) is at -1.6, rest at 0.
+        assert!((x(&a) + 0.8).abs() < 1e-4, "{}", x(&a));
+        a.play_with("slide", fade);
+        a.advance(0.0);
+        assert!((x(&a) + 0.8).abs() < 1e-4, "starts from what was shown");
+    }
+
+    #[test]
+    fn the_outgoing_clip_keeps_its_own_looping_while_it_fades() {
+        let mut a = Animator::new(rig());
+        a.play("slide");
+        a.advance(1.9);
+        let once = PlayOptions {
+            looping: false,
+            fade: 1.0,
+            ..PlayOptions::default()
+        };
+        a.play_with("back", once);
+        a.advance(0.5);
+        // slide wraps to 0.4 (it loops), back is at -0.5: halfway is -0.05.
+        assert!((x(&a) + 0.05).abs() < 1e-4, "{}", x(&a));
+        assert!(!a.looping);
+    }
+
+    #[test]
+    fn playing_the_current_clip_again_keeps_it_going() {
+        let mut a = Animator::new(rig());
+        a.play_with("slide", PlayOptions::default());
+        a.advance(1.0);
+        let fast = PlayOptions {
+            speed: Some(2.0),
+            ..PlayOptions::default()
+        };
+        assert!(a.play_with("slide", fast));
+        assert!((a.time - 1.0).abs() < 1e-6 && (a.speed - 2.0).abs() < 1e-6);
+        assert!(a.play_with(
+            "slide",
+            PlayOptions {
+                restart: true,
+                ..PlayOptions::default()
+            }
+        ));
+        assert!(a.time.abs() < 1e-6, "restart starts over");
+
+        // A finished one-shot plays again.
+        let once = PlayOptions {
+            looping: false,
+            ..PlayOptions::default()
+        };
+        a.play_with("back", once);
+        a.advance(5.0);
+        assert!(!a.playing);
+        a.play_with("back", once);
+        assert!(a.playing && a.time.abs() < 1e-6);
+
+        // Backwards starts at the end; seek and pose_at clamp.
+        a.speed = -1.0;
+        a.play("slide");
+        assert!((a.time - 2.0).abs() < 1e-6);
+        a.seek(9.0);
+        assert!((a.time - 2.0).abs() < 1e-6, "not looping: clamped");
+        assert!(a.pose_at("back", 1.0) && !a.playing);
+        assert!((x(&a) + 1.0).abs() < 1e-5);
+    }
+
+    #[test]
     fn animate_advances_animators_without_renderers() {
         let mut scene = crate::Scene::new();
         let mut a = Animator::new(rig());
@@ -197,5 +714,82 @@ mod tests {
         animate(scene.world_mut(), 1.0);
         let a = scene.world().get::<&Animator>(e).unwrap();
         assert!((a.time - 1.0).abs() < 1e-6);
+    }
+
+    fn rigged_visual() -> MeshVisual {
+        let mut model = Model::new("robot.glb".into(), Vec::new());
+        model.rig = Some(rig());
+        MeshVisual {
+            model: Some(Arc::new(model)),
+            ..MeshVisual::cube(1.0, [1.0; 4])
+        }
+    }
+
+    #[test]
+    fn animation_components_attach_play_and_take_commands() {
+        let mut scene = crate::Scene::new();
+        let playing = scene.spawn((rigged_visual(), Animation::new("slide")));
+        let held = scene.spawn((
+            rigged_visual(),
+            Animation {
+                play_on_start: false,
+                ..Animation::new("back")
+            },
+        ));
+        let bare = scene.spawn((rigged_visual(),));
+        let plain = scene.spawn((MeshVisual::cube(1.0, [1.0; 4]),));
+
+        // Before any animator exists, scripts still see the clips.
+        let state = animation_state(scene.world(), bare).unwrap();
+        assert_eq!(state.clips, ["slide", "back"]);
+        assert_eq!(state.lengths, [2.0, 2.0]);
+        assert_eq!(state.clip, None);
+        assert!(animation_state(scene.world(), plain).is_none());
+
+        animate(scene.world_mut(), 0.5);
+        let world = scene.world_mut();
+        let s = animation_state(world, playing).unwrap();
+        assert_eq!(s.clip.as_deref(), Some("slide"));
+        assert!(s.playing && (s.time - 0.5).abs() < 1e-6);
+        let s = animation_state(world, held).unwrap();
+        assert_eq!(s.clip.as_deref(), Some("back"));
+        assert!(!s.playing && s.time.abs() < 1e-6);
+        assert!(
+            world.get::<&Animator>(bare).is_err(),
+            "no Animation, no animator"
+        );
+
+        let play = |clip: &str| AnimationCommand::Play {
+            clip: clip.into(),
+            options: PlayOptions::default(),
+        };
+        assert!(command_animation(world, bare, &play("back")));
+        assert!(!command_animation(world, bare, &play("nope")));
+        assert!(!command_animation(world, plain, &play("back")));
+        assert!(command_animation(
+            world,
+            playing,
+            &AnimationCommand::Seek(1.5)
+        ));
+        assert!(command_animation(
+            world,
+            playing,
+            &AnimationCommand::Speed(2.0)
+        ));
+        assert!(command_animation(world, held, &AnimationCommand::Stop(0.0)));
+        let s = animation_state(world, playing).unwrap();
+        assert!((s.time - 1.5).abs() < 1e-6 && (s.speed - 2.0).abs() < 1e-6);
+        assert_eq!(animation_state(world, held).unwrap().clip, None);
+        assert!(animation_state(world, bare).unwrap().playing);
+    }
+
+    #[test]
+    fn default_clip_prefers_idle() {
+        let mut r = (*rig()).clone();
+        assert_eq!(Animation::default_clip(&r), Some("slide"));
+        r.clips.push(slide("Idle_Loop", 1.0));
+        assert_eq!(Animation::default_clip(&r), Some("Idle_Loop"));
+        r.clips.clear();
+        assert_eq!(Animation::default_clip(&r), None);
     }
 }

@@ -3,6 +3,8 @@
 Run with:  pytest crates/automata-python/tests/python
 """
 
+from pathlib import Path
+
 import pytest
 
 import automata as at
@@ -1861,3 +1863,128 @@ def test_scene_scripts_burst_particles(tmp_path):
     at.run_scene(str(tmp_path / "level.ron"), headless=True, max_frames=6, update=after)
     assert max(seen) == 3, seen
     assert attrs.get("bad_lava") and attrs.get("bad_shape"), attrs
+
+
+ROBOT = Path(__file__).resolve().parents[4] / "examples/oberon/robot_plaza/models/robot.glb"
+
+
+def test_animation_component_fields_and_scene_files():
+    anim = at.Animation("Idle", speed=0.5, looping=False)
+    assert anim.clip == "Idle" and anim.speed == 0.5
+    assert not anim.looping and anim.play_on_start
+    assert at.Animation() == at.Animation(clip="", speed=1.0, looping=True, play_on_start=True)
+    assert "Animation" in repr(anim)
+    scene = at.Scene()
+    scene.add(
+        at.Entity("bot")
+        .add(at.Transform())
+        .add(at.MeshRenderer.model(str(ROBOT)))
+        .add(at.Animation("Wave", play_on_start=False))
+    )
+    text = scene.to_ron()
+    assert "animation: Some(" in text
+    loaded = at.Scene.from_ron(text)
+    (got,) = [
+        c for e in loaded.entities() for c in e.components() if isinstance(c, at.Animation)
+    ]
+    assert got == at.Animation("Wave", play_on_start=False)
+    assert loaded.to_ron() == text
+
+
+def test_engine_animations_play_crossfade_and_stop():
+    game = at.Game(headless=True, fixed_delta=1 / 60)
+    game.load_scene(
+        at.Scene().add(
+            at.Entity("bot")
+            .add(at.Transform())
+            .add(at.MeshRenderer.model(str(ROBOT)))
+            .add(at.Animation("Idle"))
+        )
+    )
+    seen = {}
+
+    def update(ctx):
+        anim = ctx.scene["bot"].animation
+        frame = ctx.time.frame
+        if frame == 1:
+            seen["clips"] = anim.clips
+            seen["start"] = (anim.clip, anim.playing, anim.duration)
+            assert anim.length("Running") == pytest.approx(0.958, abs=0.01)
+            with pytest.raises(KeyError):
+                anim.play("Moonwalk")
+        if frame == 30:
+            seen["idle_time"] = anim.time
+            anim.play("Running", fade=0.2)
+        if frame == 31:
+            seen["running"] = (anim.clip, anim.looping)
+        if frame == 40:
+            anim.play("Jump", loop=False, speed=2.0)
+        if frame == 80:
+            seen["jump"] = (anim.clip, anim.playing, anim.time)
+            anim.play("Wave")
+            anim.time = 1.0
+            anim.speed = 0.5
+        if frame == 81:
+            seen["wave"] = (anim.time, anim.speed)
+            anim.stop()
+        if frame == 82:
+            seen["stopped"] = anim.playing
+
+    game.run(update, max_frames=83)
+    assert "Idle" in seen["clips"] and len(seen["clips"]) == 14
+    assert seen["start"][0] == "Idle" and seen["start"][1]
+    assert seen["start"][2] == pytest.approx(3.33, abs=0.01)
+    assert seen["idle_time"] == pytest.approx(29 / 60, abs=0.03)
+    assert seen["running"] == ("Running", True)
+    # A one-shot at double speed (0.71 s clip) is over after 40 frames.
+    assert seen["jump"][0] == "Jump" and not seen["jump"][1]
+    assert seen["jump"][2] == pytest.approx(0.708, abs=0.01)
+    assert seen["wave"][0] == pytest.approx(1.0 + 0.5 / 60, abs=0.01)
+    assert seen["wave"][1] == pytest.approx(0.5)
+    assert seen["stopped"] is False
+
+
+def test_scene_scripts_drive_animations(tmp_path):
+    (tmp_path / "bot.py").write_text(
+        "def update(entity, ctx):\n"
+        "    anim = entity.animation\n"
+        "    if ctx.time.frame == 2:\n"
+        "        entity.attributes['clips'] = len(anim.clips)\n"
+        "        entity.attributes['start'] = anim.clip\n"
+        "        anim.play('Walking', fade=0.2)\n"
+        "        entity.attributes['same_frame'] = anim.clip\n"
+        "        try:\n"
+        "            anim.play('Moonwalk')\n"
+        "        except KeyError:\n"
+        "            entity.attributes['bad'] = True\n"
+        "    if ctx.time.frame == 4:\n"
+        "        entity.attributes['now'] = anim.clip\n"
+        "        anim.play('Jump', loop=False)\n"
+        "        anim.time = 0.5\n"
+        "        entity.attributes['jump_t'] = anim.time\n"
+        "    if ctx.time.frame == 6:\n"
+        "        anim.stop(fade=0.1)\n"
+        "        entity.attributes['after_stop'] = anim.playing\n"
+    )
+    scene = at.Scene()
+    bot = (
+        at.Entity("bot")
+        .add(at.Transform())
+        .add(at.MeshRenderer.model(str(ROBOT)))
+        .add(at.Animation("Idle"))
+    )
+    bot.script = "bot.py"
+    scene.add(bot)
+    (tmp_path / "level.ron").write_text(scene.to_ron())
+    attrs = {}
+    at.run_scene(
+        str(tmp_path / "level.ron"),
+        headless=True,
+        max_frames=8,
+        update=lambda ctx: attrs.update(ctx.scene["bot"].attributes),
+    )
+    assert attrs["clips"] == 14 and attrs["start"] == "Idle"
+    assert attrs["same_frame"] == "Walking", "reads see this frame's requests"
+    assert attrs["bad"] and attrs["now"] == "Walking"
+    assert attrs["jump_t"] == pytest.approx(0.5)
+    assert attrs["after_stop"] is False

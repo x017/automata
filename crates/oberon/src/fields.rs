@@ -211,6 +211,8 @@ pub enum Field {
     AudioPitch,
     /// Distance at which a 3D audio source falls silent (metres).
     AudioRange,
+    /// Animation playback rate (1 = normal; negative plays backwards).
+    AnimSpeed,
     /// Particles made per second.
     ParticleRate,
     /// Particles made at once when the emitter starts.
@@ -290,6 +292,10 @@ pub enum Flag {
     AudioPlayOnStart,
     /// Audio source fades with distance from the camera.
     AudioSpatial,
+    /// The animation's clip starts over when it ends.
+    AnimLoop,
+    /// The animation's clip plays when the game starts.
+    AnimPlayOnStart,
 }
 
 /// An enumerated property of an entity (cycled by a dropdown-style button).
@@ -464,6 +470,7 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::AudioVolume => data.audio_source.as_ref()?.volume,
         F::AudioPitch => data.audio_source.as_ref()?.pitch,
         F::AudioRange => data.audio_source.as_ref()?.range,
+        F::AnimSpeed => data.animation.as_ref()?.speed,
     })
 }
 
@@ -553,6 +560,7 @@ pub fn range(field: Field) -> (f32, f32) {
         | F::EnvFogSun
         | F::EnvDepthOfField => (0.0, 4.0),
         F::AudioPitch => (0.05, 4.0),
+        F::AnimSpeed => (-10.0, 10.0),
         F::AudioRange => (0.5, 10_000.0),
         F::CameraNear => (0.001, 1_000.0),
         F::CameraFar => (0.01, 1_000_000.0),
@@ -640,6 +648,7 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::WaterWaveHeight
         | F::AudioVolume
         | F::AudioPitch
+        | F::AnimSpeed
         | F::EnvExposure => 0.005,
         F::AudioRange | F::LightShadowDistance | F::EnvToonBands | F::EnvPalette => 0.1,
         F::Scale(_) | F::LightDirection(_) => 0.01,
@@ -969,6 +978,10 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
             },
             None => return false,
         },
+        F::AnimSpeed => match &mut data.animation {
+            Some(a) => a.speed = v,
+            None => return false,
+        },
     }
     true
 }
@@ -996,6 +1009,8 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::ParticleFollowCamera => data.particle_emitter.as_ref()?.follow_camera,
         Flag::AudioPlayOnStart => data.audio_source.as_ref()?.play_on_start,
         Flag::AudioSpatial => data.audio_source.as_ref()?.spatial,
+        Flag::AnimLoop => data.animation.as_ref()?.looping,
+        Flag::AnimPlayOnStart => data.animation.as_ref()?.play_on_start,
     })
 }
 
@@ -1076,6 +1091,17 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
                 None => return false,
             }
         }
+        Flag::AnimLoop | Flag::AnimPlayOnStart => match &mut data.animation {
+            Some(a) => {
+                let slot = if flag == Flag::AnimLoop {
+                    &mut a.looping
+                } else {
+                    &mut a.play_on_start
+                };
+                *slot = !*slot;
+            }
+            None => return false,
+        },
     }
     true
 }

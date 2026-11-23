@@ -105,6 +105,37 @@ pub fn model_path(data: &EntityData) -> Option<&str> {
     }
 }
 
+/// The rig (bones and clips) of the animated model an entity shows.
+#[must_use]
+pub fn model_rig(data: &EntityData) -> Option<std::sync::Arc<automata_assets::Rig>> {
+    automata_assets::load(model_path(data)?).ok()?.rig.clone()
+}
+
+/// The Animation a new or freshly swapped animated model gets: its idle
+/// clip (or first), playing on start. Entities without one get an empty
+/// clip.
+#[must_use]
+pub fn default_animation(data: &EntityData) -> automata_scene::Animation {
+    let clip = model_rig(data)
+        .and_then(|rig| automata_scene::Animation::default_clip(&rig).map(str::to_string))
+        .unwrap_or_default();
+    automata_scene::Animation::new(clip)
+}
+
+/// Gives an entity whose model has clips an Animation (or, if it has one
+/// naming a clip the model lacks, points it at the default clip).
+fn fit_animation(data: &mut EntityData) {
+    let Some(rig) = model_rig(data).filter(|r| !r.clips.is_empty()) else {
+        return;
+    };
+    let fresh = default_animation(data);
+    match &mut data.animation {
+        Some(a) if rig.clip(&a.clip).is_none() => a.clip = fresh.clip,
+        Some(_) => {}
+        None => data.animation = Some(fresh),
+    }
+}
+
 /// The collider Add Collider gives an entity: a box fitted to its mesh,
 /// unless it shows a model that a box fits badly. Then static scenery gets
 /// the model's triangles (Mesh) and moving bodies its Convex Hull (see
@@ -199,6 +230,8 @@ impl CreateKind {
 pub enum ComponentKind {
     /// Primitive mesh visual.
     Mesh,
+    /// Which clip an animated model plays.
+    Animation,
     /// Directional light.
     Light,
     /// Light shining every way from the entity.
@@ -225,8 +258,9 @@ pub enum ComponentKind {
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Mesh,
+        Self::Animation,
         Self::Light,
         Self::PointLight,
         Self::SpotLight,
@@ -245,6 +279,7 @@ impl ComponentKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Mesh => "Mesh Renderer",
+            Self::Animation => "Animation",
             Self::Light => "Directional Light",
             Self::PointLight => "Point Light",
             Self::SpotLight => "Spot Light",
@@ -264,6 +299,7 @@ impl ComponentKind {
     pub fn present_in(self, data: &EntityData) -> bool {
         match self {
             Self::Mesh => data.mesh_visual.is_some(),
+            Self::Animation => data.animation.is_some(),
             Self::Light => data.directional_light.is_some(),
             Self::PointLight => data.point_light.is_some(),
             Self::SpotLight => data.spot_light.is_some(),
@@ -287,6 +323,11 @@ impl ComponentKind {
                     color: [0.85, 0.87, 0.92, 1.0],
                     surface: automata_scene::Surface::default(),
                 });
+            }
+            Self::Animation => {
+                if data.animation.is_none() {
+                    data.animation = Some(default_animation(data));
+                }
             }
             Self::Light => {
                 data.directional_light
@@ -358,6 +399,7 @@ impl ComponentKind {
     pub fn copy_between(self, src: &EntityData, dst: &mut EntityData) {
         match self {
             Self::Mesh => dst.mesh_visual.clone_from(&src.mesh_visual),
+            Self::Animation => dst.animation.clone_from(&src.animation),
             Self::Light => dst.directional_light = src.directional_light,
             Self::PointLight => dst.point_light = src.point_light,
             Self::SpotLight => dst.spot_light = src.spot_light,
@@ -380,6 +422,7 @@ impl ComponentKind {
     pub fn remove_from(self, data: &mut EntityData) {
         match self {
             Self::Mesh => data.mesh_visual = None,
+            Self::Animation => data.animation = None,
             Self::Light => data.directional_light = None,
             Self::PointLight => data.point_light = None,
             Self::SpotLight => data.spot_light = None,
@@ -962,6 +1005,7 @@ impl Document {
             }),
             ..Default::default()
         };
+        fit_animation(&mut data);
         let lift = mesh_bounds(&data).map_or(0.0, |(c, s)| -(c.y - s.y * 0.5));
         if let Some(t) = &mut data.transform {
             t.position = [at[0], at[1] + lift, at[2]];
@@ -988,6 +1032,7 @@ impl Document {
                 color,
                 surface: automata_scene::Surface::default(),
             });
+            fit_animation(d);
         })
     }
 

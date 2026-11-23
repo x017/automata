@@ -69,6 +69,8 @@ from . import _core
 from .enums import GamepadAxis, GamepadButton, GraphicsQuality, Key, MouseButton
 from ._core import (
     ActionMap,
+    Animation,
+    AnimationRef,
     Attributes,
     Audio,
     AxisBinding,
@@ -131,6 +133,7 @@ Component = Union[
     AudioSource,
     ParticleEmitter,
     Water,
+    Animation,
 ]
 
 #: A per-frame update callback.
@@ -209,6 +212,8 @@ __all__ = [
     "ScriptEntity",
     "run_scene",
     "ActionMap",
+    "Animation",
+    "AnimationRef",
     "Attributes",
     "Audio",
     "AxisBinding",

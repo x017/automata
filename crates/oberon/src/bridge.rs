@@ -76,6 +76,8 @@ pub struct EntityState {
     pub camera: Option<[f32; 7]>,
     /// Whether the entity has an Audio Source.
     pub has_audio: bool,
+    /// An animated model's playback, if the entity shows one.
+    pub anim: Option<automata_scene::AnimationState>,
 }
 
 /// A collider as the runner sees it (for `ctx.physics.raycast`).
@@ -277,6 +279,8 @@ pub struct EntityWrite {
     pub camera: Option<[f32; 7]>,
     /// Play or stop the entity's Audio Source.
     pub audio: Option<AudioWrite>,
+    /// Requests to the entity's animation, in call order.
+    pub anim: Vec<automata_scene::AnimationCommand>,
     /// Remove the entity from the running scene.
     pub despawn: bool,
 }
@@ -777,7 +781,51 @@ fn state_json(e: &EntityState) -> Json {
     if e.has_audio {
         obj.set("snd", Json::Bool(true));
     }
+    if let Some(a) = &e.anim {
+        obj.set("anim", anim_json(a));
+    }
     obj
+}
+
+/// `{"clip", "time", "len", "playing", "speed", "loop", "clips", "lens"}`
+/// (see the script API's frame model).
+fn anim_json(a: &automata_scene::AnimationState) -> Json {
+    Json::obj([
+        ("clip", a.clip.as_deref().map_or(Json::Null, Json::from)),
+        ("time", Json::Float(f64::from(a.time))),
+        ("len", Json::Float(f64::from(a.duration))),
+        ("playing", Json::Bool(a.playing)),
+        ("speed", Json::Float(f64::from(a.speed))),
+        ("loop", Json::Bool(a.looping)),
+        (
+            "clips",
+            Json::Arr(a.clips.iter().map(|c| Json::from(c.as_str())).collect()),
+        ),
+        ("lens", Json::floats(&a.lengths)),
+    ])
+}
+
+/// One `entity.animation` request: `["play", clip, loop, fade, speed or
+/// null, restart]`, `["stop", fade]`, `["seek", t]` or `["speed", s]`.
+fn parse_anim(v: &Json) -> Option<automata_scene::AnimationCommand> {
+    use automata_scene::{AnimationCommand as C, PlayOptions};
+    let a = v.as_arr()?;
+    let n = |i: usize| a.get(i).and_then(num).filter(|x| x.is_finite());
+    Some(match a.first()?.as_str()? {
+        "play" => C::Play {
+            clip: a.get(1)?.as_str()?.to_string(),
+            options: PlayOptions {
+                looping: a.get(2).and_then(Json::as_bool).unwrap_or(true),
+                fade: n(3).unwrap_or(0.0).max(0.0),
+                speed: n(4),
+                restart: a.get(5).and_then(Json::as_bool).unwrap_or(false),
+            },
+        },
+        "stop" => C::Stop(n(1).unwrap_or(0.0).max(0.0)),
+        "seek" => C::Seek(n(1)?),
+        "speed" => C::Speed(n(1)?),
+        _ => return None,
+    })
 }
 
 fn parse_write(w: &Json) -> Option<EntityWrite> {
@@ -800,6 +848,13 @@ fn parse_write(w: &Json) -> Option<EntityWrite> {
             Some("stop") => Some(AudioWrite::Stop),
             _ => None,
         },
+        anim: w
+            .get("anim")
+            .and_then(Json::as_arr)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(parse_anim)
+            .collect(),
         despawn: matches!(w.get("despawn"), Some(Json::Bool(true))),
     })
 }
@@ -1096,6 +1151,64 @@ mod tests {
         assert_eq!(bursts[1].direction, None);
         assert_eq!(bursts[1].count, None);
         assert_eq!(emits, vec![(7, 5)]);
+    }
+
+    #[test]
+    fn animation_requests_and_state_cross_the_bridge() {
+        use automata_scene::{AnimationCommand as C, AnimationState, PlayOptions};
+        let msg = parse_msg(concat!(
+            r#"{"op":"frame","frame":1,"writes":[{"id":3,"anim":["#,
+            r#"["play","Walking",true,0.2,null,false],["play","Jump",false,0,1.5,true],"#,
+            r#"["stop",0.5],["seek",1.25],["speed",-1],["seek","x"],["dance"],[]]}]}"#
+        ));
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(
+            writes[0].anim,
+            vec![
+                C::Play {
+                    clip: "Walking".into(),
+                    options: PlayOptions {
+                        fade: 0.2,
+                        ..PlayOptions::default()
+                    },
+                },
+                C::Play {
+                    clip: "Jump".into(),
+                    options: PlayOptions {
+                        looping: false,
+                        speed: Some(1.5),
+                        fade: 0.0,
+                        restart: true,
+                    },
+                },
+                C::Stop(0.5),
+                C::Seek(1.25),
+                C::Speed(-1.0),
+            ],
+            "malformed requests are skipped"
+        );
+        let state = EntityState {
+            anim: Some(AnimationState {
+                clip: Some("Idle".into()),
+                time: 0.5,
+                duration: 2.0,
+                playing: true,
+                speed: 1.0,
+                looping: true,
+                clips: vec!["Idle".into(), "Wave".into()],
+                lengths: vec![2.0, 1.5],
+            }),
+            ..EntityState::default()
+        };
+        let json = state_json(&state).dump();
+        assert!(
+            json.contains(r#""anim":{"clip":"Idle","time":0.5,"len":2.0,"playing":true"#)
+                && json.contains(r#""clips":["Idle","Wave"],"lens":[2.0,1.5]"#),
+            "{json}"
+        );
+        assert!(!state_json(&EntityState::default()).dump().contains("anim"));
     }
 
     #[test]

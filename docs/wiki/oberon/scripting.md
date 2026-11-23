@@ -75,6 +75,9 @@ for `entity` and `ctx`.
 | `entity.camera` | The entity's camera, or `None` ([Cameras](cameras.md)) |
 | `entity.audio.play()` / `.stop()` | Start (or restart) / stop the entity's Audio Source ([Audio](audio.md)) |
 | `entity.audio.playing` | Whether the Audio Source was playing at the start of the frame |
+| `entity.animation.play("Running", loop=True, fade=0.2)` | Blend to a clip of the entity's animated model over `fade` seconds. An unknown clip raises `KeyError`. Asking for the clip that's already playing does nothing, so it's safe every frame ([Animation](models.md#animation)) |
+| `entity.animation.stop(fade=0)` | Blend back to the rest pose |
+| `entity.animation.clip` / `.time` / `.playing` / `.clips` | The current clip, seconds into it (assign to jump), whether it's playing (False once a one-shot ends), and every clip name. `.speed` can be set too |
 | `entity.despawn()` | Remove the entity until Play stops |
 | `entity.state` | A dict of your own that persists between frames (not saved) |
 

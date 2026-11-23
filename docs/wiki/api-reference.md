@@ -291,6 +291,20 @@ Fields (all readable as properties): `emitting`, `rate`, `burst`,
 `texture`, `sheet` (columns, rows), `world_space`, `follow_camera` (fill a box of `shape_size` around the camera, wrapping particles round as it moves). Pairs also take one number for both, and colours take RGB or RGBA. A bad name raises `KeyError`. A bad value raises `ValueError`. Saved in scene
 files. Guide: [Rendering & Lights](guides/rendering-and-lights.md#particles).
 
+### Animation
+
+```python
+at.Animation(clip="", speed=1.0, looping=True, play_on_start=True)
+```
+
+Plays a clip of the entity's animated model (a glTF with a skeleton or
+animated nodes on its `MeshRenderer.model`). `clip` is the clip played on
+start; `""` shows the rest pose. `speed` is the playback rate (negative plays
+backwards). A clip with `looping=False` plays once and holds its last frame.
+All four are readable properties. Saved in scene files. While the game runs,
+`view.animation` controls it (below). Guide:
+[Models → Animation](oberon/models.md#animation).
+
 ### Physics components
 
 ```text
@@ -360,8 +374,25 @@ view.transform.position / .rotation_euler / .scale    # get/set
 view.transform.set(transform); view.transform.copy()
 view.character_velocity  # (vx, vy, vz) | None; assign to drive characters
 view.camera_3d           # Camera3D copy | None; assign to move the camera
+view.animation           # AnimationRef | None (entities with an Animation and an animated model)
 view.despawn()           # queues removal (children too)
 ```
+
+```text
+anim.play(clip, loop=True, fade=0.0, speed=None, restart=False)
+                         # blend to `clip` over `fade` seconds; KeyError for an unknown clip.
+                         # Asking for the clip that's playing keeps it going (unless restart)
+anim.stop(fade=0.0)      # blend back to the rest pose
+anim.clip                # the clip playing (or held), or None
+anim.time                # seconds into the clip; assign to jump
+anim.duration            # the clip's length; anim.length("Jump") for any clip
+anim.playing             # False once a one-shot ends or after stop()
+anim.speed               # get/set; anim.looping
+anim.clips               # every clip in the model, in file order
+```
+
+Reads show the start of the frame. `play`, `stop` and setting `time` or
+`speed` apply after your update.
 
 ### Input
 
@@ -498,6 +529,7 @@ returns the number of frames run.
 | `attributes` | Dict-like, saved in the scene |
 | `camera` | `ScriptCamera` or `None` |
 | `audio` | `play()`, `stop()`, `playing`, `source` |
+| `animation` | `play(clip, loop=True, fade=0.0, speed=None, restart=False)`, `stop(fade=0.0)`, `clip`, `time` (settable), `duration`, `length(clip)`, `playing`, `speed` (settable), `looping`, `clips`, or `None` without an Animation. Reads include this frame's requests |
 | `camera_3d` | The camera as a `Camera3D` (get/set) |
 | `view` | The engine's `EntityView` for this frame |
 | `despawn()` | At the end of the frame |

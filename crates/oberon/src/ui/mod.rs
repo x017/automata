@@ -47,6 +47,18 @@ pub use picker::ColorTarget;
 
 pub use crate::view::ViewCamera;
 
+/// The Inspector's animation preview: an animated model playing (or
+/// scrubbed to a moment) in the scene view while editing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AnimPreview {
+    /// The document entity being previewed.
+    pub id: u64,
+    /// Whether time advances.
+    pub playing: bool,
+    /// Seconds into the entity's clip.
+    pub time: f32,
+}
+
 /// The pointer's state for a frame, in logical pixels.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Pointer {
@@ -320,6 +332,13 @@ pub enum Intent {
         rgba: [f32; 4],
         /// Part of a continuous drag (coalesced undo).
         gesture: bool,
+    },
+    /// Point an entity's Animation at another clip ("" for none).
+    SetAnimationClip {
+        /// Entity id.
+        id: u64,
+        /// The clip's name.
+        clip: String,
     },
     /// Set an enumerated property to the option labelled `label`.
     SetChoice {
@@ -737,6 +756,13 @@ pub struct Ui {
     pub stats: FrameStats,
     /// The selected camera's view, rendered by the app: RGBA, size.
     camera_preview: Option<(Vec<u8>, u32, u32)>,
+    /// The animation playing or scrubbed in the scene view while editing
+    /// (the app advances it and poses the model).
+    pub anim_preview: Option<AnimPreview>,
+    /// The animation preview's time bar is being dragged.
+    anim_scrub: bool,
+    /// The context menu opened this frame (its opening press picks nothing).
+    menu_fresh: bool,
     recent_colors: Vec<[f32; 4]>,
     /// The Files panel's height last frame (keyboard scrolling).
     last_files_h: f32,
@@ -849,6 +875,9 @@ impl Ui {
             right_tab: RightTab::Inspector,
             stats: FrameStats::default(),
             camera_preview: None,
+            anim_preview: None,
+            anim_scrub: false,
+            menu_fresh: false,
             recent_colors: Vec::new(),
             dialog_dirs: std::collections::HashMap::new(),
             last_files_h: 0.0,
@@ -2201,6 +2230,15 @@ impl Ui {
                 y += 6.0;
             }
         }
+        if d.animation.is_some() {
+            let kind = ComponentKind::Animation;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                y = self.animation_rows(canvas, x, y, w, e);
+                y += 6.0;
+            }
+        }
         if d.directional_light.is_some() {
             let kind = ComponentKind::Light;
             let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
@@ -2852,6 +2890,211 @@ impl Ui {
                     }
                     self.open_menu(b.x, b.y + b.h + 2.0, items);
                 }
+            }
+        }
+        y + layout::ROW_STEP
+    }
+
+    /// The Animation's rows: its clip (a menu of the model's), speed, loop
+    /// and play-on-start, and a preview that plays or scrubs the clip in
+    /// the scene view without pressing Play.
+    fn animation_rows(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        mut y: f32,
+        w: f32,
+        e: &EntityEntry,
+    ) -> f32 {
+        let Some(anim) = e.data.animation.as_ref() else {
+            return y;
+        };
+        let rig = crate::doc::model_rig(&e.data).filter(|r| !r.clips.is_empty());
+        let editing = self.play == PlayState::Editing;
+        let clip = rig.as_ref().and_then(|r| r.clip(&anim.clip));
+        let b = Rect::new(x + layout::LABEL_W, y, w - layout::LABEL_W, layout::FIELD_H);
+        if self.row_visible(b) {
+            self.row_label(canvas, x, y, "Clip");
+            let hot = self.hot(b) && rig.is_some();
+            canvas.fill_rounded(
+                b.x,
+                b.y,
+                b.w,
+                b.h,
+                3.0,
+                if hot { color::hover() } else { color::raised() },
+            );
+            let (shown, tint) = match (&rig, clip) {
+                (None, _) => ("Needs an animated model", color::danger()),
+                (Some(_), None) if !anim.clip.is_empty() => (anim.clip.as_str(), color::danger()),
+                (Some(_), None) => ("None (rest pose)", color::text_dim()),
+                (Some(_), Some(c)) => (c.name.as_str(), color::text()),
+            };
+            canvas.text_clipped(
+                b.x + 6.0,
+                b.y + 3.0,
+                layout::FONT_SIZE,
+                shown,
+                tint,
+                b.w - 24.0,
+            );
+            let (cx, cy) = (b.x + b.w - 11.0, b.y + b.h / 2.0);
+            canvas.fill_polygon(
+                &[(cx - 4.0, cy - 2.0), (cx + 4.0, cy - 2.0), (cx, cy + 3.0)],
+                color::text_dim(),
+            );
+            if rig.is_none() {
+                self.tip(
+                    b,
+                    "Pick a model with animations in the Mesh Renderer (a .glb or .gltf)",
+                );
+            }
+            if let (true, Some(rig)) = (hot, &rig) {
+                self.cursor = CursorHint::Pointer;
+                if self.p.pressed && editing {
+                    let names = std::iter::once(("", "None"))
+                        .chain(rig.clips.iter().map(|c| (c.name.as_str(), c.name.as_str())));
+                    let items = names
+                        .map(|(name, label)| menus::MenuItem {
+                            label: if name == anim.clip {
+                                format!("✓ {label}")
+                            } else {
+                                format!("   {label}")
+                            },
+                            shortcut: "",
+                            action: Some(menus::Action::Intent(Intent::SetAnimationClip {
+                                id: e.id,
+                                clip: name.to_string(),
+                            })),
+                            enabled: true,
+                        })
+                        .collect();
+                    self.open_menu(b.x, b.y + b.h + 2.0, items);
+                }
+            }
+        }
+        y += layout::ROW_STEP;
+        y = self.float_row(canvas, x, y, w, e, "Speed", Field::AnimSpeed);
+        y = self.flag_row(canvas, x, y, w, e, "Loop", Flag::AnimLoop);
+        y = self.flag_row(canvas, x, y, w, e, "Play On Start", Flag::AnimPlayOnStart);
+        if let (true, Some(clip)) = (editing, clip) {
+            y = self.anim_preview_row(canvas, x, y, w, e.id, clip.duration);
+        }
+        y
+    }
+
+    /// Play/pause and a time bar for the Animation preview.
+    fn anim_preview_row(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        y: f32,
+        w: f32,
+        id: u64,
+        duration: f32,
+    ) -> f32 {
+        let mut preview = self
+            .anim_preview
+            .filter(|p| p.id == id)
+            .unwrap_or(AnimPreview {
+                id,
+                playing: false,
+                time: 0.0,
+            });
+        let button = Rect::new(x + layout::LABEL_W, y + 1.0, 18.0, 18.0);
+        let bar = Rect::new(
+            button.x + 24.0,
+            y + 1.0,
+            (w - layout::LABEL_W - 24.0).max(10.0),
+            18.0,
+        );
+        if self.row_visible(Rect::new(x, y, w, layout::FIELD_H)) {
+            self.row_label(canvas, x, y, "Preview");
+            let hot = self.hot(button);
+            canvas.fill_rounded(
+                button.x,
+                button.y,
+                button.w,
+                button.h,
+                3.0,
+                if preview.playing {
+                    color::accent()
+                } else if hot {
+                    color::hover()
+                } else {
+                    color::raised()
+                },
+            );
+            let ink = if preview.playing {
+                color::on_accent()
+            } else {
+                color::text()
+            };
+            let (bx, by) = (button.x, button.y);
+            if preview.playing {
+                canvas.fill_rect(bx + 5.0, by + 4.5, 3.0, 9.0, ink);
+                canvas.fill_rect(bx + 10.0, by + 4.5, 3.0, 9.0, ink);
+            } else {
+                canvas.fill_polygon(
+                    &[
+                        (bx + 6.0, by + 4.0),
+                        (bx + 6.0, by + 14.0),
+                        (bx + 14.0, by + 9.0),
+                    ],
+                    ink,
+                );
+            }
+            self.tip(
+                button,
+                "Play the clip in the scene view (no need to press Play)",
+            );
+            if hot {
+                self.cursor = CursorHint::Pointer;
+                if self.p.pressed {
+                    preview.playing = !preview.playing;
+                    if preview.playing && preview.time >= duration {
+                        preview.time = 0.0;
+                    }
+                    self.anim_preview = Some(preview);
+                }
+            }
+            // The time bar: filled up to the playhead; drag to scrub.
+            canvas.fill_rounded(bar.x, bar.y, bar.w, bar.h, 3.0, color::field());
+            let share = if duration > 0.0 {
+                (preview.time / duration).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            canvas.fill_rounded(
+                bar.x,
+                bar.y,
+                (bar.w * share).max(3.0),
+                bar.h,
+                3.0,
+                color::accent_soft(),
+            );
+            canvas.text_clipped(
+                bar.x + 6.0,
+                bar.y + 2.0,
+                layout::SMALL_SIZE,
+                &format!("{:.2} / {:.2} s", preview.time, duration),
+                color::text(),
+                bar.w - 8.0,
+            );
+            if self.hot(bar) {
+                self.cursor = CursorHint::Pointer;
+                if self.p.pressed {
+                    self.anim_scrub = true;
+                }
+            }
+        }
+        if self.anim_scrub {
+            if self.p.down {
+                preview.playing = false;
+                preview.time = ((self.p.x - bar.x) / bar.w).clamp(0.0, 1.0) * duration;
+                self.anim_preview = Some(preview);
+            } else {
+                self.anim_scrub = false;
             }
         }
         y + layout::ROW_STEP
@@ -5179,6 +5422,72 @@ mod tests {
         }
         assert!(found.is_some(), "Add Collider button");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_animation_section_picks_clips_and_previews_them() {
+        let mut c = canvas();
+        let mut doc = Document::new();
+        let id = doc.create_model(crate::play::tests::ROBOT, "Robot", [0.0; 3]);
+        doc.select(Some(id));
+        let mut ui = Ui::new();
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        let insp = lay().inspector;
+        let value_x = insp.x + layout::PAD + layout::LABEL_W;
+        // Scrolled to the bottom, where the Animation section is; then up
+        // to the preview's play button (the first click on it plays).
+        let wheel = Pointer {
+            x: insp.x + 40.0,
+            y: insp.y + 200.0,
+            scroll: -100.0,
+            ..Pointer::default()
+        };
+        ui.frame(&mut c, &doc, wheel, None);
+        let mut button_y = None;
+        for y in (insp.y as i32..(insp.y + insp.h) as i32).rev().step_by(5) {
+            ui.menu = None;
+            click(&mut ui, &mut c, &doc, value_x + 9.0, y as f32);
+            if ui.anim_preview.is_some_and(|p| p.playing && p.id == id) {
+                button_y = Some(y as f32);
+                break;
+            }
+        }
+        let button_y = button_y.expect("a preview play button");
+        // Scrubbing the time bar pauses at the pointer's share of the clip.
+        let bar_x = value_x + 24.0;
+        let bar_w = insp.w - 2.0 * layout::PAD - layout::LABEL_W - 24.0;
+        click(&mut ui, &mut c, &doc, bar_x + bar_w * 0.5, button_y);
+        let p = ui.anim_preview.unwrap();
+        assert!(!p.playing, "{p:?}");
+        assert!((p.time - 3.3333 * 0.5).abs() < 0.1, "half of Idle: {p:?}");
+        // Four rows up, the clip menu lists the model's clips.
+        ui.menu = None;
+        click(
+            &mut ui,
+            &mut c,
+            &doc,
+            value_x + 40.0,
+            button_y - 4.0 * layout::ROW_STEP,
+        );
+        let menu = ui.menu.as_ref().expect("the clip menu");
+        let labels: Vec<&str> = menu.items.iter().map(|i| i.label.trim()).collect();
+        assert_eq!(labels.len(), 15, "None + 14 clips: {labels:?}");
+        assert!(
+            labels.contains(&"✓ Idle") && labels.contains(&"Wave"),
+            "{labels:?}"
+        );
+        let wave = menu
+            .items
+            .iter()
+            .find(|i| i.label.trim() == "Wave")
+            .unwrap();
+        assert_eq!(
+            wave.action,
+            Some(menus::Action::Intent(Intent::SetAnimationClip {
+                id,
+                clip: "Wave".into()
+            }))
+        );
     }
 
     #[test]

@@ -224,7 +224,7 @@ engine (wgpu sprites).
 
 ---
 
-## 4. Skeletal animation 🟡 in progress (phase 1 ✅)
+## 4. Skeletal animation 🟡 in progress (phases 1–2 ✅)
 
 **Decision: everything**: clips, crossfades, Inspector preview, animation
 events, root motion, and a visual animation state machine in Oberon.
@@ -236,15 +236,19 @@ events, root motion, and a visual animation state machine in Oberon.
      skins and node animation (rigid parts follow their node as one
      joint), GPU skinning (`vs_skinned` in the mesh and shadow shaders,
      128 joints, `DrawList::skinned_mesh`), and a Rust `Animator`
-     component. Rigged models draw their rest pose in Oberon and games
-     until phase 2 plays clips.
+     component.
    - Read glTF skins (joints, inverse bind matrices) and animation channels
      (translation / rotation / scale; linear, step and cubic-spline
      interpolation).
    - GPU skinning in the renderer: four joint weights per vertex, a joint
      matrix buffer per skinned entity.
    - Shadows and the Oberon viewport use the posed mesh.
-2. **Playback:**
+2. **Playback:** ✅
+   - Done: `automata_scene::Animation` (saved in scene files) and an
+     `Animator` with eased crossfades, `animate` / `command_animation` /
+     `animation_state`; Python `at.Animation`, `view.animation` and the
+     script API's `entity.animation`; Oberon's Inspector Animation section
+     with a live preview and scrubber; `examples/oberon/robot_plaza`.
    - An Animation component: default clip, speed, play on start.
    - Script API: `entity.animation.play("run", loop=True, fade=0.2,
      speed=1.0)`, `.stop()`, `.playing`, `.time`.

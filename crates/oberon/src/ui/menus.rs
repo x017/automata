@@ -258,6 +258,9 @@ impl Menu {
 impl Ui {
     /// Opens a popup menu at `(x, y)`.
     pub(super) fn open_menu(&mut self, x: f32, y: f32, items: Vec<MenuItem>) {
+        // A long menu pushed up to fit the window can land under the
+        // pointer: the press that opened it mustn't also pick an item.
+        self.menu_fresh = true;
         self.menu = Some(Menu {
             x,
             y,
@@ -796,6 +799,7 @@ impl Ui {
 
     /// Draws the open popup menu (if any) and handles its clicks.
     pub(super) fn draw_menu(&mut self, canvas: &mut Canvas, doc: &Document, w: f32, h: f32) {
+        let fresh = std::mem::take(&mut self.menu_fresh);
         let Some(menu) = self.menu.clone() else {
             return;
         };
@@ -841,7 +845,7 @@ impl Ui {
                     color::text_dim(),
                 );
             }
-            if hot && raw.pressed {
+            if hot && raw.pressed && !fresh {
                 chosen.clone_from(&item.action);
             }
             y += layout::ROW_H;

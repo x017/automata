@@ -16,8 +16,8 @@ use automata_renderer::{Camera2D, Camera3D, Environment, MeshData, Water};
 /// A mesh's roughness / metalness / glow overrides (saved with its visual).
 pub use automata_scene::Surface;
 use automata_scene::{
-    DirectionalLight, MeshVisual, MeshVisualKind, Name, ParticleEmitter, PointLight, SceneWorld,
-    SpotLight, Transform,
+    Animation, DirectionalLight, Entity, MeshVisual, MeshVisualKind, Name, ParticleEmitter,
+    PointLight, SceneWorld, SpotLight, Transform,
 };
 use glam::EulerRot;
 use serde::{Deserialize, Serialize};
@@ -89,6 +89,9 @@ pub struct EntityData {
     /// Primitive mesh visual.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh_visual: Option<MeshVisualData>,
+    /// Which clip an animated model plays (the model is the mesh's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub animation: Option<Animation>,
     /// Rigid body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rigid_body: Option<automata_physics::RigidBody>,
@@ -325,6 +328,9 @@ impl SceneFile {
             if let Some(visual) = eref.get::<&MeshVisual>() {
                 data.mesh_visual = Some(MeshVisualData::from(&*visual));
             }
+            if let Some(animation) = eref.get::<&Animation>() {
+                data.animation = Some(Animation::clone(&animation));
+            }
             if let Some(body) = eref.get::<&automata_physics::RigidBody>() {
                 data.rigid_body = Some((*body).clone());
             }
@@ -362,12 +368,15 @@ impl SceneFile {
     /// The inverse of [`SceneFile::from_world`]; editors (Oberon) and
     /// tooling use it to materialize a loaded scene file into a live world
     /// for simulation or rendering. Entities get a `GlobalTransform` so
-    /// the renderer's draw-list recording sees them immediately.
-    pub fn apply_to_world(&self, world: &mut SceneWorld) {
+    /// the renderer's draw-list recording sees them immediately. Returns
+    /// the spawned entities, in file order.
+    pub fn apply_to_world(&self, world: &mut SceneWorld) -> Vec<Entity> {
         use automata_scene::GlobalTransform;
         world.clear();
+        let mut spawned = Vec::with_capacity(self.entities.len());
         for data in &self.entities {
             let entity = world.spawn(());
+            spawned.push(entity);
             if let Some(name) = &data.name {
                 let _ = world.insert_one(entity, Name::new(name.clone()));
             }
@@ -403,6 +412,9 @@ impl SceneFile {
             if let Some(visual) = &data.mesh_visual {
                 let _ = world.insert_one(entity, MeshVisual::from(visual));
             }
+            if let Some(animation) = &data.animation {
+                let _ = world.insert_one(entity, animation.clone());
+            }
             if let Some(body) = &data.rigid_body {
                 let _ = world.insert_one(entity, body.clone());
             }
@@ -428,6 +440,7 @@ impl SceneFile {
                 let _ = world.insert_one(entity, source.clone());
             }
         }
+        spawned
     }
 
     /// Pretty-printed RON with two-space indentation.
@@ -721,6 +734,36 @@ mod tests {
         let water = partial.entities[0].water.unwrap();
         assert!((water.wave_height - 0.5).abs() < f32::EPSILON);
         assert_eq!(water.size, Water::default().size);
+    }
+
+    #[test]
+    fn animations_round_trip_and_fill_in_defaults() {
+        let walk = Animation {
+            speed: 1.5,
+            ..Animation::new("Walking")
+        };
+        let file = SceneFile {
+            version: SCENE_FILE_VERSION,
+            entities: vec![EntityData {
+                animation: Some(walk.clone()),
+                ..EntityData::default()
+            }],
+        };
+        let back = SceneFile::from_ron(&file.to_ron().unwrap()).unwrap();
+        assert_eq!(back.entities[0].animation, Some(walk.clone()));
+        let partial =
+            SceneFile::from_ron("(version: 1, entities: [(animation: Some((clip: \"Idle\")))])")
+                .unwrap();
+        assert_eq!(partial.entities[0].animation, Some(Animation::new("Idle")));
+        // Through a live world and back.
+        let mut world = SceneWorld::new();
+        let spawned = back.apply_to_world(&mut world);
+        assert_eq!(spawned.len(), 1);
+        assert_eq!(*world.get::<&Animation>(spawned[0]).unwrap(), walk);
+        assert_eq!(
+            SceneFile::from_world(&world).entities[0].animation,
+            Some(walk)
+        );
     }
 
     #[test]

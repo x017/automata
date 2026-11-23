@@ -175,6 +175,10 @@ impl PyEntity {
                         crate::particles::PyParticleEmitter::from_inner(v.clone()),
                     )?
                     .into_any(),
+                    StagedComponent::Animation(v) => {
+                        Py::new(py, crate::animation::PyAnimation::from_inner(v.clone()))?
+                            .into_any()
+                    }
                 })
             })
             .collect()
@@ -418,6 +422,9 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
             StagedComponent::AudioSource(c) => {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }
+            StagedComponent::Animation(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
         }
     }
     if !staged.attributes.is_empty() {
@@ -466,6 +473,8 @@ pub struct FrameWrites {
     )>,
     /// Extra particles from entities' own emitters.
     pub emitter_bursts: Vec<(EntityId, u32)>,
+    /// Animation requests (play, stop, seek, speed), in call order.
+    pub animations: Vec<(u64, automata_scene::AnimationCommand)>,
 }
 
 /// Shared write buffer between the per-frame views and the game loop.
@@ -517,6 +526,11 @@ pub fn apply_writes(scene: &mut Scene, writes: &WriteQueue) {
     for (entity, count) in drained.emitter_bursts {
         automata_scene::burst(scene.world_mut(), entity, count);
     }
+    for (bits, command) in drained.animations {
+        if let Some(entity) = EntityId::from_bits(bits) {
+            automata_scene::command_animation(scene.world_mut(), entity, &command);
+        }
+    }
     for entity in drained.despawns {
         if scene.world().contains(entity) {
             scene.despawn_recursive(entity);
@@ -535,6 +549,7 @@ struct EntitySnapshot {
     attributes: AttributeMap,
     script: Option<String>,
     audio_source: Option<automata_core::AudioSource>,
+    animation: Option<automata_scene::AnimationState>,
 }
 
 /// Read access to the scene during the update callback.
@@ -553,8 +568,8 @@ pub struct SceneView {
 impl SceneView {
     /// Builds a view over the scene's current state.
     pub fn snapshot(scene: &Scene, writes: WriteQueue) -> Self {
-        let snapshot = scene
-            .world()
+        let world = scene.world();
+        let snapshot = world
             .query::<(
                 EntityId,
                 Option<&Name>,
@@ -577,6 +592,7 @@ impl SceneView {
                         attributes: attributes.map(|a| a.0.clone()).unwrap_or_default(),
                         script: script.map(|s| s.path.clone()),
                         audio_source: audio.cloned(),
+                        animation: automata_scene::animation_state(world, id),
                     }
                 },
             )
@@ -700,6 +716,7 @@ pub struct EntityView {
     attributes: AttributeMap,
     script: Option<String>,
     audio_source: Option<automata_core::AudioSource>,
+    animation: Option<automata_scene::AnimationState>,
     writes: WriteQueue,
 }
 
@@ -714,6 +731,7 @@ impl EntityView {
             attributes: snapshot.attributes.clone(),
             script: snapshot.script.clone(),
             audio_source: snapshot.audio_source.clone(),
+            animation: snapshot.animation.clone(),
             writes,
         }
     }
@@ -845,6 +863,15 @@ impl EntityView {
         self.audio_source
             .clone()
             .map(crate::components::PyAudioSource::from_inner)
+    }
+
+    /// The entity's animation (`play`, `stop`, `clip`, `time`, ...), or
+    /// `None` when its mesh isn't an animated model.
+    #[getter]
+    fn animation(&self) -> Option<crate::animation::PyAnimationRef> {
+        self.animation.clone().map(|state| {
+            crate::animation::PyAnimationRef::new(self.id, state, Rc::clone(&self.writes))
+        })
     }
 
     /// Queues the entity (and its children) for despawn after the callback.

@@ -1777,6 +1777,8 @@ pub enum StagedComponent {
     AudioSource(automata_core::AudioSource),
     /// Makes particles.
     ParticleEmitter(automata_scene::ParticleEmitter),
+    /// Which clip an animated model plays.
+    Animation(automata_scene::Animation),
 }
 
 /// Extracts a staged component from an arbitrary Python object, raising a
@@ -1830,12 +1832,15 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(e) = obj.cast::<crate::particles::PyParticleEmitter>() {
         return Ok(StagedComponent::ParticleEmitter(e.get().inner()));
     }
+    if let Ok(a) = obj.cast::<crate::animation::PyAnimation>() {
+        return Ok(StagedComponent::Animation(a.get().inner()));
+    }
     let typename = obj.get_type().name()?.to_string();
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
          MeshRenderer, DirectionalLight, PointLight, SpotLight, Environment, Water, \
-         AudioSource, or ParticleEmitter"
+         AudioSource, ParticleEmitter, or Animation"
     )))
 }
 

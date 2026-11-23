@@ -46,6 +46,49 @@ pub struct ViewportRenderer {
     hud_textures: HashMap<PathBuf, Option<Texture>>,
     /// Glyphs for HUD text (the engine's atlas, so text matches the game).
     hud_text: Option<TextAtlas>,
+    /// The edit-time world's entities, in document order.
+    entities: Vec<automata_scene::Entity>,
+    /// The entity the Inspector's animation preview last posed.
+    previewed: Option<automata_scene::Entity>,
+}
+
+/// Moves a playing preview `dt` seconds (at most 0.1, so a stalled frame
+/// doesn't jump) at the Animation's speed: looping clips wrap, others stop
+/// at their end.
+fn step_preview(
+    p: &mut crate::ui::AnimPreview,
+    anim: &automata_scene::Animation,
+    duration: f32,
+    dt: f32,
+) {
+    if !p.playing {
+        return;
+    }
+    p.time += dt.clamp(0.0, 0.1) * anim.speed;
+    if anim.looping && duration > 0.0 {
+        p.time = p.time.rem_euclid(duration);
+    } else if p.time >= duration || p.time <= 0.0 && anim.speed < 0.0 {
+        p.time = p.time.clamp(0.0, duration);
+        p.playing = false;
+    }
+}
+
+/// Shows `entity`'s animated model frozen `time` seconds into `clip` (the
+/// rest pose for an unknown or empty clip).
+fn pose_model(world: &mut SceneWorld, entity: automata_scene::Entity, clip: &str, time: f32) {
+    let palette = {
+        let Ok(mut animator) = world.get::<&mut automata_scene::Animator>(entity) else {
+            return;
+        };
+        if !animator.pose_at(clip, time) {
+            animator.stop();
+            animator.advance(0.0);
+        }
+        animator.palette()
+    };
+    if let Ok(mut renderer) = world.get::<&mut automata_scene::MeshRenderer>(entity) {
+        renderer.joints = Some(palette);
+    }
 }
 
 impl Default for ViewportRenderer {
@@ -68,6 +111,8 @@ impl ViewportRenderer {
             preview_frame: Vec::new(),
             hud_textures: HashMap::new(),
             hud_text: None,
+            entities: Vec::new(),
+            previewed: None,
         }
     }
 
@@ -199,7 +244,8 @@ impl ViewportRenderer {
                 .iter()
                 .map(|(n, s)| (n.0.clone(), s.clone()))
                 .collect();
-            file.apply_to_world(self.scene.world_mut());
+            self.entities = file.apply_to_world(self.scene.world_mut());
+            self.previewed = None;
             if !live.is_empty() {
                 let world = self.scene.world_mut();
                 let restore: Vec<_> = world
@@ -217,6 +263,9 @@ impl ViewportRenderer {
             }
             automata_scene::materialize_visuals(self.scene.world_mut(), renderer);
             automata_scene::load_particle_textures(self.scene.world_mut(), renderer);
+            // Animated models hold their clip's first frame while editing.
+            automata_scene::attach_animators(self.scene.world_mut(), false);
+            automata_scene::animate(self.scene.world_mut(), 0.0);
             self.built_counter = Some(counter);
         }
     }
@@ -227,6 +276,50 @@ impl ViewportRenderer {
         if self.built_counter.is_some() {
             automata_scene::preview_particles(self.scene.world_mut(), dt.clamp(0.0, 0.1));
         }
+    }
+
+    /// Plays or scrubs the Inspector's animation `preview` in the
+    /// edit-time world (advancing a playing one by `dt` seconds, at the
+    /// Animation's speed, and ending a one-shot clip). The model previewed
+    /// before goes back to its clip's first frame when the preview moves
+    /// on or ends. Call after [`Self::sync`].
+    pub fn preview_animation(
+        &mut self,
+        doc: &Document,
+        preview: Option<&mut crate::ui::AnimPreview>,
+        dt: f32,
+    ) {
+        if self.built_counter.is_none() {
+            return;
+        }
+        let target = preview.and_then(|p| {
+            let index = doc.entities.iter().position(|e| e.id == p.id)?;
+            let anim = doc.entities[index].data.animation.clone()?;
+            Some((*self.entities.get(index)?, anim, p))
+        });
+        let world = self.scene.world_mut();
+        if let Some(previous) = self.previewed.take() {
+            if target.as_ref().map(|t| t.0) != Some(previous) {
+                let clip = world
+                    .get::<&automata_scene::Animation>(previous)
+                    .map(|a| a.clip.clone())
+                    .unwrap_or_default();
+                pose_model(world, previous, &clip, 0.0);
+            }
+        }
+        let Some((entity, anim, p)) = target else {
+            return;
+        };
+        let Some(duration) = world
+            .get::<&automata_scene::Animator>(entity)
+            .ok()
+            .and_then(|a| a.rig().clip(&anim.clip).map(|c| c.duration))
+        else {
+            return;
+        };
+        step_preview(p, &anim, duration, dt);
+        pose_model(world, entity, &anim.clip, p.time);
+        self.previewed = Some(entity);
     }
 
     /// Live particles in the edit-time world.
@@ -622,6 +715,35 @@ pub mod render_wireframe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_animation_preview_wraps_loops_and_ends_one_shots() {
+        use crate::ui::AnimPreview;
+        let mut p = AnimPreview {
+            id: 1,
+            playing: true,
+            time: 1.9,
+        };
+        let walk = automata_scene::Animation::new("Walk");
+        step_preview(&mut p, &walk, 2.0, 0.05);
+        step_preview(&mut p, &walk, 2.0, 0.05);
+        step_preview(&mut p, &walk, 2.0, 0.05);
+        assert!(p.playing && (p.time - 0.05).abs() < 1e-4, "wrapped: {p:?}");
+        // A stalled frame moves at most 0.1 s.
+        step_preview(&mut p, &walk, 2.0, 5.0);
+        assert!((p.time - 0.15).abs() < 1e-4, "{p:?}");
+        let once = automata_scene::Animation {
+            looping: false,
+            speed: 2.0,
+            ..walk
+        };
+        p.time = 1.9;
+        step_preview(&mut p, &once, 2.0, 0.1);
+        assert!(!p.playing && (p.time - 2.0).abs() < 1e-6, "ends: {p:?}");
+        // Paused, time stays put.
+        step_preview(&mut p, &once, 2.0, 0.1);
+        assert!((p.time - 2.0).abs() < 1e-6);
+    }
 
     #[test]
     fn fallback_viewport_follows_the_orbit_camera() {

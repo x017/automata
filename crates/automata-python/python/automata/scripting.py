@@ -146,6 +146,16 @@ class _ViewRecord:
             return dict(v.attributes.items())
         if key == "snd":
             return v.audio_source
+        if key == "anim":
+            a = v.animation
+            if a is None:
+                return None
+            clips = a.clips
+            return {
+                "clip": a.clip, "time": a.time, "len": a.duration, "playing": a.playing,
+                "speed": a.speed, "loop": a.looping, "clips": clips,
+                "lens": [a.length(c) for c in clips],
+            }
         if key == "view":
             return v
         return None
@@ -201,6 +211,16 @@ class _EngineBackend(api.Backend):
                 ctx.audio.play_source(view)
             elif audio == "stop":
                 ctx.audio.stop_source(view)
+            anim = view.animation if w.get("anim") else None
+            for cmd in w.get("anim", ()) if anim is not None else ():
+                if cmd[0] == "play":
+                    anim.play(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5])
+                elif cmd[0] == "stop":
+                    anim.stop(cmd[1])
+                elif cmd[0] == "seek":
+                    anim.time = cmd[1]
+                elif cmd[0] == "speed":
+                    anim.speed = cmd[1]
             if w.get("despawn"):
                 view.despawn()
         for path, volume, pitch, pos in out.sounds:

@@ -25,10 +25,8 @@ four bones per vertex, 128 bones per model) and parts moved by animated
 nodes, like a robot whose arms are separate meshes. The renderer poses
 them on the GPU, and shadows follow the pose.
 
-For now an animated model shows its rest pose in the scene view and in
-your game. Playing clips from scripts (`entity.animation.play("run")`) and
-previewing them in the Inspector come next. Rust games can already play
-clips with the `Animator` component.
+An entity plays its model's clips with an **Animation** component. See
+[Animation](#animation) below.
 
 ## Add a model to the scene
 
@@ -113,6 +111,75 @@ With a model selected, the **Mesh Renderer** section shows:
 | **Surface**, **Roughness**, **Metallic**, **Emission** | Leave them at Default to keep the file's materials. Setting one overrides it on every part. See [Surfaces](interface.md#surfaces). |
 | **Glow Light** | Glowing parts of the model light their surroundings. This scales that light (0 = off). |
 | **Glow Shadows** | Whether other objects block that light and cast shadows from it (High and up). |
+
+## Animation
+
+![One robot, eight clips: Idle, Walking, Running, Jump, Wave, Dance, Punch and ThumbsUp](../../assets/models/animation_clips.jpg)
+
+Add a model that has animations and Oberon gives the entity an
+**Animation** component set to the model's idle clip (the first clip with
+"idle" in its name, or else the first clip). Add one by hand with
+**Add Component → Animation**.
+
+| Row | What it does |
+|---|---|
+| **Clip** | The clip played when the game starts. The menu lists the model's clips, with **None** for the rest pose. It turns red if the model has no clip of that name, or no animations at all. |
+| **Speed** | Playback rate: 1 is as authored, 0.5 half speed, negative backwards. |
+| **Loop** | Off plays the clip once and holds its last frame (a character that sits down stays seated). |
+| **Play On Start** | Off holds the first frame until a script calls `play`. |
+| **Preview** | Plays the clip in the scene view without pressing Play. The button plays and pauses it. Drag the time bar to scrub, which pauses it on that frame. The preview follows Speed and Loop, and stops when you select something else. |
+
+While you edit, an animated model holds its clip's first frame, so you place
+it in its real pose instead of the T-pose. Press Play and every Animation
+with **Play On Start** starts.
+
+### From a script
+
+`entity.animation` controls the clip while the game runs:
+
+```python
+def update(entity, ctx):
+    anim = entity.animation
+    if not ctx.physics.grounded(entity):
+        anim.play("Jump", loop=False, fade=0.1)
+    elif ctx.input.pressed("w"):
+        anim.play("Running", fade=0.2)      # blend over 0.2 s
+    else:
+        anim.play("Idle", fade=0.3)
+```
+
+Asking for the clip that's already playing does nothing, so working out the
+right clip and asking for it every frame is fine: it only changes when the
+answer does. `fade` crossfades from whatever was playing, and a new `play`
+mid-fade blends on from the current pose. `loop=False` plays once.
+`anim.playing` turns False when it ends, so you can tell when to move on.
+`speed=` sets the rate, and `restart=True` starts a clip that's already
+playing over.
+
+| Member | Meaning |
+|---|---|
+| `play(clip, loop=True, fade=0.0, speed=None, restart=False)` | Switch clips. An unknown name raises `KeyError` (names are case-sensitive; see `clips`) |
+| `stop(fade=0.0)` | Blend back to the rest pose |
+| `clip`, `time`, `duration` | The clip, seconds into it, and its length. Assign `time` to jump |
+| `playing`, `looping`, `speed` | Assign `speed` to change it mid-clip |
+| `clips`, `length(clip)` | Every clip name, in file order, and any clip's length |
+
+Reads see your own requests made earlier in the frame. The pose updates
+after every script has run.
+
+### From Python
+
+```python
+robot = (
+    at.Entity("Robot")
+    .add(at.Transform())
+    .add(at.MeshRenderer.model("models/robot.glb"))
+    .add(at.Animation("Wave", speed=1.0, looping=False, play_on_start=True))
+)
+```
+
+In a `Game` update, `ctx.scene["Robot"].animation` has the same members. See
+the [API reference](../api-reference.md#animation).
 
 ## Import settings
 
@@ -239,6 +306,16 @@ yourself. A missing file raises `FileNotFoundError`. See the
 
 ## Try it
 
+`examples/oberon/robot_plaza/` is a town square with five copies of an
+animated CC0 robot. You walk one of them around, and its script blends
+between Idle, Walking, Running, Jump and Wave. The others dance, sit, wave
+when you come near, and walk in slow motion. Open it and pick clips for
+them in the Inspector:
+
+```console
+cargo run -p oberon --release examples/oberon/robot_plaza/level.ron
+```
+
 `examples/oberon/fps/` uses ten of Kenney's CC0 models, three of them with
 import settings. See the [FPS tutorial](../tutorials/fps.md).
 
@@ -259,6 +336,8 @@ the files.
 |---|---|
 | File row red, *File not found* | The model moved or the scene was saved elsewhere. **Change…** to re-pick it. |
 | *…mesh compression, which isn't supported* | Re-export without mesh compression. These glTF extensions aren't supported. |
+| Clip row is red | The model has no clip with that name (names are case-sensitive), or no animations at all. Pick one from the menu. |
+| Animated model doesn't move in Play | Check the Animation's **Play On Start**, and that a script isn't calling `stop()`. |
 | Model is huge or tiny | Modelling tools disagree on units. Set **Import → Scale** (×0.01 for centimetres), or export from Blender with **Apply Unit** checked. glTF is always metres. |
 | Model faces the wrong way | glTF's forward is +Z. Press **Import → Rotation → +90°** until it faces the right way. |
 | Model floats or sinks when placed | Its origin isn't at its base. Set **Import → Pivot** to **Bottom**. |
