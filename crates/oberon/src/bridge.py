@@ -398,6 +398,7 @@ class BridgeBackend(api.Backend):
         self.splashes = []  # sent back with the frame's reply
         self.bursts = []
         self.emits = []
+        self.gfx = None  # Play's graphics preset ("high"), from each frame
 
     def set_shapes(self, shapes):
         self.shapes = shapes
@@ -412,6 +413,9 @@ class BridgeBackend(api.Backend):
 
     def source_playing(self, entity):
         return entity.id in self.playing
+
+    def graphics(self):
+        return self.gfx
 
     def water_height(self, x, z):
         for surface in self.water:
@@ -455,6 +459,10 @@ class Runner:
             hot_reload=True,
             module_prefix="oberon_script_",
             internal_files=[__file__],
+            # This file lives in the project's .oberon/: saves go next to it,
+            # in .oberon/save, where run_scene keeps them too.
+            save_dir=os.environ.get("AUTOMATA_SAVE_DIR")
+            or os.path.join(os.path.dirname(os.path.abspath(__file__)), "save"),
         )
 
     @property
@@ -479,6 +487,7 @@ class Runner:
         self.backend.set_shapes(msg.get("cols", []))
         self.backend.playing = set(msg.get("playing", []))
         self.backend.water = msg.get("water", [])
+        self.backend.gfx = msg.get("gfx")
         started = time.perf_counter()
         out = self.host.frame(
             msg.get("entities", []),
@@ -501,6 +510,8 @@ class Runner:
             reply["hud"] = out.hud
         if out.lock is not None:
             reply["lock"] = out.lock
+        if out.settings:
+            reply["settings"] = out.settings
         if self.backend.splashes:
             reply["splashes"] = self.backend.splashes
             self.backend.splashes = []

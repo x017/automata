@@ -89,6 +89,25 @@ def test_collecting_a_coin_scores_it(tmp_path):
     assert scores[-1] == 1
 
 
+def test_the_best_run_is_remembered(tmp_path):
+    import json
+    import shutil
+
+    shutil.copytree(os.path.join(GAME, "scripts"), tmp_path / "scripts")
+    original = list(build_level.COINS)
+    build_level.COINS[0] = (0, 1.0, 0)  # a coin right where the player starts
+    try:
+        build_level.build().save(str(tmp_path / "level.ron"))
+    finally:
+        build_level.COINS[:] = original
+    saves = tmp_path / "saves"
+    for _ in range(2):
+        at.run_scene(str(tmp_path / "level.ron"), headless=True, max_frames=20,
+                     save_dir=str(saves))
+    data = json.loads((saves / "saves" / "default.json").read_text())["data"]
+    assert data == {"best": 1, "coins_ever": 2}
+
+
 # --------------------------------------------------------------------------
 # Script logic with a fake context
 # --------------------------------------------------------------------------
@@ -270,7 +289,7 @@ def _body(code):
     "page, index, script",
     [
         ("coin-collector.md", 0, "coin.py"),
-        ("coin-collector.md", 1, "rules.py"),
+        ("coin-collector.md", -1, "rules.py"),
         ("third-person-camera.md", -1, "follow_camera.py"),
         ("camera-rail.md", 0, "camera_rail.py"),
     ],

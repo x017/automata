@@ -160,6 +160,9 @@ pub struct FrameInput {
     /// Water surfaces at the last physics step, packed by
     /// [`automata_renderer::WaterSurface::pack`] (for `water_height`).
     pub water: Vec<Vec<f32>>,
+    /// The graphics preset Play renders at (`"high"`), for
+    /// `ctx.settings.graphics`; empty when unknown.
+    pub graphics: &'static str,
 }
 
 /// What a script asked of an entity's Audio Source.
@@ -245,6 +248,51 @@ pub struct FrameReply {
     /// How long the scripts took to run this frame, in milliseconds (as
     /// the runner measured it, without the trip over the pipe).
     pub script_ms: Option<f32>,
+    /// Player settings to apply now (`ctx.settings.volume`, `.graphics`).
+    pub settings: PlayerSettings,
+}
+
+/// Player settings a script changed (or that were loaded from the
+/// project's `.oberon/save/settings.json` at the start).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct PlayerSettings {
+    /// The master volume, 0 to 1.
+    pub volume: Option<f32>,
+    /// The graphics preset.
+    pub graphics: Option<automata_renderer::GraphicsQuality>,
+}
+
+/// A graphics preset's script name (`"high"`), as `ctx.settings.graphics`
+/// spells it.
+#[must_use]
+pub fn quality_key(quality: automata_renderer::GraphicsQuality) -> &'static str {
+    use automata_renderer::GraphicsQuality as Q;
+    match quality {
+        Q::Low => "low",
+        Q::Medium => "medium",
+        Q::High => "high",
+        Q::Ultra => "ultra",
+        Q::Beautiful => "beautiful",
+    }
+}
+
+fn parse_settings(v: Option<&Json>) -> PlayerSettings {
+    let Some(v) = v else {
+        return PlayerSettings::default();
+    };
+    #[allow(clippy::cast_possible_truncation)]
+    PlayerSettings {
+        volume: v
+            .get("volume")
+            .and_then(Json::as_f64)
+            .filter(|x| x.is_finite())
+            .map(|x| x.clamp(0.0, 1.0) as f32),
+        graphics: v.get("graphics").and_then(Json::as_str).and_then(|name| {
+            automata_renderer::GraphicsQuality::ALL
+                .into_iter()
+                .find(|q| quality_key(*q) == name)
+        }),
+    }
 }
 
 /// A one-off particle effect a script asked for.
@@ -703,6 +751,9 @@ fn mesh_json(key: u64, tris: &MeshTris) -> Json {
 
 #[allow(clippy::cast_possible_wrap)]
 fn frame_input_json(msg: &mut Json, input: &FrameInput) {
+    if !input.graphics.is_empty() {
+        msg.set("gfx", Json::from(input.graphics));
+    }
     msg.set(
         "mouse",
         Json::obj([
@@ -1017,6 +1068,7 @@ pub fn parse_msg(line: &str) -> Option<BridgeMsg> {
                 },
                 #[allow(clippy::cast_possible_truncation)]
                 script_ms: v.get("ms").and_then(Json::as_f64).map(|ms| ms as f32),
+                settings: parse_settings(v.get("settings")),
             })
         }
         "bye" => BridgeMsg::Bye,
@@ -1135,6 +1187,32 @@ mod tests {
         };
         // Strength is clamped to 0..10; malformed entries are skipped.
         assert_eq!(splashes, vec![([1.0, 0.5, -2.0], 2.0), ([0.0; 3], 10.0)]);
+    }
+
+    #[test]
+    fn player_settings_cross_the_bridge() {
+        use automata_renderer::GraphicsQuality as Q;
+        let msg = parse_msg(
+            r#"{"op":"frame","frame":1,"writes":[],"settings":{"volume":1.5,"graphics":"low"}}"#,
+        );
+        let Some(BridgeMsg::Frame(FrameReply { settings, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(
+            settings,
+            PlayerSettings {
+                volume: Some(1.0),
+                graphics: Some(Q::Low)
+            }
+        );
+        let msg = parse_msg(r#"{"op":"frame","frame":2,"settings":{"graphics":"potato"}}"#);
+        let Some(BridgeMsg::Frame(FrameReply { settings, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(settings, PlayerSettings::default());
+        for q in Q::ALL {
+            assert_eq!(q.label().to_lowercase(), quality_key(q));
+        }
     }
 
     #[test]
@@ -1351,6 +1429,69 @@ mod tests {
         drop(bridge.stop());
         let _ = std::fs::remove_dir_all(&runtime);
         let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[test]
+    fn saves_and_settings_live_in_the_project() {
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("oberon_bridge_save_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("saver.py");
+        std::fs::write(
+            &script,
+            "def start(entity, ctx):\n    ctx.save['coins'] = ctx.save.get('coins', 0) + 12\n    \
+             entity.attributes['gfx'] = ctx.settings.graphics\n    \
+             ctx.settings.graphics = 'low'\n    ctx.settings.volume = 0.25\n",
+        )
+        .unwrap();
+        let entities = vec![EntityState {
+            id: 1,
+            name: "Saver".into(),
+            script: Some(script.clone()),
+            scale: [1.0; 3],
+            ..EntityState::default()
+        }];
+        let input = FrameInput {
+            graphics: "medium",
+            ..FrameInput::default()
+        };
+        for run in 1..=2 {
+            let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+            pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+            assert!(bridge.send_frame_with(0.016, 0.016, &[], &entities, &input));
+            let msgs = pump(&mut bridge, |m| matches!(m, BridgeMsg::Frame(_)));
+            let reply = msgs
+                .iter()
+                .find_map(|m| match m {
+                    BridgeMsg::Frame(r) => Some(r.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(
+                reply.settings,
+                PlayerSettings {
+                    volume: Some(0.25),
+                    graphics: Some(automata_renderer::GraphicsQuality::Low),
+                },
+                "{msgs:?}"
+            );
+            // The first run sees Play's preset; the second the saved one.
+            let gfx = reply.writes[0].attributes.as_ref().unwrap()["gfx"].clone();
+            let want = if run == 1 { "medium" } else { "low" };
+            assert_eq!(gfx, AttributeValue::Text(want.into()));
+            drop(bridge.stop());
+            let saved =
+                std::fs::read_to_string(dir.join(".oberon/save/saves/default.json")).unwrap();
+            assert!(
+                saved.contains(&format!("\"coins\": {}", 12 * run)),
+                "{saved}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

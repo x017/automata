@@ -142,17 +142,90 @@ to the Player. Use the version in
 it walks relative to the camera, sprints, jumps, and has gravity. A
 character with a script skips the built-in controller.
 
-The heart of it:
+Its controls are *actions*: `start` binds names to default keys, and
+`update` asks about the names. A settings screen can then let players
+change the keys (`ctx.settings.rebind("jump", "k")`), and the game
+remembers it:
+
+```python
+def start(entity, ctx):
+    entity.state["vy"] = 0.0
+    ctx.settings.bind("forward", "w", "arrow_up")
+    ctx.settings.bind("jump", "space")
+    ...
+```
+
+The heart of `update`:
 
 ```python
 vy = entity.state["vy"]
 if ctx.physics.grounded(entity):
-    vy = JUMP if keys.just_pressed("space") else -2.0
+    vy = JUMP if keys.just_pressed("jump") else -2.0
 else:
     vy -= GRAVITY * ctx.time.delta
 entity.state["vy"] = vy
 entity.character_velocity = (vx, vy, vz)
 ```
+
+## 7. Remember the best run
+
+Scores reset every time you press Play. To keep something between runs,
+put it in `ctx.save`. It works like a dict that's written to disk at the
+end of the frame. In Oberon it lives in your project's `.oberon/save`
+folder. In an exported game it lives in the player's own user-data
+folder. Here's the finished `scripts/rules.py`:
+
+```python
+"""rules: keeps score, announces the win, and remembers the best run.
+Attach to an empty entity.
+
+The best score and the coins found over every run live in ``ctx.save``, so
+they're still there next time (in Oberon: ``.oberon/save``; in an exported
+game: the player's user-data folder). F2 cycles the graphics preset, which
+``ctx.settings`` remembers too.
+"""
+
+PRESETS = ["low", "medium", "high", "ultra", "beautiful"]
+
+
+def coins(ctx):
+    return [e for e in ctx.scene if e.name.startswith("Coin")]
+
+
+def start(entity, ctx):
+    entity.state["score"] = 0
+    print(f"Collect {len(coins(ctx))} coins! WASD to move, Space to jump, Q/E to turn.")
+    if "best" in ctx.save:
+        print(f"Welcome back! Best run: {ctx.save['best']}, "
+              f"coins found so far: {ctx.save.get('coins_ever', 0)}.")
+
+
+def update(entity, ctx):
+    all_coins = coins(ctx)
+    score = sum(c.attributes.get("value", 1) for c in all_coins if c.attributes.get("collected"))
+    if score != entity.state["score"]:
+        ctx.save["coins_ever"] = ctx.save.get("coins_ever", 0) + score - entity.state["score"]
+        entity.state["score"] = score
+        entity.attributes["score"] = score
+        print(f"Score: {score}")
+        if score > ctx.save.get("best", 0):
+            ctx.save["best"] = score
+        if all_coins and all(c.attributes.get("collected") for c in all_coins):
+            print("You found every coin!")
+
+    if ctx.input.just_pressed("f2"):
+        preset = PRESETS[(PRESETS.index(ctx.settings.graphics) + 1) % len(PRESETS)]
+        ctx.settings.graphics = preset
+        print(f"Graphics: {preset}")
+
+    ctx.hud.text(f"Coins {score}   Best {max(score, ctx.save.get('best', 0))}", 16, 16, size=22)
+```
+
+Play twice. The second time, the Console says "Welcome back!" and the
+HUD shows your best. Press **F2** to cycle the graphics preset.
+`ctx.settings` remembers it, along with the volume and any rebound keys,
+in the same folder. To start fresh, delete `.oberon/save` (or call
+`ctx.save.clear()`).
 
 ## What you learned
 
@@ -163,6 +236,8 @@ entity.character_velocity = (vx, vy, vz)
   `ctx.scene`.
 - Save to hot-reload; errors pause only the script that failed.
 - Have one writer per value.
+- `ctx.save` keeps values between runs; `ctx.settings` keeps the player's
+  volume, graphics and keys.
 
 **Next:** [Third-person camera](third-person-camera.md). Make the camera
 chase the player.

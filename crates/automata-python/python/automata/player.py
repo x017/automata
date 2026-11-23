@@ -8,6 +8,10 @@ project's scenes, scripts, and assets.
 ``oop_platformer.py``) or a ``start_scene`` (an Oberon project, run with its
 behaviour scripts through ``automata.run_scene``).
 
+Saves and settings (``ctx.save``, ``ctx.settings``) go to a folder named
+after the game in the player's user-data folder (see
+``automata.script_api.user_data_dir``; ``$AUTOMATA_SAVE_DIR`` overrides it).
+
 Options: ``--headless`` (no window), ``--frames N`` (stop after N frames)
 and ``--fixed-delta SECONDS`` (headless: every frame advances by exactly
 that much; benchmarks use it). Anything else is passed on to a ``main``
@@ -81,7 +85,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         game_options["headless"] = True
         if opts["fixed_delta"] is not None:
             game_options["fixed_delta"] = opts["fixed_delta"]
-    frames = at.run_scene(scene, max_frames=opts["frames"], **game_options)
+    from .script_api import user_data_dir
+
+    save_dir = user_data_dir(manifest.get("name") or os.path.basename(folder))
+    frames = at.run_scene(scene, max_frames=opts["frames"], save_dir=save_dir, **game_options)
     if opts["headless"]:
         print(f"ran {frames} frames of {manifest['start_scene']}")
     return 0

@@ -55,9 +55,11 @@ from __future__ import annotations
 import difflib
 import fnmatch
 import importlib.util
+import json
 import math
 import os
 import sys
+import time
 import traceback
 import types
 from typing import TYPE_CHECKING, Any, Callable, Iterable
@@ -89,6 +91,13 @@ __all__ = [
     "EASINGS",
     "ease",
     "easing",
+    "SaveData",
+    "SaveSlot",
+    "Settings",
+    "KEY_NAMES",
+    "GRAPHICS_PRESETS",
+    "user_data_dir",
+    "dev_save_dir",
 ]
 
 
@@ -679,22 +688,49 @@ class Input:
     def __init__(self, source):
         self._src = source
         self._lock_request = None
+        self._settings: Settings | None = None  # ctx.settings, for action names
+
+    def _any(self, key, on_key, on_button):
+        settings = self._settings
+        if settings is not None and isinstance(key, str) and settings.is_action(key):
+            for k in settings.keys(key):
+                button = MOUSE_BINDINGS.get(k)
+                if button is not None:
+                    if on_button(button):
+                        return True
+                elif any(on_key(n) for n in keys_for(k)):
+                    return True
+            return False
+        return any(on_key(k) for k in keys_for(key))
 
     def pressed(self, key: str) -> bool:
-        """The key is held down."""
-        return any(self._src.key_down(k) for k in keys_for(key))
+        """The key is held down. Takes a key name (``"space"``) or an
+        action bound with ``ctx.settings.bind`` (``"jump"``)."""
+        return self._any(key, self._src.key_down, self._src.button_down)
 
     def just_pressed(self, key: str) -> bool:
-        """The key went down this frame."""
-        return any(self._src.key_pressed(k) for k in keys_for(key))
+        """The key (or action) went down this frame."""
+        return self._any(key, self._src.key_pressed, self._src.button_pressed)
 
     def just_released(self, key: str) -> bool:
-        """The key came up this frame."""
-        return any(self._src.key_released(k) for k in keys_for(key))
+        """The key (or action) came up this frame."""
+        return self._any(key, self._src.key_released, self._src.button_released)
 
     def axis(self, negative: str, positive: str) -> float:
-        """-1, 0, or 1 from two keys."""
+        """-1, 0, or 1 from two keys (or actions)."""
         return float(self.pressed(positive)) - float(self.pressed(negative))
+
+    def any_just_pressed(self) -> str | None:
+        """The key that went down this frame (``"k"``, ``"space"``,
+        ``"mouse_left"``...), or None: for "press a key" rebinding
+        screens."""
+        for k in KEY_NAMES:
+            if self._src.key_pressed(k):
+                return k
+        for name, button in MOUSE_BINDINGS.items():
+            if self._src.button_pressed(button):
+                return name
+        return None
 
     def mouse_pressed(self, button: str = "left") -> bool:
         return self._src.button_down(str(button).lower())
@@ -1907,6 +1943,555 @@ class Tween(_Scheduled):
         return f"Tween({what} -> {self.end!r} over {self.duration:g}s, {state})"
 
 
+# --------------------------------------------------------------------------
+# Save games and player settings: ctx.save / ctx.settings
+# --------------------------------------------------------------------------
+
+#: The key names both runners know, in the order
+#: ``ctx.input.any_just_pressed()`` checks them.
+KEY_NAMES = (
+    tuple("abcdefghijklmnopqrstuvwxyz")
+    + tuple("0123456789")
+    + ("space", "enter", "escape", "tab", "backspace",
+       "arrow_left", "arrow_right", "arrow_up", "arrow_down",
+       "shift_left", "shift_right", "ctrl_left", "ctrl_right", "alt_left", "alt_right")
+    + tuple(f"f{i}" for i in range(1, 13))
+)
+#: Mouse buttons as bindings: ``"mouse_left"``, ``"mouse_right"``,
+#: ``"mouse_middle"``.
+MOUSE_BINDINGS = {"mouse_left": "left", "mouse_right": "right", "mouse_middle": "middle"}
+#: The graphics presets, lowest first.
+GRAPHICS_PRESETS = ("low", "medium", "high", "ultra", "beautiful")
+
+_SAVE_FORMAT = 1
+
+
+def user_data_dir(game: str) -> str:
+    """Where an exported game keeps its saves and settings: a folder named
+    after ``game`` in the platform's user-data folder (``%APPDATA%`` on
+    Windows, ``~/Library/Application Support`` on macOS,
+    ``$XDG_DATA_HOME`` or ``~/.local/share`` elsewhere).
+    ``$AUTOMATA_SAVE_DIR`` overrides it."""
+    override = os.environ.get("AUTOMATA_SAVE_DIR")
+    if override:
+        return os.path.abspath(override)
+    name = "".join(c for c in str(game) if c not in '/\\:*?"<>|' and ord(c) >= 32)
+    name = name.strip().rstrip(".") or "AUTOMATA game"
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData",
+                                                         "Roaming")
+    elif sys.platform == "darwin":
+        base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+    elif os.environ.get("ANDROID_PRIVATE"):
+        base = os.environ["ANDROID_PRIVATE"]
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or ""
+        if not os.path.isabs(base):
+            base = os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(base, name)
+
+
+def dev_save_dir(project: str) -> str:
+    """Where saves go while developing (Oberon's Play mode and
+    ``run_scene``): ``<project>/.oberon/save``, kept out of exports.
+    ``$AUTOMATA_SAVE_DIR`` overrides it."""
+    override = os.environ.get("AUTOMATA_SAVE_DIR")
+    if override:
+        return os.path.abspath(override)
+    return os.path.join(os.path.abspath(project), ".oberon", "save")
+
+
+def _plain(value, where):
+    """A JSON-safe copy of ``value`` (tuples become lists), or TypeError."""
+    if value is None or isinstance(value, (bool, str)):
+        return value
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{where}: {value!r} can't be saved (only finite numbers)")
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_plain(v, f"{where}[{i}]") for i, v in enumerate(value)]
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            if not isinstance(k, str):
+                raise TypeError(f"{where}: dictionary keys must be strings to save, not {k!r}")
+            out[k] = _plain(v, f"{where}[{k!r}]")
+        return out
+    raise TypeError(f"{where}: can't save {type(value).__name__} {value!r}; saves hold numbers, "
+                    "strings, True/False/None, and lists and dicts of them")
+
+
+class _Store:
+    """JSON files in one folder, written atomically; or nothing at all
+    (``folder=None``: kept in memory, for tests)."""
+
+    def __init__(self, folder, log):
+        self.folder = folder
+        self._log = log
+
+    def path(self, rel):
+        return None if self.folder is None else os.path.join(self.folder, rel)
+
+    def read(self, rel):
+        path = self.path(rel)
+        if path is None or not os.path.isfile(path):
+            return None
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError) as exc:
+            broken = path + ".broken"
+            try:
+                os.replace(path, broken)
+                where = f"; kept it as {os.path.basename(broken)}"
+            except OSError:
+                where = ""
+            self._log("warn", f"couldn't read {path} ({exc}); starting fresh{where}")
+            return None
+
+    def write(self, rel, data):
+        path = self.path(rel)
+        if path is None:
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1, sort_keys=True, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp, path)
+
+    def remove(self, rel):
+        path = self.path(rel)
+        if path is not None and os.path.isfile(path):
+            os.remove(path)
+
+    def names(self, sub, suffix):
+        path = self.path(sub)
+        if path is None or not os.path.isdir(path):
+            return []
+        return sorted(n[: -len(suffix)] for n in os.listdir(path) if n.endswith(suffix))
+
+
+def _slot_name(slot):
+    if isinstance(slot, bool) or not isinstance(slot, (str, int)):
+        raise TypeError(f"a save slot is a name or a number, not {slot!r}")
+    name = str(slot).strip()
+    if not name or len(name) > 64 or any(not (c.isalnum() or c in " _-") for c in name):
+        raise ValueError(f"save slot {slot!r}: use up to 64 letters, digits, spaces, '_' or '-'")
+    return name
+
+
+class SaveSlot:
+    """One save slot as ``ctx.save.slots()`` lists it: ``name``,
+    ``saved_at`` (seconds since 1970, as ``time.time()``) and ``keys``
+    (how many values it holds)."""
+
+    __slots__ = ("name", "saved_at", "keys")
+
+    def __init__(self, name, saved_at, keys):
+        self.name = name
+        self.saved_at = saved_at
+        self.keys = keys
+
+    def __repr__(self):
+        return f"SaveSlot({self.name!r}, saved_at={self.saved_at!r}, keys={self.keys})"
+
+
+class SaveData:
+    """``ctx.save``: the current save slot, a dict that lasts between runs::
+
+        ctx.save["coins"] = ctx.save.get("coins", 0) + 1
+        if "checkpoint" in ctx.save:
+            entity.transform.position = ctx.save["checkpoint"]
+
+    Values are JSON: numbers, strings, True/False/None, and lists and
+    dicts of them (tuples come back as lists). Changes are written at the
+    end of the frame, nested ones too (``ctx.save["items"].append(...)``).
+    Slots: ``use("2")`` switches, ``slots()`` lists them, ``delete(slot)``
+    removes one and ``clear()`` empties the current one.
+    """
+
+    def __init__(self, store):
+        self._store = store
+        self._slot = "default"
+        self._data = None
+        self._written = None  # the JSON last written (or read)
+        self._touched = False
+        self._saved_at = None
+
+    def _rel(self, slot=None):
+        return os.path.join("saves", f"{slot or self._slot}.json")
+
+    def _load(self):
+        if self._data is None:
+            raw = self._store.read(self._rel())
+            data = raw.get("data") if isinstance(raw, dict) else None
+            self._data = data if isinstance(data, dict) else {}
+            self._saved_at = raw.get("saved_at") if isinstance(raw, dict) else None
+            self._written = json.dumps(self._data, sort_keys=True)
+        return self._data
+
+    def _flush(self):
+        """Writes the slot if anything in it changed."""
+        if self._data is None or not self._touched:
+            return
+        text = json.dumps(self._data, sort_keys=True)
+        if text != self._written:
+            saved_at = time.time()
+            self._store.write(self._rel(), {"format": _SAVE_FORMAT, "saved_at": saved_at,
+                                            "data": self._data})
+            self._written, self._saved_at = text, saved_at
+        self._touched = False
+
+    # --- the dict --------------------------------------------------------
+
+    def __getitem__(self, key: str) -> Any:
+        data = self._load()
+        if key not in data:
+            raise KeyError(f"{key!r} isn't saved in slot {self._slot!r}"
+                           f"{_did_you_mean(str(key), data)} (use ctx.save.get(key, default))")
+        value = data[key]
+        if isinstance(value, (list, dict)):
+            self._touched = True  # it may be changed in place
+        return value
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        if not isinstance(key, str):
+            raise TypeError(f"save keys are strings, not {key!r}")
+        self._load()[key] = _plain(value, f"ctx.save[{key!r}]")
+        self._touched = True
+
+    def __delitem__(self, key: str) -> None:
+        del self._load()[key]
+        self._touched = True
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._load()
+
+    def __iter__(self):
+        return iter(list(self._load()))
+
+    def __len__(self) -> int:
+        return len(self._load())
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """The saved value, or ``default`` when there's none."""
+        return self[key] if key in self._load() else default
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        if key not in self._load():
+            self[key] = default
+        return self[key]
+
+    def pop(self, key: str, *default: Any) -> Any:
+        data = self._load()
+        if key in data:
+            self._touched = True
+        return data.pop(key, *default)
+
+    def update(self, values: dict[str, Any] | None = None, **more: Any) -> None:
+        for k, v in {**(values or {}), **more}.items():
+            self[k] = v
+
+    def keys(self) -> list[str]:
+        return list(self._load())
+
+    def items(self) -> list[tuple[str, Any]]:
+        self._touched = True
+        return list(self._load().items())
+
+    def values(self) -> list[Any]:
+        self._touched = True
+        return list(self._load().values())
+
+    def clear(self) -> None:
+        """Empties the current slot."""
+        self._load().clear()
+        self._touched = True
+
+    # --- slots -------------------------------------------------------------
+
+    @property
+    def slot(self) -> str:
+        """The current slot's name (``"default"`` until :meth:`use`)."""
+        return self._slot
+
+    @property
+    def saved_at(self) -> float | None:
+        """When the current slot was last written (``time.time()``
+        seconds), or None if it never was."""
+        self._load()
+        return self._saved_at
+
+    @property
+    def path(self) -> str | None:
+        """The current slot's file (None when saves are kept in memory)."""
+        return self._store.path(self._rel())
+
+    def use(self, slot: str | int) -> None:
+        """Switches to ``slot`` (a name or number), writing the current
+        one first. A slot that was never saved starts empty."""
+        name = _slot_name(slot)
+        if name == self._slot:
+            return
+        self._flush()
+        self._slot, self._data, self._written, self._saved_at = name, None, None, None
+
+    def exists(self, slot: str | int | None = None) -> bool:
+        """Whether ``slot`` (default: the current one) has been saved."""
+        name = self._slot if slot is None else _slot_name(slot)
+        if name == self._slot and self._data is not None and (self._data or self._touched):
+            return True
+        if self._store.folder is None:
+            return False
+        path = self._store.path(self._rel(name))
+        return path is not None and os.path.isfile(path)
+
+    def slots(self) -> list[SaveSlot]:
+        """Every saved slot, by name."""
+        self._flush()
+        out = []
+        for name in self._store.names("saves", ".json"):
+            if name == self._slot and self._data is not None:
+                out.append(SaveSlot(name, self._saved_at, len(self._data)))
+                continue
+            raw = self._store.read(self._rel(name))
+            if isinstance(raw, dict) and isinstance(raw.get("data"), dict):
+                out.append(SaveSlot(name, raw.get("saved_at"), len(raw["data"])))
+        if self._store.folder is None and self._data:
+            out.append(SaveSlot(self._slot, self._saved_at, len(self._data)))
+        return out
+
+    def delete(self, slot: str | int | None = None) -> None:
+        """Deletes ``slot`` (default: the current one, which then starts
+        empty)."""
+        name = self._slot if slot is None else _slot_name(slot)
+        self._store.remove(self._rel(name))
+        if name == self._slot:
+            self._data, self._touched, self._saved_at = {}, False, None
+            self._written = json.dumps({})
+
+    def flush(self) -> None:
+        """Writes changes now instead of at the end of the frame."""
+        self._touched = True
+        self._flush()
+
+    def __repr__(self):
+        return f"SaveData(slot={self._slot!r}, {dict(self._load())!r})"
+
+
+class Settings:
+    """``ctx.settings``: the player's settings, kept between runs and
+    shared by every save slot.
+
+    - ``volume`` (0 to 1) sets the master volume.
+    - ``graphics`` (``"low"`` … ``"beautiful"``) sets the graphics preset.
+    - Key bindings: ``bind("jump", "space")`` gives an action its default
+      keys, ``rebind("jump", "k")`` changes them for good, and
+      ``ctx.input.pressed("jump")`` checks them.
+    - Anything else: ``ctx.settings["sensitivity"] = 0.4``.
+
+    Changes apply and are written at the end of the frame.
+    """
+
+    def __init__(self, store, current_graphics):
+        self._store = store
+        self._current_graphics = current_graphics
+        self._loaded = False
+        self._volume = None
+        self._graphics = None
+        self._rebound = {}
+        self._values = {}
+        self._defaults = {}
+        self._dirty = False
+        self._apply = {}
+        self._initial_graphics = None
+
+    def _load(self):
+        if not self._loaded:
+            self._loaded = True
+            self._initial_graphics = self._current_graphics()
+            raw = self._store.read("settings.json")
+            raw = raw if isinstance(raw, dict) else {}
+            v = raw.get("volume")
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+                self._volume = min(max(float(v), 0.0), 1.0)
+                self._apply["volume"] = self._volume
+            g = raw.get("graphics")
+            if g in GRAPHICS_PRESETS:
+                self._graphics = g
+                self._apply["graphics"] = g
+            keys = raw.get("keys")
+            if isinstance(keys, dict):
+                self._rebound = {str(a): tuple(str(k) for k in ks)
+                                 for a, ks in keys.items() if isinstance(ks, list)}
+            values = raw.get("values")
+            if isinstance(values, dict):
+                self._values = values
+        return self
+
+    def _flush(self):
+        if not self._dirty:
+            return
+        data: dict[str, Any] = {"format": _SAVE_FORMAT, "values": self._values,
+                "keys": {a: list(ks) for a, ks in self._rebound.items()}}
+        if self._volume is not None:
+            data["volume"] = self._volume
+        if self._graphics is not None:
+            data["graphics"] = self._graphics
+        self._store.write("settings.json", data)
+        self._dirty = False
+
+    def _take_apply(self):
+        self._load()
+        out, self._apply = self._apply, {}
+        return out or None
+
+    @property
+    def volume(self) -> float:
+        """The master volume, 0 (silent) to 1 (full, the default)."""
+        v = self._load()._volume
+        return 1.0 if v is None else v
+
+    @volume.setter
+    def volume(self, v: float) -> None:
+        v = float(v)
+        if not math.isfinite(v):
+            raise ValueError(f"volume is 0 to 1, not {v!r}")
+        self._load()._volume = min(max(v, 0.0), 1.0)
+        self._apply["volume"] = self._volume
+        self._dirty = True
+
+    @property
+    def graphics(self) -> str:
+        """The graphics preset: ``"low"``, ``"medium"``, ``"high"``,
+        ``"ultra"`` or ``"beautiful"``. Until the player picks one it's
+        whatever the game started with."""
+        g = self._load()._graphics
+        if g is None:
+            g = self._current_graphics()
+        return g if g in GRAPHICS_PRESETS else "high"
+
+    @graphics.setter
+    def graphics(self, quality: str) -> None:
+        q = str(quality).strip().lower()
+        if q not in GRAPHICS_PRESETS:
+            raise ValueError(f"there's no graphics preset {quality!r}"
+                             f"{_did_you_mean(q, GRAPHICS_PRESETS)} "
+                             f"(presets: {', '.join(GRAPHICS_PRESETS)})")
+        self._load()._graphics = q
+        self._apply["graphics"] = q
+        self._dirty = True
+
+    # --- key bindings -----------------------------------------------------
+
+    @staticmethod
+    def _check_keys(action, keys):
+        if not isinstance(action, str) or not action or ":" in action:
+            raise ValueError(f"an action is a name like 'jump', not {action!r}")
+        out = []
+        for k in keys:
+            if isinstance(k, (list, tuple)):
+                out.extend(Settings._check_keys(action, k))
+                continue
+            name = str(getattr(k, "value", k)).strip().lower()
+            if name not in KEY_NAMES and name not in KEY_ALIASES and name not in MOUSE_BINDINGS:
+                options = (*KEY_NAMES, *KEY_ALIASES, *MOUSE_BINDINGS)
+                raise ValueError(f"{action!r}: there's no key {k!r}{_did_you_mean(name, options)} "
+                                 "(keys are like 'space', 'w', 'arrow_up', 'shift' or "
+                                 "'mouse_left')")
+            out.append(name)
+        return out
+
+    def bind(self, action: str, *keys: str) -> None:
+        """Gives ``action`` its default keys (``bind("jump", "space",
+        "w")``). A player's :meth:`rebind` wins over it. Call it from
+        ``start``; binding again replaces the defaults."""
+        self._defaults[action] = tuple(self._check_keys(action, keys))
+
+    def rebind(self, action: str, *keys: str) -> None:
+        """Changes ``action``'s keys for good (saved). With no keys the
+        action has none until :meth:`reset_keys`."""
+        self._load()._rebound[action] = tuple(self._check_keys(action, keys))
+        self._dirty = True
+
+    def keys(self, action: str) -> tuple[str, ...]:
+        """``action``'s keys now: the player's, else the defaults."""
+        self._load()
+        if action in self._rebound:
+            return self._rebound[action]
+        return self._defaults.get(action, ())
+
+    def bindings(self) -> dict[str, tuple[str, ...]]:
+        """Every action's keys, by action name."""
+        self._load()
+        return {a: self.keys(a) for a in sorted({*self._defaults, *self._rebound})}
+
+    def is_action(self, name: str) -> bool:
+        """Whether ``name`` is a bound action."""
+        return name in self._defaults or name in self._load()._rebound
+
+    def reset_keys(self, action: str | None = None) -> None:
+        """Puts ``action``'s keys (or every action's) back to the defaults."""
+        self._load()
+        if action is None:
+            self._rebound = {}
+        else:
+            self._rebound.pop(action, None)
+        self._dirty = True
+
+    # --- anything else ----------------------------------------------------
+
+    def __getitem__(self, key: str) -> Any:
+        values = self._load()._values
+        if key not in values:
+            raise KeyError(f"there's no setting {key!r}{_did_you_mean(str(key), values)} "
+                           "(use ctx.settings.get(key, default))")
+        value = values[key]
+        if isinstance(value, (list, dict)):
+            self._dirty = True
+        return value
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        if not isinstance(key, str):
+            raise TypeError(f"setting names are strings, not {key!r}")
+        self._load()._values[key] = _plain(value, f"ctx.settings[{key!r}]")
+        self._dirty = True
+
+    def __delitem__(self, key: str) -> None:
+        del self._load()._values[key]
+        self._dirty = True
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._load()._values
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self[key] if key in self._load()._values else default
+
+    def reset(self) -> None:
+        """Every setting back to the game's defaults: full volume, the
+        starting graphics, default keys, no other values."""
+        self._load()
+        if self._volume is not None:
+            self._apply["volume"] = 1.0
+        if self._graphics is not None and self._initial_graphics in GRAPHICS_PRESETS:
+            self._apply["graphics"] = self._initial_graphics
+        self._volume, self._graphics, self._rebound, self._values = None, None, {}, {}
+        self._dirty = True
+
+    @property
+    def path(self) -> str | None:
+        """The settings file (None when kept in memory)."""
+        return self._store.path("settings.json")
+
+    def __repr__(self):
+        return (f"Settings(volume={self.volume:g}, graphics={self.graphics!r}, "
+                f"keys={self.bindings()!r}, values={self._values!r})")
+
+
 class Context:
     """The ``ctx`` every script function receives."""
 
@@ -1921,6 +2506,12 @@ class Context:
         self.scene = SceneView(host)
         self.audio = Audio(host)
         self.hud = Hud()
+        store = _Store(host.save_dir, host.backend.log)
+        #: The current save slot (see :class:`SaveData`).
+        self.save = SaveData(store)
+        #: The player's settings (see :class:`Settings`).
+        self.settings = Settings(store, host.backend.graphics)
+        self.input._settings = self.settings
 
     @property
     def camera(self) -> Camera | None:
@@ -2117,16 +2708,18 @@ class FrameOutput:
     ``r``, ``s``, ``v``, ``cam`` (tuples), ``attrs`` (the whole new dict),
     ``audio`` ("play"/"stop"), ``despawn``). ``sounds``: ``[path, volume, pitch, position or None]``.
     ``hud``: draw items. ``lock``: True/False to capture/free the cursor,
-    or None.
+    or None. ``settings``: player settings to apply now, ``{"volume": 0.5,
+    "graphics": "low"}`` (either may be missing), or None.
     """
 
-    __slots__ = ("writes", "sounds", "hud", "lock")
+    __slots__ = ("writes", "sounds", "hud", "lock", "settings")
 
-    def __init__(self, writes, sounds, hud, lock):
+    def __init__(self, writes, sounds, hud, lock, settings=None):
         self.writes = writes
         self.sounds = sounds
         self.hud = hud
         self.lock = lock
+        self.settings = settings
 
 
 class Backend:
@@ -2162,6 +2755,10 @@ class Backend:
         return False
 
     def camera_3d(self, entity):
+        return None
+
+    def graphics(self):
+        """The graphics preset the game runs at (``"high"``...), or None."""
         return None
 
     def log(self, level, message):
@@ -2224,8 +2821,11 @@ class ScriptHost:
     """
 
     def __init__(self, backend, input_source=None, on_error="raise", hot_reload=False,
-                 module_prefix="automata_script_", internal_files=()):
+                 module_prefix="automata_script_", internal_files=(), save_dir=None):
         self.backend = backend
+        #: Where ``ctx.save`` and ``ctx.settings`` live (None: in memory).
+        self.save_dir = None if save_dir is None else os.path.abspath(save_dir)
+        self._save_error = None
         self.on_error = on_error
         self.hot_reload = hot_reload
         self.module_prefix = module_prefix
@@ -2524,16 +3124,17 @@ class ScriptHost:
                 self._name_count.pop(e.name, None)
         if gone and self._subs:
             self._drop_orphans()
+        self._persist()
         out = FrameOutput(writes, self.ctx.audio._queue, self.ctx.hud._items,
-                          self.ctx.input._lock_request)
+                          self.ctx.input._lock_request, self.ctx.settings._take_apply())
         self.ctx.audio._queue = []
         self.ctx.hud._items = []
         self.ctx.input._lock_request = None
         return out
 
     def stop(self):
-        """Calls ``stop(entity, ctx)`` on every started entity, then ends
-        every timer and tween."""
+        """Calls ``stop(entity, ctx)`` on every started entity, ends every
+        timer and tween, and writes any unsaved save data and settings."""
         for e in list(self.entities.values()):
             if e.script and e.id in self.started:
                 s = self.scripts.get(e.script)
@@ -2542,6 +3143,20 @@ class ScriptHost:
         for t in self._timers:
             t.active = False
         self._timers = []
+        self._persist()
+
+    def _persist(self):
+        """Writes changed save data and settings; a failure is logged
+        (once per different error), not raised."""
+        try:
+            self.ctx.save._flush()
+            self.ctx.settings._flush()
+            self._save_error = None
+        except OSError as exc:
+            message = f"couldn't save to {self.save_dir}: {exc}"
+            if message != self._save_error:
+                self._save_error = message
+                self.backend.log("warn", message)
 
     # --- scripts ----------------------------------------------------------
 

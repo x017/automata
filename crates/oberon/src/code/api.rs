@@ -114,6 +114,18 @@ const CONTEXT: &[Member] = &[
         "The scene camera Play mode renders through (None without one).",
         Some(Ty::Camera),
     ),
+    prop(
+        "save",
+        "SaveData",
+        "A dict kept between runs: ctx.save[\"coins\"] = 12. Slots: use(), slots().",
+        None,
+    ),
+    prop(
+        "settings",
+        "Settings",
+        "The player's settings, kept between runs: volume, graphics, bind(action, *keys).",
+        None,
+    ),
     meth(
         "log",
         "(*parts) -> None",
@@ -164,6 +176,12 @@ const INPUT: &[Member] = &[
             None,
         ),
         ArgKind::Key,
+    ),
+    meth(
+        "any_just_pressed",
+        "() -> str | None",
+        "The key that went down this frame (for rebinding screens), or None.",
+        None,
     ),
 ];
 

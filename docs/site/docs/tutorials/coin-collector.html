@@ -134,25 +134,89 @@ to the Player. Use the version in
 <a href="https://github.com/x017/automata/blob/main/examples/oberon/coin_run/scripts/player.py" rel="noopener"><code>examples/oberon/coin_run/scripts/player.py</code></a>:
 it walks relative to the camera, sprints, jumps, and has gravity. A
 character with a script skips the built-in controller.</p>
-<p>The heart of it:</p>
+<p>Its controls are <em>actions</em>: <code>start</code> binds names to default keys, and
+<code>update</code> asks about the names. A settings screen can then let players
+change the keys (<code>ctx.settings.rebind(&quot;jump&quot;, &quot;k&quot;)</code>), and the game
+remembers it:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;vy&quot;</span>] = <span class="tok-n">0.0</span>
+    ctx.settings.bind(<span class="tok-s">&quot;forward&quot;</span>, <span class="tok-s">&quot;w&quot;</span>, <span class="tok-s">&quot;arrow_up&quot;</span>)
+    ctx.settings.bind(<span class="tok-s">&quot;jump&quot;</span>, <span class="tok-s">&quot;space&quot;</span>)
+    ...</code></pre></div>
+<p>The heart of <code>update</code>:</p>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>vy = entity.state[<span class="tok-s">&quot;vy&quot;</span>]
 <span class="tok-k">if</span> ctx.physics.grounded(entity):
-    vy = JUMP <span class="tok-k">if</span> keys.just_pressed(<span class="tok-s">&quot;space&quot;</span>) <span class="tok-k">else</span> -<span class="tok-n">2.0</span>
+    vy = JUMP <span class="tok-k">if</span> keys.just_pressed(<span class="tok-s">&quot;jump&quot;</span>) <span class="tok-k">else</span> -<span class="tok-n">2.0</span>
 <span class="tok-k">else</span>:
     vy -= GRAVITY * ctx.time.delta
 entity.state[<span class="tok-s">&quot;vy&quot;</span>] = vy
 entity.character_velocity = (vx, vy, vz)</code></pre></div>
+<h2 id="7-remember-the-best-run">7. Remember the best run<a class="anchor" href="#7-remember-the-best-run" aria-label="Link to this section">#</a></h2>
+<p>Scores reset every time you press Play. To keep something between runs,
+put it in <code>ctx.save</code>. It works like a dict that's written to disk at the
+end of the frame. In Oberon it lives in your project's <code>.oberon/save</code>
+folder. In an exported game it lives in the player's own user-data
+folder. Here's the finished <code>scripts/rules.py</code>:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-s">&quot;&quot;&quot;rules: keeps score, announces the win, and remembers the best run.
+Attach to an empty entity.
+
+The best score and the coins found over every run live in ``ctx.save``, so
+they&#x27;re still there next time (in Oberon: ``.oberon/save``; in an exported
+game: the player&#x27;s user-data folder). F2 cycles the graphics preset, which
+``ctx.settings`` remembers too.
+&quot;&quot;&quot;</span>
+
+PRESETS = [<span class="tok-s">&quot;low&quot;</span>, <span class="tok-s">&quot;medium&quot;</span>, <span class="tok-s">&quot;high&quot;</span>, <span class="tok-s">&quot;ultra&quot;</span>, <span class="tok-s">&quot;beautiful&quot;</span>]
+
+
+<span class="tok-k">def</span> <span class="tok-f">coins</span>(ctx):
+    <span class="tok-k">return</span> [e <span class="tok-k">for</span> e <span class="tok-k">in</span> ctx.scene <span class="tok-k">if</span> e.name.startswith(<span class="tok-s">&quot;Coin&quot;</span>)]
+
+
+<span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;score&quot;</span>] = <span class="tok-n">0</span>
+    <span class="tok-b">print</span>(<span class="tok-s">f&quot;Collect {len(coins(ctx))} coins! WASD to move, Space to jump, Q/E to turn.&quot;</span>)
+    <span class="tok-k">if</span> <span class="tok-s">&quot;best&quot;</span> <span class="tok-k">in</span> ctx.save:
+        <span class="tok-b">print</span>(<span class="tok-s">f&quot;Welcome back! Best run: {ctx.save[&#x27;best&#x27;]}, &quot;</span>
+              <span class="tok-s">f&quot;coins found so far: {ctx.save.get(&#x27;coins_ever&#x27;, 0)}.&quot;</span>)
+
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    all_coins = coins(ctx)
+    score = <span class="tok-b">sum</span>(c.attributes.get(<span class="tok-s">&quot;value&quot;</span>, <span class="tok-n">1</span>) <span class="tok-k">for</span> c <span class="tok-k">in</span> all_coins <span class="tok-k">if</span> c.attributes.get(<span class="tok-s">&quot;collected&quot;</span>))
+    <span class="tok-k">if</span> score != entity.state[<span class="tok-s">&quot;score&quot;</span>]:
+        ctx.save[<span class="tok-s">&quot;coins_ever&quot;</span>] = ctx.save.get(<span class="tok-s">&quot;coins_ever&quot;</span>, <span class="tok-n">0</span>) + score - entity.state[<span class="tok-s">&quot;score&quot;</span>]
+        entity.state[<span class="tok-s">&quot;score&quot;</span>] = score
+        entity.attributes[<span class="tok-s">&quot;score&quot;</span>] = score
+        <span class="tok-b">print</span>(<span class="tok-s">f&quot;Score: {score}&quot;</span>)
+        <span class="tok-k">if</span> score &gt; ctx.save.get(<span class="tok-s">&quot;best&quot;</span>, <span class="tok-n">0</span>):
+            ctx.save[<span class="tok-s">&quot;best&quot;</span>] = score
+        <span class="tok-k">if</span> all_coins <span class="tok-k">and</span> <span class="tok-b">all</span>(c.attributes.get(<span class="tok-s">&quot;collected&quot;</span>) <span class="tok-k">for</span> c <span class="tok-k">in</span> all_coins):
+            <span class="tok-b">print</span>(<span class="tok-s">&quot;You found every coin!&quot;</span>)
+
+    <span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;f2&quot;</span>):
+        preset = PRESETS[(PRESETS.index(ctx.settings.graphics) + <span class="tok-n">1</span>) % <span class="tok-b">len</span>(PRESETS)]
+        ctx.settings.graphics = preset
+        <span class="tok-b">print</span>(<span class="tok-s">f&quot;Graphics: {preset}&quot;</span>)
+
+    ctx.hud.text(<span class="tok-s">f&quot;Coins {score}   Best {max(score, ctx.save.get(&#x27;best&#x27;, 0))}&quot;</span>, <span class="tok-n">16</span>, <span class="tok-n">16</span>, size=<span class="tok-n">22</span>)</code></pre></div>
+<p>Play twice. The second time, the Console says "Welcome back!" and the
+HUD shows your best. Press <strong>F2</strong> to cycle the graphics preset.
+<code>ctx.settings</code> remembers it, along with the volume and any rebound keys,
+in the same folder. To start fresh, delete <code>.oberon/save</code> (or call
+<code>ctx.save.clear()</code>).</p>
 <h2 id="what-you-learned">What you learned<a class="anchor" href="#what-you-learned" aria-label="Link to this section">#</a></h2>
 <ul><li>A behaviour script has <code>start(entity, ctx)</code> and <code>update(entity, ctx)</code>.</li><li><code>entity.state</code> is private memory; <code>entity.attributes</code> is shared, shown
 in the Inspector, and saved.</li><li>Find other entities with <code>ctx.scene[&quot;Name&quot;]</code> or by iterating
-<code>ctx.scene</code>.</li><li>Save to hot-reload; errors pause only the script that failed.</li><li>Have one writer per value.</li></ul>
+<code>ctx.scene</code>.</li><li>Save to hot-reload; errors pause only the script that failed.</li><li>Have one writer per value.</li><li><code>ctx.save</code> keeps values between runs; <code>ctx.settings</code> keeps the player's
+volume, graphics and keys.</li></ul>
 <p><strong>Next:</strong> <a href="third-person-camera.html">Third-person camera</a>. Make the camera
 chase the player.</p>
     </article>
     <footer class="pager"><a class="prev" href="first-scene.html"><small>Previous</small>Your first scene</a><a class="next" href="third-person-camera.html"><small>Next</small>Third-person camera</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/tutorials/coin-collector.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#1-a-coin">1. A coin</a></li><li class="l2"><a href="#2-the-coin-script">2. The coin script</a></li><li class="l2"><a href="#3-hot-reload">3. Hot reload</a></li><li class="l2"><a href="#4-many-coins-different-values">4. Many coins, different values</a></li><li class="l2"><a href="#5-keeping-score">5. Keeping score</a></li><li class="l2"><a href="#6-your-own-player-script-optional">6. Your own player script (optional)</a></li><li class="l2"><a href="#what-you-learned">What you learned</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#1-a-coin">1. A coin</a></li><li class="l2"><a href="#2-the-coin-script">2. The coin script</a></li><li class="l2"><a href="#3-hot-reload">3. Hot reload</a></li><li class="l2"><a href="#4-many-coins-different-values">4. Many coins, different values</a></li><li class="l2"><a href="#5-keeping-score">5. Keeping score</a></li><li class="l2"><a href="#6-your-own-player-script-optional">6. Your own player script (optional)</a></li><li class="l2"><a href="#7-remember-the-best-run">7. Remember the best run</a></li><li class="l2"><a href="#what-you-learned">What you learned</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

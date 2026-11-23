@@ -127,6 +127,8 @@ for `entity` and `ctx`.
 | `ctx.input.just_pressed("space")` | Pressed this frame |
 | `ctx.input.just_released("e")` | Released this frame |
 | `ctx.input.axis("a", "d")` | −1, 0, or 1 from two keys |
+| `ctx.input.pressed("jump")` | All of the above also take an action bound with `ctx.settings.bind` ([Settings](#player-settings)) |
+| `ctx.input.any_just_pressed()` | The key that went down this frame (`"k"`, `"mouse_left"`), or `None`. Use it for "press a key" screens |
 | `ctx.input.mouse_delta` | `(dx, dy)` mouse movement in pixels since last frame; +y is down |
 | `ctx.input.mouse_pressed("left")` | Mouse button held (`"left"`, `"right"`, `"middle"`); also `mouse_just_pressed` and `mouse_just_released` |
 | `ctx.input.lock_mouse(True)` | Hide and capture the cursor for mouse look. `False` frees it, and Stop always frees it |
@@ -154,6 +156,8 @@ for `entity` and `ctx`.
 | `ctx.tween(entity, "position", to, seconds, ease="out_cubic")`, `ctx.tween_value(start, end, seconds)` | Move a value smoothly over time ([Tweens and timers](#tweens-and-timers)) |
 | `ctx.after(seconds, fn, *args)`, `ctx.every(seconds, fn, *args, times=None)` | Call a function later, or again and again ([Tweens and timers](#tweens-and-timers)) |
 | `ctx.ease("out_back", t)` | `t` (0 to 1) through an easing curve |
+| `ctx.save["coins"] = 12` | Values that last between runs, in save slots ([Save games](#save-games)) |
+| `ctx.settings.volume`, `.graphics`, `.bind("jump", "space")` | The player's settings, remembered automatically ([Settings](#player-settings)) |
 | `ctx.log(...)`, `ctx.warn(...)` | Write to the Console. `print()` works too |
 
 HUD shapes last one frame, so draw them in `update` every frame you want
@@ -357,6 +361,110 @@ made them goes away, and a tween also stops when the entity it moves goes
 away. They pause while their script is paused by an error, and Stop ends
 them all. Functions they call follow hot reloads like subscribers do. If
 one raises, its script pauses like any other script error.
+
+## Save games
+
+`ctx.save` is a dict that outlives the run. Put anything in it that a
+player expects to find next time:
+
+```python
+def start(entity, ctx):
+    if "checkpoint" in ctx.save:
+        entity.transform.position = ctx.save["checkpoint"]
+
+def update(entity, ctx):
+    ...
+    ctx.save["coins"] = ctx.save.get("coins", 0) + 1
+    ctx.save["inventory"].append("key")   # changes inside lists count too
+```
+
+- **Values** are JSON: numbers, strings, `True`/`False`/`None`, and lists
+  and dicts of those. Tuples come back as lists. Anything else, such as an
+  entity or a `NaN`, raises an error when you assign it, so nothing bad
+  reaches the file.
+- **Writing** happens at the end of the frame, and only if something
+  changed. Use `ctx.save.flush()` to write now. Writes are atomic (a temp
+  file, then a rename), so a crash can't leave half a save. A file that
+  won't parse is renamed to `….broken`, a warning goes to the Console, and
+  the slot starts empty.
+- **Slots.** Everything goes to the slot named `"default"` until you switch:
+
+  | | |
+  |---|---|
+  | `ctx.save.use(2)` / `use("hard mode")` | Switch slots (the old one is written first). A new slot starts empty |
+  | `ctx.save.slot` | The current slot's name |
+  | `ctx.save.slots()` | Saved slots: each has `name`, `saved_at` (`time.time()` seconds) and `keys` (how many values). Use them for a load screen |
+  | `ctx.save.exists(slot=None)`, `ctx.save.saved_at` | Whether a slot was saved; when the current one was |
+  | `ctx.save.delete(slot=None)`, `ctx.save.clear()` | Delete a slot's file; empty the current slot |
+  | `get`, `setdefault`, `pop`, `update`, `keys`, `items`, `in`, `len`, `del` | The usual dict methods |
+
+- **Where the files go.** Each slot is `saves/<slot>.json` in the save
+  folder:
+
+  | Running in | Save folder |
+  |---|---|
+  | Oberon's Play | `<project>/.oberon/save` (delete it to start fresh) |
+  | `run_scene(...)` | `.oberon/save` next to the scene. Headless runs keep nothing unless you pass `save_dir=` |
+  | An exported game | A folder named after the game (`game.json`'s `name`) in the player's user-data folder: `%APPDATA%` on Windows, `~/Library/Application Support` on macOS, `$XDG_DATA_HOME` or `~/.local/share` on Linux |
+
+  Setting the `AUTOMATA_SAVE_DIR` environment variable overrides all of
+  them. `.oberon/` is never exported, so your test saves don't ship.
+
+## Player settings
+
+`ctx.settings` holds the player's settings. It's saved in the same folder
+as `settings.json`, shared by every save slot, and applied as soon as the
+game starts:
+
+| | |
+|---|---|
+| `ctx.settings.volume = 0.5` | Master volume, 0 to 1 (1 by default) |
+| `ctx.settings.graphics = "low"` | Graphics preset: `"low"`, `"medium"`, `"high"`, `"ultra"` or `"beautiful"`. Until the player picks one, it reads as the preset the game is running at |
+| `ctx.settings["sensitivity"] = 0.4` | Any other setting, with the same JSON rules as `ctx.save` |
+| `ctx.settings.reset()` | Everything back to the game's defaults |
+
+In Oberon's Play mode, the graphics setting overrides the editor's preset
+until you press Stop.
+
+**Key bindings.** Name your controls as *actions* and give them default
+keys in `start`. Then ask `ctx.input` about the action instead of a key:
+
+```python
+def start(entity, ctx):
+    ctx.settings.bind("jump", "space")
+    ctx.settings.bind("fire", "mouse_left", "f")
+
+def update(entity, ctx):
+    if ctx.input.just_pressed("jump"):
+        ...
+```
+
+A settings screen changes them with `rebind`. The change is saved, and it
+wins over `bind` from then on:
+
+```python
+def update(entity, ctx):
+    if entity.state.get("waiting"):
+        key = ctx.input.any_just_pressed()
+        if key and key != "escape":
+            ctx.settings.rebind("jump", key)
+            entity.state["waiting"] = False
+        return
+    if ctx.input.just_pressed("f1"):
+        entity.state["waiting"] = True
+    ctx.hud.text(f"Jump: {', '.join(ctx.settings.keys('jump'))}", 16, 16)
+```
+
+| | |
+|---|---|
+| `bind(action, *keys)` | Default keys: [key names](#ctx) or `"mouse_left"`/`"mouse_right"`/`"mouse_middle"`. Binding again replaces the defaults |
+| `rebind(action, *keys)` | The player's keys, saved. With no keys, the action has none |
+| `keys(action)`, `bindings()` | One action's keys now, or every action's |
+| `reset_keys(action=None)` | Back to the defaults (one action or all) |
+
+A misspelt key (`"spce"`) raises an error that suggests the right one. An
+action name that was never bound is treated as a key name, so
+`ctx.input.pressed("space")` keeps working.
 
 ## Hot reload
 

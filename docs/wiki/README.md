@@ -55,6 +55,7 @@ hours.
 | Learn every panel and how to navigate | [The interface](oberon/interface.md) |
 | Write behaviour scripts | [Scripting](oberon/scripting.md) |
 | Move things smoothly, or run code later | [Tweens and timers](oberon/scripting.md#tweens-and-timers) |
+| Save progress, and let players set volume, graphics and keys | [Save games](oberon/scripting.md#save-games) and [Player settings](oberon/scripting.md#player-settings) |
 | Place and drive cameras | [Cameras](oberon/cameras.md) |
 | Tune lighting, fog, and tone mapping, and test graphics | [Graphics](oberon/graphics.md) |
 | Paint grass, flowers and rocks onto the ground | [Grass & foliage](oberon/foliage.md) |

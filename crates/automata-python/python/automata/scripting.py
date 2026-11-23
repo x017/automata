@@ -245,6 +245,14 @@ class _EngineBackend(api.Backend):
                 ctx.screen.rect(item["x"], item["y"], item["w"], item["h"], color)
         if out.lock is not None:
             ctx.screen.lock_cursor(out.lock)
+        if out.settings:
+            if "volume" in out.settings:
+                ctx.audio.set_master_volume(float(out.settings["volume"]))
+            if "graphics" in out.settings:
+                ctx.screen.set_graphics(out.settings["graphics"])
+
+    def graphics(self) -> Any:
+        return self.ctx.screen.graphics if self.ctx is not None else None
 
     def resolve(self, script: Optional[str]) -> Optional[str]:
         """A scene's script path (relative to the scene file) made absolute."""
@@ -315,12 +323,15 @@ class SceneScripts:
     """The behaviour scripts of one running scene, advanced frame by frame.
 
     `run_scene` drives one of these from the game loop: call `tick(ctx)` in
-    every update callback, and `stop()` once the game ends.
+    every update callback, and `stop()` once the game ends. `save_dir` is
+    where `ctx.save` and `ctx.settings` are kept; without one they last
+    only while it runs.
     """
 
-    def __init__(self, base_dir: str) -> None:
+    def __init__(self, base_dir: str, save_dir: Optional[str] = None) -> None:
         self.backend = _EngineBackend(base_dir)
-        self.host = api.ScriptHost(self.backend, self.backend.keys, on_error="raise")
+        self.host = api.ScriptHost(self.backend, self.backend.keys, on_error="raise",
+                                   save_dir=save_dir)
 
     def tick(self, ctx: Any) -> None:
         """Runs every script for this frame and queues what they changed."""
@@ -400,6 +411,7 @@ def run_scene(
     *,
     max_frames: Optional[int] = None,
     update: Optional[Callable[[Any], None]] = None,
+    save_dir: "str | bool | None" = None,
     **game_options: Any,
 ) -> int:
     """Loads an Oberon scene file and runs it with its behaviour scripts.
@@ -409,6 +421,14 @@ def run_scene(
     Extra keyword arguments go to `Game` (`headless=True`, `title=...`).
     Exceptions raised by scripts propagate out of `run_scene`, like any
     update callback. Returns the number of frames run.
+
+    `save_dir` is where `ctx.save` and `ctx.settings` live. By default
+    that's `.oberon/save` next to the scene, the same folder Oberon's Play
+    mode uses, except in headless runs, which start fresh and keep nothing
+    (so tests don't see each other's saves). Pass a folder to keep them
+    there, `True` for `.oberon/save` even when headless, or `False` to keep
+    nothing. Exported games use the player's user-data
+    folder.
     """
     scene = _core.Scene.load(path)
 
@@ -417,7 +437,12 @@ def run_scene(
     game_options.setdefault("title", f"{os.path.basename(path)} — AUTOMATA")
     game = Game(**game_options)
     game.load_scene(scene)
-    scripts = SceneScripts(os.path.dirname(os.path.abspath(path)))
+    base = os.path.dirname(os.path.abspath(path))
+    if save_dir is None:
+        save_dir = not game_options.get("headless")
+    if save_dir is True:
+        save_dir = api.dev_save_dir(base)
+    scripts = SceneScripts(base, save_dir=save_dir if isinstance(save_dir, str) else None)
     stats = _FrameStats.from_env()
 
     def tick(ctx: Any) -> None:

@@ -1513,6 +1513,8 @@ impl EditorApp {
         frame.mouse_buttons = buttons;
         frame.mouse_delta = [self.input.mouse_delta.0, self.input.mouse_delta.1];
         frame.mouse_locked = self.lock_active;
+        frame.graphics =
+            bridge::quality_key(play.graphics.unwrap_or(self.ui.prefs.graphics_quality));
         let s = {
             let dpi = self
                 .window
@@ -1969,8 +1971,14 @@ impl EditorApp {
             prev + (ms - prev) * 0.08
         };
         if let Some(r) = &mut self.renderer {
-            if r.quality() != self.ui.prefs.graphics_quality {
-                r.set_quality(self.ui.prefs.graphics_quality);
+            // A game's own graphics setting wins while it plays.
+            let quality = self
+                .play
+                .as_ref()
+                .and_then(|p| p.graphics)
+                .unwrap_or(self.ui.prefs.graphics_quality);
+            if r.quality() != quality {
+                r.set_quality(quality);
             }
             if r.vsync() != self.ui.prefs.vsync {
                 r.set_vsync(self.ui.prefs.vsync);

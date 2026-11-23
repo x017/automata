@@ -97,6 +97,14 @@ pub struct PlaySession {
     /// Collision triangles of mesh / convex-hull colliders by shape key,
     /// read out of the physics world once (scripts raycast against them).
     mesh_tris: std::cell::RefCell<HashMap<u64, std::sync::Arc<MeshTris>>>,
+    /// The graphics preset the game's settings ask for
+    /// (`ctx.settings.graphics`); Play renders at it instead of the
+    /// editor's preset.
+    pub graphics: Option<automata_renderer::GraphicsQuality>,
+    /// The master volume the game's settings ask for.
+    volume: Option<f32>,
+    /// The master volume last given to the audio engine.
+    applied_volume: Option<f32>,
 }
 
 impl PlaySession {
@@ -182,6 +190,9 @@ impl PlaySession {
             hud: Vec::new(),
             lock_request: None,
             mesh_tris: std::cell::RefCell::default(),
+            graphics: None,
+            volume: None,
+            applied_volume: None,
         }
     }
 
@@ -325,6 +336,12 @@ impl PlaySession {
         if reply.lock.is_some() {
             self.lock_request = reply.lock;
         }
+        if let Some(volume) = reply.settings.volume {
+            self.volume = Some(volume);
+        }
+        if reply.settings.graphics.is_some() {
+            self.graphics = reply.settings.graphics;
+        }
     }
 
     /// Runs the scene's audio for this frame: `play_on_start` sources,
@@ -340,6 +357,12 @@ impl PlaySession {
             return Vec::new();
         }
         engine.set_underwater(self.camera_under_water());
+        if self.volume != self.applied_volume {
+            if let Some(volume) = self.volume {
+                engine.set_master_volume(f64::from(volume), 0.0);
+            }
+            self.applied_volume = self.volume;
+        }
         let commands = std::mem::take(&mut self.audio_commands);
         self.sources
             .update(self.scene.world(), engine, Some(root), commands)
@@ -360,6 +383,9 @@ impl PlaySession {
         self.audio_commands.clear();
         self.sources.stop_all(engine);
         engine.set_underwater(false);
+        if self.applied_volume.take().is_some() {
+            engine.set_master_volume(1.0, 0.0);
+        }
     }
 
     /// Pauses or resumes this session's sounds.
@@ -1447,6 +1473,34 @@ pub(crate) mod tests {
             play.stop_audio(&mut engine);
             assert!(!engine.is_underwater());
         }
+    }
+
+    /// `ctx.settings` volume and graphics reach the session, the master
+    /// volume is set once per change, and Stop puts it back.
+    #[test]
+    fn player_settings_apply_while_playing() {
+        use crate::bridge::{FrameReply, PlayerSettings};
+        use automata_renderer::GraphicsQuality as Q;
+        let doc = Document::starter();
+        let mut play = PlaySession::start(&doc);
+        let mut engine = AudioEngine::new();
+        let root = std::env::temp_dir();
+        assert_eq!(play.graphics, None);
+        play.apply_frame(&FrameReply {
+            settings: PlayerSettings {
+                volume: Some(0.3),
+                graphics: Some(Q::Low),
+            },
+            ..FrameReply::default()
+        });
+        assert_eq!(play.graphics, Some(Q::Low));
+        play.update_audio(&mut engine, &root);
+        assert_eq!(play.applied_volume, Some(0.3));
+        // A reply without settings changes nothing.
+        play.apply_frame(&FrameReply::default());
+        assert_eq!((play.graphics, play.volume), (Some(Q::Low), Some(0.3)));
+        play.stop_audio(&mut engine);
+        assert_eq!(play.applied_volume, None);
     }
 
     /// Water in play mode: a crate floats at the surface, and scripts read

@@ -548,11 +548,36 @@ conformance runner now uses `fixed_delta=1/60`, so both count the same
 time. The campfire's crackle now books its pops with `ctx.after`.
 `at.Game`'s object-oriented loop doesn't have them yet.
 
-### C3. Save games and settings ⬜ S
+### C3. Save games and settings ✅ S
 - `ctx.save["coins"] = 12`, plus slots, stored as JSON in the platform's
   user-data folder, so it works in exports.
 - Player settings (volume, graphics quality, key bindings) persisted
   automatically.
+
+Done. `ctx.save` is a dict of JSON values. It's written atomically at the
+end of any frame that changed it, nested edits included. A broken file is
+set aside with a warning. Slots are `saves/<slot>.json`, with `use`,
+`slots()`, `exists`, `delete` and `clear`. `ctx.settings` is a separate
+`settings.json` shared by every slot:
+- `volume` sets the master volume, both in Oberon and under `run_scene`.
+- `graphics` sets the preset. In Play it overrides the editor's preset
+  until Stop.
+- `bind` and `rebind` make actions that `ctx.input.pressed("jump")`
+  understands (mouse buttons too). `any_just_pressed()` drives "press a
+  key" screens.
+
+Saved settings apply on the first frame. Saves go to:
+- Oberon: `.oberon/save`, which is never exported.
+- `run_scene`: `.oberon/save` next to the scene. Headless runs keep
+  nothing.
+- Exported games: `automata.player` uses the user-data folder named after
+  the game (`%APPDATA%`, `~/Library/Application Support`, or XDG).
+
+`$AUTOMATA_SAVE_DIR` overrides all of them. Coin Run remembers its best
+run and lifetime coins, binds its controls as actions, and cycles the
+graphics preset on F2. The coin-collector tutorial gained a step 7 for
+this. Games run from a `main` script on the object-oriented `at.Game`
+loop don't get `ctx.save` yet.
 
 ### C4. Navigation ⬜ L
 - A navmesh baked from static colliders (voxelise → regions → polygons),
