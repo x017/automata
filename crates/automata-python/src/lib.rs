@@ -23,6 +23,7 @@ mod components;
 mod context;
 mod error;
 mod events;
+mod foliage;
 mod game;
 mod gamepads;
 mod keys;
@@ -82,6 +83,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<particles::PyParticleEmitter>()?;
     m.add_class::<components::PyEnvironment>()?;
     m.add_class::<components::PyWater>()?;
+    m.add_class::<foliage::PyGrass>()?;
+    m.add_class::<foliage::PyScatter>()?;
     m.add_class::<components::PyAudioSource>()?;
     m.add_class::<animation::PyAnimation>()?;
     m.add_class::<animation::PyAnimationRef>()?;

@@ -86,6 +86,13 @@ pub struct EntityData {
     /// the Beautiful preset).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub water: Option<Water>,
+    /// A field of grass blades.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grass: Option<automata_scene::Grass>,
+    /// Draws the entity's model at many spots on the ground instead of
+    /// once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scatter: Option<automata_scene::Scatter>,
     /// Primitive mesh visual.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh_visual: Option<MeshVisualData>,
@@ -336,6 +343,12 @@ impl SceneFile {
             if let Some(water) = eref.get::<&Water>() {
                 data.water = Some(*water);
             }
+            if let Some(grass) = eref.get::<&automata_scene::Grass>() {
+                data.grass = Some(automata_scene::Grass::clone(&grass));
+            }
+            if let Some(scatter) = eref.get::<&automata_scene::Scatter>() {
+                data.scatter = Some(automata_scene::Scatter::clone(&scatter));
+            }
             if let Some(visual) = eref.get::<&MeshVisual>() {
                 data.mesh_visual = Some(MeshVisualData::from(&*visual));
             }
@@ -419,6 +432,12 @@ impl SceneFile {
             }
             if let Some(water) = &data.water {
                 let _ = world.insert_one(entity, *water);
+            }
+            if let Some(grass) = &data.grass {
+                let _ = world.insert_one(entity, grass.clone());
+            }
+            if let Some(scatter) = &data.scatter {
+                let _ = world.insert_one(entity, scatter.clone());
             }
             if let Some(visual) = &data.mesh_visual {
                 let _ = world.insert_one(entity, MeshVisual::from(visual));
@@ -814,6 +833,41 @@ mod tests {
             SceneFile::from_world(&world).entities[0].animation,
             Some(walk)
         );
+    }
+
+    #[test]
+    fn grass_and_scatter_round_trip_with_their_strokes() {
+        let grass = automata_scene::Grass {
+            density: 25.0,
+            strokes: vec![automata_scene::Dab::paint(
+                glam::Vec3::new(1.0, 0.5, 2.0),
+                glam::Vec3::Y,
+                1.5,
+            )],
+            ..automata_scene::Grass::area(8.0, 6.0)
+        };
+        let scatter = automata_scene::Scatter::area(10.0, 10.0);
+        let file = SceneFile {
+            version: 1,
+            entities: vec![EntityData {
+                grass: Some(grass.clone()),
+                scatter: Some(scatter.clone()),
+                ..EntityData::default()
+            }],
+        };
+        let back = SceneFile::from_ron(&file.to_ron().unwrap()).unwrap();
+        assert_eq!(back.entities[0].grass.as_ref(), Some(&grass));
+        assert_eq!(back.entities[0].scatter.as_ref(), Some(&scatter));
+        // Fields left out keep their defaults.
+        let partial =
+            SceneFile::from_ron("(version: 1, entities: [(grass: Some((area: (4.0, 4.0))))])")
+                .unwrap();
+        let loaded = partial.entities[0].grass.clone().unwrap();
+        assert_eq!(loaded.area, [4.0, 4.0]);
+        assert!((loaded.height - automata_scene::Grass::default().height).abs() < f32::EPSILON);
+        let mut world = automata_scene::SceneWorld::new();
+        partial.apply_to_world(&mut world);
+        assert_eq!(world.query::<&automata_scene::Grass>().iter().count(), 1);
     }
 
     #[test]

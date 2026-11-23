@@ -555,6 +555,14 @@ impl Animator {
         self.springs.is_some()
     }
 
+    /// Sets the scene wind its spring bones blow in (see
+    /// [`SpringSim::set_wind`]).
+    pub fn set_wind(&mut self, wind: Vec3) {
+        if let Some(springs) = &mut self.springs {
+            springs.set_wind(wind);
+        }
+    }
+
     /// The spring bones' state, if the model has any.
     #[must_use]
     pub fn springs(&self) -> Option<&SpringSim> {
@@ -864,6 +872,11 @@ pub fn animation_state(world: &SceneWorld, entity: Entity) -> Option<AnimationSt
 /// onto the [`Transform`] otherwise.
 pub fn animate(world: &mut SceneWorld, dt: f32) {
     attach_animators(world, true);
+    // Spring bones blow in the scene's wind.
+    let wind = (&mut world.query::<&automata_renderer::Environment>())
+        .into_iter()
+        .next()
+        .map_or(Vec3::ZERO, automata_renderer::Environment::wind_vector);
     let mut moves: Vec<(Entity, Vec3)> = Vec::new();
     for (entity, animator, renderer, place) in world.query_mut::<(
         Entity,
@@ -872,6 +885,7 @@ pub fn animate(world: &mut SceneWorld, dt: f32) {
         Option<&GlobalTransform>,
     )>() {
         let place = place.map_or(Mat4::IDENTITY, |g| g.0);
+        animator.set_wind(wind);
         animator.advance_in(dt, place);
         if let Some(renderer) = renderer {
             renderer.joints = Some(animator.palette());
@@ -1248,6 +1262,19 @@ mod tests {
         // The pose (and so the palette) shows the tail hanging too.
         let g = animator.rig().globals(animator.pose());
         assert!(g[2].transform_point3(Vec3::ZERO).y < -0.95);
+        drop(animator);
+        // The scene's wind (toward +X) blows it out sideways.
+        scene.spawn((automata_renderer::Environment {
+            wind: 1.0,
+            wind_direction: 0.0,
+            ..automata_renderer::Environment::default()
+        },));
+        for _ in 0..120 {
+            animate(scene.world_mut(), 1.0 / 60.0);
+        }
+        let animator = scene.world().get::<&Animator>(e).unwrap();
+        let (_, tip) = animator.springs().unwrap().tips()[0];
+        assert!(tip.x > at.x + 0.3, "streams downwind: {tip}");
     }
 
     #[test]

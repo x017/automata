@@ -37,6 +37,8 @@ pub struct DrawList {
     pub(crate) time: Option<f32>,
     pub(crate) ripples: Option<crate::RippleMap>,
     pub(crate) particles: Vec<crate::ParticleBatch>,
+    pub(crate) grass: Vec<crate::GrassField>,
+    pub(crate) grass_pushers: Vec<crate::GrassPusher>,
 }
 
 impl DrawList {
@@ -144,6 +146,36 @@ impl DrawList {
         &self.point_lights
     }
 
+    /// Draws a field of grass (see [`crate::GrassField`]). Its blades sway
+    /// with the environment's wind and bend away from the frame's
+    /// [pushers](Self::push_grass).
+    pub fn grass(&mut self, field: crate::GrassField) {
+        if !field.chunks.is_empty() {
+            self.grass.push(field);
+        }
+    }
+
+    /// Bends grass away from something this frame: a character's feet, a
+    /// rolling ball. The [`crate::MAX_GRASS_PUSHERS`] nearest the camera
+    /// count.
+    pub fn push_grass(&mut self, pusher: crate::GrassPusher) {
+        if pusher.radius > 0.0 {
+            self.grass_pushers.push(pusher);
+        }
+    }
+
+    /// The grass fields recorded so far.
+    #[must_use]
+    pub fn grass_fields(&self) -> &[crate::GrassField] {
+        &self.grass
+    }
+
+    /// The grass pushers recorded so far.
+    #[must_use]
+    pub fn grass_pushers(&self) -> &[crate::GrassPusher] {
+        &self.grass_pushers
+    }
+
     /// Sets the animation time (seconds) for time-driven effects such as
     /// water waves. Without one, the renderer uses its own clock.
     pub fn set_time(&mut self, seconds: f32) {
@@ -238,6 +270,8 @@ impl DrawList {
         self.time = None;
         self.ripples = None;
         self.particles.clear();
+        self.grass.clear();
+        self.grass_pushers.clear();
         // The clear color intentionally persists across frames.
     }
 }
@@ -262,6 +296,8 @@ impl Default for DrawList {
             time: None,
             ripples: None,
             particles: Vec::new(),
+            grass: Vec::new(),
+            grass_pushers: Vec::new(),
         }
     }
 }

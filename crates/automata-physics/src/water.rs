@@ -130,6 +130,12 @@ impl PhysicsWorld3D {
         self.water.clear();
         self.winds.clear();
         let time = self.water_time();
+        // The scene's wind blows over every water surface too: spray goes
+        // with whichever is stronger, the water's own or the scene's.
+        let scene_wind = (&mut scene.query::<&automata_renderer::Environment>())
+            .into_iter()
+            .next()
+            .map(|env| (env.wind.clamp(0.0, 1.0), env.wind_direction.to_radians()));
         for (water, global, local) in
             &mut scene.query::<(&Water, Option<&GlobalTransform>, Option<&Transform>)>()
         {
@@ -140,10 +146,14 @@ impl PhysicsWorld3D {
                 GlobalTransform::matrix,
             );
             self.water.push(WaterSurface::new(water, model, time));
-            self.winds.push((
+            let own = (
                 water.wind.clamp(0.0, 1.0),
                 water.wave_direction.to_radians(),
-            ));
+            );
+            self.winds.push(match scene_wind {
+                Some(scene) if scene.0 > own.0 => scene,
+                _ => own,
+            });
         }
     }
 

@@ -574,6 +574,7 @@ impl Application {
             // Record the scene into the throwaway draw list: headless frames
             // exercise the same scene-to-renderer bridge as windowed ones.
             automata_scene::record_draw_list(self.world.scene.world(), &mut draw);
+            automata_physics::record_grass_pushers(self.world.scene.world(), &mut draw);
             draw.set_time(self.world.physics3d.water_time());
             if let Some(camera) = draw.camera_3d() {
                 self.world

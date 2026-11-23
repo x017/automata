@@ -270,6 +270,25 @@ impl ViewportRenderer {
         }
     }
 
+    /// Where the world ray from `origin` along `dir` first meets a mesh in
+    /// the edit-time world (or else the ground, y = 0): the point and the
+    /// surface's normal. Where the foliage brush paints.
+    #[must_use]
+    pub fn surface_under(
+        &self,
+        origin: glam::Vec3,
+        dir: glam::Vec3,
+    ) -> Option<(glam::Vec3, glam::Vec3)> {
+        let hit = self.built_counter.and_then(|_| {
+            automata_scene::raycast_surfaces(self.scene.world(), origin, dir, 5_000.0)
+        });
+        hit.map(|h| (h.point, h.normal)).or_else(|| {
+            (dir.y < -1e-3)
+                .then(|| (origin + dir * (-origin.y / dir.y), glam::Vec3::Y))
+                .filter(|(p, _)| p.distance(origin) < 5_000.0)
+        })
+    }
+
     /// Advances the edit-time world's particle emitters by `dt` seconds,
     /// so fire burns and smoke rises in the scene view while editing.
     pub fn tick_particles(&mut self, dt: f32) {
@@ -540,6 +559,7 @@ impl ViewportRenderer {
         let mut draw = DrawList::new();
         draw.set_clear_color(wgpu_color(0.012, 0.012, 0.012, 1.0));
         automata_scene::record_draw_list(world, &mut draw);
+        automata_physics::record_grass_pushers(world, &mut draw);
         // Play mode runs the waves on the physics clock, so what floats
         // rides exactly the waves that are drawn.
         if let Some(water) = water {

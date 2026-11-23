@@ -450,18 +450,33 @@ fn mesh_buffers(skinned: bool) -> Vec<Option<wgpu::VertexBufferLayout<'static>>>
     vec![Some(geometry_buffer()), Some(second)]
 }
 
+/// The vertex buffers of a mesh pipeline for a batch kind: grass draws
+/// baked chunks (one buffer, see `grass.rs`), the rest geometry plus
+/// instances or skin.
+fn mesh_buffers_for(
+    kind: crate::batch::BatchKind,
+) -> Vec<Option<wgpu::VertexBufferLayout<'static>>> {
+    if kind == crate::batch::BatchKind::Grass {
+        vec![Some(crate::grass::grass_vertex_layout())]
+    } else {
+        mesh_buffers(kind == crate::batch::BatchKind::Skinned)
+    }
+}
+
 /// The bind group 1 layout of a mesh pipeline: skinned draws' model and
 /// joints; plain ones have none (their model matrices are per instance).
 fn model_group(shared: &PipelineShared, skinned: bool) -> Option<&wgpu::BindGroupLayout> {
     skinned.then_some(&shared.skinned_model_layout)
 }
 
-/// The plain and skinned variants of a pipeline, and for the shaded mesh
-/// pipelines a fading one (plain, dithering copies away, see `batch.rs`).
+/// The plain and skinned variants of a pipeline, for the shaded mesh
+/// pipelines a fading one (plain, dithering copies away, see `batch.rs`),
+/// and for the camera's a grass one (`vs_grass`, see `grass.rs`).
 pub(crate) struct PipelinePair {
     pub plain: wgpu::RenderPipeline,
     pub skinned: wgpu::RenderPipeline,
     pub faded: Option<wgpu::RenderPipeline>,
+    pub grass: Option<wgpu::RenderPipeline>,
 }
 
 impl PipelinePair {
@@ -470,6 +485,7 @@ impl PipelinePair {
         match kind {
             crate::batch::BatchKind::Skinned => &self.skinned,
             crate::batch::BatchKind::Faded => self.faded.as_ref().unwrap_or(&self.plain),
+            crate::batch::BatchKind::Grass => self.grass.as_ref().unwrap_or(&self.plain),
             crate::batch::BatchKind::Plain => &self.plain,
         }
     }
@@ -538,6 +554,7 @@ pub(crate) fn create_mesh_pipelines(
         plain: variant(crate::batch::BatchKind::Plain),
         skinned: variant(crate::batch::BatchKind::Skinned),
         faded: Some(variant(crate::batch::BatchKind::Faded)),
+        grass: Some(variant(crate::batch::BatchKind::Grass)),
     }
 }
 
@@ -667,6 +684,7 @@ pub(crate) fn create_shadow_pipelines(
         plain: create_shadow_pipeline(device, shared, false),
         skinned: create_shadow_pipeline(device, shared, true),
         faded: None,
+        grass: None,
     }
 }
 
@@ -710,21 +728,17 @@ fn create_mesh_pipeline(
         label: Some(match kind {
             crate::batch::BatchKind::Skinned => "skinned mesh",
             crate::batch::BatchKind::Faded => "fading mesh",
+            crate::batch::BatchKind::Grass => "grass",
             crate::batch::BatchKind::Plain => "mesh",
         }),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &shared.mesh_shader,
-            entry_point: Some(if skinned { "vs_skinned" } else { "vs_main" }),
+            entry_point: Some(vertex_entry(kind)),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &mesh_buffers(skinned),
+            buffers: &mesh_buffers_for(kind),
         },
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            cull_mode: Some(wgpu::Face::Back),
-            front_face: wgpu::FrontFace::Ccw,
-            ..wgpu::PrimitiveState::default()
-        },
+        primitive: mesh_primitive(kind),
         depth_stencil: Some(wgpu::DepthStencilState {
             format: depth_format,
             depth_write_enabled: Some(true),
@@ -762,9 +776,34 @@ pub(crate) fn create_depth_prepass_pipelines(
     shared: &PipelineShared,
 ) -> PipelinePair {
     PipelinePair {
-        plain: create_depth_prepass_pipeline(device, shared, false),
-        skinned: create_depth_prepass_pipeline(device, shared, true),
+        plain: create_depth_prepass_pipeline(device, shared, crate::batch::BatchKind::Plain),
+        skinned: create_depth_prepass_pipeline(device, shared, crate::batch::BatchKind::Skinned),
         faded: None,
+        grass: Some(create_depth_prepass_pipeline(
+            device,
+            shared,
+            crate::batch::BatchKind::Grass,
+        )),
+    }
+}
+
+/// Triangles, back faces culled, except grass: its blades are one-sided
+/// and show from both sides.
+fn mesh_primitive(kind: crate::batch::BatchKind) -> wgpu::PrimitiveState {
+    wgpu::PrimitiveState {
+        topology: wgpu::PrimitiveTopology::TriangleList,
+        cull_mode: (kind != crate::batch::BatchKind::Grass).then_some(wgpu::Face::Back),
+        front_face: wgpu::FrontFace::Ccw,
+        ..wgpu::PrimitiveState::default()
+    }
+}
+
+/// The mesh shader's vertex entry point for a batch kind.
+fn vertex_entry(kind: crate::batch::BatchKind) -> &'static str {
+    match kind {
+        crate::batch::BatchKind::Skinned => "vs_skinned",
+        crate::batch::BatchKind::Grass => "vs_grass",
+        crate::batch::BatchKind::Plain | crate::batch::BatchKind::Faded => "vs_main",
     }
 }
 
@@ -773,8 +812,9 @@ pub(crate) fn create_depth_prepass_pipelines(
 fn create_depth_prepass_pipeline(
     device: &wgpu::Device,
     shared: &PipelineShared,
-    skinned: bool,
+    kind: crate::batch::BatchKind,
 ) -> wgpu::RenderPipeline {
+    let skinned = kind == crate::batch::BatchKind::Skinned;
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("depth prepass"),
         bind_group_layouts: &[Some(&shared.camera_layout), model_group(shared, skinned)],
@@ -785,16 +825,11 @@ fn create_depth_prepass_pipeline(
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &shared.mesh_shader,
-            entry_point: Some(if skinned { "vs_skinned" } else { "vs_main" }),
+            entry_point: Some(vertex_entry(kind)),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &mesh_buffers(skinned),
+            buffers: &mesh_buffers_for(kind),
         },
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            cull_mode: Some(wgpu::Face::Back),
-            front_face: wgpu::FrontFace::Ccw,
-            ..wgpu::PrimitiveState::default()
-        },
+        primitive: mesh_primitive(kind),
         depth_stencil: Some(wgpu::DepthStencilState {
             format: HDR_DEPTH_FORMAT,
             depth_write_enabled: Some(true),

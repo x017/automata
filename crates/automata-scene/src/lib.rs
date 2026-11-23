@@ -16,12 +16,15 @@
 //! - [`Animation`], [`Animator`] and [`animate`] — clip playback (with
 //!   crossfades) for animated models.
 //! - [`ParticleEmitter`] and [`simulate_particles`] — CPU particles.
+//! - [`Grass`] and [`Scatter`] — fields of blades and scattered models,
+//!   painted onto the ground.
 //!
 //! All ECS types needed for common game code (`Entity`, queries) are
 //! re-exported; `hecs` remains available for advanced use.
 
 mod animation;
 mod events;
+mod foliage;
 mod handle;
 mod particles;
 mod render;
@@ -36,6 +39,10 @@ pub use animation::{
 };
 pub use automata_renderer::{ParticleBlend, ParticleSprite};
 pub use events::Events;
+pub use foliage::{
+    raycast_surfaces, Dab, Grass, Scatter, SurfaceHit, MAX_AREA, MAX_BLADES, MAX_SCATTERED,
+    PAINT_CELL,
+};
 pub use handle::{Assets, Handle};
 pub use particles::{
     blend_label, burst, load_particle_textures, preview_particles, simulate_particles, spawn_burst,

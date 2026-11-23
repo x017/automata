@@ -371,20 +371,34 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
         draw.set_clear_color(env.clear_color());
     }
 
-    for (renderer, global) in &mut world.query::<(&MeshRenderer, &GlobalTransform)>() {
+    for (renderer, global, scatter) in
+        &mut world.query::<(&MeshRenderer, &GlobalTransform, Option<&crate::Scatter>)>()
+    {
         let model = global.matrix();
-        let parts = std::iter::once((&renderer.mesh, &renderer.material))
-            .chain(renderer.parts.iter().map(|(m, mat)| (m, mat)));
-        for (i, (mesh, material)) in parts.enumerate() {
-            match &renderer.joints {
-                Some(joints) => draw.skinned_mesh(mesh, model, material, joints),
-                None => draw.mesh(mesh, model, material),
+        let mut record = |model: glam::Mat4| {
+            let parts = std::iter::once((&renderer.mesh, &renderer.material))
+                .chain(renderer.parts.iter().map(|(m, mat)| (m, mat)));
+            for (i, (mesh, material)) in parts.enumerate() {
+                match &renderer.joints {
+                    Some(joints) => draw.skinned_mesh(mesh, model, material, joints),
+                    None => draw.mesh(mesh, model, material),
+                }
+                if let Some(Some(lod)) = renderer.lods.get(i) {
+                    draw.set_lod(lod);
+                }
             }
-            if let Some(Some(lod)) = renderer.lods.get(i) {
-                draw.set_lod(lod);
+        };
+        // A scattered model draws at every spot it's scattered to instead.
+        match scatter {
+            Some(scatter) => {
+                for spot in scatter.placements().iter() {
+                    record(model * *spot);
+                }
             }
+            None => record(model),
         }
     }
+    crate::foliage::record_grass(world, draw);
 
     // Placed lights: at the entity's position; spots shine along its
     // forward (-Z) axis.

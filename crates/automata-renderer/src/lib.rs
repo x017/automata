@@ -16,6 +16,7 @@ mod context;
 mod draw;
 mod environment;
 mod error;
+mod grass;
 mod light;
 mod material;
 mod mesh;
@@ -36,6 +37,10 @@ pub use context::{probe_gpu, GpuSummary, RenderContext};
 pub use draw::{DrawList, MeshLod, Sprite};
 pub use environment::{Environment, PostEffects, Tonemapping};
 pub use error::{Error, Result};
+pub use grass::{
+    blade_mesh as grass_blade_mesh, drawn_blades as grass_drawn_blades, keep_at as grass_keep_at,
+    GrassBlade, GrassChunk, GrassField, GrassLook, GrassPusher, MAX_GRASS_PUSHERS,
+};
 pub use light::{
     PointLight, SpotCone, Sun, DEFAULT_SHADOW_DISTANCE, MAX_POINT_LIGHTS, MAX_POINT_SHADOWS,
 };

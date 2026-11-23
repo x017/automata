@@ -29,6 +29,8 @@ const DRAG_RATE: f32 = 15.0;
 const SPRING_DAMPING: f32 = 0.4;
 /// Gravity, m/s².
 const GRAVITY: f32 = 9.81;
+/// The push (m/s²) of the scene's wind at full strength.
+const SCENE_WIND: f32 = 8.0;
 
 #[derive(Debug, Clone)]
 struct Joint {
@@ -59,6 +61,8 @@ pub struct SpringSim {
     started: bool,
     time: f32,
     last_world: Option<Mat4>,
+    /// The scene's wind (direction times 0..1 strength).
+    wind: Vec3,
 }
 
 impl SpringSim {
@@ -148,7 +152,15 @@ impl SpringSim {
             started: false,
             time: 0.0,
             last_world: None,
+            wind: Vec3::ZERO,
         })
+    }
+
+    /// Sets the scene's wind, a horizontal direction times its strength
+    /// (0..1, as [`automata_renderer::Environment::wind_vector`]), which
+    /// blows every chain on top of its own `wind`.
+    pub fn set_wind(&mut self, wind: Vec3) {
+        self.wind = wind;
     }
 
     /// Forgets the motion: the next update starts at rest (after a
@@ -235,7 +247,7 @@ impl SpringSim {
                 let gust = 1.0 + 0.6 * (t * 1.3 + phase).sin() * (t * 0.7).sin();
                 let accel = (goal - j.cur) * omega * omega
                     + Vec3::NEG_Y * GRAVITY * chain.gravity
-                    + Vec3::from(chain.wind) * gust;
+                    + (Vec3::from(chain.wind) + self.wind * SCENE_WIND) * gust;
                 next = j.cur + (j.cur - j.prev) * damp + accel * h * h;
             }
             let rest_dir = (target - head) / len;

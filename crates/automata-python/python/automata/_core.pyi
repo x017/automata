@@ -397,6 +397,11 @@ class Environment:
     palette: int
     """Dithered levels per colour channel (0 = full colour; ``"medium"``
     and up)."""
+    wind: float
+    """How hard the wind blows, 0 (still) to 1 (a gale): grass sways and
+    spring bones stream with it."""
+    wind_direction: float
+    """Which way the wind blows, degrees around +Y (0 = toward +X)."""
     style_name: str
     """The style this environment is exactly, or ``"Custom"``."""
     bloom: float
@@ -455,6 +460,8 @@ class Environment:
         outline_color: tuple[float, float, float] = (0.05, 0.04, 0.06),
         pixelate: float = 0.0,
         palette: int = 0,
+        wind: float = 0.0,
+        wind_direction: float = 0.0,
         post: str | None = None,
         bloom: float | None = None,
         contrast: float | None = None,
@@ -539,7 +546,8 @@ class Water:
     caustics: float
     """Sunlight dancing on what's under the water, 0..2 (1.0)."""
     wind: float
-    """Wind over the water, 0..1 (0.0); from 0.5 up spray blows off crests."""
+    """Wind over the water, 0..1 (0.0); from 0.5 up spray blows off crests.
+    The ``Environment``'s wind blows here too (spray follows the stronger)."""
     def __init__(
         self,
         size: Optional[tuple[float, float]] = None,
@@ -560,6 +568,113 @@ class Water:
     @staticmethod
     def preset(name: str) -> Water:
         """``"pond"`` or ``"ocean"``."""
+        ...
+
+class Grass:
+    """A field of grass: blades that sway in the ``Environment``'s wind and
+    bend away from characters and moving bodies walking through them.
+
+    Grow it over ``area`` (metres along the entity's X and Z, centred on
+    it), paint more on with ``paint`` and cut it out with ``erase``. Past
+    ``draw_distance`` metres from the camera it's gone, thinning out over
+    the way there.
+    """
+
+    area: tuple[float, float]
+    """The filled rectangle (metres along X and Z; zero for none)."""
+    density: float
+    """Blades per square metre where fully painted (60)."""
+    height: float
+    """The tallest blades, metres (0.6)."""
+    height_variation: float
+    """0..1: how much shorter some blades are (0.45)."""
+    width: float
+    """Blade width at the root, metres (0.07)."""
+    base_color: tuple[float, float, float]
+    """Colour at the root (linear RGB)."""
+    tip_color: tuple[float, float, float]
+    """Colour at the tip (linear RGB)."""
+    color_variation: float
+    """0..1: how much blades' colours differ (0.3)."""
+    draw_distance: float
+    """Metres from the camera it's drawn to (60; 0 = any distance)."""
+    seed: int
+    """Picks which random field grows."""
+    strokes: int
+    """How many brush strokes (paint and erase dabs) it has."""
+    def __init__(
+        self,
+        area: Optional[tuple[float, float]] = None,
+        density: Optional[float] = None,
+        height: Optional[float] = None,
+        height_variation: Optional[float] = None,
+        width: Optional[float] = None,
+        base_color: Optional[tuple[float, float, float]] = None,
+        tip_color: Optional[tuple[float, float, float]] = None,
+        color_variation: Optional[float] = None,
+        draw_distance: Optional[float] = None,
+        seed: Optional[int] = None,
+    ) -> None: ...
+    def paint(
+        self,
+        position: tuple[float, float, float],
+        radius: float = 2.0,
+        normal: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        strength: float = 1.0,
+    ) -> Grass:
+        """A copy with grass painted in a soft disc of ``radius`` metres at
+        ``position`` (the entity's space) on a surface facing ``normal``."""
+        ...
+    def erase(
+        self, position: tuple[float, float, float], radius: float = 2.0, strength: float = 1.0
+    ) -> Grass:
+        """A copy with the grass in a soft disc cut away."""
+        ...
+    def blade_count(self) -> int:
+        """How many blades it grows on an entity at the origin."""
+        ...
+
+class Scatter:
+    """Foliage scatter: draws the entity's model (its ``MeshRenderer``) at
+    many spots on the ground instead of once (rocks, flowers, bushes).
+    Copies aren't solid."""
+
+    area: tuple[float, float]
+    """The filled rectangle (metres along X and Z; zero for none)."""
+    density: float
+    """Copies per square metre where fully painted (0.2)."""
+    scale: tuple[float, float]
+    """The smallest and largest scale (0.7, 1.3)."""
+    align: float
+    """0 = upright, 1 = following the ground's slope (0.3)."""
+    seed: int
+    """Picks where the copies go."""
+    strokes: int
+    """How many brush strokes it has."""
+    def __init__(
+        self,
+        area: Optional[tuple[float, float]] = None,
+        density: Optional[float] = None,
+        scale: Optional[tuple[float, float]] = None,
+        align: Optional[float] = None,
+        seed: Optional[int] = None,
+    ) -> None: ...
+    def paint(
+        self,
+        position: tuple[float, float, float],
+        radius: float = 2.0,
+        normal: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        strength: float = 1.0,
+    ) -> Scatter:
+        """A copy with copies painted in a soft disc."""
+        ...
+    def erase(
+        self, position: tuple[float, float, float], radius: float = 2.0, strength: float = 1.0
+    ) -> Scatter:
+        """A copy with the copies in a soft disc cut away."""
+        ...
+    def count(self) -> int:
+        """How many copies it places."""
         ...
 
 class Entity:

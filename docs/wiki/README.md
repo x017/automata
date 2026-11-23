@@ -56,6 +56,7 @@ hours.
 | Write behaviour scripts | [Scripting](oberon/scripting.md) |
 | Place and drive cameras | [Cameras](oberon/cameras.md) |
 | Tune lighting, fog, and tone mapping, and test graphics | [Graphics](oberon/graphics.md) |
+| Paint grass, flowers and rocks onto the ground | [Grass & foliage](oberon/foliage.md) |
 | Use the built-in code editor and language servers | [The code editor](oberon/code-editor.md) |
 | Reuse objects and add custom data | [Prefabs & attributes](oberon/prefabs-and-attributes.md) |
 | Ship your game for Windows and Linux | [Exporting your game](oberon/exporting.md) |
@@ -74,6 +75,7 @@ hours.
 | Understand the update loop and the frame model | [Guide: The Game Loop](guides/game-loop.md) |
 | Build levels out of entities and components | [Guide: Scenes & Entities](guides/scenes-and-entities.md) |
 | Draw things, light them, fog and tone mapping | [Guide: Rendering & Lights](guides/rendering-and-lights.md) |
+| Grass that sways and parts, scattered rocks and flowers, wind | [Guide: Grass & Foliage](guides/grass-and-foliage.md) |
 | Follow, orbit, rail, and shake cameras | [Guide: Cameras](guides/cameras.md) |
 | Handle keyboard, mouse, and gamepads | [Guide: Input](guides/input.md) |
 | Add gravity, collisions, and character movement | [Guide: Physics](guides/physics.md) |

@@ -563,6 +563,8 @@ impl PyEnvironment {
         outline_color=(0.05, 0.04, 0.06),
         pixelate=0.0,
         palette=0,
+        wind=0.0,
+        wind_direction=0.0,
         post=None,
         bloom=None,
         contrast=None,
@@ -610,6 +612,8 @@ impl PyEnvironment {
         outline_color: (f32, f32, f32),
         pixelate: f32,
         palette: u32,
+        wind: f32,
+        wind_direction: f32,
         post: Option<&str>,
         bloom: Option<f32>,
         contrast: Option<f32>,
@@ -672,6 +676,8 @@ impl PyEnvironment {
                 outline_color: rgb(outline_color),
                 pixelate,
                 palette,
+                wind,
+                wind_direction,
                 post,
             },
         })
@@ -1027,6 +1033,20 @@ impl PyEnvironment {
     #[getter]
     fn fog_density(&self) -> f32 {
         self.inner.fog_density
+    }
+
+    /// How hard the wind blows, ``0`` (still) to ``1`` (a gale): grass
+    /// sways and spring bones (hair, cloth, leaves) stream with it.
+    #[getter]
+    fn wind(&self) -> f32 {
+        self.inner.wind
+    }
+
+    /// Which way the wind blows, in degrees around +Y (``0`` = toward +X,
+    /// ``90`` = toward +Z), like water's ``wave_direction``.
+    #[getter]
+    fn wind_direction(&self) -> f32 {
+        self.inner.wind_direction
     }
 
     /// Distance from the camera where fog starts.
@@ -1817,6 +1837,10 @@ pub enum StagedComponent {
     ParticleEmitter(automata_scene::ParticleEmitter),
     /// Which clip an animated model plays.
     Animation(automata_scene::Animation),
+    /// A field of grass.
+    Grass(automata_scene::Grass),
+    /// Draws the entity's model at many spots on the ground.
+    Scatter(automata_scene::Scatter),
 }
 
 /// Extracts a staged component from an arbitrary Python object, raising a
@@ -1873,12 +1897,18 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(a) = obj.cast::<crate::animation::PyAnimation>() {
         return Ok(StagedComponent::Animation(a.get().inner()));
     }
+    if let Ok(g) = obj.cast::<crate::foliage::PyGrass>() {
+        return Ok(StagedComponent::Grass(g.get().inner()));
+    }
+    if let Ok(s) = obj.cast::<crate::foliage::PyScatter>() {
+        return Ok(StagedComponent::Scatter(s.get().inner()));
+    }
     let typename = obj.get_type().name()?.to_string();
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
          MeshRenderer, DirectionalLight, PointLight, SpotLight, Environment, Water, \
-         AudioSource, ParticleEmitter, or Animation"
+         AudioSource, ParticleEmitter, Animation, Grass, or Scatter"
     )))
 }
 

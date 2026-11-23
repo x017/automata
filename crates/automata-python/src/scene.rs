@@ -195,6 +195,12 @@ impl PyEntity {
                         Py::new(py, crate::animation::PyAnimation::from_inner(v.clone()))?
                             .into_any()
                     }
+                    StagedComponent::Grass(v) => {
+                        Py::new(py, crate::foliage::PyGrass::from_inner(v.clone()))?.into_any()
+                    }
+                    StagedComponent::Scatter(v) => {
+                        Py::new(py, crate::foliage::PyScatter::from_inner(v.clone()))?.into_any()
+                    }
                 })
             })
             .collect()
@@ -439,6 +445,12 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }
             StagedComponent::Animation(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
+            StagedComponent::Grass(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
+            StagedComponent::Scatter(c) => {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }
         }

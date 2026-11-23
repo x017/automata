@@ -28,6 +28,7 @@ use crate::view::{self, Gizmo, GizmoMode, Projector};
 
 pub mod assets_panel;
 pub mod attributes;
+pub mod brush;
 pub mod clip_files;
 mod code_view;
 pub mod dialogs;
@@ -255,6 +256,20 @@ fn clamp_files_h(files_h: f32, body_h: f32) -> f32 {
 pub enum Intent {
     /// Select an entity (`None` clears the selection).
     Select(Option<u64>),
+    /// Lay a foliage brush dab on an entity's Grass or Scatter (part of a
+    /// stroke: coalesced undo).
+    Brush {
+        /// Entity id.
+        id: u64,
+        /// The dab's centre on the surface (world space).
+        point: [f32; 3],
+        /// The surface's normal there.
+        normal: [f32; 3],
+        /// The brush's radius (metres).
+        radius: f32,
+        /// -1..1: positive paints, negative erases.
+        strength: f32,
+    },
     /// Create a new entity.
     Create(CreateKind),
     /// Duplicate an entity.
@@ -658,6 +673,10 @@ enum Drag {
         axis: usize,
         last: (f32, f32),
     },
+    /// A foliage brush stroke on an entity.
+    Brush {
+        id: u64,
+    },
     /// Press on a number field: drag scrubs; a click starts typing.
     Scrub {
         id: u64,
@@ -761,6 +780,8 @@ pub struct Ui {
     /// The animation playing or scrubbed in the scene view while editing
     /// (the app advances it and poses the model).
     pub anim_preview: Option<AnimPreview>,
+    /// The foliage brush (Grass and Scatter painting).
+    pub brush: brush::Brush,
     /// The animation preview's time bar is being dragged.
     anim_scrub: bool,
     /// The context menu opened this frame (its opening press picks nothing).
@@ -878,6 +899,7 @@ impl Ui {
             stats: FrameStats::default(),
             camera_preview: None,
             anim_preview: None,
+            brush: brush::Brush::default(),
             anim_scrub: false,
             menu_fresh: false,
             recent_colors: Vec::new(),
@@ -2374,6 +2396,60 @@ impl Ui {
                 y += 6.0;
             }
         }
+        if d.grass.is_some() {
+            let kind = ComponentKind::Grass;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                y = self.brush_rows(canvas, x, y, w);
+                y = self.float_row(canvas, x, y, w, e, "Area Width", Field::GrassArea(0));
+                y = self.float_row(canvas, x, y, w, e, "Area Depth", Field::GrassArea(1));
+                y = self.float_row(canvas, x, y, w, e, "Density", Field::GrassDensity);
+                y = self.float_row(canvas, x, y, w, e, "Height", Field::GrassHeight);
+                y = self.float_row(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    e,
+                    "Height Vary",
+                    Field::GrassHeightVariation,
+                );
+                y = self.float_row(canvas, x, y, w, e, "Blade Width", Field::GrassWidth);
+                y = self.color_row(canvas, x, y, w, e, "Root Color", ColorTarget::GrassBase);
+                y = self.color_row(canvas, x, y, w, e, "Tip Color", ColorTarget::GrassTip);
+                y = self.float_row(canvas, x, y, w, e, "Color Vary", Field::GrassColorVariation);
+                y = self.float_row(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    e,
+                    "Draw Distance",
+                    Field::GrassDrawDistance,
+                );
+                y = self.float_row(canvas, x, y, w, e, "Seed", Field::GrassSeed);
+                y = self.foliage_note(canvas, x, y, w, e, true);
+                y += 6.0;
+            }
+        }
+        if d.scatter.is_some() {
+            let kind = ComponentKind::Scatter;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                y = self.brush_rows(canvas, x, y, w);
+                y = self.float_row(canvas, x, y, w, e, "Area Width", Field::ScatterArea(0));
+                y = self.float_row(canvas, x, y, w, e, "Area Depth", Field::ScatterArea(1));
+                y = self.float_row(canvas, x, y, w, e, "Density", Field::ScatterDensity);
+                y = self.float_row(canvas, x, y, w, e, "Scale Min", Field::ScatterScale(0));
+                y = self.float_row(canvas, x, y, w, e, "Scale Max", Field::ScatterScale(1));
+                y = self.float_row(canvas, x, y, w, e, "Follow Slope", Field::ScatterAlign);
+                y = self.float_row(canvas, x, y, w, e, "Seed", Field::ScatterSeed);
+                y = self.foliage_note(canvas, x, y, w, e, false);
+                y += 6.0;
+            }
+        }
         if let Some(emitter) = &d.particle_emitter {
             let kind = ComponentKind::Particles;
             let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
@@ -3832,7 +3908,9 @@ impl Ui {
         let over_tools = editing && Self::tool_group_rect(canvas, rect).contains(p.x, p.y);
         let inside = rect.contains(p.x, p.y) && !over_tools;
         let selected = doc.selected_index().map(|i| &doc.entities[i]);
-        let gizmo = if editing {
+        // The foliage brush takes the left button while it's on.
+        let brushing = self.brush_target(doc);
+        let gizmo = if editing && brushing.is_none() {
             selected
                 .and_then(|e| e.data.transform)
                 .and_then(|t| Gizmo::build(self.gizmo, &t, &proj))
@@ -3972,6 +4050,20 @@ impl Ui {
                     }
                 }
             }
+            Drag::Brush { id } => {
+                if raw.down {
+                    self.brush_stroke(id);
+                } else {
+                    self.drag = Drag::None;
+                    self.brush_end();
+                }
+            }
+            Drag::None if inside && p.pressed && !p.alt && brushing.is_some() => {
+                if let Some(id) = brushing {
+                    self.drag = Drag::Brush { id };
+                    self.brush_start(id);
+                }
+            }
             Drag::None if inside && p.pressed => {
                 let handle = if p.alt {
                     None
@@ -4014,6 +4106,9 @@ impl Ui {
             }
             if let Some(g) = &gizmo {
                 draw_gizmo(canvas, g, self.hover_axis);
+            }
+            if brushing.is_some() && inside {
+                self.draw_brush(canvas, &proj);
             }
             self.draw_axes_widget(canvas, rect);
         }

@@ -86,6 +86,105 @@ fn vs_main(in: VertexInput, inst: InstanceInput) -> VertexOutput {
     return out;
 }
 
+// Grass (`grass.rs`): baked chunks, a `GrassVertex` per blade vertex. The
+// rank (0..1) is the order distance thins blades in, the variant (0..1)
+// the palette column, the draw distance the field's (0 = none).
+const MAX_PUSHERS: u32 = 8u;
+
+struct GrassInput {
+    @location(0) offset_h: vec4<f32>,
+    @location(1) root_variant: vec4<f32>,
+    @location(2) up_rank: vec4<f32>,
+    @location(3) normal_reach: vec4<f32>,
+};
+
+// Must match `keep_at` in grass.rs.
+fn grass_keep(distance: f32, draw_distance: f32) -> f32 {
+    if draw_distance <= 0.0 {
+        return 1.0;
+    }
+    return 1.0 - smoothstep(0.2 * draw_distance, draw_distance, distance);
+}
+
+@vertex
+fn vs_grass(in: GrassInput) -> VertexOutput {
+    var out: VertexOutput;
+    let root = in.root_variant.xyz;
+    let up_axis = in.up_rank.xyz;
+    let rank = in.up_rank.w;
+    let height = max(length(up_axis), 1e-4);
+    let up = up_axis / height;
+    let h = clamp(in.offset_h.w, 0.0, 1.0);
+
+    // Distance: thin out by rank (shrinking the blades just past the cut),
+    // and widen what's left so the field stays as full.
+    let draw_distance = in.normal_reach.w;
+    let distance = length(camera.view_pos.xyz - root);
+    let keep = grass_keep(distance, draw_distance);
+    let shrink = clamp((keep - rank) * 12.0, 0.0, 1.0);
+    var widen = 1.0;
+    if draw_distance > 0.0 {
+        widen = 1.0 + 1.6 * smoothstep(0.2 * draw_distance, draw_distance, distance);
+    }
+
+    // The unbent blade, split into its height and its width.
+    let v = in.offset_h.xyz;
+    let along = dot(v, up) * up;
+    let across = (v - along) * widen;
+
+    // Wind: a slow travelling gust over a quicker flutter, plus a little
+    // idle motion even in still air.
+    let dir = camera.wind.xy;
+    let strength = camera.wind.z;
+    let t = camera.wind.w;
+    let travel = dot(root.xz, dir);
+    let phase = fract(rank * 7.31) * 6.2832;
+    let gust = 0.5 + 0.5 * sin(t * 0.9 - travel * 0.12) * sin(t * 0.37 - travel * 0.05 + 1.3);
+    let flutter = sin(t * 2.7 + phase + travel * 0.6);
+    var lean = dir * strength * (0.25 + 0.95 * gust + 0.15 * flutter);
+    let idle = vec2<f32>(sin(t * 1.3 + phase), cos(t * 1.1 + phase * 1.7)) * 0.04;
+    lean = lean + idle;
+
+    // Pushers: blades within reach lean away, more the closer they are.
+    for (var i = 0u; i < MAX_PUSHERS; i = i + 1u) {
+        let p = camera.pushers[i];
+        if p.w <= 0.0 {
+            continue;
+        }
+        let d = root.xz - p.xz;
+        let reach = p.w + 0.5 * height;
+        let dist = length(d);
+        let rise = root.y - p.y;
+        if dist < reach && rise > -0.6 && rise < p.w + 1.0 {
+            let k = 1.0 - dist / reach;
+            lean = lean + d / max(dist, 1e-3) * k * k * 2.2;
+        }
+    }
+    let amount = length(lean);
+    if amount > 1.6 {
+        lean = lean * (1.6 / amount);
+    }
+
+    // Bend: the tip moves most, and the blade keeps its length.
+    let shift = vec3<f32>(lean.x, 0.0, lean.y) * height * h * h;
+    let along_len = length(along);
+    var bent = along + shift;
+    let bent_len = length(bent);
+    if bent_len > 1e-5 {
+        bent = bent * (along_len / bent_len);
+    }
+    let world = root + (bent + across) * shrink;
+
+    out.clip_position = camera.view_proj * vec4<f32>(world, 1.0);
+    out.world_position = world;
+    out.normal = normalize(normalize(in.normal_reach.xyz) + vec3<f32>(lean.x, 0.0, lean.y) * 0.35);
+    // The palette: its column picks the variant, its rows run root to tip
+    // (kept off the wrapped edge rows).
+    out.uv = vec2<f32>(0.0625 + 0.875 * in.root_variant.w, 0.03 + 0.94 * h);
+    out.fade = 1.0;
+    return out;
+}
+
 struct SkinInput {
     @location(3) joints: vec4<u32>,
     @location(4) weights: vec4<f32>,

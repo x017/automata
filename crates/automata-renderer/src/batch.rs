@@ -70,6 +70,9 @@ pub(crate) enum BatchKind {
     Faded,
     /// One skinned mesh with its joint palette.
     Skinned,
+    /// Grass blades (`grass.rs`): instanced, bent by `vs_grass`. The
+    /// batch's `draw` indexes the frame's grass materials, not its meshes.
+    Grass,
 }
 
 /// One draw call.

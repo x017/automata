@@ -254,6 +254,8 @@ scene.add(
             fog_sun=0.5,                     # fog glows toward the sun
             god_rays=0.5,                    # Beautiful only: sun shafts
             depth_of_field=0.0,              # Beautiful only: 0 off .. 4
+            wind=0.4,                        # 0 still .. 1 a gale
+            wind_direction=30.0,             # degrees around +Y, 0 = toward +X
         )
     )
 )
@@ -299,6 +301,9 @@ How it combines with the sun:
 - **Tone mapping** runs last. ACES and AgX roll off highlights smoothly,
   so you can use brighter suns and colours without clipping. Raise
   `exposure` a little to compensate for their darker mid-tones.
+- **Wind** (`wind`, `wind_direction`) blows through the whole scene:
+  [grass](grass-and-foliage.md#wind) sways, spring bones stream out, and
+  water throws spray off its crests from 0.5 up.
 - An Environment is staged data like any other component. It's saved in
   scene files and edited in [Oberon's Graphics tab](../oberon/graphics.md).
 
@@ -688,3 +693,4 @@ top to get fog and tone mapping too.
 - [Cameras](cameras.md) — follow, orbit, rails, shake, zoom
 - [Cookbook](../cookbook.md#cameras) — orbit cams, screen shake
 - [Oberon: Graphics](../oberon/graphics.md) — tune all of this visually
+- [Grass & Foliage](grass-and-foliage.md) — grass, scattered models, wind

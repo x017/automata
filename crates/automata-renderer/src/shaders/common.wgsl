@@ -11,6 +11,11 @@ const PI: f32 = 3.14159265;
 struct CameraUniform {
     view_proj: mat4x4<f32>,
     view_pos: vec4<f32>,
+    // Grass (`vs_grass`): xy the wind's direction on XZ, z its strength
+    // (0..1), w the time (s).
+    wind: vec4<f32>,
+    // Grass pushers: xyz where each meets the ground, w its radius (0 = none).
+    pushers: array<vec4<f32>, 8>,
 };
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
 

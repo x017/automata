@@ -308,7 +308,7 @@ GLES and WebGL. Skinned meshes still draw one by one. glTF nodes named
 shadow included, and dithers out over the last tenth through a pipeline
 override constant. Not done yet: an Inspector field for the draw distance.
 
-### A12. Grass and foliage (BotW-style fields) ⬜ L
+### A12. Grass and foliage (BotW-style fields) ✅ L
 Builds on A11's instancing.
 - A `Grass` component: blades painted onto surfaces in Oberon with a
   brush (density, height, colour variation), drawn as instanced blades
@@ -318,6 +318,36 @@ Builds on A11's instancing.
 - Foliage scatter: paint models (rocks, flowers, bushes) onto ground.
 - **Done when:** a field of grass sways around the walking player with
   no frame drop on High.
+
+Done: `Grass` grows blades over an area plus brush strokes (soft discs
+that paint or erase, stored in the entity's space and saved in scene
+files). Fields are grown once, cached, and split into 8 m chunks. Each
+chunk is baked into a GPU vertex buffer the first time it's seen, so a
+frame uploads nothing for grass and draws each visible chunk in one
+call, nearest first. Distance thins blades toward `draw_distance` (in
+rank order, with a smooth shrink at the cut), and past 12 m a blade is
+one triangle instead of five. The vertex shader sways blades in the
+`Environment`'s new `wind` and `wind_direction`, which spring bones and
+water spray share. Blades bend away from the bottom of every character
+and moving body's collider (the 8 nearest the camera). `Scatter` draws
+the entity's model at many painted spots, instanced. In Oberon, Grass
+and Scatter get Inspector sections with a brush: Paint or Erase, four
+sizes and three strengths, on whatever surface is under the cursor, one
+undo step a stroke. The Environment gets Wind rows. `examples/oberon/meadow`
+has a 30 × 30 m field (52,000 blades, a path erased through it), painted
+wildflowers, scattered low-poly rocks, flowers and trees, a runner with a
+Character Controller and a ball to kick.
+
+Performance could only be measured on lavapipe, a software rasterizer.
+At 1280×720 on High the meadow takes 1,686 ms a frame against 687 ms
+with no foliage. At 320×180 it's 264 against 61, so most of what's left
+is fill rate. Baking chunks and the far-blade LOD brought it down from
+2,761 ms with instanced blades. On lavapipe the extra cost is a frame
+drop. On a real GPU a frame's grass is one draw per visible chunk with no
+uploads, but "no frame drop on High" still needs checking on real
+hardware. Not done yet: a brush stroke regrows and rebakes the whole
+field (fine at this size, a hitch on huge fields), and painting doesn't
+follow terrain until A13.
 
 ### A13. Terrain ⬜ L
 - A `Terrain` component: a heightmap with sculpt brushes in Oberon
@@ -723,7 +753,7 @@ per effort. Reorder any time by telling me.
 | 18 | B3b Key store for scripts | M | ✅ |
 | 19 | A11 Culling, instancing, LOD | M | ✅ |
 | 20 | D0 The oberon command, new projects, bundled Python | M | ✅ |
-| 21 | A12 Grass and foliage | L | ⬜ |
+| 21 | A12 Grass and foliage | L | ✅ |
 | 22 | C2 Tweens and timers | S | ⬜ |
 | 23 | C3 Save games and settings | S | ⬜ |
 | 24 | C1 Physics joints | M | ⬜ |

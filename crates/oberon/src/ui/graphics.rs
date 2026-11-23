@@ -137,14 +137,14 @@ impl Ui {
     }
 
     /// A line of secondary text (wrapped by the caller).
-    fn gfx_note(&self, canvas: &mut Canvas, x: f32, y: f32, w: f32, text: &str) -> f32 {
+    pub(super) fn gfx_note(&self, canvas: &mut Canvas, x: f32, y: f32, w: f32, text: &str) -> f32 {
         if self.row_visible(Rect::new(x, y, w, 16.0)) {
             canvas.text_clipped(x, y, layout::SMALL_SIZE, text, color::text_dim(), w);
         }
         y + 17.0
     }
 
-    fn editable_style(&self, style: ButtonStyle) -> ButtonStyle {
+    pub(super) fn editable_style(&self, style: ButtonStyle) -> ButtonStyle {
         if self.play == PlayState::Editing {
             style
         } else {
@@ -546,8 +546,8 @@ impl Ui {
         y + 8.0
     }
 
-    /// Height fog (with fog on), god rays and depth of field (the Graphics
-    /// tab and the Inspector).
+    /// Height fog (with fog on), god rays, depth of field and the wind
+    /// (the Graphics tab and the Inspector).
     pub(super) fn atmosphere_rows(
         &mut self,
         canvas: &mut Canvas,
@@ -585,7 +585,17 @@ impl Ui {
             );
             y = self.float_row(canvas, x, y, w, env, "Focus Range", Field::EnvFocusRange);
         }
-        y
+        // The wind grass, spring bones and water blow in.
+        y = self.float_row(canvas, x, y, w, env, "Wind", Field::EnvWind);
+        self.float_row(
+            canvas,
+            x,
+            y,
+            w,
+            env,
+            "Wind Direction",
+            Field::EnvWindDirection,
+        )
     }
 
     /// An Environment's post-effect settings (the Graphics tab and the

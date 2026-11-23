@@ -48,6 +48,7 @@
 
 pub mod components;
 pub mod events;
+pub mod grass;
 pub mod model_shape;
 pub mod ripples;
 pub mod world;
@@ -59,6 +60,7 @@ pub use components::{
     Collider3D, RigidBody, Shape2D, Shape3D,
 };
 pub use events::{ContactForce, PhysicsEvent};
+pub use grass::record_grass_pushers;
 pub use model_shape::{auto_model_shape, box_fill, collider_problem};
 pub use world::{CharacterMove, PhysicsTick, RayFilter, RayHit, WaterSplash};
 pub use world2d_impl::PhysicsWorld2D;

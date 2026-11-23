@@ -81,6 +81,9 @@ struct PreparedFrame {
     water_binds: Vec<(wgpu::BindGroup, u32)>,
     /// The particle batches, uploaded in draw order.
     particle_runs: Vec<crate::particles::ParticleRun>,
+    /// Per grass field the camera sees, its material (grass batches'
+    /// `draw` indexes this).
+    grass_materials: Vec<Material>,
     /// The frame's 3D camera.
     camera_3d: crate::Camera3D,
 }
@@ -183,6 +186,15 @@ pub struct Renderer {
     compositor: Compositor,
     /// Particle pipelines, sprite sheet and instances.
     particles: crate::particles::Particles,
+    /// The index buffers grass chunks draw with (see [`GrassIndices`]).
+    grass_indices: Option<GrassIndices>,
+    /// Grass chunks baked into vertex buffers, by chunk address (each
+    /// entry holds its chunk, so the address can't be reused meanwhile).
+    grass_chunks: HashMap<usize, BakedGrass>,
+    /// Frames that drew grass, to forget chunks not drawn for a while.
+    grass_frame: u64,
+    /// Grass materials (their colour palettes) by [`crate::GrassLook::key`].
+    grass_materials: HashMap<u64, Material>,
 }
 
 impl Renderer {
@@ -226,6 +238,7 @@ impl Renderer {
     }
 
     /// Builds the pipelines and resources around a context.
+    #[allow(clippy::too_many_lines)] // one field per resource
     fn build(ctx: RenderContext, size: (u32, u32), quality: GraphicsQuality) -> Self {
         let device = ctx.device();
         let shared = PipelineShared::new(device);
@@ -325,6 +338,10 @@ impl Renderer {
             offscreen_depth: None,
             compositor,
             particles,
+            grass_indices: None,
+            grass_chunks: HashMap::new(),
+            grass_frame: 0,
+            grass_materials: HashMap::new(),
             ctx,
         }
     }
@@ -913,11 +930,19 @@ impl Renderer {
 
     /// Builds a camera bind group from a view-projection matrix and the
     /// camera's world position (used for specular highlights).
-    fn camera_bind_group(&self, view_proj: glam::Mat4, view_pos: glam::Vec3) -> wgpu::BindGroup {
-        let mut contents = [0.0_f32; 20];
+    /// `grass` is the wind and pushers grass bends with (see
+    /// [`grass_uniform`]).
+    fn camera_bind_group(
+        &self,
+        view_proj: glam::Mat4,
+        view_pos: glam::Vec3,
+        grass: &[f32; GRASS_UNIFORM_FLOATS],
+    ) -> wgpu::BindGroup {
+        let mut contents = [0.0_f32; 20 + GRASS_UNIFORM_FLOATS];
         contents[..16].copy_from_slice(&view_proj.to_cols_array());
         contents[16..19].copy_from_slice(&view_pos.to_array());
         contents[19] = 1.0;
+        contents[20..].copy_from_slice(grass);
         self.uniform_bind_group(
             Some("camera"),
             bytemuck::cast_slice(&contents),
@@ -1721,14 +1746,19 @@ impl Renderer {
                 pass.set_pipeline(pipelines.get(batch.kind));
                 current = Some(batch.kind);
             }
-            let mesh_draw = &draw.meshes[batch.draw];
-            pass.set_bind_group(2, &mesh_draw.material.inner.bind_group, &[]);
+            let material = if batch.kind == crate::batch::BatchKind::Grass {
+                &prepared.grass_materials[batch.draw]
+            } else {
+                &draw.meshes[batch.draw].material
+            };
+            pass.set_bind_group(2, &material.inner.bind_group, &[]);
             Self::record_batch(pass, draw, prepared, batch, instances);
         }
     }
 
     /// Records one batch's geometry and draw call: a skinned mesh with its
-    /// bind group and skin, or instanced copies from `instances`.
+    /// bind group and skin, a baked grass chunk, or instanced copies from
+    /// `instances`.
     fn record_batch(
         pass: &mut wgpu::RenderPass<'_>,
         draw: &DrawList,
@@ -1738,6 +1768,12 @@ impl Renderer {
     ) {
         let mesh = &batch.mesh.inner;
         pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+        if batch.kind == crate::batch::BatchKind::Grass {
+            // A baked chunk: its first blades, no instances.
+            pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..batch.count.min(mesh.index_count), 0, 0..1);
+            return;
+        }
         if batch.kind == crate::batch::BatchKind::Skinned {
             let (Some(model_bind), Some(skin)) =
                 (&prepared.model_bind_groups[batch.draw], &mesh.skin_buffer)
@@ -1932,6 +1968,7 @@ impl Renderer {
     /// Builds the frame's GPU resources from the draw list: camera, model,
     /// light and water bind groups, the sprite batch, and the sun's shadow
     /// cascades.
+    #[allow(clippy::too_many_lines)] // one step per resource, in order
     fn prepare_frame(
         &mut self,
         draw: &DrawList,
@@ -1944,10 +1981,18 @@ impl Renderer {
                 |c| c.view_proj(viewport),
             ),
             glam::Vec3::ZERO,
+            &[0.0; GRASS_UNIFORM_FLOATS],
         );
         let camera_3d = draw.camera_3d.unwrap_or_default();
-        let camera_3d_bind =
-            self.camera_bind_group(camera_3d.view_proj(viewport), camera_3d.position);
+        let env = draw.environment.unwrap_or_default();
+        let time = draw
+            .time
+            .unwrap_or_else(|| self.clock.elapsed().as_secs_f32());
+        let camera_3d_bind = self.camera_bind_group(
+            camera_3d.view_proj(viewport),
+            camera_3d.position,
+            &grass_uniform(&env, time, &draw.grass_pushers, camera_3d.position),
+        );
 
         let sprite_runs = batch_sprites(&draw.sprites);
         self.sprite_batch.write(self.ctx.queue(), &draw.sprites);
@@ -1979,18 +2024,14 @@ impl Renderer {
             sun.shadow_distance,
         );
         let render_shadows = sun.shadows && self.shadows_enabled && !draw.meshes.is_empty();
-        let (seen, main_batches, cascade_batches) = self.batch_frame(
+        let (seen, main_batches, cascade_batches, grass_materials) = self.batch_frame(
             draw,
             &mesh_spheres,
             &camera_3d,
             viewport,
             render_shadows.then_some(&shadows),
         );
-        let env = draw.environment.unwrap_or_default();
         let c = draw.clear_color;
-        let time = draw
-            .time
-            .unwrap_or_else(|| self.clock.elapsed().as_secs_f32());
         #[allow(clippy::cast_possible_truncation)] // colors fit f32
         let background = [c.r as f32, c.g as f32, c.b as f32];
         let frame = FrameView {
@@ -2042,6 +2083,7 @@ impl Renderer {
             points,
             water_binds,
             particle_runs,
+            grass_materials,
             camera_3d,
         }
     }
@@ -2175,11 +2217,7 @@ impl Renderer {
         camera: &crate::Camera3D,
         viewport: (u32, u32),
         shadows: Option<&ShadowCascades>,
-    ) -> (
-        Vec<Option<crate::batch::Seen>>,
-        Vec<crate::batch::Batch>,
-        Vec<Vec<crate::batch::Batch>>,
-    ) {
+    ) -> FrameBatches {
         use crate::batch::{batch, choose, Frustum, PassKind};
         let lod_scale = self.quality.lod_scale();
         let seen: Vec<_> = draw
@@ -2195,7 +2233,15 @@ impl Renderer {
             .enumerate()
             .filter_map(|(i, s)| Some((i, (*s)?)))
             .filter(|(i, _)| frustum.sees(spheres[*i]));
-        let main = batch(&draw.meshes, visible, PassKind::Shaded, &mut instances);
+        let mut main = batch(&draw.meshes, visible, PassKind::Shaded, &mut instances);
+        // Grass is solid: after the other solid batches, before see-through
+        // ones. It casts no shadows.
+        let (grass, grass_materials) = self.batch_grass(draw, &frustum, camera.position);
+        let at = main
+            .iter()
+            .position(|b| b.transparent)
+            .unwrap_or(main.len());
+        main.splice(at..at, grass);
         let cascades = shadows.map_or_else(Vec::new, |shadows| {
             (0..shadows.count)
                 .map(|cascade| {
@@ -2209,7 +2255,183 @@ impl Renderer {
                 .collect()
         });
         self.upload_instances(&instances);
-        (seen, main, cascades)
+        (seen, main, cascades, grass_materials)
+    }
+
+    /// The grass chunks the camera sees, as one batch each, nearest first:
+    /// its baked blades (see [`BakedGrass`]), as many as its distance
+    /// keeps, with five triangles a blade up close and one further off.
+    /// Returns the
+    /// batches and, per field with any in view, its material (the batches'
+    /// `draw`).
+    fn batch_grass(
+        &mut self,
+        draw: &DrawList,
+        frustum: &crate::batch::Frustum,
+        eye: glam::Vec3,
+    ) -> (Vec<crate::batch::Batch>, Vec<Material>) {
+        if draw.grass.is_empty() {
+            self.grass_chunks.clear();
+            return (Vec::new(), Vec::new());
+        }
+        self.grass_frame += 1;
+        let frame = self.grass_frame;
+        // Lower presets draw fewer blades.
+        let density = self.quality.lod_scale().min(1.0);
+        // (distance, batch): drawn nearest first, so the blades in front
+        // hide the ones behind before they're shaded.
+        let mut batches: Vec<(f32, crate::batch::Batch)> = Vec::new();
+        let mut materials = Vec::new();
+        for field in &draw.grass {
+            let material = materials.len();
+            let mut seen = false;
+            for chunk in &field.chunks {
+                let sphere = Sphere {
+                    center: glam::Vec3::from(chunk.center),
+                    radius: chunk.radius,
+                };
+                if !frustum.sees(sphere) {
+                    continue;
+                }
+                let near = (sphere.center.distance(eye) - sphere.radius).max(0.0);
+                let n = crate::grass::drawn_blades(chunk.blades.len(), near, field.draw_distance);
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    clippy::cast_precision_loss
+                )]
+                let n = ((n as f32 * density).ceil() as usize).min(n);
+                if n == 0 {
+                    continue;
+                }
+                let baked = self.baked_grass(chunk, frame);
+                let (mesh, per_blade) = if near < crate::grass::FULL_BLADE_DISTANCE {
+                    (baked.near, crate::grass::BLADE_INDICES.0)
+                } else {
+                    (baked.far, crate::grass::BLADE_INDICES.1)
+                };
+                batches.push((
+                    near,
+                    crate::batch::Batch {
+                        kind: crate::batch::BatchKind::Grass,
+                        draw: material,
+                        mesh,
+                        first: 0,
+                        count: u32::try_from(n)
+                            .unwrap_or(u32::MAX)
+                            .saturating_mul(per_blade),
+                        transparent: false,
+                    },
+                ));
+                seen = true;
+            }
+            if seen {
+                materials.push(self.grass_material(&field.look));
+            }
+        }
+        // Forget chunks not drawn for a while: out of view for long, or
+        // their field regrew (painted, moved) and they're gone.
+        self.grass_chunks
+            .retain(|_, baked| frame - baked.last_drawn < GRASS_KEEP_FRAMES);
+        batches.sort_by(|a, b| a.0.total_cmp(&b.0));
+        (batches.into_iter().map(|(_, b)| b).collect(), materials)
+    }
+
+    /// `chunk` baked into a vertex buffer (on first use), as the meshes
+    /// that draw it up close and far off.
+    fn baked_grass(&mut self, chunk: &Arc<crate::GrassChunk>, frame: u64) -> BakedGrass {
+        let key = Arc::as_ptr(chunk) as usize;
+        if let Some(baked) = self.grass_chunks.get_mut(&key) {
+            baked.last_drawn = frame;
+            return baked.clone();
+        }
+        let blades = u32::try_from(chunk.blades.len()).unwrap_or(u32::MAX);
+        let indices = self.grass_indices_for(blades);
+        let vertex_buffer =
+            self.ctx
+                .device()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("grass chunk"),
+                    contents: bytemuck::cast_slice(&crate::grass::bake(chunk)),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+        let mesh = |index_buffer: &wgpu::Buffer, per_blade: u32| Mesh {
+            inner: Arc::new(crate::mesh::MeshInner {
+                vertex_buffer: vertex_buffer.clone(),
+                index_buffer: index_buffer.clone(),
+                index_count: blades.saturating_mul(per_blade),
+                skin_buffer: None,
+                bounding_radius: chunk.radius,
+                bounds: (glam::Vec3::ZERO, glam::Vec3::ZERO),
+                key: 0,
+            }),
+        };
+        let baked = BakedGrass {
+            chunk: Arc::clone(chunk),
+            near: mesh(&indices.near, crate::grass::BLADE_INDICES.0),
+            far: mesh(&indices.far, crate::grass::BLADE_INDICES.1),
+            last_drawn: frame,
+        };
+        self.grass_chunks.insert(key, baked.clone());
+        baked
+    }
+
+    /// Index buffers covering at least `blades` blades (grown as needed;
+    /// chunks baked earlier keep the smaller ones they had).
+    fn grass_indices_for(&mut self, blades: u32) -> GrassIndices {
+        if let Some(indices) = &self.grass_indices {
+            if indices.blades >= blades {
+                return indices.clone();
+            }
+        }
+        let blades = blades.max(1024).next_power_of_two();
+        let device = self.ctx.device();
+        let buffer = |far: bool| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(if far {
+                    "far grass indices"
+                } else {
+                    "grass indices"
+                }),
+                contents: bytemuck::cast_slice(&crate::grass::blade_indices(blades, far)),
+                usage: wgpu::BufferUsages::INDEX,
+            })
+        };
+        let indices = GrassIndices {
+            near: buffer(false),
+            far: buffer(true),
+            blades,
+        };
+        self.grass_indices = Some(indices.clone());
+        indices
+    }
+
+    /// The material for grass that looks like `look` (its colour palette),
+    /// made once.
+    fn grass_material(&mut self, look: &crate::GrassLook) -> Material {
+        let key = look.key();
+        if let Some(material) = self.grass_materials.get(&key) {
+            return material.clone();
+        }
+        let (w, h) = crate::grass::PALETTE_SIZE;
+        let texture = self.create_texture_rgba(w, h, &crate::grass::palette(look));
+        let material = self.create_pbr_material(
+            &crate::MaterialParams {
+                roughness: 0.85,
+                ..crate::MaterialParams::with_color([1.0; 4])
+            },
+            crate::MaterialTextures {
+                base: Some(texture),
+                ..crate::MaterialTextures::default()
+            },
+        );
+        // Looks rarely change; a scene that keeps restyling its grass
+        // shouldn't grow this forever.
+        if self.grass_materials.len() > 64 {
+            self.grass_materials.clear();
+        }
+        self.grass_materials.insert(key, material.clone());
+        material
     }
 
     /// Writes `instances` to the instance buffer, growing it first if
@@ -2355,6 +2577,73 @@ impl Renderer {
 }
 
 /// A vertex buffer for `count` [`crate::batch::Instance`]s.
+/// Frames a baked grass chunk stays on the GPU undrawn.
+const GRASS_KEEP_FRAMES: u64 = 300;
+
+/// A grass chunk on the GPU: a vertex buffer of its blades (see
+/// [`crate::grass::bake`]) drawn by two meshes, five triangles a blade
+/// ([`Self::near`]) or one ([`Self::far`]). A batch draws the first part of
+/// either: the first blades, as many as the distance keeps.
+#[derive(Clone)]
+struct BakedGrass {
+    /// Kept so its address (the cache key) isn't reused while cached.
+    #[allow(dead_code)]
+    chunk: Arc<crate::GrassChunk>,
+    near: Mesh,
+    far: Mesh,
+    last_drawn: u64,
+}
+
+/// The index buffers every baked grass chunk draws with: the blade's
+/// triangles over and over, for `blades` blades.
+#[derive(Clone)]
+struct GrassIndices {
+    near: wgpu::Buffer,
+    far: wgpu::Buffer,
+    blades: u32,
+}
+
+/// What [`Renderer::batch_frame`] sorted a frame into: per mesh what the
+/// camera saw of it, the camera's batches, each sun cascade's batches, and
+/// the materials of the grass batches.
+type FrameBatches = (
+    Vec<Option<crate::batch::Seen>>,
+    Vec<crate::batch::Batch>,
+    Vec<Vec<crate::batch::Batch>>,
+    Vec<Material>,
+);
+
+/// Floats of grass data at the end of the camera uniform: the wind, then
+/// [`crate::MAX_GRASS_PUSHERS`] pushers (`wind` and `pushers` in
+/// common.wgsl).
+const GRASS_UNIFORM_FLOATS: usize = 4 + 4 * crate::MAX_GRASS_PUSHERS;
+
+/// The grass part of the camera uniform: the wind's direction, strength
+/// and the time, then the pushers nearest `eye` (the rest zero).
+fn grass_uniform(
+    env: &crate::Environment,
+    time: f32,
+    pushers: &[crate::GrassPusher],
+    eye: glam::Vec3,
+) -> [f32; GRASS_UNIFORM_FLOATS] {
+    let mut out = [0.0; GRASS_UNIFORM_FLOATS];
+    let angle = env.wind_direction.to_radians();
+    out[..4].copy_from_slice(&[angle.cos(), angle.sin(), env.wind.clamp(0.0, 1.0), time]);
+    let mut nearest: Vec<&crate::GrassPusher> = pushers.iter().collect();
+    nearest.sort_by(|a, b| {
+        a.position
+            .distance_squared(eye)
+            .total_cmp(&b.position.distance_squared(eye))
+    });
+    for (slot, p) in out[4..]
+        .chunks_exact_mut(4)
+        .zip(nearest.into_iter().take(crate::MAX_GRASS_PUSHERS))
+    {
+        slot.copy_from_slice(&[p.position.x, p.position.y, p.position.z, p.radius]);
+    }
+    out
+}
+
 fn instance_buffer(device: &wgpu::Device, count: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("instances"),
@@ -3282,6 +3571,131 @@ mod tests {
         // Past the draw distance: gone.
         assert!(lit(21.0, None) > 0);
         assert_eq!(lit(21.0, Some(&fades)), 0);
+    }
+
+    /// A square of grass `size` metres across, `n` blades, drawn to
+    /// `draw_distance`, as one chunk in random order.
+    fn grass_field(n: usize, size: f32, draw_distance: f32) -> crate::GrassField {
+        let mut seed = 0x2545_f491_u32;
+        let mut random = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            (seed as f32) / (u32::MAX as f32)
+        };
+        let blades = (0..n)
+            .map(|i| {
+                let root = glam::Vec3::new((random() - 0.5) * size, 0.0, (random() - 0.5) * size);
+                crate::GrassBlade::new(
+                    root,
+                    glam::Vec3::Y,
+                    random() * std::f32::consts::TAU,
+                    0.08,
+                    0.7,
+                    random(),
+                    i as f32 / n as f32,
+                    draw_distance,
+                )
+            })
+            .collect();
+        crate::GrassField {
+            chunks: vec![Arc::new(crate::GrassChunk::new(blades, 1.0))],
+            look: crate::GrassLook::default(),
+            draw_distance,
+        }
+    }
+
+    #[test]
+    fn offscreen_grass_sways_bends_away_from_pushers_and_thins_with_distance() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping grass test");
+            return;
+        };
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let green = |px: &[u8]| {
+            px.chunks_exact(4)
+                .filter(|p| p[1] > 12 && p[1] > p[0] && p[1] > p[2])
+                .count()
+        };
+        let frame = |renderer: &mut Renderer,
+                     field: &crate::GrassField,
+                     eye: glam::Vec3,
+                     wind: f32,
+                     pusher: Option<glam::Vec3>| {
+            let mut draw = DrawList::new();
+            draw.set_clear_color(Color::BLACK);
+            draw.set_time(3.0);
+            draw.set_camera_3d(Camera3D::new(eye, glam::Vec3::new(0.0, 0.3, 0.0)));
+            draw.set_sun(crate::Sun::new(glam::Vec3::new(-0.3, -1.0, -0.4)));
+            draw.set_environment(crate::Environment {
+                wind,
+                wind_direction: 0.0,
+                ..crate::Environment::default()
+            });
+            draw.grass(field.clone());
+            if let Some(at) = pusher {
+                draw.push_grass(crate::GrassPusher {
+                    position: at,
+                    radius: 0.8,
+                });
+            }
+            renderer.render_offscreen(&draw, &target);
+            read_pixels(renderer, &target, size)
+        };
+        let differing = |a: &[u8], b: &[u8]| {
+            a.chunks_exact(4)
+                .zip(b.chunks_exact(4))
+                .filter(|(p, q)| p.iter().zip(q.iter()).any(|(x, y)| x.abs_diff(*y) > 24))
+                .count()
+        };
+        let near = glam::Vec3::new(0.0, 1.6, 3.5);
+        let field = grass_field(3000, 4.0, 0.0);
+        for quality in [
+            GraphicsQuality::Low,
+            GraphicsQuality::Medium,
+            GraphicsQuality::High,
+            GraphicsQuality::Beautiful,
+        ] {
+            renderer.set_quality(quality);
+            let still = frame(&mut renderer, &field, near, 0.0, None);
+            assert!(
+                green(&still) > 600,
+                "{quality:?}: a green field ({} px)",
+                green(&still)
+            );
+            let windy = frame(&mut renderer, &field, near, 1.0, None);
+            assert!(
+                differing(&still, &windy) > 150,
+                "{quality:?}: the wind bends it ({} px moved)",
+                differing(&still, &windy)
+            );
+            let pushed = frame(&mut renderer, &field, near, 0.0, Some(glam::Vec3::ZERO));
+            assert!(
+                differing(&still, &pushed) > 80,
+                "{quality:?}: a pusher parts it ({} px moved)",
+                differing(&still, &pushed)
+            );
+        }
+        renderer.set_quality(GraphicsQuality::High);
+        // Far away a field with a draw distance is gone, and one without
+        // stays.
+        let far = glam::Vec3::new(0.0, 3.0, 24.0);
+        let unlimited = green(&frame(&mut renderer, &field, far, 0.0, None));
+        assert!(unlimited > 10, "seen from afar ({unlimited} px)");
+        let limited = grass_field(3000, 4.0, 18.0);
+        assert_eq!(green(&frame(&mut renderer, &limited, far, 0.0, None)), 0);
+        // Half way to it, about half the blades draw (see `drawn_blades`),
+        // widened so the field still covers the ground.
+        let mid = glam::Vec3::new(0.0, 2.0, 11.0);
+        let (all, thinned) = (
+            green(&frame(&mut renderer, &field, mid, 0.0, None)),
+            green(&frame(&mut renderer, &limited, mid, 0.0, None)),
+        );
+        assert!(
+            thinned * 10 > all * 7,
+            "thinned but still full ({thinned} of {all} px)"
+        );
     }
 
     #[test]

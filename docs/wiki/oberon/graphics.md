@@ -126,6 +126,7 @@ tuning.
 | Depth of Field | Blur on what's nearer or farther than the focus, 0 off to 4. Beautiful quality only |
 | Focus Distance | Metres from the camera kept sharp. 0 follows the camera's Look At point (shown once Depth of Field is above 0) |
 | Focus Range | Metres either side of the focus that stay sharp too |
+| Wind / Wind Direction | The scene's wind, 0 still to 1 a gale, and which way it blows (degrees around Y). Grass sways, spring bones stream out, water sprays. See [Grass & foliage](foliage.md#wind) |
 
 > With the sky off, fog is applied before tone mapping and the
 > background after it, so with ACES or AgX the far fog can look slightly

@@ -147,6 +147,13 @@ pub struct Environment {
     /// Colour grading and screen effects, applied after tone mapping on
     /// Medium graphics and up.
     pub post: PostEffects,
+    /// Wind across the scene, `0` (still air) to `1` (a gale): grass sways
+    /// and bends with it, and spring bones (hair, cloth, tails) are blown
+    /// by it.
+    pub wind: f32,
+    /// Which way the wind blows, degrees around +Y (`0` = toward +X), as
+    /// water's wave direction.
+    pub wind_direction: f32,
 }
 
 /// Post effects: bloom, colour grading and lens/film effects.
@@ -346,7 +353,19 @@ impl Default for Environment {
             pixelate: 0.0,
             palette: 0,
             post: PostEffects::default(),
+            wind: 0.0,
+            wind_direction: 0.0,
         }
+    }
+}
+
+impl Environment {
+    /// The wind as a horizontal vector: its direction times its strength
+    /// (`wind`, clamped to 0..1).
+    #[must_use]
+    pub fn wind_vector(&self) -> glam::Vec3 {
+        let angle = self.wind_direction.to_radians();
+        glam::Vec3::new(angle.cos(), 0.0, angle.sin()) * self.wind.clamp(0.0, 1.0)
     }
 }
 

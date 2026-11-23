@@ -58,7 +58,9 @@ pub struct Water {
     /// water (caustics), 0..=2 (0 = none). Medium graphics and up.
     pub caustics: f32,
     /// Wind over the water, 0..=1: from 0.5 up it blows spray off the
-    /// wave crests (more and further the stronger it is).
+    /// wave crests (more and further the stronger it is). The scene's
+    /// wind ([`Environment::wind`](crate::Environment::wind)) blows here
+    /// too: spray follows whichever is stronger.
     pub wind: f32,
 }
 

@@ -401,6 +401,15 @@ impl EditorApp {
         }
         let doc = &mut self.doc;
         match intent {
+            Intent::Brush {
+                id,
+                point,
+                normal,
+                radius,
+                strength,
+            } => {
+                doc.brush(id, point, normal, radius, strength);
+            }
             Intent::Select(id) => {
                 doc.select(id);
                 if let Some(play) = &mut self.play {
@@ -2061,6 +2070,13 @@ impl EditorApp {
                         viewport.sync(r, doc);
                         viewport.preview_animation(doc, ui.anim_preview.as_mut(), dt);
                     }
+                    // The foliage brush paints on what's under the cursor.
+                    let hit = ui.brush_target(doc).and_then(|_| {
+                        let proj = crate::view::Projector::new(&ui.camera, view);
+                        let (origin, dir) = proj.ray(pointer.x, pointer.y);
+                        viewport.surface_under(origin, dir)
+                    });
+                    ui.set_brush_hit(hit);
                     // The selected camera's preview first (same world).
                     let preview = ui.camera_preview_request(doc, lw, lh, s);
                     match (preview, renderer.as_mut()) {

@@ -121,6 +121,40 @@ pub enum Field {
     WaterCaustics,
     /// Wind over the water (0..1; spray off the crests from 0.5).
     WaterWind,
+    /// The scene's wind for grass and spring bones (0..1).
+    EnvWind,
+    /// Which way the scene's wind blows (degrees around +Y).
+    EnvWindDirection,
+    /// Grass rectangle width (X) and depth (Z): index 0..2.
+    GrassArea(u8),
+    /// Grass blades per square metre.
+    GrassDensity,
+    /// The tallest grass blades (m).
+    GrassHeight,
+    /// How much shorter some blades are (0..1).
+    GrassHeightVariation,
+    /// Blade width at the root (m).
+    GrassWidth,
+    /// Grass colour at the root, channel 0..3.
+    GrassBase(u8),
+    /// Grass colour at the tip, channel 0..3.
+    GrassTip(u8),
+    /// How much blades' colours differ (0..1).
+    GrassColorVariation,
+    /// How far from the camera grass is drawn (m; 0 = any distance).
+    GrassDrawDistance,
+    /// Which random field grows.
+    GrassSeed,
+    /// Scatter rectangle width (X) and depth (Z): index 0..2.
+    ScatterArea(u8),
+    /// Scattered copies per square metre.
+    ScatterDensity,
+    /// Scattered copies' smallest (0) and largest (1) scale.
+    ScatterScale(u8),
+    /// Scattered copies follow the slope (0 upright .. 1).
+    ScatterAlign,
+    /// Where scattered copies go.
+    ScatterSeed,
     /// Point light color channel 0..3 (RGB, 0..1).
     PointColor(u8),
     /// Point light brightness.
@@ -413,6 +447,23 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::WaterDrag => data.water?.drag,
         F::WaterCaustics => data.water?.caustics,
         F::WaterWind => data.water?.wind,
+        F::EnvWind => data.environment?.wind,
+        F::EnvWindDirection => data.environment?.wind_direction,
+        F::GrassArea(_)
+        | F::GrassDensity
+        | F::GrassHeight
+        | F::GrassHeightVariation
+        | F::GrassWidth
+        | F::GrassBase(_)
+        | F::GrassTip(_)
+        | F::GrassColorVariation
+        | F::GrassDrawDistance
+        | F::GrassSeed => grass_get(data.grass.as_ref()?, field)?,
+        F::ScatterArea(_)
+        | F::ScatterDensity
+        | F::ScatterScale(_)
+        | F::ScatterAlign
+        | F::ScatterSeed => scatter_get(data.scatter.as_ref()?, field)?,
         F::ParticleRate
         | F::ParticleBurst
         | F::ParticleDuration
@@ -476,6 +527,74 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
     })
 }
 
+#[allow(clippy::cast_precision_loss)] // seeds stay far below 2^24
+fn grass_get(g: &automata_scene::Grass, field: Field) -> Option<f32> {
+    use Field as F;
+    Some(match field {
+        F::GrassArea(i) => g.area[usize::from(i.min(1))],
+        F::GrassDensity => g.density,
+        F::GrassHeight => g.height,
+        F::GrassHeightVariation => g.height_variation,
+        F::GrassWidth => g.width,
+        F::GrassBase(i) => g.base_color[axis(i)],
+        F::GrassTip(i) => g.tip_color[axis(i)],
+        F::GrassColorVariation => g.color_variation,
+        F::GrassDrawDistance => g.draw_distance,
+        F::GrassSeed => g.seed as f32,
+        _ => return None,
+    })
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // clamped
+fn grass_set(g: &mut automata_scene::Grass, field: Field, v: f32) {
+    use Field as F;
+    match field {
+        F::GrassArea(i) => g.area[usize::from(i.min(1))] = v,
+        F::GrassDensity => g.density = v,
+        F::GrassHeight => g.height = v,
+        F::GrassHeightVariation => g.height_variation = v,
+        F::GrassWidth => g.width = v,
+        F::GrassBase(i) => g.base_color[axis(i)] = v,
+        F::GrassTip(i) => g.tip_color[axis(i)] = v,
+        F::GrassColorVariation => g.color_variation = v,
+        F::GrassDrawDistance => g.draw_distance = v,
+        _ => g.seed = v.round() as u32,
+    }
+}
+
+#[allow(clippy::cast_precision_loss)] // seeds stay far below 2^24
+fn scatter_get(s: &automata_scene::Scatter, field: Field) -> Option<f32> {
+    use Field as F;
+    Some(match field {
+        F::ScatterArea(i) => s.area[usize::from(i.min(1))],
+        F::ScatterDensity => s.density,
+        F::ScatterScale(i) => s.scale[usize::from(i.min(1))],
+        F::ScatterAlign => s.align,
+        F::ScatterSeed => s.seed as f32,
+        _ => return None,
+    })
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // clamped
+fn scatter_set(s: &mut automata_scene::Scatter, field: Field, v: f32) {
+    use Field as F;
+    match field {
+        F::ScatterArea(i) => s.area[usize::from(i.min(1))] = v,
+        F::ScatterDensity => s.density = v,
+        // The smallest stays at most the largest.
+        F::ScatterScale(0) => {
+            s.scale[0] = v;
+            s.scale[1] = s.scale[1].max(v);
+        }
+        F::ScatterScale(_) => {
+            s.scale[1] = v;
+            s.scale[0] = s.scale[0].min(v);
+        }
+        F::ScatterAlign => s.align = v,
+        _ => s.seed = v.round() as u32,
+    }
+}
+
 /// The valid range of a field (values are clamped into it on write).
 #[must_use]
 pub fn range(field: Field) -> (f32, f32) {
@@ -507,7 +626,19 @@ pub fn range(field: Field) -> (f32, f32) {
         | F::WaterDeep(_)
         | F::WaterShallow(_)
         | F::WaterFoam
-        | F::WaterWind => (0.0, 1.0),
+        | F::WaterWind
+        | F::EnvWind
+        | F::GrassBase(_)
+        | F::GrassTip(_)
+        | F::GrassColorVariation
+        | F::GrassHeightVariation
+        | F::ScatterAlign => (0.0, 1.0),
+        F::GrassArea(_) | F::ScatterArea(_) => (0.0, automata_scene::MAX_AREA),
+        F::GrassHeight => (0.01, 10.0),
+        F::GrassWidth => (0.002, 1.0),
+        F::GrassSeed | F::ScatterSeed => (0.0, 1_000_000.0),
+        F::ScatterDensity => (0.0, 50.0),
+        F::ScatterScale(_) => (0.01, 100.0),
         F::EnvTemperature | F::EnvTint | F::EnvLift(_) => (-1.0, 1.0),
         F::EnvContrast => (0.25, 3.0),
         F::EnvSaturation | F::EnvGain(_) => (0.0, 3.0),
@@ -527,11 +658,12 @@ pub fn range(field: Field) -> (f32, f32) {
         F::ParticleMax => (1.0, 100_000.0),
         F::WaterDensity
         | F::WaterDrag
+        | F::GrassDensity
         | F::PointIntensity
         | F::SpotIntensity
         | F::PointRange
         | F::SpotRange => (0.0, 1_000.0),
-        F::WaterWaveDirection | F::LightAzimuth => (-180.0, 180.0),
+        F::WaterWaveDirection | F::LightAzimuth | F::EnvWindDirection => (-180.0, 180.0),
         F::LightElevation => (-89.0, 89.0),
         F::LightTimeOfDay => (5.0, 19.0),
         F::LightShadowDistance => (10.0, 1_000.0),
@@ -568,6 +700,7 @@ pub fn range(field: Field) -> (f32, f32) {
         F::CameraFar => (0.01, 1_000_000.0),
         F::BodyLinearDamping
         | F::BodyAngularDamping
+        | F::GrassDrawDistance
         | F::ColliderDensity
         | F::ColliderFriction
         | F::ParticleRate
@@ -596,9 +729,11 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::ParticleConeAngle
         | F::ParticleRate
         | F::ParticleBurst
-        | F::WaterWaveDirection => 0.5,
+        | F::WaterWaveDirection
+        | F::EnvWindDirection => 0.5,
+        F::GrassSeed | F::ScatterSeed => 0.05,
         F::ParticleMax => 2.0,
-        F::EnvFogDensity => 0.0005,
+        F::EnvFogDensity | F::GrassWidth => 0.0005,
         F::EnvFogFalloff => 0.002,
         F::EnvLift(_) => 0.001,
         F::ParticleColor(_)
@@ -646,6 +781,15 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::WaterShallow(_)
         | F::WaterFoam
         | F::WaterWind
+        | F::EnvWind
+        | F::GrassBase(_)
+        | F::GrassTip(_)
+        | F::GrassColorVariation
+        | F::GrassHeightVariation
+        | F::GrassHeight
+        | F::ScatterAlign
+        | F::ScatterDensity
+        | F::ScatterScale(_)
         | F::WaterCaustics
         | F::WaterWaveHeight
         | F::AudioVolume
@@ -826,6 +970,32 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
             None => return false,
         },
         F::EnvToonBands | F::EnvPalette => return set_env_count(data, field, v),
+        F::EnvWind | F::EnvWindDirection => match &mut data.environment {
+            Some(env) if field == F::EnvWind => env.wind = v,
+            Some(env) => env.wind_direction = v,
+            None => return false,
+        },
+        F::GrassArea(_)
+        | F::GrassDensity
+        | F::GrassHeight
+        | F::GrassHeightVariation
+        | F::GrassWidth
+        | F::GrassBase(_)
+        | F::GrassTip(_)
+        | F::GrassColorVariation
+        | F::GrassDrawDistance
+        | F::GrassSeed => match &mut data.grass {
+            Some(grass) => grass_set(grass, field, v),
+            None => return false,
+        },
+        F::ScatterArea(_)
+        | F::ScatterDensity
+        | F::ScatterScale(_)
+        | F::ScatterAlign
+        | F::ScatterSeed => match &mut data.scatter {
+            Some(scatter) => scatter_set(scatter, field, v),
+            None => return false,
+        },
         F::WaterSize(_)
         | F::WaterDeep(_)
         | F::WaterShallow(_)

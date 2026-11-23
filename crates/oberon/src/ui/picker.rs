@@ -42,6 +42,10 @@ pub enum ColorTarget {
     WaterDeep,
     /// Water shallow color (RGB).
     WaterShallow,
+    /// Grass colour at the root (RGB).
+    GrassBase,
+    /// Grass colour at the tip (RGB).
+    GrassTip,
     /// Particle color at birth (RGBA, before its glow).
     ParticleColor,
     /// Particle color at death (RGBA, before its glow).
@@ -69,6 +73,8 @@ impl ColorTarget {
             Self::EnvOutline => (0..3).map(Field::EnvOutlineColor).collect(),
             Self::WaterDeep => (0..3).map(Field::WaterDeep).collect(),
             Self::WaterShallow => (0..3).map(Field::WaterShallow).collect(),
+            Self::GrassBase => (0..3).map(Field::GrassBase).collect(),
+            Self::GrassTip => (0..3).map(Field::GrassTip).collect(),
             Self::ParticleColor => (0..4).map(Field::ParticleColor).collect(),
             Self::ParticleEndColor => (0..4).map(Field::ParticleEndColor).collect(),
             Self::Attribute(_) => Vec::new(),

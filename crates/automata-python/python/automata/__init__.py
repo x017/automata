@@ -93,6 +93,7 @@ from ._core import (
     Gamepad,
     GamepadEvent,
     Gamepads,
+    Grass,
     Input,
     MeshRenderer,
     Modifiers,
@@ -103,6 +104,7 @@ from ._core import (
     Prefab,
     Resources,
     RigidBody,
+    Scatter,
     SceneView,
     Screen,
     SpotLight,
@@ -134,6 +136,8 @@ Component = Union[
     ParticleEmitter,
     Water,
     Animation,
+    Grass,
+    Scatter,
 ]
 
 #: A per-frame update callback.
@@ -242,6 +246,7 @@ __all__ = [
     "GamepadEvent",
     "Gamepads",
     "GraphicsQuality",
+    "Grass",
     "Input",
     "Key",
     "MeshRenderer",
@@ -254,6 +259,7 @@ __all__ = [
     "Prefab",
     "Resources",
     "RigidBody",
+    "Scatter",
     "Scene",
     "SceneView",
     "Screen",

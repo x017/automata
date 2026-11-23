@@ -269,13 +269,45 @@ toward `wave_direction` degrees around +Y). Every quality preset draws it;
 flat and calm, out to the horizon; waves, foam and physics stay within
 `size`. `caustics` (0 to 2) is the strength of the light the waves focus on
 what's under them (Medium and up). `wind` (0 to 1) blows spray off the
-crests from 0.5 up. With the camera under the surface the view fogs
+crests from 0.5 up (the Environment's `wind` too, whichever is stronger). With the camera under the surface the view fogs
 blue-green and the sound is muffled. It's also a volume of water for physics. Dynamic bodies in it float by
 buoyancy (`density` against their colliders' density, which defaults to
 1.0, so a default box floats half under) and are slowed by `drag`.
 All arguments are readable as properties, and it's saved in scene files.
 Guides: [Rendering & Lights](guides/rendering-and-lights.md#water),
 [Physics](guides/physics.md#water).
+
+### Grass
+
+```python
+at.Grass(area=(0, 0), density=60.0, height=0.6, height_variation=0.45,
+         width=0.07, base_color=(...), tip_color=(...), color_variation=0.3,
+         draw_distance=60.0, seed=0)
+grass.paint(position, radius=2.0, normal=(0, 1, 0), strength=1.0) -> Grass
+grass.erase(position, radius=2.0, strength=1.0) -> Grass
+grass.blade_count() -> int
+grass.strokes  # how many brush strokes
+```
+
+A field of blades over `area` (metres along the entity's X and Z,
+centred on it) plus brush strokes in the entity's space. `paint` and
+`erase` return changed copies. The blades sway in the Environment's
+`wind`, bend away from characters and moving bodies, and thin out toward
+`draw_distance`. Saved in scene files with its strokes.
+Guide: [Grass & Foliage](guides/grass-and-foliage.md).
+
+### Scatter
+
+```python
+at.Scatter(area=(0, 0), density=0.2, scale=(0.7, 1.3), align=0.3, seed=0)
+scatter.paint(...) / scatter.erase(...)  # as Grass
+scatter.count() -> int
+```
+
+Draws the entity's `MeshRenderer` at many spots on the ground instead of
+once (rocks, flowers, trees), each copy turned and sized at random
+between `scale`'s ends and tilted toward the slope by `align`. Copies
+aren't solid. Guide: [Grass & Foliage](guides/grass-and-foliage.md#scatter).
 
 ### ParticleEmitter
 

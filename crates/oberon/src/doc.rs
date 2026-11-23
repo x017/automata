@@ -175,6 +175,8 @@ pub enum CreateKind {
     Environment,
     /// An animated water surface.
     Water,
+    /// A 10 m field of grass to paint more onto.
+    Grass,
     /// A particle emitter (a campfire's flames to start with).
     Particles,
     /// A cube with a dynamic rigid body and a box collider.
@@ -188,7 +190,7 @@ pub enum CreateKind {
 
 impl CreateKind {
     /// Every kind, in menu order.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Empty,
         Self::Cube,
         Self::Sphere,
@@ -199,6 +201,7 @@ impl CreateKind {
         Self::Camera,
         Self::Environment,
         Self::Water,
+        Self::Grass,
         Self::Particles,
         Self::PhysicsCube,
         Self::Player,
@@ -218,6 +221,7 @@ impl CreateKind {
             Self::Camera => "Camera",
             Self::Environment => "Environment",
             Self::Water => "Water",
+            Self::Grass => "Grass",
             Self::Particles => "Particles",
             Self::PhysicsCube => "Physics Cube",
             Self::Player => "Player",
@@ -244,6 +248,10 @@ pub enum ComponentKind {
     Environment,
     /// Animated water surface.
     Water,
+    /// A field of grass blades.
+    Grass,
+    /// Draws the entity's model at many spots on the ground.
+    Scatter,
     /// Particle emitter: fire, smoke, sparks, dust …
     Particles,
     /// Rigid body.
@@ -258,7 +266,7 @@ pub enum ComponentKind {
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 15] = [
         Self::Mesh,
         Self::Animation,
         Self::Light,
@@ -267,6 +275,8 @@ impl ComponentKind {
         Self::Camera,
         Self::Environment,
         Self::Water,
+        Self::Grass,
+        Self::Scatter,
         Self::Particles,
         Self::RigidBody,
         Self::Collider,
@@ -286,6 +296,8 @@ impl ComponentKind {
             Self::Camera => "Camera",
             Self::Environment => "Environment",
             Self::Water => "Water",
+            Self::Grass => "Grass",
+            Self::Scatter => "Scatter",
             Self::Particles => "Particle Emitter",
             Self::RigidBody => "Rigidbody",
             Self::Collider => "Collider",
@@ -306,6 +318,8 @@ impl ComponentKind {
             Self::Camera => data.camera_3d.is_some(),
             Self::Environment => data.environment.is_some(),
             Self::Water => data.water.is_some(),
+            Self::Grass => data.grass.is_some(),
+            Self::Scatter => data.scatter.is_some(),
             Self::Particles => data.particle_emitter.is_some(),
             Self::RigidBody => data.rigid_body.is_some(),
             Self::Collider => data.collider_3d.is_some(),
@@ -358,6 +372,14 @@ impl ComponentKind {
                 data.water
                     .get_or_insert_with(automata_renderer::Water::pond);
             }
+            Self::Grass => {
+                data.grass
+                    .get_or_insert_with(|| automata_scene::Grass::area(10.0, 10.0));
+            }
+            Self::Scatter => {
+                data.scatter
+                    .get_or_insert_with(|| automata_scene::Scatter::area(10.0, 10.0));
+            }
             Self::Particles => {
                 data.particle_emitter.get_or_insert_with(|| {
                     automata_scene::ParticleEmitter::preset("fire").unwrap_or_default()
@@ -407,6 +429,8 @@ impl ComponentKind {
             Self::Camera => dst.camera_3d = src.camera_3d,
             Self::Environment => dst.environment = src.environment,
             Self::Water => dst.water = src.water,
+            Self::Grass => dst.grass.clone_from(&src.grass),
+            Self::Scatter => dst.scatter.clone_from(&src.scatter),
             Self::Particles => dst.particle_emitter.clone_from(&src.particle_emitter),
             Self::RigidBody => dst.rigid_body.clone_from(&src.rigid_body),
             Self::Collider => dst.collider_3d.clone_from(&src.collider_3d),
@@ -430,6 +454,8 @@ impl ComponentKind {
             Self::Camera => data.camera_3d = None,
             Self::Environment => data.environment = None,
             Self::Water => data.water = None,
+            Self::Grass => data.grass = None,
+            Self::Scatter => data.scatter = None,
             Self::Particles => data.particle_emitter = None,
             Self::RigidBody => data.rigid_body = None,
             Self::Collider => data.collider_3d = None,
@@ -995,6 +1021,47 @@ impl Document {
         true
     }
 
+    /// Lays a foliage brush dab (world-space `point` on a surface facing
+    /// `normal`, `radius` metres, `strength` -1..1 with negative erasing)
+    /// on entity `id`'s Grass, or else its Scatter, in the entity's own
+    /// space. Part of a stroke: one undo step per stroke.
+    pub fn brush(
+        &mut self,
+        id: u64,
+        point: [f32; 3],
+        normal: [f32; 3],
+        radius: f32,
+        strength: f32,
+    ) -> bool {
+        self.modify(id, true, |d| {
+            let model = d
+                .transform
+                .map_or(glam::Mat4::IDENTITY, |t| crate::view::model_matrix(&t));
+            let det = model.determinant();
+            if !det.is_finite() || det.abs() < 1e-9 {
+                return;
+            }
+            let local = model.inverse();
+            let normal = (glam::Mat3::from_mat4(model).transpose() * glam::Vec3::from(normal))
+                .try_normalize()
+                .unwrap_or(glam::Vec3::Y);
+            // The radius in the entity's units (its ground is X and Z).
+            let (scale, _, _) = model.to_scale_rotation_translation();
+            let spread = f32::midpoint(scale.x.abs(), scale.z.abs()).max(1e-3);
+            let dab = automata_scene::Dab {
+                position: local.transform_point3(glam::Vec3::from(point)).to_array(),
+                normal: normal.to_array(),
+                radius: radius / spread,
+                strength: strength.clamp(-1.0, 1.0),
+            };
+            if let Some(grass) = &mut d.grass {
+                grass.strokes.push(dab);
+            } else if let Some(scatter) = &mut d.scatter {
+                scatter.strokes.push(dab);
+            }
+        })
+    }
+
     /// Creates an entity showing the model at `rel` (scene-relative), named
     /// `name`, standing on `at` (its lowest point at `at.y`), and selects it.
     /// One undo step.
@@ -1227,6 +1294,9 @@ impl Document {
             }
             CreateKind::Water => {
                 ComponentKind::Water.add_to(&mut data);
+            }
+            CreateKind::Grass => {
+                ComponentKind::Grass.add_to(&mut data);
             }
             CreateKind::Particles => {
                 ComponentKind::Particles.add_to(&mut data);
@@ -1991,6 +2061,50 @@ pub(crate) mod tests {
         assert_eq!(bare.spot_light, data(spot).spot_light);
         ComponentKind::SpotLight.remove_from(&mut bare);
         assert!(bare.spot_light.is_none());
+    }
+
+    #[test]
+    fn brush_strokes_paint_grass_in_the_entitys_space_as_one_undo_step() {
+        let mut doc = Document::new();
+        let id = doc.create(CreateKind::Grass);
+        let data = doc.entities[doc.index_of(id).unwrap()].data.clone();
+        assert!(ComponentKind::Grass.present_in(&data));
+        assert_eq!(data.grass.as_ref().unwrap().area, [10.0, 10.0]);
+        doc.modify(id, false, |d| {
+            if let Some(t) = &mut d.transform {
+                t.position = [10.0, 1.0, 0.0];
+                t.scale = [2.0, 1.0, 2.0];
+            }
+        });
+        assert!(doc.brush(id, [14.0, 1.0, 0.0], [0.0, 1.0, 0.0], 3.0, 1.0));
+        assert!(doc.brush(id, [16.0, 1.0, 0.0], [0.0, 1.0, 0.0], 3.0, -0.5));
+        doc.end_gesture();
+        let grass = doc.entities[doc.index_of(id).unwrap()]
+            .data
+            .grass
+            .clone()
+            .unwrap();
+        assert_eq!(grass.strokes.len(), 2);
+        let dab = grass.strokes[0];
+        assert_eq!(dab.position, [2.0, 0.0, 0.0]);
+        assert!((dab.radius - 1.5).abs() < 1e-5);
+        assert!((grass.strokes[1].strength + 0.5).abs() < 1e-5);
+        // It grows where it was painted.
+        let mut world = automata_scene::SceneWorld::new();
+        doc.to_scene_file().apply_to_world(&mut world);
+        let mut draw = automata_renderer::DrawList::new();
+        automata_scene::record_draw_list(&world, &mut draw);
+        assert_eq!(draw.grass_fields().len(), 1);
+        // The whole stroke undoes at once.
+        assert!(doc.undo());
+        let after = doc.entities[doc.index_of(id).unwrap()].data.clone();
+        assert_eq!(after.grass.unwrap().strokes.len(), 0);
+        // Without Grass, a Scatter takes the dab; with neither, nothing.
+        let cube = doc.create(CreateKind::Cube);
+        assert!(!doc.brush(cube, [0.0; 3], [0.0, 1.0, 0.0], 1.0, 1.0));
+        let at = doc.index_of(cube).unwrap();
+        ComponentKind::Scatter.add_to(&mut doc.entities[at].data);
+        assert!(doc.brush(cube, [0.0; 3], [0.0, 1.0, 0.0], 1.0, 1.0));
     }
 
     #[test]

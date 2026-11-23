@@ -154,6 +154,7 @@ impl<F: FnMut(&mut AppContext<'_>)> WinitDriver<'_, F> {
         automata_scene::animate(self.world.scene_mut().world_mut(), delta.as_secs_f32());
         automata_scene::simulate_particles(self.world.scene_mut().world_mut(), delta.as_secs_f32());
         automata_scene::record_draw_list(self.world.scene().world(), &mut self.draw);
+        automata_physics::record_grass_pushers(self.world.scene().world(), &mut self.draw);
         // Waves run on the physics clock, so floating bodies ride exactly
         // the waves that are drawn.
         self.draw.set_time(self.world.physics3d_ref().water_time());

@@ -337,8 +337,12 @@ fn water_particles_can_be_turned_off() {
 
 #[test]
 fn strong_wind_blows_spray_off_the_crests() {
-    let spray = |wind: f32| {
+    let spray_in = |wind: f32, scene_wind: f32| {
         let mut scene = SceneWorld::new();
+        scene.spawn((automata_renderer::Environment {
+            wind: scene_wind,
+            ..automata_renderer::Environment::default()
+        },));
         scene.spawn((
             Transform::from_position(Vec3::ZERO),
             Water {
@@ -365,9 +369,17 @@ fn strong_wind_blows_spray_off_the_crests() {
         }
         (seen, on_crests)
     };
+    let spray = |wind: f32| spray_in(wind, 0.0);
     assert_eq!(spray(0.0).0, 0, "calm air: no spray");
     assert_eq!(spray(0.45).0, 0, "a breeze: no spray");
     let (strong, on_crests) = spray(1.0);
     assert!(strong >= 5, "a gale throws spray, saw {strong}");
     assert!(on_crests);
+    // The scene's wind (the Environment's, which sways grass) blows over
+    // the water too.
+    let (shared, _) = spray_in(0.0, 1.0);
+    assert!(
+        shared >= 5,
+        "the scene's gale throws spray too, saw {shared}"
+    );
 }

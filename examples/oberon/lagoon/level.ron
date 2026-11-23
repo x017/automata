@@ -58,6 +58,8 @@
                     grain: 0.3,
                     chromatic_aberration: 0.15,
                 ),
+                wind: 0.0,
+                wind_direction: 0.0,
             )),
         ),
         (
