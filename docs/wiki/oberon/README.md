@@ -19,16 +19,21 @@ Oberon needs a GPU that supports Vulkan, Metal, or DX12 to render the
 viewport. Without one it still runs and draws the scene as wireframes, so
 editing works anywhere.
 
-For Play mode, Oberon starts a Python interpreter (`python3`, or the one you
-pick in **Settings → Python**). That interpreter needs only the standard
-library. The `automata` package is required only when you run scenes outside
-the editor.
+For Play mode, Oberon starts a Python interpreter: the project's own
+`.venv`, or `python3`, or the one you pick in **Settings → Python**. That
+interpreter needs only the standard library.
+
+To start a project from the command line, run `oberon new mygame`. That
+gives you a level, a typed starter script, tests, and a `.venv` with the
+engine and a language server. [The `oberon` command](command-line.md) covers
+this and `oberon run`, `test`, `export` and `doctor`.
 
 ## The manual
 
 | Page | What it covers |
 |---|---|
 | [The interface](interface.md) | Every panel, moving around the scene, gizmos, Play mode |
+| [The `oberon` command](command-line.md) | `oberon new`, `run`, `test`, `export`, `doctor`; the project's own Python |
 | [Keyboard shortcuts](shortcuts.md) | The complete list |
 | [Scripting](scripting.md) | Behaviour scripts, the `entity` / `ctx` API, hot reload, errors |
 | [Cameras](cameras.md) | Scene cameras, the preview, Look Through, driving cameras from Python |

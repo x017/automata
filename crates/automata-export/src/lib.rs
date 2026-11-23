@@ -20,6 +20,7 @@
 //! ([`BuildConfig`]).
 
 pub mod archive;
+pub mod cli;
 
 use std::fmt;
 use std::fmt::Write as _;

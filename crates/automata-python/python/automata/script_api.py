@@ -50,6 +50,8 @@ events as ``<entity name>:animation:<event>`` at the start of the frame
 after the playhead passes them, just before ``update`` runs.
 """
 
+from __future__ import annotations
+
 import difflib
 import fnmatch
 import importlib.util
@@ -58,6 +60,10 @@ import os
 import sys
 import traceback
 import types
+from typing import TYPE_CHECKING, Any, Callable, Iterable
+
+#: An (x, y, z) triple.
+Vec3 = tuple[float, float, float]
 
 __all__ = [
     "Attributes",
@@ -126,35 +132,35 @@ class Transform:
         self._e = entity
 
     @property
-    def position(self):
+    def position(self) -> Vec3:
         return self._e._read("p", (0.0, 0.0, 0.0))
 
     @position.setter
-    def position(self, v):
+    def position(self, v: Iterable[float]) -> None:
         self._e._write("p", _vec(v, 3))
 
     @property
-    def rotation_euler(self):
+    def rotation_euler(self) -> Vec3:
         return self._e._read("r", (0.0, 0.0, 0.0))
 
     @rotation_euler.setter
-    def rotation_euler(self, v):
+    def rotation_euler(self, v: Iterable[float]) -> None:
         self._e._write("r", _vec(v, 3))
 
     @property
-    def scale(self):
+    def scale(self) -> Vec3:
         return self._e._read("s", (1.0, 1.0, 1.0))
 
     @scale.setter
-    def scale(self, v):
+    def scale(self, v: Iterable[float]) -> None:
         self._e._write("s", _vec(v, 3))
 
-    def translate(self, delta):
+    def translate(self, delta: Iterable[float]) -> None:
         """Moves by ``delta`` (x, y, z)."""
         d = _vec(delta, 3)
         self.position = tuple(a + b for a, b in zip(self.position, d))
 
-    def rotate(self, delta):
+    def rotate(self, delta: Iterable[float]) -> None:
         """Adds ``delta`` (radians, x, y, z) to the rotation."""
         d = _vec(delta, 3)
         self.rotation_euler = tuple(a + b for a, b in zip(self.rotation_euler, d))
@@ -184,39 +190,45 @@ class Camera:
         self._e._write("cam", tuple(cam))
 
     @property
-    def position(self):
+    def position(self) -> Vec3:
         """The eye position (x, y, z)."""
         return self._get(0, 3)
 
     @position.setter
-    def position(self, v):
+    def position(self, v: Iterable[float]) -> None:
         self._set(0, _vec(v, 3))
 
     @property
-    def target(self):
+    def target(self) -> Vec3:
         """The point the camera looks at (x, y, z)."""
         return self._get(3, 6)
 
     @target.setter
-    def target(self, v):
+    def target(self, v: Iterable[float]) -> None:
         self._set(3, _vec(v, 3))
 
     @property
-    def fov(self):
+    def fov(self) -> float:
         """Vertical field of view in degrees."""
         return self._e._read("cam")[6]
 
     @fov.setter
-    def fov(self, degrees):
+    def fov(self, degrees: float) -> None:
         self._set(6, (min(179.0, max(1.0, float(degrees))),))
 
-    def look_at(self, point):
+    def look_at(self, point: Iterable[float]) -> None:
         """Aims the camera at a point or an entity."""
         if hasattr(point, "transform"):
             point = point.transform.position
         self.target = point
 
-    def follow(self, entity, offset=(0.0, 3.0, 8.0), smooth=8.0, look_height=0.6):
+    def follow(
+        self,
+        entity: Entity,
+        offset: Iterable[float] = (0.0, 3.0, 8.0),
+        smooth: float = 8.0,
+        look_height: float = 0.6,
+    ) -> None:
         """Moves the camera toward ``entity + offset`` and looks at it.
 
         Call every frame from ``update``. ``smooth`` is how quickly it
@@ -283,22 +295,22 @@ class EntityAudio:
     def __init__(self, entity):
         self._e = entity
 
-    def play(self):
+    def play(self) -> None:
         """Starts the sound (restarts it if it's already playing)."""
         self._e._audio = "play"
         self._e._dirty.add("audio")
 
-    def stop(self):
+    def stop(self) -> None:
         self._e._audio = "stop"
         self._e._dirty.add("audio")
 
     @property
-    def playing(self):
+    def playing(self) -> bool:
         """Whether it was playing at the start of the frame."""
         return bool(self._e._host.backend.source_playing(self._e))
 
     @property
-    def source(self):
+    def source(self) -> Any:
         """The Audio Source (truthy), or None if the entity has none."""
         return self._e._record.get("snd") or None
 
@@ -322,7 +334,14 @@ class EntityAnimation:
     def _st(self):
         return self._e._anim_state()
 
-    def play(self, clip, loop=True, fade=0.0, speed=None, restart=False):
+    def play(
+        self,
+        clip: str,
+        loop: bool = True,
+        fade: float = 0.0,
+        speed: float | None = None,
+        restart: bool = False,
+    ) -> None:
         """Plays ``clip``, crossfading from the current pose over ``fade``
         seconds. Playing the clip that's already playing keeps it going
         unless ``restart``; ``speed`` (if given) sets the playback rate.
@@ -345,28 +364,28 @@ class EntityAnimation:
         st.update(clip=clip, len=length, playing=True)
         st["time"] = length if float(st.get("speed") or 1.0) < 0 else 0.0
 
-    def stop(self, fade=0.0):
+    def stop(self, fade: float = 0.0) -> None:
         """Stops, fading back to the rest pose over ``fade`` seconds."""
         self._e._anim_cmd(["stop", max(0.0, float(fade))])
         self._st().update(clip=None, time=0.0, len=0.0, playing=False)
 
     @property
-    def clip(self):
+    def clip(self) -> str | None:
         """The current clip's name, or None in the rest pose."""
         return self._st().get("clip")
 
     @property
-    def playing(self):
+    def playing(self) -> bool:
         """Whether time advances (False once a one-shot clip has ended)."""
         return bool(self._st().get("playing"))
 
     @property
-    def time(self):
+    def time(self) -> float:
         """Seconds into the current clip; set it to jump."""
         return float(self._st().get("time") or 0.0)
 
     @time.setter
-    def time(self, t):
+    def time(self, t: float) -> None:
         t = float(t)
         self._e._anim_cmd(["seek", t])
         st = self._st()
@@ -376,54 +395,54 @@ class EntityAnimation:
         st["time"] = min(max(t, 0.0), length)
 
     @property
-    def duration(self):
+    def duration(self) -> float:
         """The current clip's length in seconds (0 with no clip)."""
         return float(self._st().get("len") or 0.0)
 
     @property
-    def speed(self):
+    def speed(self) -> float:
         """Playback rate (1 is normal speed, negative plays backwards)."""
         return float(self._st().get("speed", 1.0))
 
     @speed.setter
-    def speed(self, v):
+    def speed(self, v: float) -> None:
         v = float(v)
         self._e._anim_cmd(["speed", v])
         self._st()["speed"] = v
 
     @property
-    def looping(self):
+    def looping(self) -> bool:
         """Whether the current clip loops."""
         return bool(self._st().get("loop"))
 
     @property
-    def clips(self):
+    def clips(self) -> tuple[str, ...]:
         """Every clip the model has."""
         return tuple(self._st().get("clips") or ())
 
     @property
-    def springs(self):
+    def springs(self) -> bool:
         """Whether the model has spring bones (set up in its import settings)."""
         return bool(self._st().get("springs"))
 
-    def reset_springs(self):
+    def reset_springs(self) -> None:
         """Puts the spring bones back at rest, as if the entity had just
         appeared (after moving it somewhere new, say)."""
         self._e._anim_cmd(["reset_springs"])
 
     @property
-    def root_motion(self):
+    def root_motion(self) -> bool:
         """Whether the clip's own travel across the ground moves the entity
         (through its Character Controller, if it has one) instead of
         sliding the model away from it. Settable."""
         return bool(self._st().get("rm"))
 
     @root_motion.setter
-    def root_motion(self, on):
+    def root_motion(self, on: bool) -> None:
         self._e._anim_cmd(["root_motion", bool(on)])
         self._st()["rm"] = bool(on)
 
-    def length(self, clip=None):
+    def length(self, clip: str | None = None) -> float:
         """A clip's length in seconds (default: the current clip's)."""
         if clip is None:
             return self.duration
@@ -486,12 +505,12 @@ class Entity:
         self._dirty.add(key)
 
     @property
-    def transform(self):
+    def transform(self) -> Transform:
         """Position, rotation (``rotation_euler``, radians) and scale."""
         return self._transform
 
     @transform.setter
-    def transform(self, value):
+    def transform(self, value: Any) -> None:
         # Any transform-like object: ours, the engine's Transform, ...
         self._transform.position = value.position
         if hasattr(value, "rotation_euler"):
@@ -500,21 +519,21 @@ class Entity:
             self._transform.scale = value.scale
 
     @property
-    def character_velocity(self):
+    def character_velocity(self) -> Vec3 | None:
         """The Character Controller's velocity, or None without one."""
         return self._read("v")
 
     @character_velocity.setter
-    def character_velocity(self, v):
+    def character_velocity(self, v: Iterable[float]) -> None:
         self._write("v", _vec(v, 3))
 
     @property
-    def grounded(self):
+    def grounded(self) -> bool:
         """True when a character is standing on something."""
         return bool(self._read("g", False))
 
     @property
-    def attributes(self):
+    def attributes(self) -> Attributes:
         """Custom values from the Inspector; read and write like a dict."""
         if self._attrs is None:
             raw = self._record.get("attrs") or {}
@@ -522,31 +541,31 @@ class Entity:
         return self._attrs
 
     @attributes.setter
-    def attributes(self, values):
+    def attributes(self, values: dict[str, Any]) -> None:
         self._attrs = Attributes(self, {k: _tuple(v) for k, v in dict(values).items()})
         self._dirty.add("attrs")
 
     @property
-    def camera(self):
+    def camera(self) -> Camera | None:
         """This entity's Camera, or None if it has no Camera component."""
         return Camera(self) if self._read("cam") is not None else None
 
     @property
-    def camera_3d(self):
+    def camera_3d(self) -> Any:
         """The engine's ``Camera3D`` (``run_scene`` only; prefer ``camera``)."""
         return self._host.backend.camera_3d(self)
 
     @camera_3d.setter
-    def camera_3d(self, value):
+    def camera_3d(self, value: Any) -> None:
         self._write("cam", (*_vec(value.position, 3), *_vec(value.target, 3), float(value.fov)))
 
     @property
-    def audio(self):
+    def audio(self) -> EntityAudio | None:
         """This entity's Audio Source: ``play()``, ``stop()``, ``playing``."""
         return EntityAudio(self)
 
     @property
-    def animation(self):
+    def animation(self) -> EntityAnimation | None:
         """This entity's animated model: ``play(clip, loop=True, fade=0,
         speed=None)``, ``stop(fade=0)``, ``clip``, ``time``, ``playing``,
         ``speed``, ``clips``. None when its mesh isn't animated."""
@@ -566,11 +585,11 @@ class Entity:
         self._dirty.add("anim")
 
     @property
-    def view(self):
+    def view(self) -> Any:
         """The engine's own handle for the entity (``run_scene`` only)."""
         return self._record.get("view")
 
-    def despawn(self):
+    def despawn(self) -> None:
         """Removes the entity from the running scene (after this frame)."""
         self._despawn = True
         self._dirty.add("despawn")
@@ -656,53 +675,54 @@ class Input:
         self._src = source
         self._lock_request = None
 
-    def pressed(self, key):
+    def pressed(self, key: str) -> bool:
         """The key is held down."""
         return any(self._src.key_down(k) for k in keys_for(key))
 
-    def just_pressed(self, key):
+    def just_pressed(self, key: str) -> bool:
         """The key went down this frame."""
         return any(self._src.key_pressed(k) for k in keys_for(key))
 
-    def just_released(self, key):
+    def just_released(self, key: str) -> bool:
         """The key came up this frame."""
         return any(self._src.key_released(k) for k in keys_for(key))
 
-    def axis(self, negative, positive):
+    def axis(self, negative: str, positive: str) -> float:
         """-1, 0, or 1 from two keys."""
         return float(self.pressed(positive)) - float(self.pressed(negative))
 
-    def mouse_pressed(self, button="left"):
+    def mouse_pressed(self, button: str = "left") -> bool:
         return self._src.button_down(str(button).lower())
 
-    def mouse_just_pressed(self, button="left"):
+    def mouse_just_pressed(self, button: str = "left") -> bool:
         return self._src.button_pressed(str(button).lower())
 
-    def mouse_just_released(self, button="left"):
+    def mouse_just_released(self, button: str = "left") -> bool:
         return self._src.button_released(str(button).lower())
 
     @property
-    def mouse_delta(self):
+    def mouse_delta(self) -> tuple[float, float]:
         """Mouse movement since last frame (dx, dy) in pixels; +y is down."""
         dx, dy = self._src.mouse_delta()
         return (float(dx), float(dy))
 
-    def lock_mouse(self, locked=True):
+    def lock_mouse(self, locked: bool = True) -> None:
         """Hides and captures the cursor for mouse look (False frees it).
         In Oberon, Esc gives the cursor back; click the view to recapture."""
         self._lock_request = bool(locked)
 
     @property
-    def mouse_locked(self):
+    def mouse_locked(self) -> bool:
         if self._lock_request is not None:
             return self._lock_request
         return bool(self._src.mouse_locked())
 
-    def __getattr__(self, name):
-        raw = getattr(self._src, "raw", None)
-        if raw is None:
-            raise AttributeError(f"ctx.input has no {name!r}")
-        return getattr(raw, name)
+    if not TYPE_CHECKING:  # type checkers flag misspelt names instead
+        def __getattr__(self, name):
+            raw = getattr(self._src, "raw", None)
+            if raw is None:
+                raise AttributeError(f"ctx.input has no {name!r}")
+            return getattr(raw, name)
 
 
 class Time:
@@ -715,17 +735,23 @@ class Time:
         self.frame = 0
         self.raw = None
 
-    def __getattr__(self, name):
-        raw = self.__dict__.get("raw")
-        if raw is None:
-            raise AttributeError(f"ctx.time has no {name!r}")
-        return getattr(raw, name)
+    if not TYPE_CHECKING:  # type checkers flag misspelt names instead
+        def __getattr__(self, name):
+            raw = self.__dict__.get("raw")
+            if raw is None:
+                raise AttributeError(f"ctx.time has no {name!r}")
+            return getattr(raw, name)
 
 
 class Hit:
     """A raycast hit: ``entity`` (or None), ``point``, ``normal``, ``distance``."""
 
     __slots__ = ("entity", "point", "normal", "distance")
+
+    entity: Entity | None
+    point: Vec3
+    normal: Vec3
+    distance: float
 
     def __init__(self, entity, point, normal, distance):
         self.entity = entity
@@ -744,12 +770,18 @@ class Physics:
     def __init__(self, host):
         self._host = host
 
-    def grounded(self, entity):
+    def grounded(self, entity: Entity) -> bool:
         if isinstance(entity, Entity):
             return entity.grounded
         return bool(self._host.backend.grounded(entity))
 
-    def raycast(self, origin, direction, max_distance=100.0, ignore=None):
+    def raycast(
+        self,
+        origin: Iterable[float],
+        direction: Iterable[float],
+        max_distance: float = 100.0,
+        ignore: Entity | None = None,
+    ) -> Hit | None:
         """The first collider along a ray, right now, or None.
 
         ``ignore`` skips one entity (usually the caster). Sensors are skipped.
@@ -767,15 +799,16 @@ class Physics:
         sid, point, normal, distance = hit
         return Hit(self._host.entities.get(sid), point, normal, distance)
 
-    def water_height(self, x, z):
+    def water_height(self, x: float, z: float) -> float | None:
         """The height of the water surface at world ``(x, z)``, waves
         included (what floating bodies ride), or None where there's no
         water."""
         h = self._host.backend.water_height(float(x), float(z))
         return None if h is None else float(h)
 
-    def __getattr__(self, name):
-        return self._host.backend.extra("physics", name)
+    if not TYPE_CHECKING:  # type checkers flag misspelt names instead
+        def __getattr__(self, name):
+            return self._host.backend.extra("physics", name)
 
 
 class Water:
@@ -784,14 +817,14 @@ class Water:
     def __init__(self, host):
         self._host = host
 
-    def height(self, x, z):
+    def height(self, x: float, z: float) -> float | None:
         """The height of the water surface at world ``(x, z)``, waves
         included, or None where there's no water (same as
         ``ctx.physics.water_height``)."""
         h = self._host.backend.water_height(float(x), float(z))
         return None if h is None else float(h)
 
-    def splash(self, position, strength=1.0):
+    def splash(self, position: Iterable[float], strength: float = 1.0) -> None:
         """Makes a splash at ``position`` (a point or an entity; its X and
         Z): rings spread out from it and foam gathers. ``strength`` 1 is
         about a crate dropped from a couple of metres (0 to 10). Things
@@ -804,8 +837,9 @@ class Water:
         if strength > 0.0:
             self._host.backend.splash(pos, strength)
 
-    def __getattr__(self, name):
-        return self._host.backend.extra("water", name)
+    if not TYPE_CHECKING:  # type checkers flag misspelt names instead
+        def __getattr__(self, name):
+            return self._host.backend.extra("water", name)
 
 
 PARTICLE_PRESETS = ("fire", "smoke", "sparks", "dust", "splash", "magic")
@@ -833,7 +867,14 @@ class Particles:
     def __init__(self, host):
         self._host = host
 
-    def burst(self, effect, position, direction=None, count=None, **fields):
+    def burst(
+        self,
+        effect: str,
+        position: Iterable[float],
+        direction: Iterable[float] | None = None,
+        count: int | None = None,
+        **fields: Any,
+    ) -> None:
         """A one-off effect at ``position`` (a point or an entity) that
         cleans up after itself: sparks where a shot hits, a puff of dust
         where something lands.
@@ -863,7 +904,7 @@ class Particles:
             return
         self._host.backend.burst(name, base, pos, d, n)
 
-    def emit(self, entity, count):
+    def emit(self, entity: Entity | str, count: int) -> None:
         """``count`` extra particles from ``entity``'s own emitter (its
         Particle Emitter component), on top of its rate."""
         n = max(0, int(count))
@@ -887,8 +928,9 @@ class Particles:
             return None, {k: _particle_value(getattr(effect, k)) for k in PARTICLE_FIELDS}
         raise TypeError("burst() wants a preset name or an at.ParticleEmitter")
 
-    def __getattr__(self, name):
-        return self._host.backend.extra("particles", name)
+    if not TYPE_CHECKING:  # type checkers flag misspelt names instead
+        def __getattr__(self, name):
+            return self._host.backend.extra("particles", name)
 
 
 class Audio:
@@ -898,7 +940,13 @@ class Audio:
         self._host = host
         self._queue = []
 
-    def play(self, path, volume=1.0, pitch=1.0, position=None):
+    def play(
+        self,
+        path: str,
+        volume: float = 1.0,
+        pitch: float = 1.0,
+        position: Iterable[float] | None = None,
+    ) -> None:
         """Plays a sound file once (relative to the scene folder). With a
         ``position`` (a point or an entity) it fades with distance."""
         if hasattr(position, "transform"):
@@ -906,8 +954,9 @@ class Audio:
         pos = list(_vec(tuple(position)[:3], 3)) if position is not None else None
         self._queue.append([str(path), float(volume), float(pitch), pos])
 
-    def __getattr__(self, name):
-        return self._host.backend.extra("audio", name)
+    if not TYPE_CHECKING:  # type checkers flag misspelt names instead
+        def __getattr__(self, name):
+            return self._host.backend.extra("audio", name)
 
 
 class Hud:
@@ -922,22 +971,46 @@ class Hud:
         self.size = (1280, 720)
 
     @property
-    def center(self):
+    def center(self) -> tuple[float, float]:
         return (self.size[0] / 2.0, self.size[1] / 2.0)
 
-    def image(self, path, x, y, size=None, color=(1.0, 1.0, 1.0, 1.0), rotation=0.0):
+    def image(
+        self,
+        path: str,
+        x: float,
+        y: float,
+        size: float | tuple[float, float] | None = None,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        rotation: float = 0.0,
+    ) -> None:
         item = {"k": "img", "path": str(path), "x": float(x), "y": float(y),
                 "c": list(_vec(color, 4)), "rot": float(rotation)}
         if size is not None:
             item["w"], item["h"] = float(size[0]), float(size[1])
         self._items.append(item)
 
-    def rect(self, x, y, width, height, color=(1.0, 1.0, 1.0, 1.0)):
+    def rect(
+        self,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+    ) -> None:
         self._items.append({"k": "rect", "x": float(x), "y": float(y), "w": float(width),
                             "h": float(height), "c": list(_vec(color, 4))})
 
-    def text(self, text, x, y, size=24.0, color=(1.0, 1.0, 1.0, 1.0), align="left",
-             shadow=None, outline=None):
+    def text(
+        self,
+        text: str,
+        x: float,
+        y: float,
+        size: float = 24.0,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        align: str = "left",
+        shadow: Any = None,
+        outline: Any = None,
+    ) -> None:
         """Draws ``text`` with the built-in font this frame.
 
         ``size`` is the line height in pixels. ``align`` says where ``x``
@@ -971,7 +1044,7 @@ class SceneView:
     def __init__(self, host):
         self._host = host
 
-    def find(self, name):
+    def find(self, name: str) -> Entity | None:
         """The entity with this name, or None."""
         return self._host._by_name.get(name)
 
@@ -990,19 +1063,20 @@ class SceneView:
     def __contains__(self, name):
         return name in self._host._by_name
 
-    def names(self):
+    def names(self) -> list[str]:
         return [e.name for e in self._host.entities.values()]
 
-    def by_id(self, entity_id):
+    def by_id(self, entity_id: int) -> Entity | None:
         """The entity with this id (as in ``Hit.entity.id``), or None."""
         return self._host.entities.get(entity_id)
 
     @property
-    def entity_count(self):
+    def entity_count(self) -> int:
         return len(self._host.entities)
 
-    def __getattr__(self, name):
-        return self._host.backend.extra("scene", name)
+    if not TYPE_CHECKING:  # type checkers flag misspelt names instead
+        def __getattr__(self, name):
+            return self._host.backend.extra("scene", name)
 
 
 class Message:
@@ -1014,6 +1088,13 @@ class Message:
     """
 
     __slots__ = ("channel", "data", "entity", "event", "clip", "ctx")
+
+    channel: str
+    data: Any
+    entity: Entity | None
+    event: str | None
+    clip: str | None
+    ctx: Context | None
 
     def __init__(self, channel, data=None, entity=None, event=None, clip=None):
         self.channel = channel
@@ -1054,12 +1135,12 @@ class Subscription:
         self.active = True
         self._wild = any(c in pattern for c in "*?[")
 
-    def matches(self, channel):
+    def matches(self, channel: str) -> bool:
         if self._wild:
             return fnmatch.fnmatchcase(channel, self.pattern)
         return channel == self.pattern
 
-    def cancel(self):
+    def cancel(self) -> None:
         """Stops delivering to this subscriber."""
         if self.active:
             self.active = False
@@ -1132,18 +1213,18 @@ class FieldRef:
         self._component = component
         self._field = field
 
-    def get(self):
+    def get(self) -> Any:
         return self._store._read_field(self.key, self._entity, self._component, self._field)
 
-    def set(self, value):
+    def set(self, value: Any) -> None:
         self._store._write_field(self.key, self._entity, self._component, self._field, value)
 
     @property
-    def value(self):
+    def value(self) -> Any:
         return self.get()
 
     @value.setter
-    def value(self, v):
+    def value(self, v: Any) -> None:
         self.set(v)
 
     def __repr__(self):
@@ -1163,7 +1244,7 @@ class ComponentRef:
         object.__setattr__(self, "_entity", entity)
         object.__setattr__(self, "_component", component)
 
-    def resolve(self):
+    def resolve(self) -> Any:
         """The component's handle this frame."""
         return self._store._component_of(self.key, self._entity, self._component)
 
@@ -1304,7 +1385,7 @@ class KeyStore:
 
     # --- the API -----------------------------------------------------------
 
-    def get(self, key):
+    def get(self, key: str) -> Any:
         entity, component, field = self._resolve(key)
         if component is None:
             return entity
@@ -1312,7 +1393,7 @@ class KeyStore:
             return self._component_of(key, entity, component)
         return self._read_field(key, entity, component, field)
 
-    def set(self, key, value):
+    def set(self, key: str, value: Any) -> None:
         entity, component, field = self._resolve(key)
         if field is None:
             raise KeyError(f"{key!r}: set needs a field, like '{key}:"
@@ -1320,7 +1401,7 @@ class KeyStore:
                            if component else f"{key!r}: set needs 'entity:component:field'")
         self._write_field(key, entity, component, field, value)
 
-    def ref(self, key):
+    def ref(self, key: str) -> Entity | ComponentRef | FieldRef:
         entity, component, field = self._resolve(key)
         if component is None:
             return entity  # entity handles already last the whole run
@@ -1372,10 +1453,10 @@ class KeyStore:
                 raise KeyError(f"{pattern!r}: no match has attribute {field_pat!r}{hint}")
         return out
 
-    def keys(self, pattern="*"):
+    def keys(self, pattern: str = "*") -> list[str]:
         return [k for k, *_ in self._matches(pattern)]
 
-    def scan(self, pattern):
+    def scan(self, pattern: str) -> dict[str, Any]:
         out = []
         for key, entity, component, field in self._matches(pattern):
             if component is None:
@@ -1403,21 +1484,21 @@ class Context:
         self.hud = Hud()
 
     @property
-    def camera(self):
+    def camera(self) -> Camera | None:
         """The scene camera Play renders through (None if the scene has none)."""
         for e in self._host.entities.values():
             if e._read("cam") is not None:
                 return Camera(e)
         return None
 
-    def log(self, *parts):
+    def log(self, *parts: object) -> None:
         """Writes to the Console (``print()`` works too)."""
         self._host.backend.log("info", " ".join(str(p) for p in parts))
 
-    def warn(self, *parts):
+    def warn(self, *parts: object) -> None:
         self._host.backend.log("warn", " ".join(str(p) for p in parts))
 
-    def subscribe(self, pattern, fn):
+    def subscribe(self, pattern: str, fn: Callable[[Message], Any]) -> Subscription:
         """Calls ``fn(message)`` for every message published on a channel
         matching ``pattern``: an exact name, or ``*`` and ``?`` wildcards.
         Animation events arrive as ``"<entity>:animation:<event>"``::
@@ -1431,20 +1512,20 @@ class Context:
         :class:`Subscription` (``cancel()`` it to stop)."""
         return self._host.subscribe(pattern, fn)
 
-    def unsubscribe(self, pattern, fn=None):
+    def unsubscribe(self, pattern: str, fn: Callable[[Message], Any] | None = None) -> int:
         """Ends this script's subscriptions to ``pattern`` (only those to
         ``fn`` if given), or the :class:`Subscription` passed. Returns how
         many ended."""
         return self._host.unsubscribe(pattern, fn)
 
-    def publish(self, channel, data=None):
+    def publish(self, channel: str, data: Any = None) -> int:
         """Sends ``data`` to every subscriber of ``channel`` now (they run
         before this returns). Returns how many received it."""
         return self._host.publish(Message(str(channel), data))
 
     # Keys, Redis style (see KeyStore).
 
-    def get(self, key):
+    def get(self, key: str) -> Any:
         """The value at ``key``: ``"Player:animation:clip"``,
         ``"Player:attr:health"``, ``"Player:transform:position"``.
         ``"Player:animation"`` gives the component, ``"Player"`` the entity.
@@ -1452,30 +1533,31 @@ class Context:
         name two entities share."""
         return self._keys.get(key)
 
-    def set(self, key, value):
+    def set(self, key: str, value: Any) -> None:
         """Sets the field at ``key`` (``"Player:animation:speed"``). Setting
         ``animation:clip`` plays that clip. Applies like any other write."""
         self._keys.set(key, value)
 
-    def scan(self, pattern):
+    def scan(self, pattern: str) -> dict[str, Any]:
         """Everything matching ``pattern`` (``*`` and ``?`` wildcards), in
         scene order: ``ctx.scan("Enemy_*:animation")`` gives each enemy's
         animation, ``ctx.scan("Enemy_*:attr:health")`` their health.
         Entities without that component or field are skipped."""
         return self._keys.scan(pattern)
 
-    def keys(self, pattern="*"):
+    def keys(self, pattern: str = "*") -> list[str]:
         """The keys matching ``pattern``: ``ctx.keys("Player:attr:*")``."""
         return self._keys.keys(pattern)
 
-    def ref(self, key):
+    def ref(self, key: str) -> Entity | ComponentRef | FieldRef:
         """A handle to keep (from ``start``) that looks ``key`` up again on
         each use: a component (``ctx.ref("Player:animation").play("Run")``)
         or a field (``ctx.ref("Player:attr:health").value``)."""
         return self._keys.ref(key)
 
-    def __getattr__(self, name):
-        return self._host.backend.extra("ctx", name)
+    if not TYPE_CHECKING:  # type checkers flag misspelt names instead
+        def __getattr__(self, name):
+            return self._host.backend.extra("ctx", name)
 
 
 # --------------------------------------------------------------------------

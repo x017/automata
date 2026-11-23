@@ -85,11 +85,16 @@ a script. It adds:
 - **F12** go to definition
 
 Oberon looks for these, in order: **basedpyright**, **pyright**,
-**pylsp**, **jedi-language-server**.
+**pylsp**, **jedi-language-server**. It checks the project's `.venv` first.
+Projects made by [`oberon new`](command-line.md) already have basedpyright
+there. For other folders:
 
 ```console
-pip install basedpyright        # recommended
+oberon pip install basedpyright   # into the project's .venv
 ```
+
+With [type hints](scripting.md#types-and-completion) on `entity` and `ctx`,
+the server completes the whole script API and underlines misspelt names.
 
 **Settings → Python → Language server** shows which one is running and
 has a **Restart server** button.

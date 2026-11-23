@@ -320,6 +320,48 @@ impl RenderContext {
     }
 }
 
+/// What GPU the renderer would use, for diagnostics (`oberon doctor`):
+/// the adapter's name, backend and whether it's a software rasterizer.
+/// A real GPU is preferred; software adapters (llvmpipe, lavapipe, WARP)
+/// are reported too.
+///
+/// # Errors
+///
+/// When no adapter at all is available.
+pub async fn probe_gpu() -> std::result::Result<GpuSummary, String> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let options = |fallback: bool| wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        force_fallback_adapter: fallback,
+        compatible_surface: None,
+        apply_limit_buckets: false,
+    };
+    let adapter = match instance.request_adapter(&options(false)).await {
+        Ok(adapter) => adapter,
+        Err(_) => instance
+            .request_adapter(&options(true))
+            .await
+            .map_err(|e| e.to_string())?,
+    };
+    let info = adapter.get_info();
+    Ok(GpuSummary {
+        name: info.name,
+        backend: format!("{:?}", info.backend),
+        software: info.device_type == wgpu::DeviceType::Cpu,
+    })
+}
+
+/// See [`probe_gpu`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GpuSummary {
+    /// The adapter's name (`NVIDIA GeForce RTX 3060`, `llvmpipe …`).
+    pub name: String,
+    /// The graphics API in use ("Vulkan", "Dx12", "Metal", "Gl").
+    pub backend: String,
+    /// Whether it renders on the CPU (slow, but works).
+    pub software: bool,
+}
+
 #[cfg(test)]
 mod tests {
     /// Device creation works wherever a GPU or software adapter (e.g.

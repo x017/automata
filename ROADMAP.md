@@ -532,7 +532,7 @@ only draw them through `ctx.hud`.
 
 ## Track D: UI and editor
 
-### D0. The `oberon` command: CLI, new projects, a bundled Python ⬜ M
+### D0. The `oberon` command: CLI, new projects, a bundled Python ✅ M
 One `oberon` binary for everything, and new projects that work in any IDE
 from the first minute, like an engine that ships its own SDK. Today
 `oberon` takes a scene path or `--bench`, uses whatever `python3` is on
@@ -574,6 +574,42 @@ the PATH and finds a language server only if one is installed.
   with docs and a misspelt `entity.animaton` is underlined. `oberon open`,
   Play, `oberon run` and `oberon test` all work, and the same steps pass in
   CI.
+
+Done: `oberon` has `open`, `new`, `setup`, `run`, `test`, `export`, `bench`,
+`python`, `pip`, `doctor`, `help` and `--version`. Each has `--help`, and
+the exit codes are 0, 1, and 2 for bad usage. `run`, `test`, `python` and
+`pip` pass their child's code through. The parser is hand-written: no
+argument crate is vendored, and `oberon level.ron` and `--bench` still
+work. `oberon new` writes the three templates with a typed starter script,
+tests, a pinned `pyproject.toml`, `pyrightconfig.json` and `.vscode/`.
+It then makes `.venv` offline from the bundle, with uv when it's on the
+PATH and `python -m venv` otherwise.
+
+`scripts/bundle_oberon.py` assembles the download: `oberon`, a
+python-build-standalone CPython in `python/`, and `wheels/` with the
+engine built by that same interpreter, plus basedpyright and pytest.
+`OBERON_PYTHON` and `OBERON_WHEELS` stand in for the bundle in source
+builds. `automata.script_api` is fully annotated (99 signatures, with
+dynamic attributes hidden from type checkers). Oberon's new-script
+template is typed too.
+
+Play, `run`, `test`, `doctor` and the code editor's language server all
+resolve the project's `.venv`, and the preferences' interpreter still
+wins. The new Export-workflow job `oberon sdk` builds the bundle on Linux
+and Windows, hides every other Python, and on each runner:
+- runs `new` for each template, then `doctor`, `test`, `run --headless`
+  and `export check`
+- checks that `.venv` came from the bundled interpreter
+- runs `scripts/check_completions.py`, which drives
+  `basedpyright-langserver` over LSP: `ctx.` must complete with docs, and
+  `entity.animaton` must be flagged
+
+Different from the plan:
+- An outdated or missing `.venv` gets a Console message naming
+  `oberon setup --upgrade`, not an upgrade dialog.
+- `oberon open` with no argument opens the current folder's project, or the
+  starter scene, not a picker.
+- `export --target android` waits for E1.
 
 ### D1. Game UI widgets ⬜ M
 [`NEXT_PLANS.md` #3](NEXT_PLANS.md#3-game-ui-system--decided-phase-1--done)
@@ -686,7 +722,7 @@ per effort. Reorder any time by telling me.
 | 17 | B3 Animation events, root motion | M | ✅ |
 | 18 | B3b Key store for scripts | M | ✅ |
 | 19 | A11 Culling, instancing, LOD | M | ✅ |
-| 20 | D0 The oberon command, new projects, bundled Python | M | ⬜ |
+| 20 | D0 The oberon command, new projects, bundled Python | M | ✅ |
 | 21 | A12 Grass and foliage | L | ⬜ |
 | 22 | C2 Tweens and timers | S | ⬜ |
 | 23 | C3 Save games and settings | S | ⬜ |

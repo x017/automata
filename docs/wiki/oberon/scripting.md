@@ -28,6 +28,42 @@ All three functions are optional.
 - `update(entity, ctx)` runs every frame.
 - `stop(entity, ctx)` runs when you press Stop.
 
+## Types and completion
+
+Add type hints, and your editor knows the whole API. Typing `ctx.` lists
+everything with its documentation, and a misspelt `entity.animaton` is
+underlined before you press Play:
+
+```python
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # types for your editor; nothing is imported when it runs
+    from automata.script_api import Context, Entity
+
+
+def update(entity: Entity, ctx: Context) -> None:
+    entity.character_velocity = (ctx.input.axis("a", "d") * 5.0, 0.0, 0.0)
+```
+
+New scripts from Oberon, and projects from
+[`oberon new`](command-line.md), start like this. The types come from
+`automata.script_api`, which ships with the engine. Projects made by
+`oberon new` have it in `.venv`, together with the basedpyright language
+server, so VS Code, PyCharm and Oberon's [code editor](code-editor.md)
+complete and check scripts with no setup.
+
+Members that can be missing are typed `Optional`. For example,
+`entity.animation` is `None` without an Animator:
+
+```python
+if entity.animation is not None:
+    entity.animation.play("Run")
+```
+
+`pyrightconfig.json` in new projects reports unguarded uses as warnings.
+
 ## Attach a script
 
 - **Inspector → Add Component → Script…**, or right-click an entity →
@@ -264,10 +300,13 @@ The [FPS tutorial](../tutorials/fps.md) and
 
 ## Which Python?
 
-Oberon runs scripts with `python3` from your `PATH` by default. To pick a
-specific interpreter, such as a virtualenv, open **Settings → Python →
-Interpreter**. The runner needs only the standard library. Any packages
-you install in that environment can be imported from your scripts.
+Oberon runs scripts with the project's own `.venv`, the same interpreter
+that `oberon run`, `oberon test` and the language server use (see
+[The project's Python](command-line.md#the-projects-python)). A folder
+without `.venv` uses `python3` from your `PATH`. **Settings → Python →
+Interpreter** overrides both. The runner needs only the standard library.
+Packages you install with `oberon pip install …` can be imported from your
+scripts.
 
 ## Same scripts, real engine
 

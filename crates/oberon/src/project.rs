@@ -179,14 +179,15 @@ pub fn script_template(path: &Path) -> String {
     format!(
         r#""""{name}: an AUTOMATA behaviour script.
 
-Attach it to an entity (Inspector → Add Component → Script…). In Play mode
-Oberon calls `start` once and `update` every frame for that entity. The same
-file runs under the Python runtime (`automata.run_scene`).
+Attach it to an entity (Inspector → Add Component → Script…). Oberon calls
+`start` once and `update` every frame for that entity; `oberon run` and
+exported games do the same. Type `ctx.` or `entity.` for everything you can
+use, with docs.
 
     entity.transform.position        (x, y, z) — read / assign
     entity.character_velocity        set to move a Character Controller
     entity.attributes["health"]      custom values from the Inspector
-    ctx.input.pressed("w")           keys: "a".."z", "space", "arrow_left", …
+    ctx.input.axis("a", "d")         -1, 0 or 1 from a pair of keys
     ctx.time.delta                   seconds since the last frame
     ctx.physics.grounded(entity)     standing on something?
     ctx.scene["Name"]                another entity by name
@@ -194,19 +195,26 @@ file runs under the Python runtime (`automata.run_scene`).
     print(...)                       shows up in Oberon's Console
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # types for your editor; nothing is imported when it runs
+    from automata.script_api import Context, Entity
+
 SPEED = 5.0
 JUMP = 7.0
 GRAVITY = 20.0
 
 
-def start(entity, ctx):
-    entity.state = {{"vy": 0.0}}
+def start(entity: Entity, ctx: Context) -> None:
+    entity.state["vy"] = 0.0
     print(f"{{entity.name}} ready")
 
 
-def update(entity, ctx):
-    x = float(ctx.input.pressed("d")) - float(ctx.input.pressed("a"))
-    z = float(ctx.input.pressed("s")) - float(ctx.input.pressed("w"))
+def update(entity: Entity, ctx: Context) -> None:
+    x = ctx.input.axis("a", "d")
+    z = ctx.input.axis("w", "s")
     vy = entity.state["vy"]
     if ctx.physics.grounded(entity):
         vy = JUMP if ctx.input.pressed("space") else -2.0
@@ -242,7 +250,12 @@ mod tests {
     fn script_template_is_valid_looking_python() {
         let t = script_template(Path::new("scripts/player.py"));
         assert!(t.starts_with("\"\"\"player:"));
-        assert!(t.contains("def update(entity, ctx):"));
-        assert!(t.contains("entity.state = {\"vy\": 0.0}"));
+        assert!(t.contains("def update(entity: Entity, ctx: Context) -> None:"));
+        assert!(t.contains("from automata.script_api import Context, Entity"));
+        assert!(t.contains("entity.state[\"vy\"] = 0.0"));
+        assert!(
+            t.contains("{entity.name} ready"),
+            "format! braces unescaped"
+        );
     }
 }

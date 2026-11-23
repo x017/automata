@@ -1329,13 +1329,33 @@ impl EditorApp {
 
     /// Starts the Python script runner for the session's scripts.
     fn start_bridge(&mut self, scripts: usize) {
-        let python = self
-            .ui
-            .prefs
-            .python
-            .clone()
-            .filter(|p| !p.trim().is_empty())
-            .unwrap_or_else(|| bridge::default_python().to_string());
+        // The project's own .venv unless the preferences name a Python.
+        let project = self.python_project();
+        let python = crate::pyenv::project_python(self.ui.prefs.python.as_deref(), &project);
+        if self.ui.prefs.python.is_none() && project.join("pyproject.toml").is_file() {
+            match crate::pyenv::venv_state(&project) {
+                crate::pyenv::VenvState::Outdated(v) => self.ui.log(
+                    LogLevel::Warn,
+                    format!(
+                        "This project's engine is {v}; Oberon is {}. Run `oberon setup --upgrade` \
+                         in {} to match.",
+                        crate::pyenv::ENGINE_VERSION,
+                        project.display()
+                    ),
+                ),
+                crate::pyenv::VenvState::Missing | crate::pyenv::VenvState::NoEngine => {
+                    self.ui.log(
+                        LogLevel::Warn,
+                        format!(
+                            "This project has no .venv with the engine, so Play uses {python}. \
+                             Run `oberon setup` in {} to give it its own.",
+                            project.display()
+                        ),
+                    );
+                }
+                crate::pyenv::VenvState::Ready => {}
+            }
+        }
         let runtime = self.ui.project_root.join(".oberon");
         let cwd = self.doc.base_dir();
         self.bridge_slow_warned = false;
@@ -1353,11 +1373,20 @@ impl EditorApp {
             Err(err) => self.ui.log(
                 LogLevel::Error,
                 format!(
-                    "Could not start Python ({python}): {err}. Install Python 3 or set \
-                     `python` in ~/.config/oberon/prefs.ron. Scripts are disabled."
+                    "Could not start Python ({python}): {err}. Run `oberon setup` in the \
+                     project folder, or set `python` in ~/.config/oberon/prefs.ron. \
+                     Scripts are disabled."
                 ),
             ),
         }
+    }
+
+    /// The project whose `.venv` Play and the language server use: the
+    /// nearest folder above the scene with a `pyproject.toml`, `.venv` or
+    /// `build.ron`, else the scene's folder.
+    fn python_project(&self) -> PathBuf {
+        crate::pyenv::project_root(&self.ui.project_root)
+            .unwrap_or_else(|| self.ui.project_root.clone())
     }
 
     /// Shows one runner message in the Console (and applies frame writes).
@@ -1847,7 +1876,7 @@ impl EditorApp {
         let requests = self.ui.take_code_requests();
         // The language server starts with the first open script.
         if self.lsp.is_none() && !self.lsp_failed && !self.ui.code.tabs.is_empty() {
-            let root = self.ui.project_root.clone();
+            let root = self.python_project();
             let dirs = lsp::tool_dirs(&root, self.ui.prefs.python.as_deref());
             match LspClient::start(self.ui.prefs.language_server.as_deref(), &root, &dirs) {
                 Ok(client) => {

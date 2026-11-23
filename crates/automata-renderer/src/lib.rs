@@ -32,7 +32,7 @@ mod texture;
 mod water;
 
 pub use camera::{Camera2D, Camera3D};
-pub use context::RenderContext;
+pub use context::{probe_gpu, GpuSummary, RenderContext};
 pub use draw::{DrawList, MeshLod, Sprite};
 pub use environment::{Environment, PostEffects, Tonemapping};
 pub use error::{Error, Result};
