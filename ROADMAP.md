@@ -515,6 +515,49 @@ only draw them through `ctx.hud`.
 
 ## Track D: UI and editor
 
+### D0. The `oberon` command: CLI, new projects, a bundled Python ⬜ M
+One `oberon` binary for everything, and new projects that work in any IDE
+from the first minute, like an engine that ships its own SDK. Today
+`oberon` takes a scene path or `--bench`, uses whatever `python3` is on
+the PATH and finds a language server only if one is installed.
+- **Subcommands:**
+  - `oberon` / `oberon open [scene|folder]` opens the editor (a project
+    picker with no argument).
+  - `oberon new <name> [--template 3d|2d|empty]` makes a project.
+  - `oberon run [scene]` plays a scene in a window without the editor.
+  - `oberon test` runs the project's tests headless in its venv.
+  - `oberon export --target windows|linux|android …` wraps automata-export.
+  - `oberon bench` (today's `--bench`).
+  - `oberon python …` / `oberon pip …` run the project's own interpreter.
+  - `oberon doctor` checks the GPU, Python, the venv and the language server.
+  - `--help` on each, with an exit code and messages a CI log can use.
+- **The template:** `oberon new` writes `level.ron`, `scripts/` (a typed
+  starter script), `models/`, `sounds/`, `tests/test_level.py`, `README.md`,
+  `.gitignore`, a `pyproject.toml` pinning `automata-engine` to the
+  editor's version, `pyrightconfig.json` and `.vscode/settings.json`
+  pointing at `.venv`.
+- **A bundled Python:** the Oberon download carries a standalone CPython
+  (python-build-standalone) and the matching `automata-engine` wheel.
+  `oberon new` makes `.venv` from them offline, with `uv` if it's there and
+  `python -m venv` if not, so a machine with no Python works. Opening an
+  older project offers to upgrade its wheel to the editor's version.
+- **Typing from the first line:** the wheel ships `_core.pyi`, `py.typed`
+  and typed `Entity` / `Context` / `Message` / `ComponentRef` classes for
+  behaviour scripts. Templates write
+  `def update(entity: Entity, ctx: Context)`, so VS Code, PyCharm and
+  Oberon's own editor complete `ctx.get(...)`, `entity.animation.play(...)`
+  and the rest, and flag typos. basedpyright goes into the venv as a dev
+  dependency, so Oberon's code editor has a language server with nothing
+  to install.
+- **One interpreter:** Play, `oberon run`, `oberon test` and the language
+  server all use the project's `.venv`. The preferences' Python path stays
+  as an override.
+- **Done when:** on a clean Windows and Linux machine with no Python, unzip
+  Oberon, run `oberon new mygame`, then `code mygame`. `ctx.` completes
+  with docs and a misspelt `entity.animaton` is underlined. `oberon open`,
+  Play, `oberon run` and `oberon test` all work, and the same steps pass in
+  CI.
+
 ### D1. Game UI widgets ⬜ M
 [`NEXT_PLANS.md` #3](NEXT_PLANS.md#3-game-ui-system--decided-phase-1--done)
 phase 2: `ctx.ui.button/label/progress/panel/toggle/slider`, with
@@ -626,31 +669,32 @@ per effort. Reorder any time by telling me.
 | 17 | B3 Animation events, root motion | M | ✅ |
 | 18 | B3b Key store for scripts | M | ✅ |
 | 19 | A11 Culling, instancing, LOD | M | ⬜ |
-| 20 | A12 Grass and foliage | L | ⬜ |
-| 21 | C2 Tweens and timers | S | ⬜ |
-| 22 | C3 Save games and settings | S | ⬜ |
-| 23 | C1 Physics joints | M | ⬜ |
-| 24 | D1 UI widgets | M | ⬜ |
-| 25 | D2 Custom fonts | S | ⬜ |
-| 26 | D3 UI layout, focus, screens | M | ⬜ |
-| 27 | B4 Animation state machine | L | ⬜ |
-| 28 | B5 Attachments and IK | M | ⬜ |
-| 29 | C4 Navigation | L | ⬜ |
-| 30 | C5 AI helpers | S | ⬜ |
-| 31 | D5 Material assets and editor | M | ⬜ |
-| 32 | A13 Terrain | L | ⬜ |
-| 33 | B6 Ragdolls | M | ⬜ |
-| 34 | C6 2D toolkit | L | ⬜ |
-| 35 | D6 Editor workflow | M | ⬜ |
-| 36 | D4 UI editor | L | ⬜ |
-| 37 | D7 Localization | S | ⬜ |
-| 38 | E1 Android export | L | ⬜ |
-| 39 | E2 macOS export | M | ⬜ |
-| 40 | E3 Web export | L | ⬜ |
-| 41 | E4 Steam integration | M | ⬜ |
-| 42 | F3 Custom shaders | M | ⬜ |
-| 43 | F2 Video playback | M | ⬜ |
-| 44 | F1 Multiplayer | L | ⬜ |
+| 20 | D0 The oberon command, new projects, bundled Python | M | ⬜ |
+| 21 | A12 Grass and foliage | L | ⬜ |
+| 22 | C2 Tweens and timers | S | ⬜ |
+| 23 | C3 Save games and settings | S | ⬜ |
+| 24 | C1 Physics joints | M | ⬜ |
+| 25 | D1 UI widgets | M | ⬜ |
+| 26 | D2 Custom fonts | S | ⬜ |
+| 27 | D3 UI layout, focus, screens | M | ⬜ |
+| 28 | B4 Animation state machine | L | ⬜ |
+| 29 | B5 Attachments and IK | M | ⬜ |
+| 30 | C4 Navigation | L | ⬜ |
+| 31 | C5 AI helpers | S | ⬜ |
+| 32 | D5 Material assets and editor | M | ⬜ |
+| 33 | A13 Terrain | L | ⬜ |
+| 34 | B6 Ragdolls | M | ⬜ |
+| 35 | C6 2D toolkit | L | ⬜ |
+| 36 | D6 Editor workflow | M | ⬜ |
+| 37 | D4 UI editor | L | ⬜ |
+| 38 | D7 Localization | S | ⬜ |
+| 39 | E1 Android export | L | ⬜ |
+| 40 | E2 macOS export | M | ⬜ |
+| 41 | E3 Web export | L | ⬜ |
+| 42 | E4 Steam integration | M | ⬜ |
+| 43 | F3 Custom shaders | M | ⬜ |
+| 44 | F2 Video playback | M | ⬜ |
+| 45 | F1 Multiplayer | L | ⬜ |
 
 Large phases may span several "proceed"s. Each one ends with a pushed,
 working step and a report on what's left in that phase.
