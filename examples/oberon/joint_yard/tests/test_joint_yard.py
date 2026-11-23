@@ -5,6 +5,7 @@
 
 import math
 import os
+import re
 
 import pytest
 
@@ -22,9 +23,15 @@ def joints(scene):
     }
 
 
+def _numbers_rounded(text):
+    """Rotations go through f32 sin/cos, whose last digit varies by platform."""
+    return re.sub(r"-?\d+\.\d+(?:e-?\d+)?", lambda m: f"{float(m.group()):.5g}", text.strip())
+
+
 def test_saved_level_matches_the_build_script():
     with open(LEVEL, encoding="utf-8") as f:
-        assert f.read().strip() == build_level.build().to_ron().strip()
+        saved = f.read()
+    assert _numbers_rounded(saved) == _numbers_rounded(build_level.build().to_ron())
 
 
 def test_every_joint_names_an_entity_in_the_scene():
