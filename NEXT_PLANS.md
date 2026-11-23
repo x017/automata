@@ -23,6 +23,9 @@ of those phases point to.
 | First goal | **Sideloading**: an APK you install on your own phone, debug-signed. Google Play (AAB, release signing, store requirements) comes later. |
 | Touch input | **Both**: built-in on-screen controls (virtual joystick + buttons mapped to existing keys, so current games work) **and** a touch API (`ctx.input.touches`) for custom input. |
 | Next platform after Android | **Web**. |
+| How the APK is built | **[python-for-android](https://github.com/kivy/python-for-android)** (p4a, MIT), in CI only. It cross-compiles CPython (3.14) with the standard library, builds the engine as a pyo3/maturin Rust recipe (`RustCompiledComponentsRecipe`), and makes the Gradle project and APK. |
+| Window, input and lifecycle on Android | **p4a's SDL3 launcher**. The engine gets an **SDL3 driver** for Android next to the winit driver on desktop. Rendering stays wgpu (Vulkan, GLES fallback). SDL only supplies the window, the events (touch, keys, gamepads, Back) and pause/resume. |
+| Game-facing API | **One API everywhere.** Scripts, the Python API, scene files and Oberon don't change. The drivers are internal. New input features (`ctx.input.touches`) work on both, with the mouse standing in for a finger on desktop. |
 
 ### Why CPython and not the alternatives
 
@@ -39,12 +42,37 @@ of those phases point to.
 
 ### What changes architecturally
 
-On desktop, **Python hosts the engine**: the player runs Python, which
-imports the Rust extension. On Android the system starts a native
-activity, so **Rust hosts Python**: the app initializes CPython in-process,
-then runs `automata.player` against the bundled `game/` folder. The
-Android activity handle must reach the engine's event loop before Python
-calls `run_scene`.
+**Python hosts the engine on both platforms.** On Android, p4a's SDL
+activity starts CPython, which runs `automata.player` against the bundled
+`game/` folder, and that imports the engine (the same order as desktop).
+
+Inside the engine, the platform layer splits into two **drivers** with
+one shape: hand the renderer a surface, turn OS events into engine input
+events, and report pause/resume.
+
+```
+game (scripts, scenes)            one API
+engine (renderer, physics, ...)   shared
+winit driver | SDL3 driver        desktop | Android, internal
+```
+
+- `automata-input` gets **its own key, button and event types**. It
+  re-exports winit's today. Both drivers translate into them. Scripts
+  already use key names, so they don't notice.
+- The SDL3 driver links to the `libSDL3.so` that p4a builds (SDL 3.4.2 at
+  the time of writing), not a second copy.
+- The renderer already takes any `wgpu::SurfaceTarget`. On Android the
+  surface comes from SDL's `ANativeWindow` and is recreated after
+  `SDL_EVENT_DID_ENTER_FOREGROUND` / when the window changes.
+
+Why SDL3 over a NativeActivity launcher with winit: SDL is p4a's
+best-tested route (Kivy's), and it already handles gamepads (winit has none
+on Android), the on-screen keyboard and text input, rotation, immersive
+mode, the Back button and surface loss. The NativeActivity route would
+keep one driver, but would need our own CPython start-up (Rust hosting
+Python, unpacking the standard library) and our own Gradle files. Its winit
+support for keyboards and lifecycle is also less mature. The cost of SDL is
+a second driver to maintain, which emulator CI covers.
 
 Other Android work:
 - **Lifecycle:** pause/resume, and the drawing surface destroyed and
@@ -56,17 +84,20 @@ Other Android work:
 
 ### Delivery model: a template, like Windows and Linux
 
-1. CI builds a **prebuilt Android template APK** (engine + CPython),
-   published with the other export templates.
+1. CI runs **p4a** (SDL3 launcher, the engine as a Rust recipe) and
+   publishes a **prebuilt Android template APK** (engine + CPython) with
+   the other export templates.
 2. `automata-export build --target android` (and Oberon's Build menu)
-   copies the template, adds `game/`, and signs it. **Users need no Android
-   SDK or NDK** (the same model Godot uses).
+   copies the template, swaps in `game/` (in p4a's app bundle), re-aligns
+   and signs it. **Users need no Android SDK, NDK or p4a** (the same model
+   Godot uses).
 
 ### Phases (each tested in CI on an Android emulator)
 
-1. **Spike:** render a scene from Rust on Android, without Python
-   (renderer, lifecycle, input).
-2. **Embedded CPython:** run Coin Run on a device or emulator.
+1. **Spike:** a p4a build (SDL3 launcher, engine recipe) that renders a
+   scene on the emulator through the SDL3 driver, including pause/resume.
+   Our own input types land first, so both drivers share them.
+2. **Python on device:** run Coin Run on a device or emulator.
 3. **Touch:** `ctx.input.touches`, the virtual joystick and buttons, and
    control settings in `build.ron`.
 4. **Template + export:** `--target android` in `automata-export` and

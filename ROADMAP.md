@@ -549,7 +549,10 @@ scripts bind to them by name.
 
 ### E1. Android export ⬜ L
 The phases in [`NEXT_PLANS.md` #1](NEXT_PLANS.md#1-android-export--decided-not-started)
-(CPython on device, a template like Windows/Linux, emulator CI).
+(CPython on device, a template like Windows/Linux, emulator CI). The
+template is built in CI with python-for-android's **SDL3 launcher**. The
+engine gets an internal SDL3 driver for Android next to winit on desktop,
+and its own input types. The game-facing API stays the same everywhere.
 
 ### E2. macOS export ⬜ M
 - A macOS template build in CI (Apple Silicon and Intel) and an `.app`
