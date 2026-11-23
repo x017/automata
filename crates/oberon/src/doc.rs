@@ -1680,7 +1680,10 @@ pub(crate) mod tests {
         let mut doc = Document::new();
         doc.add_entity_named("Player");
         let id = doc.entities[0].id;
-        assert!(!doc.rename_entity(id, "Player:1"), "':' separates key parts");
+        assert!(
+            !doc.rename_entity(id, "Player:1"),
+            "':' separates key parts"
+        );
         assert!(!doc.rename_entity(id, ""));
         assert!(doc.rename_entity(id, "Player 1"));
         assert_eq!(doc.entities[0].name(), "Player 1");
