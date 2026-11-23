@@ -29,7 +29,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 winit = "0.30"
-tiny-skia = { version = "0.11", default-features = false }
+# `std` explicitly: on Linux winit's sctk-adwaita turns it on, elsewhere
+# nothing does and tiny-skia-path has no float maths without it.
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 ab_glyph = "0.2"
 wgpu = "30"
 pollster = "1.0"
