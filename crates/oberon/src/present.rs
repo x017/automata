@@ -586,6 +586,13 @@ impl EditorApp {
                     p.time = 0.0;
                 }
             }
+            Intent::SetJointTarget { id, target } => {
+                doc.modify(id, false, |d| {
+                    if let Some(j) = &mut d.joint {
+                        j.connected.clone_from(&target);
+                    }
+                });
+            }
             Intent::SetChoice { id, choice, label } => {
                 doc.modify(id, false, |d| {
                     fields::set_choice(d, choice, label);

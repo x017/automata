@@ -927,6 +927,9 @@ class EntityView:
     def audio_source(self) -> Optional[AudioSource]: ...
     @property
     def animation(self) -> Optional[AnimationRef]: ...
+    @property
+    def joint(self) -> Optional[JointRef]:
+        """The entity's joint (``angle``, ``broken``, ``motor_target``...), or None."""
     def despawn(self) -> None: ...
 
 class SceneView:
@@ -1295,6 +1298,150 @@ class CharacterVelocity:
     def velocity(self) -> tuple[float, float, float]: ...
     @velocity.setter
     def velocity(self, value: tuple[float, float, float]) -> None: ...
+
+class JointMotor:
+    """Drives a hinge or slider: ``JointMotor(2.0)`` turns at 2 rad/s,
+    ``JointMotor(target=1.2)`` pulls to 1.2 rad and holds it."""
+
+    def __init__(
+        self,
+        speed: float = 0.0,
+        *,
+        target: Optional[float] = None,
+        stiffness: float = 400.0,
+        damping: float = 80.0,
+        max_force: float = 0.0,
+    ) -> None: ...
+    @property
+    def speed(self) -> float: ...
+    @property
+    def target(self) -> Optional[float]: ...
+    @property
+    def stiffness(self) -> float: ...
+    @property
+    def damping(self) -> float: ...
+    @property
+    def max_force(self) -> float: ...
+
+class Joint:
+    """Holds this entity's body to another entity's (``connected``, by
+    name) or to the world.
+
+    ``Joint.hinge(axis=(0, 1, 0), connected="Frame", anchor=(-0.5, 0, 0),
+    limits=(0, 1.6))`` makes a door; ``Joint.ball(connected="Link 3",
+    anchor=(-0.25, 0, 0))`` a chain link; ``Joint.rope(3.0)`` hangs from
+    the world."""
+
+    def __init__(
+        self,
+        kind: str = "hinge",
+        *,
+        connected: Optional[str] = None,
+        anchor: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        connected_anchor: Optional[tuple[float, float, float]] = None,
+        axis: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        limits: Optional[tuple[float, float]] = None,
+        length: float = 0.0,
+        stiffness: float = 30.0,
+        damping: float = 2.0,
+        motor: Union[JointMotor, float, None] = None,
+        collide_connected: bool = False,
+        break_force: float = 0.0,
+        enabled: bool = True,
+    ) -> None: ...
+    @classmethod
+    def hinge(cls, axis: tuple[float, float, float] = (0.0, 1.0, 0.0), **options: Any) -> Joint:
+        """Turns around ``axis`` like a door or a wheel."""
+    @classmethod
+    def ball(cls, **options: Any) -> Joint:
+        """Swivels freely around a point, like a chain link."""
+    @classmethod
+    def slider(cls, axis: tuple[float, float, float] = (1.0, 0.0, 0.0), **options: Any) -> Joint:
+        """Slides along ``axis`` without turning, like a drawer."""
+    @classmethod
+    def fixed(cls, **options: Any) -> Joint:
+        """Welds the two bodies together where they are."""
+    @classmethod
+    def rope(cls, length: float = 0.0, **options: Any) -> Joint:
+        """At most ``length`` apart (0 = as far as they start); slack closer."""
+    @classmethod
+    def spring(
+        cls, length: float = 0.0, stiffness: float = 30.0, damping: float = 2.0, **options: Any
+    ) -> Joint:
+        """Pulls towards ``length`` apart, bouncing."""
+    def replace(self, **options: Any) -> Joint:
+        """A copy with some options changed."""
+    @property
+    def kind(self) -> str: ...
+    @property
+    def connected(self) -> Optional[str]: ...
+    @property
+    def anchor(self) -> tuple[float, float, float]: ...
+    @property
+    def connected_anchor(self) -> Optional[tuple[float, float, float]]: ...
+    @property
+    def axis(self) -> tuple[float, float, float]: ...
+    @property
+    def limits(self) -> Optional[tuple[float, float]]: ...
+    @property
+    def length(self) -> float: ...
+    @property
+    def stiffness(self) -> float: ...
+    @property
+    def damping(self) -> float: ...
+    @property
+    def motor(self) -> Optional[JointMotor]: ...
+    @property
+    def collide_connected(self) -> bool: ...
+    @property
+    def break_force(self) -> float: ...
+    @property
+    def enabled(self) -> bool: ...
+
+class JointRef:
+    """A running entity's joint (``view.joint``). Setting a field changes
+    the joint after the update returns."""
+
+    @property
+    def kind(self) -> str: ...
+    @property
+    def component(self) -> Joint: ...
+    @property
+    def connected(self) -> Optional[str]: ...
+    @connected.setter
+    def connected(self, name: Optional[str]) -> None: ...
+    @property
+    def value(self) -> float:
+        """Hinge angle (radians), slider position (metres) or anchor distance."""
+    @property
+    def angle(self) -> float: ...
+    @property
+    def attached(self) -> bool: ...
+    @property
+    def broken(self) -> bool: ...
+    @property
+    def force(self) -> float:
+        """The force it held with last step, in newtons."""
+    @property
+    def enabled(self) -> bool: ...
+    @enabled.setter
+    def enabled(self, on: bool) -> None: ...
+    @property
+    def motor_speed(self) -> Optional[float]: ...
+    @motor_speed.setter
+    def motor_speed(self, speed: Optional[float]) -> None: ...
+    @property
+    def motor_target(self) -> Optional[float]: ...
+    @motor_target.setter
+    def motor_target(self, target: Optional[float]) -> None: ...
+    @property
+    def limits(self) -> Optional[tuple[float, float]]: ...
+    @limits.setter
+    def limits(self, limits: Optional[tuple[float, float]]) -> None: ...
+    @property
+    def break_force(self) -> float: ...
+    @break_force.setter
+    def break_force(self, newtons: float) -> None: ...
 
 class Game:
     """The application: owns the engine, the loaded scene, and the main loop."""

@@ -201,6 +201,9 @@ impl PyEntity {
                     StagedComponent::Scatter(v) => {
                         Py::new(py, crate::foliage::PyScatter::from_inner(v.clone()))?.into_any()
                     }
+                    StagedComponent::Joint(v) => {
+                        Py::new(py, crate::joints::PyJoint::from_inner(v.clone()))?.into_any()
+                    }
                 })
             })
             .collect()
@@ -453,6 +456,9 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
             StagedComponent::Scatter(c) => {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }
+            StagedComponent::Joint(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
         }
     }
     if !staged.attributes.is_empty() {
@@ -503,6 +509,8 @@ pub struct FrameWrites {
     pub emitter_bursts: Vec<(EntityId, u32)>,
     /// Animation requests (play, stop, seek, speed), in call order.
     pub animations: Vec<(u64, automata_scene::AnimationCommand)>,
+    /// Changes to entities' joints, in call order.
+    pub joints: Vec<(u64, automata_physics::JointEdit)>,
 }
 
 /// Shared write buffer between the per-frame views and the game loop.
@@ -559,6 +567,16 @@ pub fn apply_writes(scene: &mut Scene, writes: &WriteQueue) {
             automata_scene::command_animation(scene.world_mut(), entity, &command);
         }
     }
+    for (bits, edit) in drained.joints {
+        if let Some(entity) = EntityId::from_bits(bits) {
+            if let Ok(mut joint) = scene
+                .world_mut()
+                .get::<&mut automata_physics::Joint>(entity)
+            {
+                edit.apply(&mut joint);
+            }
+        }
+    }
     for entity in drained.despawns {
         if scene.world().contains(entity) {
             scene.despawn_recursive(entity);
@@ -578,6 +596,7 @@ struct EntitySnapshot {
     script: Option<String>,
     audio_source: Option<automata_core::AudioSource>,
     animation: Option<automata_scene::AnimationState>,
+    joint: Option<(automata_physics::Joint, automata_physics::JointState)>,
 }
 
 /// Read access to the scene during the update callback.
@@ -621,6 +640,13 @@ impl SceneView {
                         script: script.map(|s| s.path.clone()),
                         audio_source: audio.cloned(),
                         animation: automata_scene::animation_state(world, id),
+                        joint: world.get::<&automata_physics::Joint>(id).ok().map(|j| {
+                            let state = world
+                                .get::<&automata_physics::JointState>(id)
+                                .map(|s| *s)
+                                .unwrap_or_default();
+                            ((*j).clone(), state)
+                        }),
                     }
                 },
             )
@@ -745,6 +771,7 @@ pub struct EntityView {
     script: Option<String>,
     audio_source: Option<automata_core::AudioSource>,
     animation: Option<automata_scene::AnimationState>,
+    joint: Option<(automata_physics::Joint, automata_physics::JointState)>,
     writes: WriteQueue,
 }
 
@@ -760,6 +787,7 @@ impl EntityView {
             script: snapshot.script.clone(),
             audio_source: snapshot.audio_source.clone(),
             animation: snapshot.animation.clone(),
+            joint: snapshot.joint.clone(),
             writes,
         }
     }
@@ -891,6 +919,15 @@ impl EntityView {
         self.audio_source
             .clone()
             .map(crate::components::PyAudioSource::from_inner)
+    }
+
+    /// The entity's joint (`angle`, `broken`, `force`, `enabled`,
+    /// `motor_speed`, `motor_target`, ...), or `None` without a Joint.
+    #[getter]
+    fn joint(&self) -> Option<crate::joints::PyJointRef> {
+        self.joint.clone().map(|(joint, state)| {
+            crate::joints::PyJointRef::new(self.id, joint, state, Rc::clone(&self.writes))
+        })
     }
 
     /// The entity's animation (`play`, `stop`, `clip`, `time`, ...), or

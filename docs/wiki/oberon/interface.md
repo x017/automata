@@ -141,7 +141,7 @@ Shows the selected entity.
 
 - **Name** at the top.
 - **Components**: Transform, Mesh Renderer, Directional Light, Point
-  Light, Spot Light, Camera, Environment, Rigidbody, Collider, Character Controller, Script. Each
+  Light, Spot Light, Camera, Environment, Rigidbody, Collider, Joint, Character Controller, Script. Each
   section folds open and closed. The **⋮** menu has Reset, Copy/Paste
   Component, and Remove.
 - **Fields**: drag the label to scrub a number, or click the field and

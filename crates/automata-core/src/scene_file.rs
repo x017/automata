@@ -114,6 +114,9 @@ pub struct EntityData {
     /// Character velocity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub character_velocity: Option<automata_physics::CharacterVelocity>,
+    /// A joint holding this entity's body to another's (or to the world).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joint: Option<automata_physics::Joint>,
     /// Custom named gameplay values (`health: Int(100)`, `team: Text("red")`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub attributes: BTreeMap<String, AttributeValue>,
@@ -370,6 +373,9 @@ impl SceneFile {
             if let Some(velocity) = eref.get::<&automata_physics::CharacterVelocity>() {
                 data.character_velocity = Some(*velocity);
             }
+            if let Some(joint) = eref.get::<&automata_physics::Joint>() {
+                data.joint = Some((*joint).clone());
+            }
             if let Some(attributes) = eref.get::<&Attributes>() {
                 data.attributes = attributes.0.clone();
             }
@@ -459,6 +465,9 @@ impl SceneFile {
             }
             if let Some(velocity) = &data.character_velocity {
                 let _ = world.insert_one(entity, *velocity);
+            }
+            if let Some(joint) = &data.joint {
+                let _ = world.insert_one(entity, joint.clone());
             }
             if !data.attributes.is_empty() {
                 let _ = world.insert_one(entity, Attributes(data.attributes.clone()));
@@ -787,6 +796,35 @@ mod tests {
         assert!((env.exposure - 2.0).abs() < f32::EPSILON);
         assert_eq!(env.tonemapping, automata_renderer::Tonemapping::Aces);
         assert!(!env.fog);
+    }
+
+    #[test]
+    fn joints_round_trip_and_fill_in_defaults() {
+        use automata_physics::{Joint, JointKind, JointMotor};
+        let mut world = SceneWorld::new();
+        let door = Joint::hinge(glam::Vec3::Y)
+            .connected_to("Frame")
+            .anchor(glam::Vec3::new(-0.5, 0.0, 0.0))
+            .limits(0.0, 1.6)
+            .motor(JointMotor::target(1.2))
+            .break_force(500.0);
+        world.spawn((Name::new("Door"), door.clone()));
+        let file = SceneFile::from_world(&world);
+        let back = SceneFile::from_ron(&file.to_ron().unwrap()).unwrap();
+        assert_eq!(back, file);
+        assert_eq!(back.entities[0].joint.as_ref(), Some(&door));
+        let mut loaded = SceneWorld::new();
+        back.apply_to_world(&mut loaded);
+        let mut q = loaded.query::<&Joint>();
+        assert_eq!(q.iter().next(), Some(&door));
+        let partial = SceneFile::from_ron(
+            "(version: 1, entities: [(joint: Some((kind: Rope, connected: Some(\"Hook\"))))])",
+        )
+        .unwrap();
+        let rope = partial.entities[0].joint.clone().unwrap();
+        assert_eq!(rope.kind, JointKind::Rope);
+        assert_eq!(rope.connected.as_deref(), Some("Hook"));
+        assert!(rope.enabled && rope.motor.is_none());
     }
 
     #[test]

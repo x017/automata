@@ -29,6 +29,9 @@ use crate::world::{
     entity_to_user_data, user_data_to_entity, CharacterMove, PhysicsTick, RayFilter, RayHit,
 };
 
+#[path = "joints2d.rs"]
+mod joints;
+
 /// The 2D physics world. Owns the Rapier sets; you own the ECS scene.
 pub struct PhysicsWorld2D {
     gravity: Vec3,
@@ -48,6 +51,12 @@ pub struct PhysicsWorld2D {
     controllers: HashMap<Entity, KinematicCharacterController>,
     grounded: HashMap<Entity, bool>,
     last_dt: f32,
+    /// Every entity's [`crate::Joint`] as built (see `joints2d.rs`).
+    joints: HashMap<Entity, joints::JointSlot>,
+    /// The fixed body joints to the world hang from.
+    ground: Option<r2::dynamics::RigidBodyHandle>,
+    /// Joints already warned about (no body, no such partner).
+    joint_warned: std::collections::HashSet<Entity>,
 }
 
 impl std::fmt::Debug for PhysicsWorld2D {
@@ -94,6 +103,9 @@ impl PhysicsWorld2D {
             controllers: HashMap::new(),
             grounded: HashMap::new(),
             last_dt: 1.0 / 60.0,
+            joints: HashMap::new(),
+            ground: None,
+            joint_warned: std::collections::HashSet::new(),
         }
     }
 
@@ -132,6 +144,7 @@ impl PhysicsWorld2D {
         self.spawn_missing(scene);
         self.update_existing(scene);
         self.despawn_removed(scene);
+        self.sync_joints(scene);
     }
 
     fn spawn_missing(&mut self, scene: &mut SceneWorld) {
@@ -430,6 +443,7 @@ impl PhysicsWorld2D {
             }
         }
 
+        tick.broken_joints = self.update_joints(scene, dt);
         self.write_back_transforms(scene);
         tick
     }

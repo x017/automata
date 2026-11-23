@@ -357,6 +357,13 @@ pub enum Intent {
         /// The clip's name.
         clip: String,
     },
+    /// Point an entity's Joint at another entity by name (`None`: the world).
+    SetJointTarget {
+        /// Entity id.
+        id: u64,
+        /// The entity to join.
+        target: Option<String>,
+    },
     /// Set an enumerated property to the option labelled `label`.
     SetChoice {
         /// Entity id.
@@ -2573,6 +2580,16 @@ impl Ui {
             }
         }
 
+        if d.joint.is_some() {
+            let kind = ComponentKind::Joint;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                y = self.joint_rows(canvas, doc, x, y, w, e);
+                y += 6.0;
+            }
+        }
+
         if d.audio_source.is_some() {
             let kind = ComponentKind::AudioSource;
             let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
@@ -2905,6 +2922,171 @@ impl Ui {
                 self.cursor = CursorHint::Pointer;
                 if self.p.pressed && self.play == PlayState::Editing {
                     self.out.push(Intent::Toggle { id: e.id, flag });
+                }
+            }
+        }
+        y + layout::ROW_STEP
+    }
+
+    /// The Joint's rows: what it joins, then only the settings its kind
+    /// uses (an axis for hinges and sliders, a length for ropes …).
+    fn joint_rows(
+        &mut self,
+        canvas: &mut Canvas,
+        doc: &Document,
+        x: f32,
+        mut y: f32,
+        w: f32,
+        e: &EntityEntry,
+    ) -> f32 {
+        let Some(joint) = e.data.joint.as_ref() else {
+            return y;
+        };
+        let kind = joint.kind;
+        let slider = kind == automata_physics::JointKind::Slider;
+        y = self.choice_row(canvas, x, y, w, e, "Type", Choice::JointKind);
+        y = self.joint_target_row(canvas, doc, x, y, w, e);
+        y = self.vec3_row(canvas, x, y, w, e, "Anchor", Field::JointAnchor);
+        if kind.has_axis() {
+            y = self.vec3_row(canvas, x, y, w, e, "Axis", Field::JointAxis);
+        }
+        if kind.has_length() {
+            y = self.float_row(canvas, x, y, w, e, "Length", Field::JointLength);
+        }
+        if kind == automata_physics::JointKind::Spring {
+            y = self.float_row(canvas, x, y, w, e, "Stiffness", Field::JointStiffness);
+            y = self.float_row(canvas, x, y, w, e, "Damping", Field::JointDamping);
+        }
+        if kind.has_limits() {
+            y = self.flag_row(canvas, x, y, w, e, "Limits", Flag::JointLimits);
+            if joint.limits.is_some() {
+                let (lo, hi) = if slider {
+                    ("Min (m)", "Max (m)")
+                } else {
+                    ("Min (°)", "Max (°)")
+                };
+                y = self.float_row(canvas, x, y, w, e, lo, Field::JointLimitMin);
+                y = self.float_row(canvas, x, y, w, e, hi, Field::JointLimitMax);
+            }
+        }
+        if kind.has_motor() {
+            y = self.flag_row(canvas, x, y, w, e, "Motor", Flag::JointMotor);
+            if let Some(motor) = joint.motor {
+                y = self.flag_row(canvas, x, y, w, e, "Pull To Target", Flag::JointMotorTarget);
+                if motor.target.is_some() {
+                    let label = if slider { "Target (m)" } else { "Target (°)" };
+                    y = self.float_row(canvas, x, y, w, e, label, Field::JointMotorTarget);
+                } else {
+                    let label = if slider {
+                        "Speed (m/s)"
+                    } else {
+                        "Speed (°/s)"
+                    };
+                    y = self.float_row(canvas, x, y, w, e, label, Field::JointMotorSpeed);
+                }
+                y = self.float_row(canvas, x, y, w, e, "Max Force", Field::JointMotorMaxForce);
+            }
+        }
+        y = self.float_row(canvas, x, y, w, e, "Break Force", Field::JointBreakForce);
+        y = self.flag_row(canvas, x, y, w, e, "Bodies Collide", Flag::JointCollide);
+        y = self.flag_row(canvas, x, y, w, e, "Enabled", Flag::JointEnabled);
+        let hint = if joint.break_force > 0.0 {
+            "Snaps past Break Force (newtons)."
+        } else {
+            "Break Force 0 never snaps."
+        };
+        if self.row_visible(Rect::new(x, y, w, 16.0)) {
+            canvas.text(x, y, layout::SMALL_SIZE, hint, color::text_dim());
+        }
+        y + 16.0
+    }
+
+    /// "Connected To": a menu of World and every other named entity.
+    fn joint_target_row(
+        &mut self,
+        canvas: &mut Canvas,
+        doc: &Document,
+        x: f32,
+        y: f32,
+        w: f32,
+        e: &EntityEntry,
+    ) -> f32 {
+        let Some(joint) = e.data.joint.as_ref() else {
+            return y;
+        };
+        let current = joint.connected.clone();
+        let missing = current
+            .as_deref()
+            .is_some_and(|n| !doc.entities.iter().any(|o| o.id != e.id && o.name() == n));
+        let r = Rect::new(x, y, w, layout::FIELD_H);
+        if self.row_visible(r) {
+            self.row_label(canvas, x, y, "Connected To");
+            let b = Rect::new(x + layout::LABEL_W, y, w - layout::LABEL_W, layout::FIELD_H);
+            let hot = self.hot(b);
+            canvas.fill_rounded(
+                b.x,
+                b.y,
+                b.w,
+                b.h,
+                3.0,
+                if hot { color::hover() } else { color::raised() },
+            );
+            let text = match &current {
+                None => "World".to_string(),
+                Some(n) if missing => format!("{n} (missing)"),
+                Some(n) => n.clone(),
+            };
+            canvas.text_clipped(
+                b.x + 6.0,
+                b.y + 3.0,
+                layout::FONT_SIZE,
+                &text,
+                if missing {
+                    color::warn()
+                } else {
+                    color::text()
+                },
+                b.w - 24.0,
+            );
+            let (cx, cy) = (b.x + b.w - 11.0, b.y + b.h / 2.0);
+            canvas.fill_polygon(
+                &[(cx - 4.0, cy - 2.0), (cx + 4.0, cy - 2.0), (cx, cy + 3.0)],
+                color::text_dim(),
+            );
+            if hot {
+                self.cursor = CursorHint::Pointer;
+                if self.p.pressed && self.play == PlayState::Editing {
+                    let item = |label: String, target: Option<String>| menus::MenuItem {
+                        label: if target == current {
+                            format!("✓ {label}")
+                        } else {
+                            format!("   {label}")
+                        },
+                        shortcut: "",
+                        action: Some(menus::Action::Intent(Intent::SetJointTarget {
+                            id: e.id,
+                            target,
+                        })),
+                        enabled: true,
+                    };
+                    let mut items = vec![item("World".into(), None)];
+                    let mut names: Vec<&str> = doc
+                        .entities
+                        .iter()
+                        .filter(|o| o.id != e.id && o.data.name.is_some())
+                        .map(EntityEntry::name)
+                        .collect();
+                    names.sort_unstable();
+                    names.dedup();
+                    if !names.is_empty() {
+                        items.push(menus::MenuItem::separator());
+                    }
+                    items.extend(
+                        names
+                            .into_iter()
+                            .map(|n| item(n.to_string(), Some(n.to_string()))),
+                    );
+                    self.open_menu(b.x, b.y + b.h + 2.0, items);
                 }
             }
         }
@@ -5772,6 +5954,85 @@ mod tests {
                 id,
                 clip: "Wave".into()
             }))
+        );
+    }
+
+    #[test]
+    fn the_joint_section_picks_what_it_connects_to() {
+        let mut c = canvas();
+        let mut doc = Document::new();
+        doc.add_entity_named("Frame");
+        let idx = doc.add_entity_named("Door");
+        let id = doc.entities[idx].id;
+        doc.modify(id, false, |d| ComponentKind::Joint.add_to(d));
+        doc.select(Some(id));
+        let mut ui = Ui::new();
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        let insp = lay().inspector;
+        let value_x = insp.x + layout::PAD + layout::LABEL_W + 40.0;
+        let mut menu = None;
+        'scroll: for _ in 0..30 {
+            for y in (insp.y as i32..(insp.y + insp.h) as i32).step_by(6) {
+                ui.menu = None;
+                click(&mut ui, &mut c, &doc, value_x, y as f32);
+                if let Some(m) = ui
+                    .menu
+                    .as_ref()
+                    .filter(|m| m.items.iter().any(|i| i.label.trim() == "✓ World"))
+                {
+                    menu = Some(m.clone());
+                    break 'scroll;
+                }
+            }
+            let wheel = Pointer {
+                x: insp.x + 40.0,
+                y: insp.y + 200.0,
+                scroll: -3.0,
+                ..Pointer::default()
+            };
+            ui.frame(&mut c, &doc, wheel, None);
+        }
+        let menu = menu.expect("a Connected To menu");
+        let labels: Vec<&str> = menu.items.iter().map(|i| i.label.trim()).collect();
+        assert!(!labels.contains(&"Door"), "not itself: {labels:?}");
+        let frame = menu
+            .items
+            .iter()
+            .find(|i| i.label.trim() == "Frame")
+            .expect("Frame is offered");
+        assert_eq!(
+            frame.action,
+            Some(menus::Action::Intent(Intent::SetJointTarget {
+                id,
+                target: Some("Frame".into())
+            }))
+        );
+    }
+
+    #[test]
+    fn renaming_an_entity_keeps_joints_pointed_at_it() {
+        let mut doc = Document::new();
+        let i = doc.add_entity_named("Frame");
+        let frame = doc.entities[i].id;
+        let i = doc.add_entity_named("Door");
+        let door = doc.entities[i].id;
+        doc.modify(door, false, |d| {
+            d.joint = Some(automata_physics::Joint::hinge(glam::Vec3::Y).connected_to("Frame"));
+        });
+        assert!(doc.rename_entity(frame, "Door Frame"));
+        let connected = |doc: &Document| {
+            doc.entities
+                .iter()
+                .find(|e| e.id == door)
+                .and_then(|e| e.data.joint.as_ref())
+                .and_then(|j| j.connected.clone())
+        };
+        assert_eq!(connected(&doc).as_deref(), Some("Door Frame"));
+        doc.undo();
+        assert_eq!(
+            connected(&doc).as_deref(),
+            Some("Frame"),
+            "undo restores both"
         );
     }
 

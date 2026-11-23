@@ -260,13 +260,15 @@ pub enum ComponentKind {
     Collider,
     /// Character controller (player movement in Play mode).
     Character,
+    /// Holds the entity's body to another entity's (or to the world).
+    Joint,
     /// A sound the entity plays.
     AudioSource,
 }
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Mesh,
         Self::Animation,
         Self::Light,
@@ -281,6 +283,7 @@ impl ComponentKind {
         Self::RigidBody,
         Self::Collider,
         Self::Character,
+        Self::Joint,
         Self::AudioSource,
     ];
 
@@ -302,6 +305,7 @@ impl ComponentKind {
             Self::RigidBody => "Rigidbody",
             Self::Collider => "Collider",
             Self::Character => "Character Controller",
+            Self::Joint => "Joint",
             Self::AudioSource => "Audio Source",
         }
     }
@@ -324,6 +328,7 @@ impl ComponentKind {
             Self::RigidBody => data.rigid_body.is_some(),
             Self::Collider => data.collider_3d.is_some(),
             Self::Character => data.character_controller.is_some(),
+            Self::Joint => data.joint.is_some(),
             Self::AudioSource => data.audio_source.is_some(),
         }
     }
@@ -410,6 +415,15 @@ impl ComponentKind {
                 data.character_velocity
                     .get_or_insert_with(automata_physics::CharacterVelocity::default);
             }
+            Self::Joint => {
+                // A joint holds a body: give it a dynamic one and a collider.
+                if data.rigid_body.is_none() {
+                    data.rigid_body = Some(automata_physics::RigidBody::dynamic());
+                }
+                Self::Collider.add_to(data);
+                data.joint
+                    .get_or_insert_with(automata_physics::Joint::default);
+            }
             Self::AudioSource => {
                 data.audio_source
                     .get_or_insert_with(automata_core::AudioSource::default);
@@ -439,6 +453,7 @@ impl ComponentKind {
                     .clone_from(&src.character_controller);
                 dst.character_velocity = src.character_velocity;
             }
+            Self::Joint => dst.joint.clone_from(&src.joint),
             Self::AudioSource => dst.audio_source.clone_from(&src.audio_source),
         }
     }
@@ -463,6 +478,7 @@ impl ComponentKind {
                 data.character_controller = None;
                 data.character_velocity = None;
             }
+            Self::Joint => data.joint = None,
             Self::AudioSource => data.audio_source = None,
         }
     }
@@ -903,7 +919,17 @@ impl Document {
             return false;
         };
         self.push_undo();
-        self.entities[idx].data.name = Some(name.to_string());
+        let old = self.entities[idx].data.name.replace(name.to_string());
+        // Joints that named it follow the new name.
+        if let Some(old) = old.filter(|o| o != name) {
+            for entry in &mut self.entities {
+                if let Some(j) = &mut entry.data.joint {
+                    if j.connected.as_deref() == Some(old.as_str()) {
+                        j.connected = Some(name.to_string());
+                    }
+                }
+            }
+        }
         self.touch();
         true
     }

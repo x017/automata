@@ -34,6 +34,7 @@ pub fn staged_to_entity_data(entity: &StagedEntity) -> EntityData {
             StagedComponent::Animation(a) => data.animation = Some(a.clone()),
             StagedComponent::Grass(g) => data.grass = Some(g.clone()),
             StagedComponent::Scatter(s) => data.scatter = Some(s.clone()),
+            StagedComponent::Joint(j) => data.joint = Some(j.clone()),
             StagedComponent::MeshVisual(v) => data.mesh_visual = Some(MeshVisualData::from(v)),
             StagedComponent::RigidBody(b) => data.rigid_body = Some(b.clone()),
             StagedComponent::Collider3D(c) => data.collider_3d = Some(c.clone()),
@@ -84,6 +85,9 @@ pub fn entity_data_to_staged(data: &EntityData) -> StagedEntity {
     }
     if let Some(s) = &data.scatter {
         components.push(StagedComponent::Scatter(s.clone()));
+    }
+    if let Some(j) = &data.joint {
+        components.push(StagedComponent::Joint(j.clone()));
     }
     if let Some(v) = &data.mesh_visual {
         components.push(StagedComponent::MeshVisual(

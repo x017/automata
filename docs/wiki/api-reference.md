@@ -390,6 +390,26 @@ at.CharacterController(mode="normal", max_slope_climb_angle=0.7853982,
                        snap_to_ground=None, offset=0.05, slide=True)
 
 at.CharacterVelocity(velocity=(0, 0, 0))   # .velocity get/set
+
+at.Joint(kind="hinge", *, connected=None, anchor=(0, 0, 0),
+         connected_anchor=None, axis=(0, 1, 0), limits=None, length=0.0,
+         stiffness=30.0, damping=2.0, motor=None, collide_connected=False,
+         break_force=0.0, enabled=True)
+at.Joint.hinge(axis=(0, 1, 0), **opts) / .ball(**opts) / .slider(axis=(1, 0, 0), **opts)
+at.Joint.fixed(**opts) / .rope(length=0.0, **opts)
+at.Joint.spring(length=0.0, stiffness=30.0, damping=2.0, **opts)
+joint.replace(**opts)              # a copy with some options changed
+# connected: an entity name, None = the world. anchor: local to this entity.
+# limits: radians (hinge, ball) or metres (slider). length 0 = starting distance.
+# break_force: newtons, 0 = never. An unknown option raises TypeError.
+
+at.JointMotor(speed=0.0, *, target=None, stiffness=400.0, damping=80.0,
+              max_force=0.0)       # target set: pull to it; else turn at speed
+
+view.joint -> JointRef | None      # kind, component, value, angle, attached,
+                                   # broken, force (N); settable: connected,
+                                   # enabled, motor_speed, motor_target,
+                                   # limits, break_force
 ```
 
 ## FrameContext (`ctx`)
@@ -581,7 +601,8 @@ at.run_scene(path, *, max_frames=None, update=None, **game_options) -> int
 Plays an Oberon scene file with its behaviour scripts:
 `start(entity, ctx)`, `update(entity, ctx)`, `stop(entity, ctx)`, and
 `on_animation_event(entity, ctx, name)` for the entity's own animation
-events. It returns the number of frames run.
+events, and `on_joint_broken(entity, ctx)` when its joint snaps. It returns
+the number of frames run.
 
 | `entity` | |
 |---|---|
@@ -592,6 +613,7 @@ events. It returns the number of frames run.
 | `camera` | `ScriptCamera` or `None` |
 | `audio` | `play()`, `stop()`, `playing`, `source` |
 | `animation` | `play(clip, loop=True, fade=0.0, speed=None, restart=False)`, `stop(fade=0.0)`, `clip`, `time` (settable), `duration`, `length(clip)`, `playing`, `speed` (settable), `looping`, `clips`, `springs`, `reset_springs()`, `root_motion` (settable), or `None` without an Animation. Reads include this frame's requests |
+| `joint` | `kind`, `connected` (settable), `value`, `angle`, `attached`, `broken`, `force`, and settable `enabled`, `motor_speed`, `motor_target`, `limits`, `break_force`; or `None` without a Joint ([Physics → Joints](guides/physics.md#joints)) |
 | `camera_3d` | The camera as a `Camera3D` (get/set) |
 | `view` | The engine's `EntityView` for this frame |
 | `despawn()` | At the end of the frame |

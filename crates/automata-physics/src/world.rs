@@ -75,6 +75,9 @@ pub struct PhysicsTick {
     pub contact_forces: Vec<ContactForce>,
     /// Bodies that hit water hard enough to splash this step.
     pub splashes: Vec<WaterSplash>,
+    /// Entities whose [`crate::Joint`] snapped this step (past its
+    /// `break_force`).
+    pub broken_joints: Vec<Entity>,
 }
 
 /// Something hitting water hard enough to splash.

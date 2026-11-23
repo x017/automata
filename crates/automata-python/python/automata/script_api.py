@@ -30,6 +30,11 @@ with a ``get(key)`` method returning the start-of-frame value of:
   ``springs``, ``rm`` (root motion on) and ``ev``: the latest animation
   events passed, ``[seq, clip, name]`` oldest first, ``seq`` counting up
   per entity (the host delivers each new one once);
+- ``joint``: the entity's Joint or None: a dict with ``kind``, ``to`` (the
+  connected entity's name or None), ``on`` (enabled), ``value`` (hinge
+  angle, slider position or anchor distance), ``attached``, ``broken``,
+  ``force`` (newtons), ``motor`` (``[speed, target or None]`` or None),
+  ``limits`` (``[min, max]`` or None) and ``bf`` (break force, 0 = never);
 - ``view``: the engine's own handle (run_scene only).
 
 Scripts read those values and write new ones. **Writes are visible to every
@@ -47,7 +52,8 @@ data)`` delivers a :class:`Message` at once to every function subscribed
 with ``ctx.subscribe(pattern, fn)``. Patterns match exactly, or with ``*``
 and ``?`` wildcards (``"*:animation:hit"``). The engine publishes animation
 events as ``<entity name>:animation:<event>`` at the start of the frame
-after the playhead passes them, just before ``update`` runs.
+after the playhead passes them, just before ``update`` runs, and
+``<entity name>:joint:broken`` the frame after a joint snaps.
 """
 
 from __future__ import annotations
@@ -74,6 +80,7 @@ __all__ = [
     "Entity",
     "EntityAnimation",
     "EntityAudio",
+    "EntityJoint",
     "FrameOutput",
     "Hit",
     "Hud",
@@ -470,6 +477,128 @@ class EntityAnimation:
         return f"Animation({self._e.name!r}, clip={self.clip!r})"
 
 
+class EntityJoint:
+    """``entity.joint``: the entity's Joint and how it's holding up.
+
+    Reads come from the start of the frame (plus this frame's own
+    writes); writes apply after every script has run::
+
+        door.joint.motor_target = 1.6       # swing open
+        if door.joint.angle > 1.5: ...
+        bridge_plank.joint.enabled = False  # let go
+    """
+
+    __slots__ = ("_e",)
+
+    def __init__(self, entity):
+        self._e = entity
+
+    def _st(self):
+        return self._e._joint_state() or {}
+
+    @property
+    def kind(self) -> str:
+        """``"hinge"``, ``"ball"``, ``"slider"``, ``"fixed"``, ``"rope"`` or ``"spring"``."""
+        return str(self._st().get("kind", "hinge"))
+
+    @property
+    def connected(self) -> str | None:
+        """The name of the entity it holds on to (None = the world)."""
+        return self._st().get("to")
+
+    @connected.setter
+    def connected(self, name: str | None) -> None:
+        self._e._joint_set("to", None if name is None else str(name))
+
+    @property
+    def value(self) -> float:
+        """A hinge's angle (radians), a slider's position (metres) or, for
+        the others, how far apart its two anchors are."""
+        return float(self._st().get("value", 0.0))
+
+    @property
+    def angle(self) -> float:
+        """A hinge's angle in radians from where it started (same as ``value``)."""
+        return self.value
+
+    @property
+    def attached(self) -> bool:
+        """Whether it's holding two things together right now."""
+        return bool(self._st().get("attached", False))
+
+    @property
+    def broken(self) -> bool:
+        """Whether it snapped past its ``break_force``."""
+        return bool(self._st().get("broken", False))
+
+    @property
+    def force(self) -> float:
+        """The force it held with last step, in newtons."""
+        return float(self._st().get("force", 0.0))
+
+    @property
+    def enabled(self) -> bool:
+        """Whether it holds at all; set False to let go."""
+        return bool(self._st().get("on", True))
+
+    @enabled.setter
+    def enabled(self, on: bool) -> None:
+        self._e._joint_set("on", bool(on))
+
+    @property
+    def motor_speed(self) -> float | None:
+        """The motor's speed (rad/s or m/s), or None without a motor.
+        Setting it drives at that speed; None removes the motor."""
+        m = self._st().get("motor")
+        return None if m is None else float(m[0])
+
+    @motor_speed.setter
+    def motor_speed(self, speed: float | None) -> None:
+        self._e._joint_set("motor", None if speed is None else [float(speed), None])
+
+    @property
+    def motor_target(self) -> float | None:
+        """The angle / position the motor pulls to, or None. Setting it
+        pulls there; None removes the motor."""
+        m = self._st().get("motor")
+        return None if m is None or m[1] is None else float(m[1])
+
+    @motor_target.setter
+    def motor_target(self, target: float | None) -> None:
+        if target is None:
+            self._e._joint_set("motor", None)
+        else:
+            m = self._st().get("motor")
+            speed = float(m[0]) if m is not None else 0.0
+            self._e._joint_set("motor", [speed, float(target)])
+
+    @property
+    def limits(self) -> tuple[float, float] | None:
+        """``(min, max)`` angle (radians) or slide (metres), or None."""
+        lim = self._st().get("limits")
+        return None if lim is None else (float(lim[0]), float(lim[1]))
+
+    @limits.setter
+    def limits(self, value: Iterable[float] | None) -> None:
+        if value is None:
+            self._e._joint_set("limits", None)
+        else:
+            lo, hi = _vec(value, 2)
+            self._e._joint_set("limits", [min(lo, hi), max(lo, hi)])
+
+    @property
+    def break_force(self) -> float:
+        """Newtons that snap it (0 = unbreakable)."""
+        return float(self._st().get("bf", 0.0))
+
+    @break_force.setter
+    def break_force(self, newtons: float) -> None:
+        self._e._joint_set("bf", max(0.0, float(newtons)))
+
+    def __repr__(self):
+        return f"Joint({self._e.name!r}, {self.kind})"
+
+
 class Entity:
     """A scene entity as seen by a script.
 
@@ -493,6 +622,10 @@ class Entity:
         self._anim_st = None
         self._despawn = False
         self._ev_seen = 0  # the last animation event delivered
+        self._joint_st: dict[str, Any] | None = None
+        self._joint_read = False
+        self._joint_w: dict[str, Any] | None = None
+        self._joint_was_broken = False
 
     def _begin(self, record):
         """Starts a frame from a fresh record."""
@@ -503,6 +636,9 @@ class Entity:
         self._audio = None
         self._anim = None
         self._anim_st = None
+        self._joint_st = None
+        self._joint_read = False
+        self._joint_w = None
         self.name = record.get("name") or ""
         self.script = record.get("script")
 
@@ -599,6 +735,31 @@ class Entity:
         self._dirty.add("anim")
 
     @property
+    def joint(self) -> EntityJoint | None:
+        """This entity's Joint: ``angle``, ``broken``, ``force``,
+        ``enabled``, ``motor_speed``, ``motor_target``, ``limits``. None
+        without a Joint component."""
+        return EntityJoint(self) if self._joint_state() is not None else None
+
+    def _joint_state(self) -> dict[str, Any] | None:
+        """This frame's joint (a dict our own writes update), or None."""
+        if not self._joint_read:
+            self._joint_read = True
+            rec = self._record.get("joint")
+            self._joint_st = None if rec is None else dict(rec)
+        return self._joint_st
+
+    def _joint_set(self, key, value):
+        st = self._joint_state()
+        if st is None:
+            raise AttributeError(f"{self.name!r} has no Joint")
+        st[key] = value
+        if self._joint_w is None:
+            self._joint_w = {}
+        self._joint_w[key] = value
+        self._dirty.add("joint")
+
+    @property
     def view(self) -> Any:
         """The engine's own handle for the entity (``run_scene`` only)."""
         return self._record.get("view")
@@ -619,6 +780,8 @@ class Entity:
             w["audio"] = self._audio
         if self._anim:
             w["anim"] = list(self._anim)
+        if self._joint_w:
+            w["joint"] = dict(self._joint_w)
         for key in ("p", "r", "s", "v", "cam"):
             if key in d and self._vals.get(key) is not None:
                 w[key] = self._vals[key]
@@ -1233,10 +1396,25 @@ _TRANSFORM_FIELDS = {
     "scale": (lambda t: t.scale, lambda t, v: _set_attr(t, "scale", v)),
 }
 _FIELD_ALIASES = {("transform", "rotation_euler"): "rotation"}
+_JOINT_FIELDS = {
+    "angle": (lambda j: j.angle, None),
+    "value": (lambda j: j.value, None),
+    "attached": (lambda j: j.attached, None),
+    "broken": (lambda j: j.broken, None),
+    "force": (lambda j: j.force, None),
+    "kind": (lambda j: j.kind, None),
+    "connected": (lambda j: j.connected, lambda j, v: _set_attr(j, "connected", v)),
+    "enabled": (lambda j: j.enabled, lambda j, v: _set_attr(j, "enabled", v)),
+    "motor_speed": (lambda j: j.motor_speed, lambda j, v: _set_attr(j, "motor_speed", v)),
+    "motor_target": (lambda j: j.motor_target, lambda j, v: _set_attr(j, "motor_target", v)),
+    "limits": (lambda j: j.limits, lambda j, v: _set_attr(j, "limits", v)),
+    "break_force": (lambda j: j.break_force, lambda j, v: _set_attr(j, "break_force", v)),
+}
 COMPONENTS = {
     "animation": (lambda e: e.animation, "no Animation (or its model isn't animated)",
                   _ANIMATION_FIELDS),
     "transform": (lambda e: e.transform, "no Transform", _TRANSFORM_FIELDS),
+    "joint": (lambda e: e.joint, "no Joint", _JOINT_FIELDS),
     "attr": (lambda e: e.attributes, "no attributes", None),  # fields: its attributes
 }
 
@@ -2854,6 +3032,7 @@ class ScriptHost:
             self._last_check = elapsed
             self.reload_changed()
         self._deliver_animation_events()
+        self._deliver_joint_breaks()
         if self._timers:
             self._tick_timers(t.delta)
         for e in list(self.entities.values()):
@@ -3109,6 +3288,27 @@ class ScriptHost:
                     break  # despawned by a handler
                 channel = f"{e.name or e.id}:animation:{name}"
                 self.publish(Message(channel, None, e, name, clip))
+
+    def _deliver_joint_breaks(self):
+        """Tells each entity whose joint just snapped: its script's
+        ``on_joint_broken(entity, ctx)`` and the channel
+        ``<name>:joint:broken`` (data: the force, in newtons)."""
+        for e in list(self.entities.values()):
+            rec = e._record.get("joint")
+            broken = bool(rec and rec.get("broken"))
+            if broken == e._joint_was_broken:
+                continue
+            e._joint_was_broken = broken
+            if not broken:
+                continue  # rebuilt: it can snap again
+            if e.script and e.id in self.started:
+                s = self.script(e.script)
+                if s is not None:
+                    self.call(s, "on_joint_broken", e)
+            if e.id not in self.entities:
+                continue
+            channel = f"{e.name or e.id}:joint:broken"
+            self.publish(Message(channel, float(rec.get("force", 0.0)), e, "broken"))
 
     def _collect(self):
         writes = [w for w in (e._writes() for e in self.entities.values()) if w]

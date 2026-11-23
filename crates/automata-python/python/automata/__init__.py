@@ -95,6 +95,9 @@ from ._core import (
     Gamepads,
     Grass,
     Input,
+    Joint,
+    JointMotor,
+    JointRef,
     MeshRenderer,
     Modifiers,
     ParticleEmitter,
@@ -138,6 +141,7 @@ Component = Union[
     Animation,
     Grass,
     Scatter,
+    Joint,
 ]
 
 #: A per-frame update callback.
@@ -248,6 +252,9 @@ __all__ = [
     "GraphicsQuality",
     "Grass",
     "Input",
+    "Joint",
+    "JointMotor",
+    "JointRef",
     "Key",
     "MeshRenderer",
     "MouseButton",

@@ -239,6 +239,28 @@ pub enum Field {
     ColliderRestitution,
     /// Character controller: steepest walkable slope, in degrees.
     CharacterSlope,
+    /// Joint anchor in the entity's space, axis 0..3.
+    JointAnchor(u8),
+    /// Hinge / slider axis in the entity's space, axis 0..3.
+    JointAxis(u8),
+    /// Joint lower limit (degrees for hinges and balls, metres for sliders).
+    JointLimitMin,
+    /// Joint upper limit.
+    JointLimitMax,
+    /// Rope / spring length (0 = the starting distance).
+    JointLength,
+    /// Spring stiffness.
+    JointStiffness,
+    /// Spring damping.
+    JointDamping,
+    /// Motor speed (degrees or metres per second).
+    JointMotorSpeed,
+    /// Motor target (degrees or metres from the start).
+    JointMotorTarget,
+    /// Most force the motor may use (0 = no limit).
+    JointMotorMaxForce,
+    /// Newtons that snap the joint (0 = unbreakable).
+    JointBreakForce,
     /// Audio source volume (1 = as recorded).
     AudioVolume,
     /// Audio source pitch / speed (1 = as recorded).
@@ -332,6 +354,16 @@ pub enum Flag {
     AnimPlayOnStart,
     /// The clip's travel moves the entity (root motion).
     AnimRootMotion,
+    /// The joint holds.
+    JointEnabled,
+    /// The two joined bodies still bump into each other.
+    JointCollide,
+    /// The joint has limits.
+    JointLimits,
+    /// The joint has a motor.
+    JointMotor,
+    /// The motor pulls to a target (rather than just turning).
+    JointMotorTarget,
 }
 
 /// An enumerated property of an entity (cycled by a dropdown-style button).
@@ -357,6 +389,8 @@ pub enum Choice {
     ParticleBlend,
     /// The built-in particle picture: Dot, Spark, Star, Flame, Puff.
     ParticleSprite,
+    /// Hinge → Ball → Slider → Fixed → Rope → Spring.
+    JointKind,
 }
 
 fn axis(i: u8) -> usize {
@@ -524,7 +558,87 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::AudioPitch => data.audio_source.as_ref()?.pitch,
         F::AudioRange => data.audio_source.as_ref()?.range,
         F::AnimSpeed => data.animation.as_ref()?.speed,
+        F::JointAnchor(_)
+        | F::JointAxis(_)
+        | F::JointLimitMin
+        | F::JointLimitMax
+        | F::JointLength
+        | F::JointStiffness
+        | F::JointDamping
+        | F::JointMotorSpeed
+        | F::JointMotorTarget
+        | F::JointMotorMaxForce
+        | F::JointBreakForce => joint_get(data.joint.as_ref()?, field)?,
     })
+}
+
+/// Hinges and balls show angles in degrees; sliders metres.
+fn joint_unit(j: &automata_physics::Joint) -> f32 {
+    if j.kind == automata_physics::JointKind::Slider {
+        1.0
+    } else {
+        std::f32::consts::PI / 180.0
+    }
+}
+
+fn joint_get(j: &automata_physics::Joint, field: Field) -> Option<f32> {
+    use Field as F;
+    let unit = joint_unit(j);
+    Some(match field {
+        F::JointAnchor(i) => j.anchor.to_array()[axis(i)],
+        F::JointAxis(i) => j.axis.to_array()[axis(i)],
+        F::JointLimitMin => j.limits?[0] / unit,
+        F::JointLimitMax => j.limits?[1] / unit,
+        F::JointLength => j.length,
+        F::JointStiffness => j.stiffness,
+        F::JointDamping => j.damping,
+        F::JointMotorSpeed => j.motor?.speed / unit,
+        F::JointMotorTarget => j.motor?.target? / unit,
+        F::JointMotorMaxForce => j.motor?.max_force,
+        F::JointBreakForce => j.break_force,
+        _ => return None,
+    })
+}
+
+fn joint_set(j: &mut automata_physics::Joint, field: Field, v: f32) -> bool {
+    use Field as F;
+    let unit = joint_unit(j);
+    match field {
+        F::JointAnchor(i) => j.anchor[axis(i)] = v,
+        F::JointAxis(i) => j.axis[axis(i)] = v,
+        F::JointLimitMin | F::JointLimitMax => {
+            let Some([lo, hi]) = &mut j.limits else {
+                return false;
+            };
+            // Dragging one past the other carries it along.
+            if field == F::JointLimitMin {
+                *lo = v * unit;
+                *hi = hi.max(*lo);
+            } else {
+                *hi = v * unit;
+                *lo = lo.min(*hi);
+            }
+        }
+        F::JointLength => j.length = v,
+        F::JointStiffness => j.stiffness = v,
+        F::JointDamping => j.damping = v,
+        F::JointMotorSpeed | F::JointMotorTarget | F::JointMotorMaxForce => {
+            let Some(m) = &mut j.motor else {
+                return false;
+            };
+            match field {
+                F::JointMotorSpeed => m.speed = v * unit,
+                F::JointMotorTarget => match &mut m.target {
+                    Some(t) => *t = v * unit,
+                    None => return false,
+                },
+                _ => m.max_force = v,
+            }
+        }
+        F::JointBreakForce => j.break_force = v,
+        _ => return false,
+    }
+    true
 }
 
 #[allow(clippy::cast_precision_loss)] // seeds stay far below 2^24
@@ -636,10 +750,16 @@ pub fn range(field: Field) -> (f32, f32) {
         F::GrassArea(_) | F::ScatterArea(_) => (0.0, automata_scene::MAX_AREA),
         F::GrassHeight => (0.01, 10.0),
         F::GrassWidth => (0.002, 1.0),
-        F::GrassSeed | F::ScatterSeed => (0.0, 1_000_000.0),
+        F::GrassSeed
+        | F::ScatterSeed
+        | F::JointLength
+        | F::JointStiffness
+        | F::JointDamping
+        | F::JointMotorMaxForce
+        | F::JointBreakForce => (0.0, 1_000_000.0),
         F::ScatterDensity => (0.0, 50.0),
         F::ScatterScale(_) => (0.01, 100.0),
-        F::EnvTemperature | F::EnvTint | F::EnvLift(_) => (-1.0, 1.0),
+        F::EnvTemperature | F::EnvTint | F::EnvLift(_) | F::JointAxis(_) => (-1.0, 1.0),
         F::EnvContrast => (0.25, 3.0),
         F::EnvSaturation | F::EnvGain(_) => (0.0, 3.0),
         F::EnvGamma(_) => (0.1, 4.0),
@@ -730,7 +850,12 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::ParticleRate
         | F::ParticleBurst
         | F::WaterWaveDirection
-        | F::EnvWindDirection => 0.5,
+        | F::EnvWindDirection
+        | F::JointLimitMin
+        | F::JointLimitMax
+        | F::JointMotorSpeed
+        | F::JointMotorTarget => 0.5,
+        F::JointBreakForce | F::JointMotorMaxForce | F::JointStiffness => 1.0,
         F::GrassSeed | F::ScatterSeed => 0.05,
         F::ParticleMax => 2.0,
         F::EnvFogDensity | F::GrassWidth => 0.0005,
@@ -1142,6 +1267,20 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
             Some(c) => c.max_slope_climb_angle = v.to_radians(),
             None => return false,
         },
+        F::JointAnchor(_)
+        | F::JointAxis(_)
+        | F::JointLimitMin
+        | F::JointLimitMax
+        | F::JointLength
+        | F::JointStiffness
+        | F::JointDamping
+        | F::JointMotorSpeed
+        | F::JointMotorTarget
+        | F::JointMotorMaxForce
+        | F::JointBreakForce => match &mut data.joint {
+            Some(j) => return joint_set(j, field, v),
+            None => return false,
+        },
         F::AudioVolume | F::AudioPitch | F::AudioRange => match &mut data.audio_source {
             Some(a) => match field {
                 F::AudioVolume => a.volume = v,
@@ -1184,6 +1323,11 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::AnimLoop => data.animation.as_ref()?.looping,
         Flag::AnimPlayOnStart => data.animation.as_ref()?.play_on_start,
         Flag::AnimRootMotion => data.animation.as_ref()?.root_motion,
+        Flag::JointEnabled => data.joint.as_ref()?.enabled,
+        Flag::JointCollide => data.joint.as_ref()?.collide_connected,
+        Flag::JointLimits => data.joint.as_ref()?.limits.is_some(),
+        Flag::JointMotor => data.joint.as_ref()?.motor.is_some(),
+        Flag::JointMotorTarget => data.joint.as_ref()?.motor?.target.is_some(),
     })
 }
 
@@ -1277,6 +1421,37 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
                 None => return false,
             }
         }
+        Flag::JointEnabled
+        | Flag::JointCollide
+        | Flag::JointLimits
+        | Flag::JointMotor
+        | Flag::JointMotorTarget => {
+            let Some(j) = &mut data.joint else {
+                return false;
+            };
+            match flag {
+                Flag::JointEnabled => j.enabled = !j.enabled,
+                Flag::JointCollide => j.collide_connected = !j.collide_connected,
+                Flag::JointLimits => {
+                    j.limits = match j.limits {
+                        Some(_) => None,
+                        // ±45° for a hinge or ball; ±0.5 m for a slider.
+                        None if j.kind == automata_physics::JointKind::Slider => Some([-0.5, 0.5]),
+                        None => Some([-std::f32::consts::FRAC_PI_4, std::f32::consts::FRAC_PI_4]),
+                    };
+                }
+                Flag::JointMotor => {
+                    j.motor = match j.motor {
+                        Some(_) => None,
+                        None => Some(automata_physics::JointMotor::speed(1.0)),
+                    };
+                }
+                _ => match &mut j.motor {
+                    Some(m) => m.target = if m.target.is_some() { None } else { Some(0.0) },
+                    None => return false,
+                },
+            }
+        }
     }
     true
 }
@@ -1322,6 +1497,7 @@ pub fn choice_label(data: &EntityData, choice: Choice) -> Option<&'static str> {
         Choice::ParticleShape => data.particle_emitter.as_ref()?.shape.label(),
         Choice::ParticleBlend => automata_scene::blend_label(data.particle_emitter.as_ref()?.blend),
         Choice::ParticleSprite => data.particle_emitter.as_ref()?.sprite.label(),
+        Choice::JointKind => data.joint.as_ref()?.kind.label(),
     })
 }
 
@@ -1491,6 +1667,25 @@ pub fn cycle(data: &mut EntityData, choice: Choice) -> bool {
                     e.sprite = all[next(all.iter().position(|s| *s == e.sprite), all.len())];
                 }
             }
+        }
+        Choice::JointKind => {
+            use automata_physics::JointKind as K;
+            let Some(j) = &mut data.joint else {
+                return false;
+            };
+            let all = K::ALL;
+            let i = all.iter().position(|k| *k == j.kind).map_or(0, |i| i + 1);
+            let next = all[i % all.len()];
+            // Limits and motors are in degrees or metres: they don't carry
+            // over between turning and sliding kinds.
+            let turning = |k: K| matches!(k, K::Hinge | K::Ball);
+            if !next.has_limits() || turning(next) != turning(j.kind) {
+                j.limits = None;
+            }
+            if !next.has_motor() || turning(next) != turning(j.kind) {
+                j.motor = None;
+            }
+            j.kind = next;
         }
     }
     true
@@ -2185,5 +2380,50 @@ mod tests {
         assert_eq!(format_value(0.25), "0.25");
         assert_eq!(format_value(-0.0001), "0");
         assert_eq!(format_value(12.3456), "12.346");
+    }
+
+    #[test]
+    fn joint_fields_show_degrees_for_hinges_and_metres_for_sliders() {
+        use automata_physics::{Joint, JointKind};
+        let mut d = EntityData::default();
+        assert_eq!(get(&d, Field::JointLength), None);
+        crate::doc::ComponentKind::Joint.add_to(&mut d);
+        assert!(
+            d.rigid_body.is_some() && d.collider_3d.is_some(),
+            "a joint needs a body"
+        );
+        assert_eq!(choice_label(&d, Choice::JointKind), Some("Hinge"));
+        assert_eq!(get(&d, Field::JointLimitMin), None);
+        assert!(!set(&mut d, Field::JointLimitMin, -10.0), "no limits yet");
+        assert!(toggle(&mut d, Flag::JointLimits));
+        assert!((get(&d, Field::JointLimitMax).unwrap() - 45.0).abs() < 1e-3);
+        assert!(set(&mut d, Field::JointLimitMin, 60.0));
+        let lim = d.joint.as_ref().unwrap().limits.unwrap();
+        assert!((lim[0] - 60f32.to_radians()).abs() < 1e-5 && lim[1] >= lim[0]);
+        assert!(toggle(&mut d, Flag::JointMotor) && toggle(&mut d, Flag::JointMotorTarget));
+        assert!(set(&mut d, Field::JointMotorTarget, 90.0));
+        let target = d.joint.as_ref().unwrap().motor.unwrap().target.unwrap();
+        assert!((target - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+        assert_eq!(
+            choice_options(&d, Choice::JointKind),
+            vec!["Hinge", "Ball", "Slider", "Fixed", "Rope", "Spring"]
+        );
+        // Ball keeps the angles; Slider drops them (metres now).
+        assert!(set_choice(&mut d, Choice::JointKind, "Ball"));
+        assert!(d.joint.as_ref().unwrap().limits.is_some());
+        assert!(
+            d.joint.as_ref().unwrap().motor.is_none(),
+            "balls have no motor"
+        );
+        assert!(set_choice(&mut d, Choice::JointKind, "Slider"));
+        assert_eq!(d.joint.as_ref().unwrap().kind, JointKind::Slider);
+        assert!(d.joint.as_ref().unwrap().limits.is_none());
+        assert!(toggle(&mut d, Flag::JointLimits));
+        assert!((get(&d, Field::JointLimitMax).unwrap() - 0.5).abs() < 1e-6);
+        assert!(set(&mut d, Field::JointBreakForce, 250.0));
+        assert!(toggle(&mut d, Flag::JointCollide) && toggle(&mut d, Flag::JointEnabled));
+        let j: &Joint = d.joint.as_ref().unwrap();
+        assert!(j.collide_connected && !j.enabled);
+        assert!((j.break_force - 250.0).abs() < f32::EPSILON);
     }
 }

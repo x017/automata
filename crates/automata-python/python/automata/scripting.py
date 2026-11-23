@@ -157,6 +157,19 @@ class _ViewRecord:
                 "lens": [a.length(c) for c in clips], "springs": a.springs,
                 "rm": a.root_motion, "ev": a.recent_events,
             }
+        if key == "joint":
+            j = v.joint
+            if j is None:
+                return None
+            mt = j.motor_target
+            ms = j.motor_speed
+            return {
+                "kind": j.kind, "to": j.connected, "on": j.enabled, "value": j.value,
+                "attached": j.attached, "broken": j.broken, "force": j.force,
+                "motor": None if ms is None else [ms, mt],
+                "limits": None if j.limits is None else list(j.limits),
+                "bf": j.break_force,
+            }
         if key == "view":
             return v
         return None
@@ -212,6 +225,24 @@ class _EngineBackend(api.Backend):
                 ctx.audio.play_source(view)
             elif audio == "stop":
                 ctx.audio.stop_source(view)
+            joint = view.joint if w.get("joint") else None
+            if joint is not None:
+                for k, val in w["joint"].items():
+                    if k == "on":
+                        joint.enabled = val
+                    elif k == "to":
+                        joint.connected = val
+                    elif k == "limits":
+                        joint.limits = None if val is None else tuple(val)
+                    elif k == "bf":
+                        joint.break_force = val
+                    elif k == "motor":
+                        if val is None:
+                            joint.motor_speed = None
+                        elif val[1] is None:
+                            joint.motor_speed = val[0]
+                        else:
+                            joint.motor_target = val[1]
             anim = view.animation if w.get("anim") else None
             for cmd in w.get("anim", ()) if anim is not None else ():
                 if cmd[0] == "play":

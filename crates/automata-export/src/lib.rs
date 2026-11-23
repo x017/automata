@@ -365,6 +365,9 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
                                     check_model(project, base, who, model, &mut out);
                                 }
                             }
+                            if let Some(joint) = &entity.joint {
+                                check_joint(&file, entity, joint, &mut out);
+                            }
                         }
                     }
                 },
@@ -378,6 +381,33 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
         out.push(Message::error("No target platforms selected."));
     }
     out
+}
+
+/// Warns about a joint that can't hold anything: no body of its own, or a
+/// partner name no entity has (a script might spawn it, so not an error).
+fn check_joint(
+    file: &automata_core::scene_file::SceneFile,
+    entity: &automata_core::scene_file::EntityData,
+    joint: &automata_physics::Joint,
+    out: &mut Vec<Message>,
+) {
+    let who = entity.name.as_deref().unwrap_or("an entity");
+    if entity.rigid_body.is_none() {
+        out.push(Message::warn(format!(
+            "{who}: its Joint needs a Rigidbody on the same entity"
+        )));
+    }
+    if let Some(partner) = &joint.connected {
+        let found = file
+            .entities
+            .iter()
+            .any(|e| e.name.as_deref() == Some(partner.as_str()) && !std::ptr::eq(e, entity));
+        if !found {
+            out.push(Message::warn(format!(
+                "{who}: its Joint is connected to {partner:?}, but no entity has that name"
+            )));
+        }
+    }
 }
 
 /// Checks one model reference: the file and the files it uses (buffers,
@@ -1186,6 +1216,49 @@ mod tests {
         assert!(has(Level::Error, "Ghost: model models/ghost.glb not found"));
         assert!(has(Level::Error, "is outside the project folder"));
         let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn validation_warns_about_joints_that_cant_hold() {
+        use automata_core::scene_file::{EntityData, SceneFile};
+        use automata_physics::{Joint, RigidBody};
+        let dir = project("joints");
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                EntityData {
+                    name: Some("Frame".into()),
+                    rigid_body: Some(RigidBody::fixed()),
+                    ..Default::default()
+                },
+                EntityData {
+                    name: Some("Door".into()),
+                    rigid_body: Some(RigidBody::dynamic()),
+                    joint: Some(Joint::default().connected_to("Frame")),
+                    ..Default::default()
+                },
+                EntityData {
+                    name: Some("Ghost".into()),
+                    joint: Some(Joint::ball().connected_to("Nobody")),
+                    ..Default::default()
+                },
+            ],
+        };
+        std::fs::write(dir.join("j.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("j.ron".into()),
+            ..BuildConfig::default()
+        };
+        let texts: Vec<String> = validate(&dir, &cfg)
+            .into_iter()
+            .filter(|m| m.level == Level::Warning)
+            .map(|m| m.text)
+            .collect();
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        assert!(texts.iter().all(|t| t.starts_with("Ghost:")), "{texts:?}");
+        assert!(texts.iter().any(|t| t.contains("Rigidbody")), "{texts:?}");
+        assert!(texts.iter().any(|t| t.contains("\"Nobody\"")), "{texts:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

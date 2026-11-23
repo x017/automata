@@ -158,6 +158,53 @@ it calms down. While it runs, about 0.25 ms per physics step in a release
 build. The engine and Oberon point it at the camera that draws the frame;
 with your own <code>PhysicsWorld3D</code> in Rust, call `set_ripple_view(eye,
 target)<code>each frame and hand</code>ripples()<code>to</code>DrawList::set_ripples`.</p>
+<h2 id="joints">Joints<a class="anchor" href="#joints" aria-label="Link to this section">#</a></h2>
+<p><img src="../../../assets/physics/joint_yard.jpg" alt="A door on a hinge, a rope bridge of hinged planks, and a chain of ball joints swinging a wrecking ball through a sign" loading="lazy" decoding="async"></p>
+<p>A <strong>Joint</strong> holds an entity's body to another entity's (<code>connected</code>, by
+name) or to the world (<code>connected=None</code>). Both need a rigid body. An entity
+has at most one joint, so a chain is each link joined to the one before it.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>door.add(at.Joint.hinge(axis=(<span class="tok-n">0</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>), connected=<span class="tok-s">&quot;Door Frame&quot;</span>,
+                        anchor=(-<span class="tok-n">0.54</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>),            <span class="tok-c"># the hinge edge, in the door&#x27;s space</span>
+                        limits=(-<span class="tok-n">1.7</span>, <span class="tok-n">1.7</span>),              <span class="tok-c"># radians</span>
+                        motor=at.JointMotor(target=<span class="tok-n">0.0</span>)))  <span class="tok-c"># pulls shut</span>
+link.add(at.Joint.ball(connected=<span class="tok-s">&quot;Link 3&quot;</span>, anchor=(<span class="tok-n">0.2</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>)))
+sign.add(at.Joint.fixed(connected=<span class="tok-s">&quot;Post&quot;</span>, break_force=<span class="tok-n">120.0</span>))  <span class="tok-c"># snaps past 120 N</span>
+lamp.add(at.Joint.spring(<span class="tok-n">1.2</span>, stiffness=<span class="tok-n">30.0</span>, damping=<span class="tok-n">1.0</span>, connected=<span class="tok-s">&quot;Beam&quot;</span>))
+crate.add(at.Joint.rope(<span class="tok-n">3.0</span>))                             <span class="tok-c"># hangs from the world</span></code></pre></div>
+<div class="table"><table><thead><tr><th>Kind</th><th>Moves</th><th>Limits</th><th>Motor</th><th>Use</th></tr></thead><tbody><tr><td><code>hinge</code></td><td>turns around <code>axis</code></td><td>angle (rad)</td><td>✓</td><td>doors, wheels, bridge planks</td></tr><tr><td><code>ball</code></td><td>swivels freely</td><td>cone (rad)</td><td></td><td>chain links, ragdoll shoulders</td></tr><tr><td><code>slider</code></td><td>slides along <code>axis</code></td><td>position (m)</td><td>✓</td><td>drawers, lifts, pistons</td></tr><tr><td><code>fixed</code></td><td>nothing</td><td></td><td></td><td>welds — give it a <code>break_force</code></td></tr><tr><td><code>rope</code></td><td>up to <code>length</code> apart, slack closer</td><td></td><td></td><td>ropes, leashes</td></tr><tr><td><code>spring</code></td><td>pulled towards <code>length</code> apart</td><td></td><td></td><td>bouncy lamps, suspension</td></tr></tbody></table></div>
+<ul><li><strong><code>anchor</code></strong> is where the joint sits, in this entity's local space;
+<code>connected_anchor</code> is the same point in the other's. Leave that out and
+the joint holds the bodies as they were placed; a rope or spring is then
+tied to the other's centre (joined to the world: to a point above it).</li><li><strong><code>length=0</code></strong> (ropes and springs) means "the distance they start at".</li><li><strong><code>JointMotor(speed)</code></strong> turns (or slides) at <code>speed</code> rad/s (m/s);
+<strong><code>JointMotor(target=1.2)</code></strong> pulls to an angle and holds it.
+<code>stiffness=400, damping=80</code> settle in about half a second with no
+overshoot; <code>max_force=0</code> means as strong as needed.</li><li><strong><code>break_force</code></strong> (newtons, 0 = never) snaps the joint when it's pulled
+harder. <strong><code>collide_connected</code></strong> lets the two bodies bump each other
+(off by default, so a hinge's door and frame can overlap).</li><li>2D works the same with <code>Collider2D</code> bodies: hinges and balls turn around Z.</li></ul>
+<h3 id="joints-in-scripts">Joints in scripts<a class="anchor" href="#joints-in-scripts" aria-label="Link to this section">#</a></h3>
+<p>A running joint is <code>entity.joint</code> (or <code>view.joint</code>), and <code>None</code> without one:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    j = entity.joint
+    j.angle          <span class="tok-c"># hinge angle from where it started (radians); .value for any kind</span>
+    j.force          <span class="tok-c"># newtons pulling on it at the last step</span>
+    j.attached, j.broken
+    j.motor_target = <span class="tok-n">1.4</span> <span class="tok-k">if</span> ctx.input.pressed(<span class="tok-s">&quot;e&quot;</span>) <span class="tok-k">else</span> <span class="tok-n">0.0</span>   <span class="tok-c"># or motor_speed</span>
+    j.limits = (-<span class="tok-n">0.5</span>, <span class="tok-n">0.5</span>)      <span class="tok-c"># None to free it</span>
+    j.enabled = <span class="tok-b">False</span>           <span class="tok-c"># let go; True joins again</span>
+    j.connected = <span class="tok-s">&quot;Hook&quot;</span>        <span class="tok-c"># join something else</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_joint_broken</span>(entity, ctx):          <span class="tok-c"># once, when break_force snaps it</span>
+    <span class="tok-b">print</span>(<span class="tok-s">&quot;snapped at&quot;</span>, entity.joint.force, <span class="tok-s">&quot;N&quot;</span>)</code></pre></div>
+<p>The key store reaches other entities' joints — <code>ctx.get(&quot;Door:joint:angle&quot;)</code>
+— and a break also publishes <code>&quot;&lt;name&gt;:joint:broken&quot;</code> with the force.</p>
+<h3 id="joints-in-oberon">Joints in Oberon<a class="anchor" href="#joints-in-oberon" aria-label="Link to this section">#</a></h3>
+<p><strong>Add Component → Joint</strong> adds a hinge, and a Rigidbody and Collider if the
+entity has none. The Inspector's Joint section picks the <strong>Type</strong>, what it's
+<strong>Connected To</strong> (World or any named entity), the <strong>Anchor</strong>, and only the
+settings that type uses: hinge and ball angles in degrees, slider distances
+in metres. Renaming an entity keeps joints pointed at it. The
+<code>examples/oberon/joint_yard</code> example has a door, a rope bridge and a chain
+to take apart.</p>
 <h2 id="the-character-controller">The character controller<a class="anchor" href="#the-character-controller" aria-label="Link to this section">#</a></h2>
 <p>The platformer recipe — tight movement that still collides and climbs
 slopes:</p>
@@ -186,7 +233,10 @@ slopes:</p>
 <h2 id="common-pitfalls">Common pitfalls<a class="anchor" href="#common-pitfalls" aria-label="Link to this section">#</a></h2>
 <ul><li><strong>Player falls through the floor:</strong> collider sizes don't match the
 visual scale (use full sizes), or the floor lacks <code>RigidBody.fixed()</code>.</li><li><strong>Kinematic character never moves:</strong> you set <code>Transform.position</code> instead
-of <code>character_velocity</code> — the solver only sees the velocity component.</li><li><strong>Dynamic body jitters against a wall:</strong> that's restitution/friction;
+of <code>character_velocity</code> — the solver only sees the velocity component.</li><li><strong>A joint drifts apart or explodes:</strong> the bodies are very different in
+mass (a 1 kg link holding a 1000 kg ball). Raise the light ones' collider
+<code>density</code>, or lower the heavy one's.</li><li><strong>A joined pair pushes itself apart:</strong> they overlap and you turned on
+<code>collide_connected</code>; leave it off.</li><li><strong>Dynamic body jitters against a wall:</strong> that's restitution/friction;
 try <code>friction(0.2)</code> on the wall or clamp velocity yourself.</li></ul>
 <h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
 <ul><li><a href="scenes-and-entities.html">Scenes &amp; Entities</a> — component basics</li><li><a href="../cookbook.html#movement">Cookbook</a> — coyote time, jump buffering</li><li><a href="../api-reference.html#physics-ctxphysics">API Reference</a></li></ul>
@@ -194,7 +244,7 @@ try <code>friction(0.2)</code> on the wall or clamp velocity yourself.</li></ul>
     <footer class="pager"><a class="prev" href="input.html"><small>Previous</small>Input</a><a class="next" href="events-and-resources.html"><small>Next</small>Events &amp; resources</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/physics.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#bodies">Bodies</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l3"><a href="#colliders-from-models">Colliders from models</a></li><li class="l2"><a href="#the-per-frame-toolbox">The per-frame toolbox</a></li><li class="l2"><a href="#water">Water</a></li><li class="l3"><a href="#ripples-and-wakes">Ripples and wakes</a></li><li class="l3"><a href="#splashes-and-spray">Splashes and spray</a></li><li class="l2"><a href="#the-character-controller">The character controller</a></li><li class="l2"><a href="#common-pitfalls">Common pitfalls</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#bodies">Bodies</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l3"><a href="#colliders-from-models">Colliders from models</a></li><li class="l2"><a href="#the-per-frame-toolbox">The per-frame toolbox</a></li><li class="l2"><a href="#water">Water</a></li><li class="l3"><a href="#ripples-and-wakes">Ripples and wakes</a></li><li class="l3"><a href="#splashes-and-spray">Splashes and spray</a></li><li class="l2"><a href="#joints">Joints</a></li><li class="l3"><a href="#joints-in-scripts">Joints in scripts</a></li><li class="l3"><a href="#joints-in-oberon">Joints in Oberon</a></li><li class="l2"><a href="#the-character-controller">The character controller</a></li><li class="l2"><a href="#common-pitfalls">Common pitfalls</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

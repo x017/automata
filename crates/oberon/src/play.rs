@@ -460,6 +460,13 @@ impl PlaySession {
                     }),
                     has_audio: world.get::<&AudioSource>(entity).is_ok(),
                     anim: automata_scene::animation_state(world, entity),
+                    joint: world.get::<&automata_physics::Joint>(entity).ok().map(|j| {
+                        let state = world
+                            .get::<&automata_physics::JointState>(entity)
+                            .map(|s| *s)
+                            .unwrap_or_default();
+                        ((*j).clone(), state)
+                    }),
                 })
             })
             .collect()
@@ -492,6 +499,11 @@ impl PlaySession {
             let world = self.scene.world_mut();
             for command in &w.anim {
                 automata_scene::command_animation(world, entity, command);
+            }
+            if let Some(edit) = &w.joint {
+                if let Ok(mut joint) = world.get::<&mut automata_physics::Joint>(entity) {
+                    edit.apply(&mut joint);
+                }
             }
             if w.position.is_some() || w.rotation.is_some() || w.scale.is_some() {
                 if let Ok(mut t) = world.get::<&mut Transform>(entity) {
@@ -901,6 +913,83 @@ pub(crate) mod tests {
         assert!(end[1] > 0.5 && end[1] < 1.5, "stays on the ground: {end:?}");
         let pos = play.player_position().unwrap();
         assert!((pos.z - end[2]).abs() < 1e-4);
+    }
+
+    #[test]
+    fn joints_hold_in_play_mode_and_scripts_can_drive_them() {
+        use automata_physics::{Joint, JointMotor};
+        let mut doc = Document::new();
+        let i = doc.add_entity_named("Hook");
+        let hook = doc.entities[i].id;
+        doc.modify(hook, false, |d| {
+            d.transform = Some(TransformData {
+                position: [0.0, 5.0, 0.0],
+                ..TransformData::default()
+            });
+        });
+        let i = doc.add_entity_named("Lamp");
+        let lamp = doc.entities[i].id;
+        doc.modify(lamp, false, |d| {
+            d.transform = Some(TransformData {
+                position: [1.5, 5.0, 0.0],
+                ..TransformData::default()
+            });
+            crate::doc::ComponentKind::Joint.add_to(d);
+            d.joint = Some(
+                Joint::ball()
+                    .connected_to("Hook")
+                    .anchor(glam::Vec3::new(-1.5, 0.0, 0.0)),
+            );
+        });
+        let i = doc.add_entity_named("Wheel");
+        let wheel = doc.entities[i].id;
+        doc.modify(wheel, false, |d| {
+            d.transform = Some(TransformData {
+                position: [6.0, 1.0, 0.0],
+                ..TransformData::default()
+            });
+            crate::doc::ComponentKind::Joint.add_to(d);
+            d.joint = Some(Joint::hinge(glam::Vec3::Z).motor(JointMotor::speed(2.0)));
+        });
+        let mut play = PlaySession::start(&doc);
+        let pos = |play: &PlaySession, id: u64| {
+            let e = play.doc.entities.iter().find(|e| e.id == id).unwrap();
+            glam::Vec3::from(e.data.transform.unwrap().position)
+        };
+        let mut lowest = f32::MAX;
+        for _ in 0..90 {
+            play.update(TIMESTEP);
+            let lamp_pos = pos(&play, lamp);
+            lowest = lowest.min(lamp_pos.y);
+            assert!(
+                (lamp_pos.distance(glam::Vec3::new(0.0, 5.0, 0.0)) - 1.5).abs() < 0.05,
+                "the lamp swings on its 1.5 m cord: {lamp_pos}"
+            );
+        }
+        assert!(lowest < 3.6, "and swung through the bottom ({lowest})");
+        let states = play.script_states(|p| PathBuf::from(p));
+        let lamp_state = states.iter().find(|s| s.id == lamp).unwrap();
+        let (joint, state) = lamp_state.joint.as_ref().expect("scripts see the joint");
+        assert_eq!(joint.connected.as_deref(), Some("Hook"));
+        assert!(state.attached && state.force > 0.0, "{state:?}");
+        // A script lets go of the lamp.
+        play.apply_script_writes(&[crate::bridge::EntityWrite {
+            id: lamp,
+            joint: Some(automata_physics::JointEdit {
+                enabled: Some(false),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }]);
+        let before = pos(&play, lamp).y;
+        for _ in 0..30 {
+            play.update(TIMESTEP);
+        }
+        assert!(pos(&play, lamp).y < before - 0.5, "it fell once let go");
+        assert!(
+            pos(&play, wheel).distance(glam::Vec3::new(6.0, 1.0, 0.0)) < 0.05,
+            "axle holds"
+        );
     }
 
     #[test]

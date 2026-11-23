@@ -22,6 +22,9 @@ use tracing::trace;
 #[path = "water.rs"]
 mod water;
 
+#[path = "joints3d.rs"]
+mod joints;
+
 use crate::components::{
     BodyType, CharacterController, CharacterVelocity, Collider3D, RigidBody, Shape3D,
 };
@@ -81,6 +84,12 @@ pub struct PhysicsWorld3D {
     /// Each character's last move straight down (m/s): characters are
     /// teleported, so their bodies carry no velocity for the water.
     character_sinking: HashMap<r3::dynamics::RigidBodyHandle, f32>,
+    /// Every entity's [`crate::Joint`] as built (see `joints3d.rs`).
+    joints: HashMap<Entity, joints::JointSlot>,
+    /// The fixed body joints to the world hang from.
+    ground: Option<r3::dynamics::RigidBodyHandle>,
+    /// Joints already warned about (no body, no such partner).
+    joint_warned: std::collections::HashSet<Entity>,
 }
 
 /// What a built model shape depends on: the loaded model (by identity, so
@@ -161,6 +170,9 @@ impl PhysicsWorld3D {
             spray_rng: 0x9e37_79b9_7f4a_7c15,
             water_particles: true,
             character_sinking: HashMap::new(),
+            joints: HashMap::new(),
+            ground: None,
+            joint_warned: std::collections::HashSet::new(),
         }
     }
 
@@ -205,6 +217,7 @@ impl PhysicsWorld3D {
         self.update_existing(scene);
         self.despawn_removed(scene);
         mark_characters(scene);
+        self.sync_joints(scene);
     }
 
     fn spawn_missing(&mut self, scene: &mut SceneWorld) {
@@ -671,6 +684,7 @@ impl PhysicsWorld3D {
             }
         }
 
+        tick.broken_joints = self.update_joints(scene, dt);
         self.write_back_transforms(scene);
         tick
     }
@@ -721,6 +735,26 @@ impl PhysicsWorld3D {
                 body.apply_impulse(Vector::new(impulse.x, impulse.y, impulse.z), true);
             }
         }
+    }
+
+    /// Apply an impulse at a world `point` (off-centre pushes also spin
+    /// the body: shoving a door's free edge, kicking a crate's corner).
+    pub fn apply_impulse_at(&mut self, entity: Entity, impulse: Vec3, point: Vec3) {
+        if let Some(&handle) = self.entity_bodies.get(&entity) {
+            if let Some(body) = self.bodies.get_mut(handle) {
+                body.apply_impulse_at_point(impulse, point, true);
+            }
+        }
+    }
+
+    /// Current angular velocity of an entity's body in radians per second
+    /// around each world axis (zero if none).
+    #[must_use]
+    pub fn angular_velocity(&self, entity: Entity) -> Vec3 {
+        self.entity_bodies
+            .get(&entity)
+            .and_then(|h| self.bodies.get(*h))
+            .map_or(Vec3::ZERO, rapier3d::dynamics::RigidBody::angvel)
     }
 
     /// Apply a force to a dynamic body (cleared each step).

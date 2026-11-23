@@ -26,6 +26,7 @@ mod events;
 mod foliage;
 mod game;
 mod gamepads;
+mod joints;
 mod keys;
 mod particles;
 mod physics;
@@ -76,6 +77,9 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<physics_components::PyCollider2D>()?;
     m.add_class::<physics_components::PyCharacterController>()?;
     m.add_class::<physics_components::PyCharacterVelocity>()?;
+    m.add_class::<joints::PyJoint>()?;
+    m.add_class::<joints::PyJointMotor>()?;
+    m.add_class::<joints::PyJointRef>()?;
     m.add_class::<components::PyMeshRenderer>()?;
     m.add_class::<components::PyDirectionalLight>()?;
     m.add_class::<components::PyPointLight>()?;

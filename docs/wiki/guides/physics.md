@@ -177,6 +177,80 @@ build. The engine and Oberon point it at the camera that draws the frame;
 with your own `PhysicsWorld3D` in Rust, call `set_ripple_view(eye,
 target)` each frame and hand `ripples()` to `DrawList::set_ripples`.
 
+## Joints
+
+![A door on a hinge, a rope bridge of hinged planks, and a chain of ball joints swinging a wrecking ball through a sign](../../assets/physics/joint_yard.jpg)
+
+A **Joint** holds an entity's body to another entity's (`connected`, by
+name) or to the world (`connected=None`). Both need a rigid body. An entity
+has at most one joint, so a chain is each link joined to the one before it.
+
+```python
+door.add(at.Joint.hinge(axis=(0, 1, 0), connected="Door Frame",
+                        anchor=(-0.54, 0, 0),            # the hinge edge, in the door's space
+                        limits=(-1.7, 1.7),              # radians
+                        motor=at.JointMotor(target=0.0)))  # pulls shut
+link.add(at.Joint.ball(connected="Link 3", anchor=(0.2, 0, 0)))
+sign.add(at.Joint.fixed(connected="Post", break_force=120.0))  # snaps past 120 N
+lamp.add(at.Joint.spring(1.2, stiffness=30.0, damping=1.0, connected="Beam"))
+crate.add(at.Joint.rope(3.0))                             # hangs from the world
+```
+
+| Kind | Moves | Limits | Motor | Use |
+|---|---|---|---|---|
+| `hinge` | turns around `axis` | angle (rad) | ✓ | doors, wheels, bridge planks |
+| `ball` | swivels freely | cone (rad) | | chain links, ragdoll shoulders |
+| `slider` | slides along `axis` | position (m) | ✓ | drawers, lifts, pistons |
+| `fixed` | nothing | | | welds — give it a `break_force` |
+| `rope` | up to `length` apart, slack closer | | | ropes, leashes |
+| `spring` | pulled towards `length` apart | | | bouncy lamps, suspension |
+
+- **`anchor`** is where the joint sits, in this entity's local space;
+  `connected_anchor` is the same point in the other's. Leave that out and
+  the joint holds the bodies as they were placed; a rope or spring is then
+  tied to the other's centre (joined to the world: to a point above it).
+- **`length=0`** (ropes and springs) means "the distance they start at".
+- **`JointMotor(speed)`** turns (or slides) at `speed` rad/s (m/s);
+  **`JointMotor(target=1.2)`** pulls to an angle and holds it.
+  `stiffness=400, damping=80` settle in about half a second with no
+  overshoot; `max_force=0` means as strong as needed.
+- **`break_force`** (newtons, 0 = never) snaps the joint when it's pulled
+  harder. **`collide_connected`** lets the two bodies bump each other
+  (off by default, so a hinge's door and frame can overlap).
+- 2D works the same with `Collider2D` bodies: hinges and balls turn around Z.
+
+### Joints in scripts
+
+A running joint is `entity.joint` (or `view.joint`), and `None` without one:
+
+```python
+def update(entity, ctx):
+    j = entity.joint
+    j.angle          # hinge angle from where it started (radians); .value for any kind
+    j.force          # newtons pulling on it at the last step
+    j.attached, j.broken
+    j.motor_target = 1.4 if ctx.input.pressed("e") else 0.0   # or motor_speed
+    j.limits = (-0.5, 0.5)      # None to free it
+    j.enabled = False           # let go; True joins again
+    j.connected = "Hook"        # join something else
+
+def on_joint_broken(entity, ctx):          # once, when break_force snaps it
+    print("snapped at", entity.joint.force, "N")
+```
+
+The key store reaches other entities' joints — `ctx.get("Door:joint:angle")`
+— and a break also publishes `"<name>:joint:broken"` with the force.
+
+### Joints in Oberon
+
+**Add Component → Joint** adds a hinge, and a Rigidbody and Collider if the
+entity has none. The Inspector's Joint section picks the **Type**, what it's
+**Connected To** (World or any named entity), the **Anchor**, and only the
+settings that type uses: hinge and ball angles in degrees, slider distances
+in metres. Renaming an entity keeps joints pointed at it. The
+`examples/oberon/joint_yard` example has a door, a rope bridge and a chain
+to take apart.
+
 ## The character controller
 
 The platformer recipe — tight movement that still collides and climbs
@@ -217,6 +291,11 @@ def on_update(self, ctx):
   visual scale (use full sizes), or the floor lacks `RigidBody.fixed()`.
 - **Kinematic character never moves:** you set `Transform.position` instead
   of `character_velocity` — the solver only sees the velocity component.
+- **A joint drifts apart or explodes:** the bodies are very different in
+  mass (a 1 kg link holding a 1000 kg ball). Raise the light ones' collider
+  `density`, or lower the heavy one's.
+- **A joined pair pushes itself apart:** they overlap and you turned on
+  `collide_connected`; leave it off.
 - **Dynamic body jitters against a wall:** that's restitution/friction;
   try `friction(0.2)` on the wall or clamp velocity yourself.
 

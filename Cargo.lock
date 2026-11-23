@@ -235,6 +235,7 @@ dependencies = [
  "hecs",
  "rapier2d",
  "rapier3d",
+ "ron",
  "serde",
  "tracing",
 ]

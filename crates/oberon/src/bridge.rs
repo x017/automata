@@ -78,6 +78,8 @@ pub struct EntityState {
     pub has_audio: bool,
     /// An animated model's playback, if the entity shows one.
     pub anim: Option<automata_scene::AnimationState>,
+    /// The entity's joint and how it's holding, if it has one.
+    pub joint: Option<(automata_physics::Joint, automata_physics::JointState)>,
 }
 
 /// A collider as the runner sees it (for `ctx.physics.raycast`).
@@ -329,6 +331,8 @@ pub struct EntityWrite {
     pub audio: Option<AudioWrite>,
     /// Requests to the entity's animation, in call order.
     pub anim: Vec<automata_scene::AnimationCommand>,
+    /// Changes to the entity's joint.
+    pub joint: Option<automata_physics::JointEdit>,
     /// Remove the entity from the running scene.
     pub despawn: bool,
 }
@@ -835,7 +839,52 @@ fn state_json(e: &EntityState) -> Json {
     if let Some(a) = &e.anim {
         obj.set("anim", anim_json(a));
     }
+    if let Some((joint, state)) = &e.joint {
+        obj.set("joint", joint_json(joint, state));
+    }
     obj
+}
+
+/// `{"kind", "to", "on", "value", "attached", "broken", "force", "motor",
+/// "limits", "bf"}` (see the script API's frame model).
+fn joint_json(j: &automata_physics::Joint, st: &automata_physics::JointState) -> Json {
+    let f = |v: f32| Json::Float(f64::from(v));
+    Json::obj([
+        ("kind", Json::from(j.kind.key())),
+        ("to", j.connected.as_deref().map_or(Json::Null, Json::from)),
+        ("on", Json::Bool(j.enabled)),
+        ("value", f(st.value)),
+        ("attached", Json::Bool(st.attached)),
+        ("broken", Json::Bool(st.broken)),
+        ("force", f(st.force)),
+        (
+            "motor",
+            j.motor.map_or(Json::Null, |m| {
+                Json::Arr(vec![f(m.speed), m.target.map_or(Json::Null, f)])
+            }),
+        ),
+        ("limits", j.limits.map_or(Json::Null, |l| Json::floats(&l))),
+        ("bf", f(j.break_force)),
+    ])
+}
+
+/// One `entity.joint` write: only the keys a script set (`"on"`,
+/// `"motor"`: `[speed, target or null]` or null, `"limits"`: `[min, max]`
+/// or null, `"bf"`, `"to"`: a name or null).
+fn parse_joint(v: &Json) -> Option<automata_physics::JointEdit> {
+    v.as_obj()?;
+    let finite = |v: &Json| num(v).filter(|x| x.is_finite());
+    let edit = automata_physics::JointEdit {
+        enabled: v.get("on").and_then(Json::as_bool),
+        motor: v.get("motor").map(|m| {
+            let a = m.as_arr()?;
+            Some((a.first().and_then(finite)?, a.get(1).and_then(finite)))
+        }),
+        limits: v.get("limits").map(Json::as_floats::<2>),
+        break_force: v.get("bf").and_then(finite),
+        connected: v.get("to").map(|t| t.as_str().map(str::to_string)),
+    };
+    (!edit.is_empty()).then_some(edit)
 }
 
 /// `{"clip", "time", "len", "playing", "speed", "loop", "clips", "lens",
@@ -922,6 +971,7 @@ fn parse_write(w: &Json) -> Option<EntityWrite> {
             .iter()
             .filter_map(parse_anim)
             .collect(),
+        joint: w.get("joint").and_then(parse_joint),
         despawn: matches!(w.get("despawn"), Some(Json::Bool(true))),
     })
 }
@@ -1245,6 +1295,61 @@ mod tests {
         assert_eq!(bursts[1].direction, None);
         assert_eq!(bursts[1].count, None);
         assert_eq!(emits, vec![(7, 5)]);
+    }
+
+    #[test]
+    fn joint_edits_and_state_cross_the_bridge() {
+        use automata_physics::{Joint, JointEdit, JointMotor, JointState};
+        let msg = parse_msg(concat!(
+            r#"{"op":"frame","frame":1,"writes":[{"id":3,"joint":{"on":false,"#,
+            r#""motor":[0.5,1.2],"limits":null,"to":"Frame"}},"#,
+            r#"{"id":4,"joint":{"motor":null,"bf":120}},{"id":5,"joint":{"nope":1}}]}"#
+        ));
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(writes[2].joint, None, "unknown keys change nothing");
+        assert_eq!(
+            writes[0].joint,
+            Some(JointEdit {
+                enabled: Some(false),
+                motor: Some(Some((0.5, Some(1.2)))),
+                limits: Some(None),
+                connected: Some(Some("Frame".into())),
+                ..JointEdit::default()
+            })
+        );
+        assert_eq!(
+            writes[1].joint,
+            Some(JointEdit {
+                motor: Some(None),
+                break_force: Some(120.0),
+                ..JointEdit::default()
+            })
+        );
+        let state = EntityState {
+            joint: Some((
+                Joint::hinge(glam::Vec3::Y)
+                    .connected_to("Frame")
+                    .motor(JointMotor::target(1.0)),
+                JointState {
+                    value: 0.25,
+                    attached: true,
+                    ..JointState::default()
+                },
+            )),
+            ..EntityState::default()
+        };
+        let json = state_json(&state).dump();
+        assert!(
+            json.contains(r#""joint":{"kind":"hinge","to":"Frame","on":true,"value":0.25,"attached":true,"broken":false"#),
+            "{json}"
+        );
+        assert!(
+            json.contains(r#""motor":[0.0,1.0]"#) || json.contains(r#""motor":[0,1]"#),
+            "{json}"
+        );
+        assert!(!state_json(&EntityState::default()).dump().contains("joint"));
     }
 
     #[test]

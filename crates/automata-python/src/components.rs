@@ -1841,6 +1841,8 @@ pub enum StagedComponent {
     Grass(automata_scene::Grass),
     /// Draws the entity's model at many spots on the ground.
     Scatter(automata_scene::Scatter),
+    /// Holds the entity's body to another's (or the world).
+    Joint(automata_physics::Joint),
 }
 
 /// Extracts a staged component from an arbitrary Python object, raising a
@@ -1903,12 +1905,15 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(s) = obj.cast::<crate::foliage::PyScatter>() {
         return Ok(StagedComponent::Scatter(s.get().inner()));
     }
+    if let Ok(j) = obj.cast::<crate::joints::PyJoint>() {
+        return Ok(StagedComponent::Joint(j.get().inner()));
+    }
     let typename = obj.get_type().name()?.to_string();
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
          MeshRenderer, DirectionalLight, PointLight, SpotLight, Environment, Water, \
-         AudioSource, ParticleEmitter, Animation, Grass, or Scatter"
+         AudioSource, ParticleEmitter, Animation, Grass, Scatter, or Joint"
     )))
 }
 

@@ -515,13 +515,34 @@ Needs C1 (joints).
 
 ## Track C: Gameplay systems
 
-### C1. Physics joints ⬜ M
+### C1. Physics joints ✅ M
 Rapier's joint sets are already created and stepped in
 `world2d_impl.rs` / `world3d_impl.rs`, but nothing exposes them.
 - Fixed, hinge, ball, slider, rope and spring joints, with limits and
   motors.
 - Scene components, Python and an Oberon target-entity picker.
 - **Done when:** a swinging door, a rope bridge and a chain demo work.
+
+Done. `Joint` is a scene component holding an entity's body to another
+entity's (by name) or to the world:
+- **Kinds:** hinge, ball, slider, fixed, rope and spring, with an anchor,
+  an axis, limits (radians or metres), and a motor. A motor either turns
+  at a speed or pulls to a target; its 400/80 default settles in about
+  0.6 s with no overshoot.
+- **Breaking:** `break_force` snaps a joint, and `JointState` reports its
+  value, force and whether it's attached.
+- **3D and 2D:** the 2D world takes only entities with a `Collider2D`.
+- **Scripts:** `entity.joint` / `view.joint` read the angle and force, and
+  set the motor, limits, `enabled` and `connected`. `ctx.get("Door:joint:angle")`
+  works too. A snap calls `on_joint_broken` and publishes
+  `<name>:joint:broken`.
+- **Oberon:** an Inspector section with a Connected To menu, showing only
+  the rows each kind uses (degrees or metres). Renames carry over to
+  joints, and export validation warns about joints with no body or no
+  partner.
+- **Demo:** `examples/oberon/joint_yard` has a motor-driven door, a
+  ten-plank rope bridge holding a crate, and an eight-link chain whose
+  wrecking ball snaps a welded sign.
 
 ### C2. Tweens and timers ✅ S
 - In `script_api.py`, so both runners get them:
@@ -799,8 +820,8 @@ per effort. Reorder any time by telling me.
 | 20 | D0 The oberon command, new projects, bundled Python | M | ✅ |
 | 21 | A12 Grass and foliage | L | ✅ |
 | 22 | C2 Tweens and timers | S | ✅ |
-| 23 | C3 Save games and settings | S | ⬜ |
-| 24 | C1 Physics joints | M | ⬜ |
+| 23 | C3 Save games and settings | S | ✅ |
+| 24 | C1 Physics joints | M | ✅ |
 | 25 | D1 UI widgets | M | ⬜ |
 | 26 | D2 Custom fonts | S | ⬜ |
 | 27 | D3 UI layout, focus, screens | M | ⬜ |

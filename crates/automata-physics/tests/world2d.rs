@@ -173,3 +173,76 @@ fn shape_cast_reports_impact() {
     // Ball centre travels until surface touches wall at x = 2.5 → toi = 2.0.
     assert!((hit.distance - 2.0).abs() < 0.1, "hit at {}", hit.distance);
 }
+
+fn joint_state(scene: &SceneWorld, entity: automata_scene::Entity) -> JointState {
+    *scene.get::<&JointState>(entity).unwrap()
+}
+
+#[test]
+fn a_2d_pendulum_swings_on_a_pin_and_keeps_its_length() {
+    let mut scene = SceneWorld::new();
+    scene.spawn((
+        automata_scene::Name::new("Pin"),
+        Transform::from_xy(0.0, 5.0),
+    ));
+    let bob = scene.spawn((
+        Transform::from_xy(2.0, 5.0),
+        RigidBody::dynamic(),
+        Collider2D::ball(0.2),
+        Joint::hinge(Vec3::Z)
+            .connected_to("Pin")
+            .anchor(Vec3::new(-2.0, 0.0, 0.0)),
+    ));
+    let mut physics = PhysicsWorld2D::new();
+    let mut lowest = f32::MAX;
+    for _ in 0..90 {
+        step_n(&mut physics, &mut scene, 1);
+        let p = position(&scene, bob);
+        lowest = lowest.min(p.y);
+        let arm = p.truncate().distance(glam::Vec2::new(0.0, 5.0));
+        assert!((arm - 2.0).abs() < 0.05, "arm length {arm}");
+    }
+    assert!(lowest < 3.1, "it never swung down ({lowest})");
+    assert!(joint_state(&scene, bob).attached);
+    assert!(joint_state(&scene, bob).value.abs() > 0.1);
+}
+
+#[test]
+fn a_2d_slider_motor_runs_to_its_limit() {
+    let mut scene = SceneWorld::new();
+    let cart = scene.spawn((
+        Transform::from_xy(0.0, 1.0),
+        RigidBody::dynamic(),
+        Collider2D::cuboid(0.5, 0.5),
+        Joint::slider(Vec3::X)
+            .limits(-1.0, 1.5)
+            .motor(JointMotor::speed(3.0)),
+    ));
+    let mut physics = PhysicsWorld2D::new();
+    step_n(&mut physics, &mut scene, 120);
+    let p = position(&scene, cart);
+    assert!((p.x - 1.5).abs() < 0.03 && (p.y - 1.0).abs() < 0.03, "{p}");
+}
+
+#[test]
+fn a_2d_rope_catches_a_falling_load_and_snaps_when_overloaded() {
+    let mut scene = SceneWorld::new();
+    let load = scene.spawn((
+        Transform::from_xy(0.0, 4.0),
+        RigidBody::dynamic(),
+        Collider2D::cuboid(1.0, 1.0),
+        Joint::rope(2.0).connected_anchor(Vec3::new(0.0, 5.0, 0.0)),
+    ));
+    let mut physics = PhysicsWorld2D::new();
+    step_n(&mut physics, &mut scene, 180);
+    assert!((position(&scene, load).y - 3.0).abs() < 0.08);
+    // 1 kg hanging pulls ~9.8 N; set the break force under that.
+    scene.get::<&mut Joint>(load).unwrap().break_force = 5.0;
+    let mut snapped = Vec::new();
+    for _ in 0..10 {
+        physics.sync_from_scene(&mut scene);
+        snapped.extend(physics.step(&mut scene, DT).broken_joints);
+    }
+    assert_eq!(snapped, vec![load]);
+    assert!(joint_state(&scene, load).broken);
+}

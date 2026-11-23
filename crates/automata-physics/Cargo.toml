@@ -18,6 +18,9 @@ rapier3d = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
 
+[dev-dependencies]
+ron = { workspace = true }
+
 [lints]
 workspace = true
 
