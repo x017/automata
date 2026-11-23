@@ -523,11 +523,30 @@ Rapier's joint sets are already created and stepped in
 - Scene components, Python and an Oberon target-entity picker.
 - **Done when:** a swinging door, a rope bridge and a chain demo work.
 
-### C2. Tweens and timers ⬜ S
+### C2. Tweens and timers ✅ S
 - In `script_api.py`, so both runners get them:
   `ctx.tween(entity, "position", to, 0.5, ease="out_cubic")`,
   `ctx.after(2.0, fn)`, `ctx.every(1.0, fn)`, with cancel handles.
 - 20 easing curves.
+
+Done: `ctx.tween(entity, field, to, seconds, ease=...)` moves position,
+rotation, scale, an attribute or any writable key field (`"animation:speed"`),
+with `start`, `delay`, `loop` (forever or n plays), `yoyo`, `on_update` and
+`on_done`. Whole numbers stay whole, and a new tween on the same field
+replaces the old one. `ctx.tween_value` tweens a value of your own (HUD
+fades). `ctx.after` / `ctx.every(..., times=)` call `fn(*args)`. Tweens
+and timers return handles with `cancel()`, `pause()` and `resume()`, plus
+`finish()` and `value` / `progress` on tweens. All 31 Penner curves (`linear`
+plus `in_`/`out_`/`in_out_` of 10 families) are in `EASINGS` and
+`ctx.ease(name, t)`, and they take forgiving spellings (`"easeOutCubic"`).
+They move once a frame by `ctx.time.delta`, before `update`. They end
+with the entity whose script made them (or the one they move), pause
+with a script paused by an error, follow hot reloads, and report errors
+like subscribers. A new `tests/script_conformance/tweens` scenario holds
+Oberon's Play mode and `run_scene` to the same frames. The engine-side
+conformance runner now uses `fixed_delta=1/60`, so both count the same
+time. The campfire's crackle now books its pops with `ctx.after`.
+`at.Game`'s object-oriented loop doesn't have them yet.
 
 ### C3. Save games and settings ⬜ S
 - `ctx.save["coins"] = 12`, plus slots, stored as JSON in the platform's
@@ -754,7 +773,7 @@ per effort. Reorder any time by telling me.
 | 19 | A11 Culling, instancing, LOD | M | ✅ |
 | 20 | D0 The oberon command, new projects, bundled Python | M | ✅ |
 | 21 | A12 Grass and foliage | L | ✅ |
-| 22 | C2 Tweens and timers | S | ⬜ |
+| 22 | C2 Tweens and timers | S | ✅ |
 | 23 | C3 Save games and settings | S | ⬜ |
 | 24 | C1 Physics joints | M | ⬜ |
 | 25 | D1 UI widgets | M | ⬜ |

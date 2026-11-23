@@ -60,6 +60,11 @@ def scenes():
     s.add(scripted("Probe", "probe.py"))
     yield "input", s
 
+    s = at.Scene()
+    s.add(scripted("Door", "door.py", score=0, ticks=0))
+    s.add(scripted("Coin", "coin.py", (2.0, 0.0, 0.0)))
+    yield "tweens", s
+
 
 if __name__ == "__main__":
     for name, scene in scenes():

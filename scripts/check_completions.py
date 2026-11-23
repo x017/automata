@@ -158,7 +158,8 @@ def main():
         }})
 
         ctx = completions(server, uri, CTX_LINE, len("    ctx."))
-        for name in ("input", "time", "physics", "publish", "subscribe", "camera", "get"):
+        for name in ("input", "time", "physics", "publish", "subscribe", "camera", "get",
+                     "tween", "after"):
             if name not in ctx:
                 problems.append(f"`ctx.` doesn't offer {name!r} (got {sorted(ctx)[:12]}…)")
         if "publish" in ctx and not documented(server, ctx["publish"]):

@@ -54,6 +54,7 @@ hours.
 | Install and open the editor | [Oberon](oberon/README.md) |
 | Learn every panel and how to navigate | [The interface](oberon/interface.md) |
 | Write behaviour scripts | [Scripting](oberon/scripting.md) |
+| Move things smoothly, or run code later | [Tweens and timers](oberon/scripting.md#tweens-and-timers) |
 | Place and drive cameras | [Cameras](oberon/cameras.md) |
 | Tune lighting, fog, and tone mapping, and test graphics | [Graphics](oberon/graphics.md) |
 | Paint grass, flowers and rocks onto the ground | [Grass & foliage](oberon/foliage.md) |

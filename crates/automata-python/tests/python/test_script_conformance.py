@@ -82,7 +82,7 @@ def test_scenario(name):
     with open(os.path.join(folder, "expect.json"), encoding="utf-8") as f:
         expect = json.load(f)
     frames = expect["frames"]
-    game = at.Game(headless=True, target_fps=60, log_filter="error")
+    game = at.Game(headless=True, fixed_delta=1 / 60, log_filter="error")
     game.load_scene(at.Scene.load(os.path.join(folder, "scene.ron")))
     scripts = SceneScripts(folder)
     result = {}

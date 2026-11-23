@@ -1,0 +1,12 @@
+{
+  "frames": 60,
+  "entities": {
+    "Door": {
+      "attributes": {"opened": true, "rang_on": 16, "y_at_quarter": 1.5, "ticks": 3,
+                     "score": 10, "fade": 0.0},
+      "position": [0, 3, 0],
+      "scale": [1, 1, 1]
+    },
+    "Coin": null
+  }
+}

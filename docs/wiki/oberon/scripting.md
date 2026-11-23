@@ -151,6 +151,9 @@ for `entity` and `ctx`.
 | `ctx.camera` | The camera Play renders through, or `None` |
 | `ctx.get(key)`, `ctx.set(key, value)`, `ctx.scan(pattern)`, `ctx.keys(pattern)`, `ctx.ref(key)` | Other entities' state by key, like `"Player:attr:health"` ([Keys](#keys)) |
 | `ctx.subscribe(pattern, fn)`, `ctx.unsubscribe(...)`, `ctx.publish(channel, data)` | Channels: animation events and your own messages ([Channels](#channels)) |
+| `ctx.tween(entity, "position", to, seconds, ease="out_cubic")`, `ctx.tween_value(start, end, seconds)` | Move a value smoothly over time ([Tweens and timers](#tweens-and-timers)) |
+| `ctx.after(seconds, fn, *args)`, `ctx.every(seconds, fn, *args, times=None)` | Call a function later, or again and again ([Tweens and timers](#tweens-and-timers)) |
+| `ctx.ease("out_back", t)` | `t` (0 to 1) through an easing curve |
 | `ctx.log(...)`, `ctx.warn(...)` | Write to the Console. `print()` works too |
 
 HUD shapes last one frame, so draw them in `update` every frame you want
@@ -267,6 +270,93 @@ it's safe in `update`. A subscription ends when the entity whose script
 made it goes away. You can also end one with `ctx.unsubscribe(pattern)` or
 by calling `cancel()` on what `subscribe` returned. If a subscriber raises,
 its script pauses like any other script error.
+
+## Tweens and timers
+
+`ctx.tween` moves one of an entity's values to a target over some seconds,
+along an easing curve. `ctx.after` and `ctx.every` call a function later.
+Each returns a handle with `cancel()`:
+
+```python
+def start(entity, ctx):
+    door = ctx.scene["Door"]
+    ctx.tween(door, "position", (0, 3, 0), 1.5, ease="in_out_sine")
+    ctx.after(2.0, ctx.audio.play, "sounds/clunk.ogg")
+    entity.state["spawner"] = ctx.every(5.0, spawn_wave, ctx)
+
+def collected(coin, ctx):
+    ctx.tween(coin, "scale", (0, 0, 0), 0.3, ease="in_back", on_done=coin.despawn)
+```
+
+**What a tween can move.** `"position"`, `"rotation"` (Euler angles in
+radians) and `"scale"`, or an attribute by name (`"score"`). Any writable
+[key](#keys) field works as `component:field`, such as
+`"animation:speed"` or `"attr:glow"`. Numbers and tuples of numbers
+tween. If both ends are whole numbers, the value stays whole, so a score
+counts up 1, 2, 3.
+
+| `ctx.tween(...)` argument | Meaning |
+|---|---|
+| `entity` | The entity, or its name |
+| `field`, `to`, `duration` | What moves, where to, and how many seconds it takes |
+| `ease` | A curve name (below) or your own function of `t`. Default `"out_cubic"`: fast, then settling |
+| `start=` | Where it starts. Otherwise it starts from the value it has when it begins |
+| `delay=` | Seconds to wait before it starts |
+| `loop=` | `True` repeats it forever. A number plays it that many times |
+| `yoyo=` | Every other play runs backwards. `yoyo=True, loop=True` swings back and forth |
+| `on_update=`, `on_done=` | `on_update(value)` runs each frame it moves, and `on_done()` runs when it ends |
+
+A `Tween` has `value`, `progress` (0 to 1) and `done`, plus `cancel()`
+(stop where it is), `finish()` (jump to the end and call `on_done`),
+`pause()` and `resume()`. Starting a tween on the same entity and field
+replaces the old one, so a door told to close halfway through opening
+turns round smoothly.
+
+`ctx.tween_value(start, end, seconds, on_update=None, ease=...)` tweens a
+value of your own. It's handy for fades, because HUD drawing happens every
+frame:
+
+```python
+def start(entity, ctx):
+    entity.state["fade"] = ctx.tween_value(1.0, 0.0, 1.2, ease="in_quad", delay=1.0)
+
+def update(entity, ctx):
+    alpha = entity.state["fade"].value
+    ctx.hud.text("LEVEL 1", *ctx.hud.center, size=64, align="center", color=(1, 1, 1, alpha))
+```
+
+**Easing curves** (31 of them, the standard set that
+[easings.net](https://easings.net) draws): `"linear"`, plus `in_`, `out_`
+and `in_out_` versions of `sine`, `quad`, `cubic`, `quart`, `quint`,
+`expo`, `circ`, `back`, `elastic` and `bounce`. `in_` starts slow, `out_`
+ends slow, and `in_out_` does both. `back` overshoots a little and
+`elastic` wobbles past the end. `bounce` bounces at the end. Spellings like
+`"easeOutCubic"` work too, and a misspelt name gets a suggestion.
+
+**Timers.** `ctx.after(seconds, fn, *args)` calls `fn(*args)` once.
+`ctx.every(seconds, fn, *args, times=None)` calls it every `seconds`,
+forever or `times` times. A `Timer` has `remaining`, `count` and `done`,
+and `cancel()`, `pause()` and `resume()`. Make an `every` timer in `start`
+or once on an event, not in `update`, or you'll start a new one each
+frame. To repeat at random intervals, let the function book itself again,
+like `examples/oberon/campfire/scripts/crackle.py`:
+
+```python
+def pop(entity, ctx):
+    ctx.particles.emit(entity, random.randint(8, 20))
+    ctx.after(random.uniform(0.8, 3.0), pop, entity, ctx)
+```
+
+**When they run.** Timers and tweens move once a frame by
+`ctx.time.delta`. They run in the order they were made, after animation
+events and before any `update`, so `update` already sees this frame's
+tweened values. Something made during a frame starts counting the next
+frame. After a long hitch, an `every` timer catches up, but at most 8
+calls in one frame. Timers and tweens stop when the entity whose script
+made them goes away, and a tween also stops when the entity it moves goes
+away. They pause while their script is paused by an error, and Stop ends
+them all. Functions they call follow hot reloads like subscribers do. If
+one raises, its script pauses like any other script error.
 
 ## Hot reload
 

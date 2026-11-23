@@ -84,6 +84,11 @@ __all__ = [
     "ScriptHost",
     "Subscription",
     "Time",
+    "Timer",
+    "Tween",
+    "EASINGS",
+    "ease",
+    "easing",
 ]
 
 
@@ -1468,6 +1473,440 @@ class KeyStore:
         return out
 
 
+# --------------------------------------------------------------------------
+# Easing, tweens and timers: ctx.tween / tween_value / after / every
+# --------------------------------------------------------------------------
+
+
+def _power(p):
+    def ease_in(t):
+        return t ** p
+
+    def ease_out(t):
+        return 1.0 - (1.0 - t) ** p
+
+    def ease_in_out(t):
+        return 2.0 ** (p - 1) * t ** p if t < 0.5 else 1.0 - (-2.0 * t + 2.0) ** p / 2.0
+
+    return ease_in, ease_out, ease_in_out
+
+
+def _expo_in(t):
+    return 0.0 if t <= 0.0 else 2.0 ** (10.0 * t - 10.0)
+
+
+def _expo_out(t):
+    return 1.0 if t >= 1.0 else 1.0 - 2.0 ** (-10.0 * t)
+
+
+def _expo_in_out(t):
+    if t <= 0.0 or t >= 1.0:
+        return min(max(t, 0.0), 1.0)
+    return 2.0 ** (20.0 * t - 10.0) / 2.0 if t < 0.5 else (2.0 - 2.0 ** (-20.0 * t + 10.0)) / 2.0
+
+
+def _circ_in(t):
+    return 1.0 - math.sqrt(max(0.0, 1.0 - t * t))
+
+
+def _circ_out(t):
+    return math.sqrt(max(0.0, 1.0 - (t - 1.0) ** 2))
+
+
+def _circ_in_out(t):
+    if t < 0.5:
+        return (1.0 - math.sqrt(max(0.0, 1.0 - (2.0 * t) ** 2))) / 2.0
+    return (math.sqrt(max(0.0, 1.0 - (-2.0 * t + 2.0) ** 2)) + 1.0) / 2.0
+
+
+_BACK = 1.70158
+
+
+def _back_in(t):
+    return (_BACK + 1.0) * t ** 3 - _BACK * t * t
+
+
+def _back_out(t):
+    return 1.0 + (_BACK + 1.0) * (t - 1.0) ** 3 + _BACK * (t - 1.0) ** 2
+
+
+def _back_in_out(t):
+    c = _BACK * 1.525
+    if t < 0.5:
+        return (2.0 * t) ** 2 * ((c + 1.0) * 2.0 * t - c) / 2.0
+    return ((2.0 * t - 2.0) ** 2 * ((c + 1.0) * (2.0 * t - 2.0) + c) + 2.0) / 2.0
+
+
+def _elastic_in(t):
+    if t <= 0.0 or t >= 1.0:
+        return min(max(t, 0.0), 1.0)
+    return -(2.0 ** (10.0 * t - 10.0)) * math.sin((10.0 * t - 10.75) * math.tau / 3.0)
+
+
+def _elastic_out(t):
+    if t <= 0.0 or t >= 1.0:
+        return min(max(t, 0.0), 1.0)
+    return 2.0 ** (-10.0 * t) * math.sin((10.0 * t - 0.75) * math.tau / 3.0) + 1.0
+
+
+def _elastic_in_out(t):
+    if t <= 0.0 or t >= 1.0:
+        return min(max(t, 0.0), 1.0)
+    s = math.sin((20.0 * t - 11.125) * math.tau / 4.5)
+    if t < 0.5:
+        return -(2.0 ** (20.0 * t - 10.0)) * s / 2.0
+    return 2.0 ** (-20.0 * t + 10.0) * s / 2.0 + 1.0
+
+
+def _bounce_out(t):
+    n, d = 7.5625, 2.75
+    if t < 1.0 / d:
+        return n * t * t
+    if t < 2.0 / d:
+        t -= 1.5 / d
+        return n * t * t + 0.75
+    if t < 2.5 / d:
+        t -= 2.25 / d
+        return n * t * t + 0.9375
+    t -= 2.625 / d
+    return n * t * t + 0.984375
+
+
+def _bounce_in(t):
+    return 1.0 - _bounce_out(1.0 - t)
+
+
+def _bounce_in_out(t):
+    return (1.0 - _bounce_out(1.0 - 2.0 * t)) / 2.0 if t < 0.5 else (1.0 + _bounce_out(2.0 * t - 1.0)) / 2.0
+
+
+def _sine_in(t):
+    return 1.0 - math.cos(t * math.pi / 2.0)
+
+
+def _sine_out(t):
+    return math.sin(t * math.pi / 2.0)
+
+
+def _sine_in_out(t):
+    return -(math.cos(math.pi * t) - 1.0) / 2.0
+
+
+def _easing_table():
+    table = {"linear": lambda t: t}
+    families = {
+        "sine": (_sine_in, _sine_out, _sine_in_out),
+        "quad": _power(2),
+        "cubic": _power(3),
+        "quart": _power(4),
+        "quint": _power(5),
+        "expo": (_expo_in, _expo_out, _expo_in_out),
+        "circ": (_circ_in, _circ_out, _circ_in_out),
+        "back": (_back_in, _back_out, _back_in_out),
+        "elastic": (_elastic_in, _elastic_out, _elastic_in_out),
+        "bounce": (_bounce_in, _bounce_out, _bounce_in_out),
+    }
+    for family, (ease_in, ease_out, ease_in_out) in families.items():
+        table[f"in_{family}"] = ease_in
+        table[f"out_{family}"] = ease_out
+        table[f"in_out_{family}"] = ease_in_out
+    return table
+
+
+#: The easing curves by name: ``"linear"``, and ``in_``, ``out_`` and
+#: ``in_out_`` versions of ``sine``, ``quad``, ``cubic``, ``quart``,
+#: ``quint``, ``expo``, ``circ``, ``back``, ``elastic`` and ``bounce``
+#: (31 in all, the standard Penner set; see easings.net). Each maps 0 to 0
+#: and 1 to 1; ``back`` and ``elastic`` overshoot on the way.
+EASINGS: dict[str, Callable[[float], float]] = _easing_table()
+
+
+def _ease_name(name):
+    """``"easeOutCubic"``, ``"ease-out-cubic"`` and ``"OutCubic"`` all mean
+    ``"out_cubic"``."""
+    out = []
+    for i, c in enumerate(name.strip()):
+        if c.isupper() and i and out and out[-1] != "_":
+            out.append("_")
+        out.append("_" if c in "- " else c.lower())
+    n = "".join(out)
+    if n.startswith("ease_"):
+        n = n[5:]
+    elif n.startswith("ease") and n != "ease":
+        n = n[4:]
+    n = n.replace("inout", "in_out")
+    return n
+
+
+def easing(ease: str | Callable[[float], float]) -> Callable[[float], float]:
+    """The curve called ``ease`` (see :data:`EASINGS`), or ``ease`` itself
+    if it's already a function of ``t``. Raises ``ValueError`` with the
+    nearest name for a misspelt one."""
+    if callable(ease):
+        return ease
+    if not isinstance(ease, str):
+        raise TypeError(f"ease is a curve name like 'out_cubic' or a function, not {ease!r}")
+    fn = EASINGS.get(ease) or EASINGS.get(_ease_name(ease))
+    if fn is None:
+        raise ValueError(f"there's no easing curve {ease!r}{_did_you_mean(_ease_name(ease), EASINGS)} "
+                         "(curves: linear, and in_/out_/in_out_ plus sine, quad, cubic, quart, "
+                         "quint, expo, circ, back, elastic or bounce)")
+    return fn
+
+
+def ease(name: str | Callable[[float], float], t: float) -> float:
+    """``t`` (0 to 1, clamped) through the easing curve ``name``:
+    ``ease("out_cubic", 0.5)`` is 0.875."""
+    return float(easing(name)(min(max(float(t), 0.0), 1.0)))
+
+
+def _numbers(value, what):
+    """``value`` as a float or a tuple of floats, for tweening."""
+    if isinstance(value, bool) or isinstance(value, str):
+        raise TypeError(f"can't tween {what} {value!r}: tweens move numbers, or tuples of numbers")
+    if isinstance(value, (int, float)):
+        return value
+    try:
+        items = tuple(value)
+    except TypeError:
+        raise TypeError(f"can't tween {what} {value!r}: tweens move numbers, or tuples of "
+                        "numbers") from None
+    for x in items:
+        if isinstance(x, bool) or not isinstance(x, (int, float)):
+            raise TypeError(f"can't tween {what} {value!r}: tweens move numbers, or tuples "
+                            "of numbers")
+    return items
+
+
+def _lerp(a, b, t):
+    if isinstance(a, tuple):
+        return tuple(x + (y - x) * t for x, y in zip(a, b))
+    v = a + (b - a) * t
+    if isinstance(a, int) and isinstance(b, int):
+        return int(round(v))
+    return v
+
+
+def _check_shapes(start, end, what):
+    if isinstance(start, tuple) != isinstance(end, tuple) or (
+            isinstance(start, tuple) and len(start) != len(end)):
+        raise ValueError(f"can't tween {what} from {start!r} to {end!r}: they need the same shape")
+
+
+def _live_fn(script, fn):
+    """``fn``, or its latest version if it's a top-level function of
+    ``script`` that a hot reload replaced."""
+    if (script is not None and script.module is not None and isinstance(fn, types.FunctionType)
+            and fn.__qualname__ == fn.__name__ and fn.__module__ == script.module.__name__):
+        return getattr(script.module, fn.__name__, fn)
+    return fn
+
+
+_TRANSFORM_SHORTCUTS = {"position": "position", "rotation": "rotation",
+                        "rotation_euler": "rotation", "scale": "scale"}
+
+
+class _Scheduled:
+    """What timers and tweens share: an owner, pausing and cancelling."""
+
+    __slots__ = ("active", "paused", "script", "owner", "_host")
+
+    def __init__(self, host):
+        self._host = host
+        self.script, self.owner = host._running or (None, None)
+        self.active = True
+        self.paused = False
+
+    def cancel(self) -> None:
+        """Stops it now, without calling anything."""
+        self.active = False
+
+    def pause(self) -> None:
+        """Holds it where it is until :meth:`resume`."""
+        self.paused = True
+
+    def resume(self) -> None:
+        self.paused = False
+
+    @property
+    def done(self) -> bool:
+        """It finished or was cancelled."""
+        return not self.active
+
+    def _call(self, fn, args, during):
+        """Runs a callback as its script, reporting errors like the script's."""
+        script = self.script
+        fn = _live_fn(script, fn)
+        host = self._host
+        outer = host._running
+        if script is not None:
+            host._running = (script, self.owner)
+        try:
+            fn(*args)
+        except BaseException as exc:  # noqa: BLE001 - user code
+            if script is None:
+                raise
+            script.broken = True
+            who = self.owner.name if self.owner is not None else "?"
+            host._failed(exc, script.path, f"{during} ({who})")
+        finally:
+            host._running = outer
+
+
+class Timer(_Scheduled):
+    """What ``ctx.after`` and ``ctx.every`` return.
+
+    ``cancel()`` stops it; ``pause()`` and ``resume()`` hold it.
+    ``remaining`` is the seconds until it next fires, ``count`` how many
+    times it has, and ``done`` whether it's finished or cancelled.
+    """
+
+    __slots__ = ("interval", "remaining", "times", "count", "fn", "args", "repeat")
+
+    def __init__(self, host, interval, fn, args, repeat, times):
+        super().__init__(host)
+        self.interval = interval
+        self.remaining = interval
+        self.repeat = repeat
+        self.times = times
+        self.count = 0
+        self.fn = fn
+        self.args = args
+
+    def _tick(self, dt):
+        self.remaining -= dt
+        fired = 0
+        while self.active and self.remaining <= 1e-9:
+            self.count += 1
+            if not self.repeat or (self.times is not None and self.count >= self.times):
+                self.active = False
+            self._call(self.fn, self.args, "every" if self.repeat else "after")
+            if not self.active or (self.script is not None and self.script.broken):
+                return
+            self.remaining += self.interval
+            fired += 1
+            if fired >= 8:  # a long hitch: don't fire a backlog of hundreds
+                self.remaining = max(self.remaining, self.interval)
+
+    def __repr__(self):
+        name = getattr(self.fn, "__qualname__", repr(self.fn))
+        kind = "every" if self.repeat else "after"
+        state = "done" if not self.active else f"in {self.remaining:.2f}s"
+        return f"Timer({kind} {self.interval:g}s, {name}, {state})"
+
+
+class Tween(_Scheduled):
+    """What ``ctx.tween`` and ``ctx.tween_value`` return.
+
+    ``value`` is where it is now, ``progress`` how far through it is (0 to
+    1 over the whole run, loops included, or of the current play if it
+    loops forever). ``cancel()`` stops it where it is, ``finish()`` jumps
+    to the end (calling ``on_done``), ``pause()`` / ``resume()`` hold it,
+    and ``done`` says whether it's over.
+    """
+
+    __slots__ = ("key", "start", "end", "duration", "curve", "delay", "plays", "yoyo",
+                 "on_update", "on_done", "value", "elapsed", "_entity", "_component", "_field",
+                 "_began", "_fixed_start")
+
+    def __init__(self, host, entity, component, field, start, end, duration, curve, delay,
+                 plays, yoyo, on_update, on_done, key):
+        super().__init__(host)
+        self.key = key
+        self._entity = entity
+        self._component = component
+        self._field = field
+        self._fixed_start = start is not None
+        self.start = start
+        self.end = end
+        self.duration = duration
+        self.curve = curve
+        self.delay = delay
+        self.plays = plays
+        self.yoyo = yoyo
+        self.on_update = on_update
+        self.on_done = on_done
+        self.elapsed = 0.0
+        self.value = start
+        self._began = False
+
+    @property
+    def progress(self) -> float:
+        t = max(0.0, self.elapsed - self.delay)
+        if self.duration <= 0.0:
+            return 1.0 if self._began else 0.0
+        if self.plays is None:
+            return (t / self.duration) % 1.0
+        return min(1.0, t / (self.duration * self.plays))
+
+    def _target_alive(self):
+        e = self._entity
+        return e is None or self._host.entities.get(e.id) is e
+
+    def _read(self):
+        store = self._host.ctx._keys
+        return _numbers(store._read_field(self.key, self._entity, self._component, self._field),
+                        f"{self.key!r}, which is")
+
+    def _apply(self, value):
+        self.value = value
+        if self._entity is not None:
+            self._host.ctx._keys._write_field(self.key, self._entity, self._component,
+                                              self._field, value)
+        if self.on_update is not None:
+            self._call(self.on_update, (value,), "tween on_update")
+
+    def _tick(self, dt):
+        if not self._target_alive():
+            self.active = False
+            return
+        self.elapsed += dt
+        t = self.elapsed - self.delay
+        if t < 0.0:
+            return
+        if not self._began:
+            self._began = True
+            if not self._fixed_start:
+                self.start = self._read()
+                _check_shapes(self.start, self.end, self.key)
+        if self.duration <= 0.0:
+            leg, frac = (self.plays or 1) - 1, 1.0
+        else:
+            leg = int(t // self.duration)
+            frac = t / self.duration - leg
+        plays = self.plays
+        finished = plays is not None and leg >= plays
+        if plays is not None and finished:
+            leg, frac = plays - 1, 1.0
+        x = 1.0 - frac if self.yoyo and leg % 2 == 1 else frac
+        self._apply(_lerp(self.start, self.end, self.curve(x)))
+        if finished and self.active:
+            self._end()
+
+    def _end(self):
+        self.active = False
+        if self.on_done is not None:
+            self._call(self.on_done, (), "tween on_done")
+
+    def finish(self) -> None:
+        """Jumps to where it ends and calls ``on_done``."""
+        if not self.active:
+            return
+        if not self._began:
+            self._began = True
+            if not self._fixed_start and self._target_alive():
+                self.start = self._read()
+        backwards = self.yoyo and self.plays is not None and self.plays % 2 == 0
+        if self._target_alive():
+            self._apply(self.start if backwards else self.end)
+        self._end()
+
+    def __repr__(self):
+        what = self.key or "value"
+        state = "done" if not self.active else f"{self.progress:.0%}"
+        return f"Tween({what} -> {self.end!r} over {self.duration:g}s, {state})"
+
+
 class Context:
     """The ``ctx`` every script function receives."""
 
@@ -1554,6 +1993,112 @@ class Context:
         each use: a component (``ctx.ref("Player:animation").play("Run")``)
         or a field (``ctx.ref("Player:attr:health").value``)."""
         return self._keys.ref(key)
+
+    # Tweens and timers.
+
+    def tween(
+        self,
+        entity: Entity | str,
+        field: str,
+        to: Any,
+        duration: float,
+        ease: str | Callable[[float], float] = "out_cubic",
+        *,
+        start: Any = None,
+        delay: float = 0.0,
+        loop: bool | int = False,
+        yoyo: bool = False,
+        on_update: Callable[[Any], Any] | None = None,
+        on_done: Callable[[], Any] | None = None,
+    ) -> Tween:
+        """Moves one of ``entity``'s values to ``to`` over ``duration``
+        seconds along an easing curve::
+
+            ctx.tween(door, "position", (0, 3, 0), 1.5, ease="in_out_sine")
+            ctx.tween("Coin_3", "scale", (0, 0, 0), 0.3, ease="in_back",
+                      on_done=coin.despawn)
+            ctx.tween(entity, "attr:score", 100, 2.0, ease="linear")
+
+        ``entity`` is an entity or its name. ``field`` is ``"position"``,
+        ``"rotation"`` (Euler radians) or ``"scale"``, an attribute's name,
+        or a key's ``component:field`` (``"animation:speed"``,
+        ``"attr:glow"``). Numbers and tuples of numbers tween; whole numbers
+        stay whole.
+
+        ``ease`` is a curve name (see :data:`EASINGS`) or a function of
+        ``t``. ``start`` overrides where it starts from (otherwise the value
+        when it begins, after ``delay`` seconds). ``loop=True`` repeats it
+        forever and ``loop=3`` plays it three times; ``yoyo=True`` makes
+        every other play run backwards, so ``yoyo=True, loop=True`` swings
+        back and forth. ``on_update(value)`` runs each frame it moves and
+        ``on_done()`` when it ends.
+
+        A new tween on the same entity and field replaces the old one.
+        Tweens move values once a frame, before ``update`` runs, and stop
+        when the entity goes (or the one whose script started them).
+        Returns a :class:`Tween` to ``cancel()``, ``finish()`` or read.
+        """
+        return self._host.tween(entity, field, to, duration, ease, start, delay, loop, yoyo,
+                                on_update, on_done)
+
+    def tween_value(
+        self,
+        start: Any,
+        end: Any,
+        duration: float,
+        on_update: Callable[[Any], Any] | None = None,
+        ease: str | Callable[[float], float] = "out_cubic",
+        *,
+        delay: float = 0.0,
+        loop: bool | int = False,
+        yoyo: bool = False,
+        on_done: Callable[[], Any] | None = None,
+    ) -> Tween:
+        """A tween that moves a value of your own from ``start`` to ``end``:
+        read it as ``.value``, or have ``on_update(value)`` called with it
+        each frame. Good for fading HUD text::
+
+            entity.state["fade"] = ctx.tween_value(1.0, 0.0, 0.8, ease="in_quad")
+            ...
+            alpha = entity.state["fade"].value
+            ctx.hud.text("Checkpoint!", *ctx.hud.center, color=(1, 1, 1, alpha))
+
+        The other arguments are as for :meth:`tween`.
+        """
+        return self._host.tween_value(start, end, duration, on_update, ease, delay, loop, yoyo,
+                                      on_done)
+
+    def after(self, seconds: float, fn: Callable[..., Any], *args: Any) -> Timer:
+        """Calls ``fn(*args)`` once, ``seconds`` from now::
+
+            ctx.after(2.0, door.despawn)
+            ctx.after(0.5, ctx.audio.play, "sounds/ding.ogg")
+
+        Returns a :class:`Timer` (``cancel()`` it to call it off). Timers
+        count ``ctx.time.delta`` and fire before ``update`` runs, and
+        stop when the entity whose script made them goes.
+        """
+        return self._host.timer(seconds, fn, args, repeat=False, times=None)
+
+    def every(
+        self, seconds: float, fn: Callable[..., Any], *args: Any, times: int | None = None
+    ) -> Timer:
+        """Calls ``fn(*args)`` every ``seconds``, first ``seconds`` from now,
+        forever or ``times`` times::
+
+            ctx.every(1.0, spawn_enemy)
+            ctx.every(0.1, blink, entity, times=6)
+
+        Returns a :class:`Timer`: ``cancel()`` stops it. Call ``every`` from
+        ``start`` (or once on an event), not from ``update``, or you'll
+        start a new timer each frame.
+        """
+        return self._host.timer(seconds, fn, args, repeat=True, times=times)
+
+    def ease(self, name: str | Callable[[float], float], t: float) -> float:
+        """``t`` (0 to 1) through an easing curve: ``ctx.ease("out_back",
+        0.5)``. See :data:`EASINGS` for the names."""
+        return ease(name, t)
 
     if not TYPE_CHECKING:  # type checkers flag misspelt names instead
         def __getattr__(self, name):
@@ -1693,6 +2238,7 @@ class ScriptHost:
         self.ctx = Context(self, input_source if input_source is not None else KeySource())
         self._last_check = 0.0
         self._subs = []
+        self._timers = []  # Timers and Tweens, oldest first
         self._running = None  # (script, entity) whose code runs now
 
     # --- frames -----------------------------------------------------------
@@ -1708,6 +2254,8 @@ class ScriptHost:
             self._last_check = elapsed
             self.reload_changed()
         self._deliver_animation_events()
+        if self._timers:
+            self._tick_timers(t.delta)
         for e in list(self.entities.values()):
             if not e.script:
                 continue
@@ -1737,11 +2285,11 @@ class ScriptHost:
             counts[e.name] = counts.get(e.name, 0) + 1
             if e.name and e.name not in self._by_name:
                 self._by_name[e.name] = e
-        if self._subs:
+        if self._subs or self._timers:
             self._drop_orphans()
 
     def _drop_orphans(self):
-        """Ends subscriptions whose entity is gone."""
+        """Ends subscriptions, timers and tweens whose entity is gone."""
         keep = []
         for s in self._subs:
             if s.owner is None or s.owner.id in self.entities:
@@ -1749,6 +2297,133 @@ class ScriptHost:
             else:
                 s.active = False
         self._subs = keep
+        for t in self._timers:
+            if t.owner is not None and self.entities.get(t.owner.id) is not t.owner:
+                t.active = False
+        self._timers = [t for t in self._timers if t.active]
+
+    # --- tweens and timers ------------------------------------------------
+
+    def _tick_timers(self, dt):
+        """Advances every timer and tween by ``dt``: the ones made during
+        this frame start next frame."""
+        dt = max(0.0, float(dt))
+        for item in list(self._timers):
+            if not item.active or item.paused:
+                continue
+            script = item.script
+            if script is not None and (script.broken or script.module is None):
+                continue  # paused with its script until the file's fixed
+            item._tick(dt)
+        self._timers = [t for t in self._timers if t.active]
+
+    def timer(self, seconds, fn, args, repeat, times):
+        """See :meth:`Context.after` and :meth:`Context.every`."""
+        if not callable(fn):
+            raise TypeError(f"{'every' if repeat else 'after'} needs a function to call, "
+                            f"not {fn!r}")
+        seconds = float(seconds)
+        if not math.isfinite(seconds) or seconds < 0.0 or (repeat and seconds <= 0.0):
+            raise ValueError(f"{'every' if repeat else 'after'} needs a number of seconds "
+                             f"{'above' if repeat else 'from'} 0, not {seconds!r}")
+        if times is not None:
+            times = int(times)
+            if times < 1:
+                raise ValueError(f"times must be 1 or more, not {times!r}")
+        item = Timer(self, seconds, fn, tuple(args), repeat, times)
+        self._timers.append(item)
+        return item
+
+    def _tween_target(self, entity, field):
+        """(entity, component, field, key) for ``ctx.tween``'s target."""
+        store = self.ctx._keys
+        if isinstance(entity, str):
+            entity = store._entity(entity, entity)
+        elif not isinstance(entity, Entity):
+            raise TypeError(f"tween moves an entity (or its name), not {entity!r}; use "
+                            "ctx.tween_value for a value of your own")
+        if self.entities.get(entity.id) is not entity:
+            raise KeyError(f"can't tween {entity.name!r}: it's gone")
+        if not isinstance(field, str) or not field:
+            raise TypeError(f"field is a name like 'position' or 'attr:health', not {field!r}")
+        if ":" in field:
+            parts = field.split(":")
+            if len(parts) != 2 or not all(parts):
+                raise KeyError(f"{field!r} isn't a field: use 'position', 'rotation', 'scale', "
+                               "an attribute's name, or 'component:field' like 'attr:health'")
+            component, name = parts
+        elif field in _TRANSFORM_SHORTCUTS:
+            component, name = "transform", field
+        elif field in entity.attributes:
+            component, name = "attr", field
+        else:
+            options = list(_TRANSFORM_SHORTCUTS) + list(entity.attributes)
+            raise KeyError(f"can't tween {entity.name!r}'s {field!r}: it's not 'position', "
+                           f"'rotation', 'scale' or one of its attributes{_did_you_mean(field, options)}")
+        key = f"{entity.name}:{component}:{name}"
+        fields = store._component_info(key, component)[2]
+        name = store._field_name(key, component, name, fields)
+        key = f"{entity.name}:{component}:{name}"
+        info = fields.get(name) if fields is not None and name is not None else None
+        if fields is not None and info is not None and info[1] is None:
+            writable = [f for f, (_, s) in fields.items() if s is not None]
+            raise AttributeError(f"{key!r} is read-only (you can tween {', '.join(writable)})")
+        return entity, component, name, key
+
+    @staticmethod
+    def _tween_args(duration, ease, delay, loop):
+        duration, delay = float(duration), float(delay)
+        if not math.isfinite(duration) or duration < 0.0:
+            raise ValueError(f"a tween's duration is seconds from 0 up, not {duration!r}")
+        if not math.isfinite(delay) or delay < 0.0:
+            raise ValueError(f"delay is seconds from 0 up, not {delay!r}")
+        if loop is True:
+            plays = None
+        elif loop is False or loop is None:
+            plays = 1
+        else:
+            plays = int(loop)
+            if plays < 1:
+                raise ValueError(f"loop is True (forever), False, or how many times to play "
+                                 f"(1 or more), not {loop!r}")
+        if plays is None and duration <= 0.0:
+            raise ValueError("a tween that loops forever needs a duration above 0")
+        return duration, easing(ease), delay, plays
+
+    def tween(self, entity, field, to, duration, ease, start, delay, loop, yoyo, on_update,
+              on_done):
+        """See :meth:`Context.tween`."""
+        entity, component, name, key = self._tween_target(entity, field)
+        duration, curve, delay, plays = self._tween_args(duration, ease, delay, loop)
+        end = _numbers(to, "to")
+        what = f"{key!r}, which is"
+        now = _numbers(self.ctx._keys._read_field(key, entity, component, name), what)
+        if start is not None:
+            start = _numbers(start, "start")
+            _check_shapes(start, end, key)
+        _check_shapes(now, end, key)
+        for old in self._timers:
+            if (isinstance(old, Tween) and old.active and old._entity is entity
+                    and old._component == component and old._field == name):
+                old.active = False
+        item = Tween(self, entity, component, name, start, end, duration, curve, delay, plays,
+                     bool(yoyo), on_update, on_done, key)
+        if start is None:
+            item.value = now
+        self._timers.append(item)
+        return item
+
+    def tween_value(self, start, end, duration, on_update, ease, delay, loop, yoyo, on_done):
+        """See :meth:`Context.tween_value`."""
+        duration, curve, delay, plays = self._tween_args(duration, ease, delay, loop)
+        start, end = _numbers(start, "start"), _numbers(end, "end")
+        _check_shapes(start, end, "the value")
+        if on_update is not None and not callable(on_update):
+            raise TypeError(f"on_update is a function to call with the value, not {on_update!r}")
+        item = Tween(self, None, None, None, start, end, duration, curve, delay, plays,
+                     bool(yoyo), on_update, on_done, None)
+        self._timers.append(item)
+        return item
 
     # --- channels ---------------------------------------------------------
 
@@ -1793,10 +2468,7 @@ class ScriptHost:
             if script is not None:
                 if script.broken or script.module is None:
                     continue
-                # A top-level function follows its script's hot reloads.
-                if (isinstance(fn, types.FunctionType) and fn.__qualname__ == fn.__name__
-                        and fn.__module__ == script.module.__name__):
-                    fn = getattr(script.module, fn.__name__, fn)
+                fn = _live_fn(script, fn)  # follows its script's hot reloads
             delivered += 1
             outer = self._running
             if script is not None:
@@ -1860,12 +2532,16 @@ class ScriptHost:
         return out
 
     def stop(self):
-        """Calls ``stop(entity, ctx)`` on every started entity."""
+        """Calls ``stop(entity, ctx)`` on every started entity, then ends
+        every timer and tween."""
         for e in list(self.entities.values()):
             if e.script and e.id in self.started:
                 s = self.scripts.get(e.script)
                 if s and s.module and not s.broken:
                     self.call(s, "stop", e)
+        for t in self._timers:
+            t.active = False
+        self._timers = []
 
     # --- scripts ----------------------------------------------------------
 

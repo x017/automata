@@ -10,7 +10,8 @@ sit on the log pile:
   that rises.
 
 The `scripts/crackle.py` script makes the fire pop now and then. It throws
-extra embers with `ctx.particles.emit`. The flames don't light anything
+extra embers with `ctx.particles.emit`, and books the next pop with
+`ctx.after`. The flames don't light anything
 themselves. A Point Light in the fire lights the stones, logs and trees
 around it.
 
