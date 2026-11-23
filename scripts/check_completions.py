@@ -13,10 +13,13 @@ the API or its docs, or the typo isn't flagged. CI runs it on a fresh
 
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
+from urllib.parse import unquote
 
 SCRIPT = '''from __future__ import annotations
 
@@ -32,6 +35,13 @@ def update(entity: Entity, ctx: Context) -> None:
     entity.animaton.play("Run")
 '''
 CTX_LINE, ENTITY_LINE, TYPO_LINE = 9, 10, 11
+# No wait for the server lasts longer than this.
+TIMEOUT = 90.0
+
+
+def same_file(uri_a, uri_b):
+    """Servers re-encode URIs (`file:///d%3A/…` for `file:///D:/…`)."""
+    return unquote(uri_a).casefold() == unquote(uri_b).casefold()
 
 
 class Server:
@@ -42,13 +52,32 @@ class Server:
         )
         self.next_id = 0
         self.notifications = []
+        # Reading on a thread lets every wait time out (pipes can't, on Windows).
+        self.inbox = queue.Queue()
+        threading.Thread(target=self._pump, daemon=True).start()
+
+    def _pump(self):
+        try:
+            while True:
+                self.inbox.put(self._read_message())
+        except Exception as e:  # noqa: BLE001 - reported by read()
+            self.inbox.put(e)
 
     def send(self, message):
         body = json.dumps(message).encode()
         self.proc.stdin.write(f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
         self.proc.stdin.flush()
 
-    def read(self):
+    def read(self, timeout=TIMEOUT):
+        try:
+            message = self.inbox.get(timeout=timeout)
+        except queue.Empty:
+            raise TimeoutError(f"no message from the language server in {timeout:.0f}s") from None
+        if isinstance(message, Exception):
+            raise RuntimeError(f"the language server stopped: {message}")
+        return message
+
+    def _read_message(self):
         length = None
         while True:
             line = self.proc.stdout.readline()
@@ -62,11 +91,12 @@ class Server:
                 length = int(value)
         return json.loads(self.proc.stdout.read(length))
 
-    def request(self, method, params):
+    def request(self, method, params, timeout=TIMEOUT):
         self.next_id += 1
         self.send({"jsonrpc": "2.0", "id": self.next_id, "method": method, "params": params})
+        deadline = time.time() + timeout
         while True:
-            message = self.read()
+            message = self.read(timeout=max(0.1, deadline - time.time()))
             if message.get("id") == self.next_id and "method" not in message:
                 if "error" in message:
                     raise RuntimeError(f"{method}: {message['error']}")
@@ -138,25 +168,34 @@ def main():
             if name not in entity:
                 problems.append(f"`entity.` doesn't offer {name!r}")
 
-        deadline = time.time() + 60
+        deadline = time.time() + TIMEOUT
         flagged = False
-        while time.time() < deadline and not flagged:
-            for message in server.notifications:
-                if message.get("method") == "textDocument/publishDiagnostics" \
-                        and message["params"]["uri"] == uri:
-                    flagged = any("animaton" in d.get("message", "") for d in message["params"]["diagnostics"])
-            if not flagged:
-                server.notifications.clear()
-                try:
-                    server.notifications.append(server.read())
-                except RuntimeError:
-                    break
+        seen = []
+        pending = list(server.notifications)
+        while not flagged:
+            for message in pending:
+                if message.get("method") != "textDocument/publishDiagnostics":
+                    continue
+                params = message["params"]
+                seen.append(params["uri"])
+                if same_file(params["uri"], uri):
+                    flagged = any("animaton" in d.get("message", "") for d in params["diagnostics"])
+            left = deadline - time.time()
+            if flagged or left <= 0:
+                break
+            try:
+                pending = [server.read(timeout=left)]
+            except (TimeoutError, RuntimeError):
+                break
         if not flagged:
-            problems.append("the misspelt `entity.animaton` isn't flagged")
+            problems.append(
+                "the misspelt `entity.animaton` isn't flagged "
+                f"(diagnostics came for: {sorted(set(seen)) or 'nothing'}; expected {uri})"
+            )
     finally:
         script.unlink(missing_ok=True)
         try:
-            server.request("shutdown", None)
+            server.request("shutdown", None, timeout=5)
             server.notify("exit", None)
         except Exception:  # noqa: BLE001 - it's going away anyway
             pass

@@ -197,6 +197,7 @@ jobs:
         run: python scripts/bundle_oberon.py --oberon "target/release/${{ matrix.exe }}" --out dist/oberon --archive
 
       - name: oberon new, doctor, test, run (offline, Python hidden)
+        timeout-minutes: 15
         run: |
           trap 'echo "::error title=oberon sdk step failed::line $LINENO: $BASH_COMMAND"' ERR
           set -eo pipefail
@@ -224,6 +225,7 @@ jobs:
           (cd ../bare && "$OBERON" test)
 
       - name: Completions and typo diagnostics in the new project
+        timeout-minutes: 15
         run: python scripts/check_completions.py "$RUNNER_TEMP/mygame"
 
       - uses: actions/upload-artifact@v4
