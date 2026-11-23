@@ -66,6 +66,34 @@ pub struct ImportSettings {
     /// [`ClipFile`]).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub clips: Vec<ClipFile>,
+    /// Named moments in clips that scripts hear about (see [`EventMark`]).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<EventMark>,
+}
+
+/// An animation event: when `clip` passes `time` seconds, scripts hear
+/// `name` (`on_animation_event`, and the channel
+/// `<entity>:animation:<name>`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EventMark {
+    /// The clip's exact name (borrowed clips too: `"emotes:Wave"`).
+    pub clip: String,
+    /// Seconds into the clip.
+    pub time: f32,
+    /// The event's name (`"footstep"`).
+    pub name: String,
+}
+
+impl EventMark {
+    /// `name` at `time` seconds into `clip`.
+    #[must_use]
+    pub fn new(clip: impl Into<String>, time: f32, name: impl Into<String>) -> Self {
+        Self {
+            clip: clip.into(),
+            time,
+            name: name.into(),
+        }
+    }
 }
 
 /// A file whose animations a model borrows: a glTF made for the same
@@ -121,6 +149,7 @@ impl Default for ImportSettings {
             pivot: Pivot::File,
             springs: crate::springs::Springs::default(),
             clips: Vec::new(),
+            events: Vec::new(),
         }
     }
 }
@@ -129,7 +158,10 @@ impl ImportSettings {
     /// Whether these settings change nothing (no file needed).
     #[must_use]
     pub fn is_identity(&self) -> bool {
-        self.keeps_geometry() && self.springs.is_unset() && self.clips.is_empty()
+        self.keeps_geometry()
+            && self.springs.is_unset()
+            && self.clips.is_empty()
+            && self.events.is_empty()
     }
 
     /// Whether the scale, rotation and pivot leave the geometry as it is.
@@ -366,6 +398,7 @@ mod tests {
                 colliders: vec![],
             },
             clips: vec![ClipFile::new("anims/run.glb")],
+            events: vec![EventMark::new("Run", 0.3, "footstep")],
         };
         write_settings(&model, &s).unwrap();
         assert_eq!(read_settings(&model), s);

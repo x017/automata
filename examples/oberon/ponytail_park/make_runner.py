@@ -5,9 +5,10 @@ skirt for showing spring bones (no dependencies).
     python3 examples/oberon/ponytail_park/make_runner.py
 
 The model is a skinned glTF with three clips (Idle, Walk, Run). It also
-writes ``models/anims/emotes.glb``: just the skeleton and two more clips
-(Wave, Cheer), the way animation packs ship one file per move. The model's
-import settings borrow them as ``emotes:Wave`` and ``emotes:Cheer``. The
+writes ``models/anims/emotes.glb``: just the skeleton and three more clips
+(Wave, Cheer, Leap), the way animation packs ship one file per move. The
+model's import settings borrow them as ``emotes:Wave`` and so on. Leap
+travels 2.4 m forward (its hips move), for showing root motion. The
 ponytail (``Hair1`` … ``HairEnd``) and the skirt (``Skirt`` and its eight
 panels) have bones but no animation: ``models/runner.glb.import.ron`` makes
 them spring bones, so they swing on their own. It faces +Z, stands on its
@@ -396,9 +397,39 @@ def cheer(t, length):
     return pose, 0.92 - 0.08 * k + hop
 
 
+def smooth(a, b, x):
+    """0 before ``a``, 1 after ``b``, easing in between."""
+    k = min(1.0, max(0.0, (x - a) / (b - a)))
+    return k * k * (3 - 2 * k)
+
+
+LEAP = 2.4  # metres forward
+
+
+def leap(t, length):
+    """Crouch, a long jump forward and a soft landing. The hips travel, so
+    the clip carries her forward (root motion) or springs back without it."""
+    u = t / length
+    crouch = math.sin(math.pi * smooth(0.0, 0.25, u)) * (u < 0.25) + \
+        math.sin(math.pi * smooth(0.75, 1.0, u)) * 0.8 * (u > 0.75)
+    air = math.sin(math.pi * smooth(0.2, 0.8, u)) if 0.2 < u < 0.8 else 0.0
+    pose, _ = idle(t, length)
+    pose["Spine"] = euler(x=0.35 * crouch + 0.15 * air)
+    pose["Head"] = euler(x=-0.25 * crouch)
+    for side, sign in (("L", 1), ("R", -1)):
+        pose[f"UpperArm{side}"] = euler(x=0.9 * crouch - 2.2 * air, z=0.15 * sign)
+        pose[f"Forearm{side}"] = euler(x=-0.4 - 0.4 * air)
+        pose[f"Thigh{side}"] = euler(x=-1.0 * crouch - 1.1 * air)
+        pose[f"Shin{side}"] = euler(x=1.6 * crouch + 1.5 * air)
+        pose[f"Foot{side}"] = euler(x=-0.4 * crouch)
+    height = 0.92 - 0.22 * crouch + 0.45 * air
+    return pose, (0.0, height, LEAP * smooth(0.2, 0.8, u))
+
+
 EMOTE_CLIPS = {
     "Wave": (2.0, lambda t: wave(t, 2.0)),
     "Cheer": (1.2, lambda t: cheer(t, 1.2)),
+    "Leap": (1.1, lambda t: leap(t, 1.1)),
 }
 
 CLIPS = {
@@ -523,7 +554,9 @@ def animations(g: Glb, clips) -> list[dict]:
     for clip, (length, frame) in clips.items():
         count = round(length * FPS)
         times = [i / FPS for i in range(count + 1)]
-        frames = [frame(min(t, length - 1e-6) if i < count else 0.0) for i, t in enumerate(times)]
+        loops = clip in CLIPS
+        frames = [frame(min(t, length - 1e-6) if i < count or not loops else 0.0)
+                  for i, t in enumerate(times)]
         time_acc = g.accessor("f", times, 5126, "SCALAR", minmax=True)
         samplers, channels = [], []
         for bone in frames[0][0]:
@@ -531,7 +564,8 @@ def animations(g: Glb, clips) -> list[dict]:
             samplers.append({"input": time_acc, "output": g.accessor("4f", rotations, 5126, "VEC4")})
             channels.append({"sampler": len(samplers) - 1,
                              "target": {"node": INDEX[bone], "path": "rotation"}})
-        hips = [(0.0, f[1], 0.0) for f in frames]
+        # Hips: a height, or a whole position for clips that travel.
+        hips = [f[1] if isinstance(f[1], tuple) else (0.0, f[1], 0.0) for f in frames]
         samplers.append({"input": time_acc, "output": g.accessor("3f", hips, 5126, "VEC3")})
         channels.append({"sampler": len(samplers) - 1,
                          "target": {"node": INDEX["Hips"], "path": "translation"}})

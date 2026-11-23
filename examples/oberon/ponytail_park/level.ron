@@ -588,6 +588,7 @@
                 speed: 1.0,
                 looping: true,
                 play_on_start: true,
+                root_motion: true,
             )),
             script: Some((
                 path: "scripts/player.py",

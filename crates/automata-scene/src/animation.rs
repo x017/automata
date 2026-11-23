@@ -10,18 +10,31 @@
 //! [`animate`] gives each entity with an `Animation` and a rigged model
 //! its animator the first time it runs, and scripts steer it with
 //! [`AnimationCommand`]s ([`command_animation`]).
+//!
+//! Clips can carry events (named moments from the model's import
+//! settings): the animator notes each one its playhead passes, and scripts
+//! hear about them. With [`Animator::root_motion`] on, a clip's own travel
+//! across the ground moves the entity instead of the pose: through its
+//! character controller when it has one ([`CharacterMotion`]), otherwise by
+//! moving its transform.
 
 use std::sync::Arc;
 
-use automata_assets::{Clip, Model, Pose, Rig};
-use glam::Mat4;
+use automata_assets::{Clip, ClipMotion, Model, Pose, Rig};
+use glam::{Mat4, Vec3};
 use hecs::Entity;
 use serde::{Deserialize, Serialize};
 
 use crate::render::{MeshRenderer, MeshVisual};
 use crate::scene::SceneWorld;
 use crate::springs::SpringSim;
-use crate::transform::GlobalTransform;
+use crate::transform::{GlobalTransform, Transform};
+
+/// How many fired events an animator remembers for scripts to catch up on.
+const RECENT_EVENTS: usize = 32;
+
+/// The event fired when a clip that doesn't loop reaches its end.
+pub const END_EVENT: &str = "end";
 
 /// What an animated model plays (also its ECS component and its record in
 /// scene files). The model itself comes from the entity's mesh.
@@ -37,6 +50,11 @@ pub struct Animation {
     /// Whether the clip plays as soon as the scene runs. Off, the model
     /// holds the clip's first frame until a script plays something.
     pub play_on_start: bool,
+    /// Root motion: the clip's own travel across the ground moves the
+    /// entity (through its character controller, if it has one) instead
+    /// of sliding the model away from it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub root_motion: bool,
 }
 
 impl Default for Animation {
@@ -46,6 +64,7 @@ impl Default for Animation {
             speed: 1.0,
             looping: true,
             play_on_start: true,
+            root_motion: false,
         }
     }
 }
@@ -108,6 +127,15 @@ struct Layer {
 }
 
 impl Layer {
+    /// How far (in clip seconds, signed) a step of `dt` moves the playhead.
+    fn advance(&self, dt: f32) -> f32 {
+        if self.playing {
+            dt * self.speed
+        } else {
+            0.0
+        }
+    }
+
     /// Moves the playhead `dt` seconds (scaled by speed). A clip that
     /// doesn't loop holds its last (or, backwards, first) frame and stops.
     fn step(&mut self, duration: f32, dt: f32) {
@@ -140,8 +168,96 @@ struct Fade {
     elapsed: f32,
 }
 
+/// An event an animator's playhead passed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FiredEvent {
+    /// Counts up from 1 per animator, so a reader can tell which events
+    /// it has already seen.
+    pub seq: u64,
+    /// The clip it's on.
+    pub clip: String,
+    /// The event's name ([`END_EVENT`] when a one-shot clip ends).
+    pub name: String,
+}
+
+/// Component: root motion waiting for the entity's character controller.
+/// The physics world adds it to every character and moves the character by
+/// `pending` (colliding) on its next step; entities without one are moved
+/// by setting their transform instead.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CharacterMotion {
+    /// World-space movement not yet applied.
+    pub pending: Vec3,
+}
+
+impl CharacterMotion {
+    /// The pending movement, leaving none.
+    pub fn take(&mut self) -> Vec3 {
+        std::mem::take(&mut self.pending)
+    }
+}
+
+/// The events of `clip` a playhead passes going from `from` by `advance`
+/// seconds (negative backwards): `(how far along, name)`. `inclusive`
+/// also counts an event exactly at `from` (a clip that just started).
+fn crossed<'c>(
+    clip: &'c Clip,
+    from: f32,
+    advance: f32,
+    looping: bool,
+    inclusive: bool,
+    out: &mut Vec<(f32, &'c str)>,
+) {
+    let d = clip.duration;
+    let to = from + advance;
+    for e in &clip.events {
+        if looping && d > 0.0 {
+            // Every lap's copy of the event inside the swept span (at most
+            // a few, should a huge step sweep many laps).
+            if advance > 0.0 {
+                let mut n = ((from - e.time) / d).ceil();
+                if e.time + n * d <= from && !inclusive {
+                    n += 1.0;
+                }
+                for _ in 0..4 {
+                    let t = e.time + n * d;
+                    if t > to {
+                        break;
+                    }
+                    out.push((t - from, &e.name));
+                    n += 1.0;
+                }
+            } else {
+                let mut n = ((from - e.time) / d).floor();
+                if e.time + n * d >= from && !inclusive {
+                    n -= 1.0;
+                }
+                for _ in 0..4 {
+                    let t = e.time + n * d;
+                    if t < to {
+                        break;
+                    }
+                    out.push((from - t, &e.name));
+                    n -= 1.0;
+                }
+            }
+        } else if advance > 0.0 {
+            let after = e.time > from || inclusive && e.time >= from;
+            if after && e.time <= to.min(d) {
+                out.push((e.time - from, &e.name));
+            }
+        } else {
+            let before = e.time < from || inclusive && e.time <= from;
+            if before && e.time >= to.max(0.0) {
+                out.push((from - e.time, &e.name));
+            }
+        }
+    }
+}
+
 /// Plays an animated model's clips.
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)] // independent switches, not states
 pub struct Animator {
     rig: Arc<Rig>,
     clip: Option<usize>,
@@ -153,9 +269,22 @@ pub struct Animator {
     pub looping: bool,
     /// Whether time advances.
     pub playing: bool,
+    /// Root motion: the clip's travel across the ground is taken out of
+    /// the pose and reported by [`Self::travel`] for [`animate`] to move
+    /// the entity by.
+    pub root_motion: bool,
     fade: Option<Fade>,
     pose: Pose,
     springs: Option<SpringSim>,
+    /// Each clip's ground travel (root motion), by clip index.
+    motions: Arc<[Option<ClipMotion>]>,
+    /// The ground travel of the last advance, in model space.
+    travel: Vec3,
+    /// The latest events passed, oldest first.
+    events: Vec<FiredEvent>,
+    next_event: u64,
+    /// The clip has just started: an event at its first moment fires.
+    fresh: bool,
 }
 
 impl Animator {
@@ -164,6 +293,7 @@ impl Animator {
     pub fn new(rig: Arc<Rig>) -> Self {
         let pose = rig.rest_pose();
         let springs = SpringSim::new(&rig);
+        let motions = rig.clips.iter().map(|c| ClipMotion::of(&rig, c)).collect();
         Self {
             rig,
             clip: None,
@@ -171,9 +301,15 @@ impl Animator {
             speed: 1.0,
             looping: true,
             playing: false,
+            root_motion: false,
             fade: None,
             pose,
             springs,
+            motions,
+            travel: Vec3::ZERO,
+            events: Vec::new(),
+            next_event: 1,
+            fresh: false,
         }
     }
 
@@ -191,6 +327,7 @@ impl Animator {
         let mut a = Self::new(rig);
         a.speed = animation.speed;
         a.looping = animation.looping;
+        a.root_motion = animation.root_motion;
         if !animation.clip.is_empty() {
             if autoplay && animation.play_on_start {
                 a.play(&animation.clip);
@@ -258,6 +395,7 @@ impl Animator {
         let duration = self.rig.clips[index].duration;
         self.time = if self.speed < 0.0 { duration } else { 0.0 };
         self.playing = true;
+        self.fresh = true;
         true
     }
 
@@ -350,8 +488,46 @@ impl Animator {
     /// Samples the current clip (or the rest pose) into `self.pose`.
     fn sample(&mut self) {
         self.pose = self.rig.rest_pose();
-        if let Some(clip) = self.clip.and_then(|i| self.rig.clips.get(i)) {
-            clip.sample_into(self.time, &mut self.pose);
+        if let Some(i) = self.clip {
+            sample_clip(
+                &self.rig,
+                &self.motions,
+                i,
+                self.time,
+                self.root_motion,
+                &mut self.pose,
+            );
+        }
+    }
+
+    /// The clip's ground travel during the last advance, in model space
+    /// (zero unless [`Self::root_motion`]).
+    #[must_use]
+    pub fn travel(&self) -> Vec3 {
+        if self.root_motion {
+            self.travel
+        } else {
+            Vec3::ZERO
+        }
+    }
+
+    /// The latest events the playhead passed (up to 32), oldest first.
+    /// Their `seq` tells a reader which ones are new to it.
+    #[must_use]
+    pub fn recent_events(&self) -> &[FiredEvent] {
+        &self.events
+    }
+
+    fn fire(&mut self, clip: usize, name: &str) {
+        let clip = self.rig.clips[clip].name.clone();
+        self.events.push(FiredEvent {
+            seq: self.next_event,
+            clip,
+            name: name.to_string(),
+        });
+        self.next_event += 1;
+        if self.events.len() > RECENT_EVENTS {
+            self.events.remove(0);
         }
     }
 
@@ -394,6 +570,7 @@ impl Animator {
     }
 
     fn advance_clip(&mut self, dt: f32) {
+        let mut travel = Vec3::ZERO;
         if let Some(clip) = self.clip {
             let mut layer = Layer {
                 clip,
@@ -402,11 +579,28 @@ impl Animator {
                 looping: self.looping,
                 playing: self.playing,
             };
+            let (from, advance) = (layer.time, layer.advance(dt));
             layer.step(self.rig.clips[clip].duration, dt);
+            if advance != 0.0 {
+                let c = &self.rig.clips[clip];
+                let mut passed = Vec::new();
+                crossed(c, from, advance, layer.looping, self.fresh, &mut passed);
+                passed.sort_by(|a, b| a.0.total_cmp(&b.0));
+                let names: Vec<String> = passed.iter().map(|(_, n)| (*n).to_string()).collect();
+                for name in names {
+                    self.fire(clip, &name);
+                }
+                travel = layer_travel(&self.rig, &self.motions, clip, from, advance, layer.looping);
+            }
+            if self.playing && !layer.playing {
+                self.fire(clip, END_EVENT);
+            }
             self.time = layer.time;
             self.playing = layer.playing;
         }
+        self.fresh = false;
         self.sample();
+        self.travel = travel;
         let Some(fade) = &mut self.fade else {
             return;
         };
@@ -416,19 +610,31 @@ impl Animator {
             self.fade = None;
             return;
         }
+        let (rig, motions) = (&self.rig, &self.motions);
+        let mut from_travel = Vec3::ZERO;
         let mut from = match &mut fade.from {
             FadeFrom::Pose(pose) => pose.clone(),
             FadeFrom::Clip(layer) => {
-                let clip = &self.rig.clips[layer.clip];
-                layer.step(clip.duration, dt);
-                let mut pose = self.rig.rest_pose();
-                clip.sample_into(layer.time, &mut pose);
+                let (start, advance) = (layer.time, layer.advance(dt));
+                layer.step(rig.clips[layer.clip].duration, dt);
+                from_travel = layer_travel(rig, motions, layer.clip, start, advance, layer.looping);
+                let mut pose = rig.rest_pose();
+                sample_clip(
+                    rig,
+                    motions,
+                    layer.clip,
+                    layer.time,
+                    self.root_motion,
+                    &mut pose,
+                );
                 pose
             }
         };
         // Ease in and out, so the blend doesn't start or end with a jolt.
-        from.blend(&self.pose, t * t * (3.0 - 2.0 * t));
+        let w = t * t * (3.0 - 2.0 * t);
+        from.blend(&self.pose, w);
         self.pose = from;
+        self.travel = from_travel.lerp(travel, w);
     }
 
     /// The current pose, one local transform per rig node.
@@ -458,12 +664,51 @@ impl Animator {
             clips: self.clip_names().into_iter().map(str::to_string).collect(),
             lengths: self.rig.clips.iter().map(|c| c.duration).collect(),
             springs: self.has_springs(),
+            root_motion: self.root_motion,
+            events: self.events.clone(),
         }
+    }
+}
+
+/// Samples clip `index` at `time` into `pose`, pinning its ground travel
+/// in place when `root_motion`.
+fn sample_clip(
+    rig: &Rig,
+    motions: &[Option<ClipMotion>],
+    index: usize,
+    time: f32,
+    root_motion: bool,
+    pose: &mut Pose,
+) {
+    let Some(clip) = rig.clips.get(index) else {
+        return;
+    };
+    clip.sample_into(time, pose);
+    if root_motion {
+        if let Some(Some(motion)) = motions.get(index) {
+            motion.pin(clip, time, pose);
+        }
+    }
+}
+
+/// The ground travel of clip `index` from `from` by `advance` seconds.
+fn layer_travel(
+    rig: &Rig,
+    motions: &[Option<ClipMotion>],
+    index: usize,
+    from: f32,
+    advance: f32,
+    looping: bool,
+) -> Vec3 {
+    match (rig.clips.get(index), motions.get(index)) {
+        (Some(clip), Some(Some(motion))) => motion.travel(clip, from, advance, looping),
+        _ => Vec3::ZERO,
     }
 }
 
 /// An animated entity's playback, as scripts read it.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::struct_excessive_bools)] // independent switches, not states
 pub struct AnimationState {
     /// The current clip, or `None` in the rest pose.
     pub clip: Option<String>,
@@ -483,6 +728,10 @@ pub struct AnimationState {
     pub lengths: Vec<f32>,
     /// Whether the model has spring bones.
     pub springs: bool,
+    /// Whether root motion is on.
+    pub root_motion: bool,
+    /// The latest events passed (see [`Animator::recent_events`]).
+    pub events: Vec<FiredEvent>,
 }
 
 /// A script's request to an entity's animation.
@@ -503,6 +752,8 @@ pub enum AnimationCommand {
     Speed(f32),
     /// Put the spring bones back at rest (see [`Animator::reset_springs`]).
     ResetSprings,
+    /// Turn root motion on or off (see [`Animator::root_motion`]).
+    RootMotion(bool),
 }
 
 /// A new animator for `entity`'s rigged model (set up from its
@@ -586,6 +837,10 @@ pub fn command_animation(
             animator.reset_springs();
             true
         }
+        AnimationCommand::RootMotion(on) => {
+            animator.root_motion = *on;
+            true
+        }
     }
 }
 
@@ -603,16 +858,36 @@ pub fn animation_state(world: &SceneWorld, entity: Entity) -> Option<AnimationSt
 /// Advances every [`Animator`] by `dt` seconds and poses its entity's
 /// [`MeshRenderer`]. Run once per frame after the game update. Entities
 /// with an [`Animation`] get their animator here the first time.
+///
+/// Root motion moves its entity by the clip's travel (turned and scaled
+/// like the entity, kept level): into [`CharacterMotion`] for characters,
+/// onto the [`Transform`] otherwise.
 pub fn animate(world: &mut SceneWorld, dt: f32) {
     attach_animators(world, true);
-    for (animator, renderer, place) in world.query_mut::<(
+    let mut moves: Vec<(Entity, Vec3)> = Vec::new();
+    for (entity, animator, renderer, place) in world.query_mut::<(
+        Entity,
         &mut Animator,
         Option<&mut MeshRenderer>,
         Option<&GlobalTransform>,
     )>() {
-        animator.advance_in(dt, place.map_or(Mat4::IDENTITY, |g| g.0));
+        let place = place.map_or(Mat4::IDENTITY, |g| g.0);
+        animator.advance_in(dt, place);
         if let Some(renderer) = renderer {
             renderer.joints = Some(animator.palette());
+        }
+        let travel = animator.travel();
+        if travel != Vec3::ZERO {
+            let mut step = place.transform_vector3(travel);
+            step.y = 0.0;
+            moves.push((entity, step));
+        }
+    }
+    for (entity, step) in moves {
+        if let Ok(mut motion) = world.get::<&mut CharacterMotion>(entity) {
+            motion.pending += step;
+        } else if let Ok(mut transform) = world.get::<&mut Transform>(entity) {
+            transform.position += step;
         }
     }
 }
@@ -634,6 +909,7 @@ mod tests {
                 times: vec![0.0, 2.0],
                 values: vec![0.0, 0.0, 0.0, to, 0.0, 0.0],
             }],
+            events: Vec::new(),
         }
     }
 
@@ -773,6 +1049,143 @@ mod tests {
         animate(scene.world_mut(), 1.0);
         let a = scene.world().get::<&Animator>(e).unwrap();
         assert!((a.time - 1.0).abs() < 1e-6);
+    }
+
+    /// The test rig with events on `slide`: `start` at 0, `step` at 0.5
+    /// and 1.5.
+    fn eventful() -> Arc<Rig> {
+        let mut rig = (*rig()).clone();
+        let slide = &mut rig.clips[0];
+        slide.add_event(1.5, "step");
+        slide.add_event(0.5, "step");
+        slide.add_event(0.0, "start");
+        Arc::new(rig)
+    }
+
+    fn names(a: &Animator, after: u64) -> Vec<String> {
+        a.recent_events()
+            .iter()
+            .filter(|e| e.seq > after)
+            .map(|e| e.name.clone())
+            .collect()
+    }
+
+    #[test]
+    fn events_fire_as_the_playhead_passes_them() {
+        let mut a = Animator::new(eventful());
+        a.play("slide");
+        a.advance(0.25);
+        assert_eq!(
+            names(&a, 0),
+            ["start"],
+            "an event at 0 fires when the clip starts"
+        );
+        a.advance(0.5);
+        assert_eq!(names(&a, 1), ["step"]);
+        // 0.75 → 2.75 wraps once: step at 1.5, start at 2.0 (the lap), step at 2.5.
+        a.advance(2.0);
+        assert_eq!(names(&a, 2), ["step", "start", "step"]);
+        let last = a.recent_events().last().unwrap();
+        assert_eq!((last.seq, last.clip.as_str()), (5, "slide"));
+
+        // Backwards from 0.75 to 0.25 passes the step at 0.5 only.
+        a.speed = -1.0;
+        a.advance(0.5);
+        assert_eq!(names(&a, 5), ["step"]);
+        // Seeking jumps without firing.
+        a.seek(1.9);
+        a.speed = 1.0;
+        a.advance(0.05);
+        assert_eq!(names(&a, 6), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_one_shot_clip_fires_end_once_and_old_events_roll_off() {
+        let mut a = Animator::new(eventful());
+        a.play_with(
+            "slide",
+            PlayOptions {
+                looping: false,
+                ..PlayOptions::default()
+            },
+        );
+        a.advance(5.0);
+        assert_eq!(names(&a, 0), ["start", "step", "step", END_EVENT]);
+        a.advance(1.0);
+        assert_eq!(a.recent_events().len(), 4, "a stopped clip fires nothing");
+        // Only the latest are kept.
+        a.looping = true;
+        a.play("slide");
+        for _ in 0..40 {
+            a.advance(1.0);
+        }
+        assert_eq!(a.recent_events().len(), RECENT_EVENTS);
+        assert_eq!(a.state().events.last(), a.recent_events().last());
+    }
+
+    #[test]
+    fn root_motion_moves_the_entity_instead_of_the_pose() {
+        let mut scene = crate::Scene::new();
+        let spawn =
+            |scene: &mut crate::Scene, root_motion: bool, extra: Option<CharacterMotion>| {
+                let mut a = Animator::new(rig());
+                a.root_motion = root_motion;
+                a.play("slide");
+                let turned = Transform::from_position(Vec3::new(5.0, 0.0, 0.0))
+                    .with_rotation(glam::Quat::from_rotation_y(std::f32::consts::FRAC_PI_2));
+                let e = scene.spawn((a, turned, GlobalTransform(turned.to_matrix())));
+                if let Some(m) = extra {
+                    scene.world_mut().insert_one(e, m).unwrap();
+                }
+                e
+            };
+        let walker = spawn(&mut scene, true, None);
+        let character = spawn(&mut scene, true, Some(CharacterMotion::default()));
+        let slider = spawn(&mut scene, false, None);
+        for _ in 0..10 {
+            animate(scene.world_mut(), 0.1);
+        }
+        let world = scene.world();
+        let at = |e| world.get::<&Transform>(e).unwrap().position;
+        // The clip slides +X at 1 m/s; turned 90° about Y that's -Z.
+        assert!(
+            at(walker).abs_diff_eq(Vec3::new(5.0, 0.0, -1.0), 1e-4),
+            "{}",
+            at(walker)
+        );
+        let w = world.get::<&Animator>(walker).unwrap();
+        assert!(x(&w).abs() < 1e-5, "the pose stays over the origin");
+        // A character's root motion waits for its controller.
+        assert!(at(character).abs_diff_eq(Vec3::new(5.0, 0.0, 0.0), 1e-6));
+        let pending = world.get::<&CharacterMotion>(character).unwrap().pending;
+        assert!(
+            pending.abs_diff_eq(Vec3::new(0.0, 0.0, -1.0), 1e-4),
+            "{pending}"
+        );
+        // Without root motion the model slides and the entity stays.
+        assert!(at(slider).abs_diff_eq(Vec3::new(5.0, 0.0, 0.0), 1e-6));
+        assert!((x(&world.get::<&Animator>(slider).unwrap()) - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn root_motion_blends_through_a_crossfade() {
+        let mut a = Animator::new(rig());
+        a.root_motion = true;
+        a.play("slide"); // +1 m/s
+        a.advance(0.5);
+        a.play_with(
+            "back", // -1 m/s
+            PlayOptions {
+                fade: 1.0,
+                ..PlayOptions::default()
+            },
+        );
+        a.advance(0.5); // halfway through the eased blend: they cancel
+        assert!(a.travel().abs_diff_eq(Vec3::ZERO, 1e-4), "{}", a.travel());
+        a.advance(1.0);
+        assert!(a.travel().abs_diff_eq(Vec3::new(-1.0, 0.0, 0.0), 1e-4));
+        a.root_motion = false;
+        assert_eq!(a.travel(), Vec3::ZERO);
     }
 
     fn rigged_visual() -> MeshVisual {

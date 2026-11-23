@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use automata_scene::{Entity, SceneWorld, Transform};
+use automata_scene::{CharacterMotion, Entity, SceneWorld, Transform};
 use glam::{Quat, Vec3};
 use r3::control::{CharacterAutostep, CharacterLength, KinematicCharacterController};
 use r3::dynamics::{
@@ -108,6 +108,19 @@ impl Default for PhysicsWorld3D {
     }
 }
 
+/// Gives every character a [`CharacterMotion`], so root motion reaches
+/// its controller (and collides) instead of moving its transform.
+fn mark_characters(scene: &mut SceneWorld) {
+    let unmarked: Vec<Entity> = scene
+        .query::<hecs::Without<(hecs::Entity, &CharacterController), &CharacterMotion>>()
+        .iter()
+        .map(|(e, _)| e)
+        .collect();
+    for entity in unmarked {
+        let _ = scene.insert_one(entity, CharacterMotion::default());
+    }
+}
+
 impl PhysicsWorld3D {
     /// An empty 3D world with Earth-like gravity along -Y (`-9.81` m/s²).
     #[must_use]
@@ -191,6 +204,7 @@ impl PhysicsWorld3D {
         self.spawn_missing(scene);
         self.update_existing(scene);
         self.despawn_removed(scene);
+        mark_characters(scene);
     }
 
     fn spawn_missing(&mut self, scene: &mut SceneWorld) {
@@ -471,14 +485,26 @@ impl PhysicsWorld3D {
                 .or_insert_with(|| controller_from_config(&config));
         }
 
+        // Velocity for this step, plus any root motion from the animator.
+        mark_characters(scene);
         let mut moves = Vec::new();
-        for (entity, velocity) in &mut scene.query::<(hecs::Entity, &CharacterVelocity)>() {
-            if self.controllers.contains_key(&entity) {
-                moves.push((entity, velocity.velocity));
+        for (entity, velocity, motion) in &mut scene.query::<(
+            hecs::Entity,
+            Option<&CharacterVelocity>,
+            Option<&mut CharacterMotion>,
+        )>() {
+            if !self.controllers.contains_key(&entity) {
+                continue;
+            }
+            let root = motion.map_or(Vec3::ZERO, CharacterMotion::take);
+            if velocity.is_some() || root != Vec3::ZERO {
+                moves.push((
+                    entity,
+                    velocity.map_or(Vec3::ZERO, |v| v.velocity) * dt + root,
+                ));
             }
         }
-        for (entity, velocity) in moves {
-            let desired = velocity * dt;
+        for (entity, desired) in moves {
             let mv = self.move_character(scene, entity, desired);
             self.grounded.insert(entity, mv.grounded);
         }

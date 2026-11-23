@@ -32,7 +32,7 @@ mod transform;
 
 pub use animation::{
     animate, animation_state, attach_animators, command_animation, Animation, AnimationCommand,
-    AnimationState, Animator, PlayOptions,
+    AnimationState, Animator, CharacterMotion, FiredEvent, PlayOptions, END_EVENT,
 };
 pub use automata_renderer::{ParticleBlend, ParticleSprite};
 pub use events::Events;

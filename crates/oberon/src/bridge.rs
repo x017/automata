@@ -791,6 +791,14 @@ fn state_json(e: &EntityState) -> Json {
 /// "springs"}`
 /// (see the script API's frame model).
 fn anim_json(a: &automata_scene::AnimationState) -> Json {
+    let events = a.events.iter().map(|e| {
+        let seq = Json::Int(i64::try_from(e.seq).unwrap_or(i64::MAX));
+        Json::Arr(vec![
+            seq,
+            Json::from(e.clip.as_str()),
+            Json::from(e.name.as_str()),
+        ])
+    });
     Json::obj([
         ("clip", a.clip.as_deref().map_or(Json::Null, Json::from)),
         ("time", Json::Float(f64::from(a.time))),
@@ -804,12 +812,15 @@ fn anim_json(a: &automata_scene::AnimationState) -> Json {
         ),
         ("lens", Json::floats(&a.lengths)),
         ("springs", Json::Bool(a.springs)),
+        ("rm", Json::Bool(a.root_motion)),
+        // The latest events passed: [seq, clip, name], oldest first.
+        ("ev", Json::Arr(events.collect())),
     ])
 }
 
 /// One `entity.animation` request: `["play", clip, loop, fade, speed or
-/// null, restart]`, `["stop", fade]`, `["seek", t]`, `["speed", s]` or
-/// `["reset_springs"]`.
+/// null, restart]`, `["stop", fade]`, `["seek", t]`, `["speed", s]`,
+/// `["reset_springs"]` or `["root_motion", on]`.
 fn parse_anim(v: &Json) -> Option<automata_scene::AnimationCommand> {
     use automata_scene::{AnimationCommand as C, PlayOptions};
     let a = v.as_arr()?;
@@ -828,6 +839,7 @@ fn parse_anim(v: &Json) -> Option<automata_scene::AnimationCommand> {
         "seek" => C::Seek(n(1)?),
         "speed" => C::Speed(n(1)?),
         "reset_springs" => C::ResetSprings,
+        "root_motion" => C::RootMotion(a.get(1)?.as_bool()?),
         _ => return None,
     })
 }
@@ -1164,7 +1176,7 @@ mod tests {
             r#"{"op":"frame","frame":1,"writes":[{"id":3,"anim":["#,
             r#"["play","Walking",true,0.2,null,false],["play","Jump",false,0,1.5,true],"#,
             r#"["stop",0.5],["seek",1.25],["speed",-1],["seek","x"],["dance"],[],"#,
-            r#"["reset_springs"]]}]}"#
+            r#"["reset_springs"],["root_motion",true],["root_motion"]]}]}"#
         ));
         let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
             panic!("{msg:?}");
@@ -1192,6 +1204,7 @@ mod tests {
                 C::Seek(1.25),
                 C::Speed(-1.0),
                 C::ResetSprings,
+                C::RootMotion(true),
             ],
             "malformed requests are skipped"
         );
@@ -1206,13 +1219,20 @@ mod tests {
                 clips: vec!["Idle".into(), "Wave".into()],
                 lengths: vec![2.0, 1.5],
                 springs: false,
+                root_motion: true,
+                events: vec![automata_scene::FiredEvent {
+                    seq: 7,
+                    clip: "Idle".into(),
+                    name: "blink".into(),
+                }],
             }),
             ..EntityState::default()
         };
         let json = state_json(&state).dump();
         assert!(
             json.contains(r#""anim":{"clip":"Idle","time":0.5,"len":2.0,"playing":true"#)
-                && json.contains(r#""clips":["Idle","Wave"],"lens":[2.0,1.5]"#),
+                && json.contains(r#""clips":["Idle","Wave"],"lens":[2.0,1.5]"#)
+                && json.contains(r#""rm":true,"ev":[[7,"Idle","blink"]]"#),
             "{json}"
         );
         assert!(!state_json(&EntityState::default()).dump().contains("anim"));

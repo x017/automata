@@ -116,6 +116,12 @@ impl PlaySession {
             {
                 *model = doc.resolve(model).to_string_lossy().into_owned();
             }
+            // Models too, so play needn't rely on the global asset root.
+            if let Some(automata_core::PrimitiveData::Model { path }) =
+                entity.mesh_visual.as_mut().map(|m| &mut m.primitive)
+            {
+                *path = doc.resolve(path).to_string_lossy().into_owned();
+            }
         }
         file.apply_to_world(scene.world_mut());
 
@@ -1041,6 +1047,79 @@ pub(crate) mod tests {
 
     /// The finished tutorial project plays in Oberon: every script loads and
     /// runs without errors, the intro flies the camera rail, and then the
+    /// Ponytail Park through the real script bridge: footsteps (animation
+    /// events from the import settings) reach the player script's
+    /// `*:animation:footstep` subscriber, which kicks up dust, and pressing
+    /// 3 leaps her 2.4 m forward by root motion (skipped without python3).
+    #[test]
+    fn ponytail_park_hears_footsteps_and_leaps_by_root_motion() {
+        use crate::bridge::{BridgeMsg, ScriptBridge};
+        let python = crate::bridge::default_python();
+        if std::process::Command::new(python)
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let game = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/oberon/ponytail_park");
+        let doc = Document::load(&game.join("level.ron")).unwrap();
+        let mut play = PlaySession::start(&doc);
+        play.update(TIMESTEP); // as the editor does before the first frame
+        let runtime = std::env::temp_dir().join(format!("oberon_ponytail_{}", std::process::id()));
+        let mut bridge = ScriptBridge::start(python, &runtime, &game).unwrap();
+        let runner = |play: &PlaySession| {
+            let states = play.script_states(|rel| doc.resolve(rel));
+            states.into_iter().find(|s| s.name == "Runner").unwrap()
+        };
+        let start = Vec3::from(runner(&play).position);
+        let (mut errors, mut most_dust, mut pressed) = (Vec::new(), 0, None);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        // The jogger sets off after 1 s; leap at 2.5 s and land by 3.8 s.
+        while play.elapsed < 4.0 && std::time::Instant::now() < deadline {
+            for msg in bridge.poll() {
+                match msg {
+                    BridgeMsg::Frame(w) => play.apply_frame(&w),
+                    BridgeMsg::Error { msg, .. } => errors.push(msg),
+                    _ => {}
+                }
+            }
+            let states = play.script_states(|rel| doc.resolve(rel));
+            let keys: &[&str] = if play.elapsed >= 2.5 && pressed.is_none() {
+                &["3"]
+            } else {
+                &[]
+            };
+            if bridge.send_frame(TIMESTEP, play.elapsed, keys, &states) {
+                if !keys.is_empty() {
+                    pressed = Some(play.elapsed);
+                }
+                play.update(TIMESTEP);
+                most_dust = most_dust.max(play.particle_count());
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&runtime);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(play.elapsed >= 4.0, "the runner kept up: {}", play.elapsed);
+        assert!(most_dust > 0, "footsteps kick up dust");
+        let end = runner(&play);
+        let travelled = start - Vec3::from(end.position);
+        // She faces -Z: the leap carries her 2.4 m that way, and no further.
+        assert!(
+            (travelled.z - 2.4).abs() < 0.1 && travelled.x.abs() < 0.01,
+            "leapt {travelled} (pressed at {pressed:?})"
+        );
+        assert_eq!(end.anim.unwrap().clip.as_deref(), Some("Idle"));
+        let landed = runner(&play).anim.unwrap().events;
+        assert!(landed
+            .iter()
+            .any(|e| e.name == "land" && e.clip == "emotes:Leap"));
+    }
+
     /// camera settles in behind the player (skipped without python3).
     #[test]
     fn the_coin_run_tutorial_project_plays() {

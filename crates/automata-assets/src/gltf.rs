@@ -878,6 +878,7 @@ fn read_clips(doc: &Doc<'_>, tree_of: &dyn Fn(usize) -> Option<usize>) -> Vec<Cl
             name,
             duration,
             channels,
+            events: Vec::new(),
         });
     }
     clips

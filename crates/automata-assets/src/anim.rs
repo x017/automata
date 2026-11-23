@@ -17,7 +17,7 @@
 //! import settings).
 
 use automata_renderer::{SkinVertex, Vertex};
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat3, Mat4, Quat, Vec3};
 
 pub use automata_renderer::MAX_JOINTS;
 
@@ -210,6 +210,16 @@ impl Channel {
     }
 }
 
+/// A named moment in a clip that scripts hear about (a footstep, the
+/// frame a sword hits). Set in the model's import settings.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClipEvent {
+    /// Seconds into the clip.
+    pub time: f32,
+    /// The event's name (`"footstep"`).
+    pub name: String,
+}
+
 /// A named animation: channels over a duration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Clip {
@@ -219,6 +229,8 @@ pub struct Clip {
     pub duration: f32,
     /// What moves.
     pub channels: Vec<Channel>,
+    /// Events, by time.
+    pub events: Vec<ClipEvent>,
 }
 
 impl Clip {
@@ -240,7 +252,36 @@ impl Clip {
             name,
             duration: self.duration,
             channels,
+            events: Vec::new(),
         })
+    }
+
+    /// Node `node`'s animated translation at `time`, or `None` when the
+    /// clip doesn't move it.
+    #[must_use]
+    pub fn translation_at(&self, node: usize, time: f32) -> Option<Vec3> {
+        self.channels
+            .iter()
+            .find(|c| c.node == node && c.property == Property::Translation)
+            .and_then(|c| c.sample(time))
+            .map(|v| Vec3::new(v[0], v[1], v[2]))
+    }
+
+    /// Adds an event at `time` (clamped to the clip), keeping them by time.
+    pub fn add_event(&mut self, time: f32, name: impl Into<String>) {
+        let time = if time.is_finite() {
+            time.clamp(0.0, self.duration)
+        } else {
+            0.0
+        };
+        let at = self.events.partition_point(|e| e.time <= time);
+        self.events.insert(
+            at,
+            ClipEvent {
+                time,
+                name: name.into(),
+            },
+        );
     }
 
     /// Writes the clip's values at `time` (seconds, clamped to the clip)
@@ -263,6 +304,95 @@ impl Clip {
                     }
                 }
             }
+        }
+    }
+}
+
+/// How a clip carries its character across the ground (root motion): the
+/// sideways and forward movement of its top moving bone, which a game can
+/// take out of the pose and apply to the entity instead.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClipMotion {
+    /// The bone: the clip's highest node with a translation channel.
+    pub node: usize,
+    /// From the bone's parent space to model space (import settings
+    /// included).
+    to_model: Mat3,
+    from_model: Mat3,
+    /// The bone's translation at the clip's start.
+    start: Vec3,
+}
+
+impl ClipMotion {
+    /// The motion of `clip` on `rig`, or `None` when it moves no bone.
+    #[must_use]
+    pub fn of(rig: &Rig, clip: &Clip) -> Option<Self> {
+        let depth = |mut n: usize| {
+            let mut d = 0;
+            while let Some(p) = rig.nodes.get(n).and_then(|node| node.parent) {
+                n = p;
+                d += 1;
+            }
+            d
+        };
+        let node = clip
+            .channels
+            .iter()
+            .filter(|c| c.property == Property::Translation && c.node < rig.nodes.len())
+            .map(|c| c.node)
+            .min_by_key(|&n| depth(n))?;
+        let mut parent = Mat4::IDENTITY;
+        let mut at = rig.nodes[node].parent;
+        while let Some(p) = at {
+            parent = rig.nodes[p].rest.matrix() * parent;
+            at = rig.nodes[p].parent;
+        }
+        let to_model = Mat3::from_mat4(rig.import * parent);
+        if to_model.determinant().abs() < 1e-12 {
+            return None;
+        }
+        Some(Self {
+            node,
+            to_model,
+            from_model: to_model.inverse(),
+            start: clip.translation_at(node, 0.0)?,
+        })
+    }
+
+    /// How far across the ground (model space, `y` = 0) the bone is at
+    /// `time`, from where it started.
+    #[must_use]
+    pub fn offset(&self, clip: &Clip, time: f32) -> Vec3 {
+        let Some(t) = clip.translation_at(self.node, time) else {
+            return Vec3::ZERO;
+        };
+        let d = self.to_model * (t - self.start);
+        Vec3::new(d.x, 0.0, d.z)
+    }
+
+    /// Takes the ground movement at `time` out of `pose`, so the bone
+    /// stays over the entity's origin (up and down movement is kept).
+    pub fn pin(&self, clip: &Clip, time: f32, pose: &mut Pose) {
+        let offset = self.offset(clip, time);
+        if let Some(trs) = pose.0.get_mut(self.node) {
+            trs.translation -= self.from_model * offset;
+        }
+    }
+
+    /// The ground movement (model space) of a playhead going from `from`
+    /// by `advance` seconds (negative backwards) through `clip`: across
+    /// the wraps when it loops, up to an end otherwise.
+    #[must_use]
+    pub fn travel(&self, clip: &Clip, from: f32, advance: f32, looping: bool) -> Vec3 {
+        let d = clip.duration;
+        if looping && d > 0.0 {
+            let unwrapped = from + advance;
+            let laps = (unwrapped / d).floor();
+            let to = unwrapped - laps * d;
+            self.offset(clip, to) - self.offset(clip, from) + self.offset(clip, d) * laps
+        } else {
+            let to = (from + advance).clamp(0.0, d.max(0.0));
+            self.offset(clip, to) - self.offset(clip, from)
         }
     }
 }
@@ -406,6 +536,101 @@ impl PartSkin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A rig whose `hips` (under an `armature` turned 90° about X and
+    /// scaled by 0.01, as Mixamo exports are) walks 100 units along the
+    /// armature's Y over 2 s while bobbing along its Z.
+    fn walker() -> (Rig, Clip) {
+        let armature = Trs {
+            translation: Vec3::ZERO,
+            rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+            scale: Vec3::splat(0.01),
+        };
+        let clip = Clip {
+            name: "Walk".into(),
+            duration: 2.0,
+            channels: vec![Channel {
+                node: 1,
+                property: Property::Translation,
+                interpolation: Interpolation::Linear,
+                times: vec![0.0, 1.0, 2.0],
+                values: vec![0.0, 0.0, 90.0, 0.0, 50.0, 80.0, 0.0, 100.0, 90.0],
+            }],
+            events: Vec::new(),
+        };
+        let rig = Rig {
+            nodes: vec![
+                RigNode {
+                    name: "armature".into(),
+                    parent: None,
+                    rest: armature,
+                },
+                RigNode {
+                    name: "hips".into(),
+                    parent: Some(0),
+                    rest: Trs::IDENTITY,
+                },
+            ],
+            joints: vec![(1, Mat4::IDENTITY)],
+            import: Mat4::IDENTITY,
+            clips: vec![clip.clone()],
+            springs: crate::springs::Springs::default(),
+        };
+        (rig, clip)
+    }
+
+    #[test]
+    fn clip_motion_measures_ground_travel_in_model_space() {
+        let (rig, clip) = walker();
+        let motion = ClipMotion::of(&rig, &clip).expect("the hips move");
+        assert_eq!(motion.node, 1);
+        // Armature +Y is model -Z after the turn; 100 units are 1 m. The
+        // bob (armature Z, model Y) isn't ground travel.
+        let at = |t| motion.offset(&clip, t);
+        assert!(at(0.0).abs_diff_eq(Vec3::ZERO, 1e-6));
+        assert!(
+            at(1.0).abs_diff_eq(Vec3::new(0.0, 0.0, -0.5), 1e-5),
+            "{}",
+            at(1.0)
+        );
+        // Travel across a loop: from 1.5 s on by 1 s ends at 0.5 s of the
+        // next lap: 0.25 m to the end, then 0.25 m more.
+        let lap = motion.travel(&clip, 1.5, 1.0, true);
+        assert!(lap.abs_diff_eq(Vec3::new(0.0, 0.0, -0.5), 1e-5), "{lap}");
+        // Three whole laps, and backwards; without looping it stops at the end.
+        assert!(motion
+            .travel(&clip, 0.0, 6.0, true)
+            .abs_diff_eq(Vec3::new(0.0, 0.0, -3.0), 1e-4));
+        assert!(motion
+            .travel(&clip, 0.5, -1.0, true)
+            .abs_diff_eq(Vec3::new(0.0, 0.0, 0.5), 1e-5));
+        assert!(motion
+            .travel(&clip, 1.5, 5.0, false)
+            .abs_diff_eq(Vec3::new(0.0, 0.0, -0.25), 1e-5));
+
+        // Pinned, the hips keep their bob but stay over the origin.
+        let mut pose = rig.rest_pose();
+        clip.sample_into(1.0, &mut pose);
+        motion.pin(&clip, 1.0, &mut pose);
+        let hips = rig.globals(&pose)[1].w_axis.truncate();
+        assert!(hips.abs_diff_eq(Vec3::new(0.0, 0.8, 0.0), 1e-5), "{hips}");
+    }
+
+    #[test]
+    fn clips_without_moving_bones_have_no_motion_and_events_stay_sorted() {
+        let (rig, mut clip) = walker();
+        clip.channels[0].property = Property::Scale;
+        assert_eq!(ClipMotion::of(&rig, &clip), None);
+        clip.add_event(1.5, "b");
+        clip.add_event(0.2, "a");
+        clip.add_event(9.0, "end");
+        let names: Vec<(f32, &str)> = clip
+            .events
+            .iter()
+            .map(|e| (e.time, e.name.as_str()))
+            .collect();
+        assert_eq!(names, [(0.2, "a"), (1.5, "b"), (2.0, "end")]);
+    }
 
     fn channel(property: Property, interpolation: Interpolation, values: Vec<f32>) -> Channel {
         Channel {

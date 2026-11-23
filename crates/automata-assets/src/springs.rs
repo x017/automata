@@ -218,6 +218,7 @@ mod tests {
                 name: "Run".into(),
                 duration: 1.0,
                 channels: vec![key(0), key(1)],
+                events: Vec::new(),
             }],
             springs: Springs::default(),
         };

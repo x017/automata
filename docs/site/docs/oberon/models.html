@@ -98,7 +98,7 @@ model, so the model's internal references keep working.</li><li>A model that's a
 <strong>Animation</strong> component set to the model's idle clip (the first clip with
 "idle" in its name, or else the first clip). Add one by hand with
 <strong>Add Component → Animation</strong>.</p>
-<div class="table"><table><thead><tr><th>Row</th><th>What it does</th></tr></thead><tbody><tr><td><strong>Clip</strong></td><td>The clip played when the game starts. The menu lists the model's clips, with <strong>None</strong> for the rest pose. It turns red if the model has no clip of that name, or no animations at all.</td></tr><tr><td><strong>Speed</strong></td><td>Playback rate: 1 is as authored, 0.5 half speed, negative backwards.</td></tr><tr><td><strong>Loop</strong></td><td>Off plays the clip once and holds its last frame (a character that sits down stays seated).</td></tr><tr><td><strong>Play On Start</strong></td><td>Off holds the first frame until a script calls <code>play</code>.</td></tr><tr><td><strong>Preview</strong></td><td>Plays the clip in the scene view without pressing Play. The button plays and pauses it. Drag the time bar to scrub, which pauses it on that frame. The preview follows Speed and Loop, and stops when you select something else.</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Row</th><th>What it does</th></tr></thead><tbody><tr><td><strong>Clip</strong></td><td>The clip played when the game starts. The menu lists the model's clips, with <strong>None</strong> for the rest pose. It turns red if the model has no clip of that name, or no animations at all.</td></tr><tr><td><strong>Speed</strong></td><td>Playback rate: 1 is as authored, 0.5 half speed, negative backwards.</td></tr><tr><td><strong>Loop</strong></td><td>Off plays the clip once and holds its last frame (a character that sits down stays seated).</td></tr><tr><td><strong>Play On Start</strong></td><td>Off holds the first frame until a script calls <code>play</code>.</td></tr><tr><td><strong>Root Motion</strong></td><td>The clip's own travel across the ground moves the entity. See <a href="#root-motion">Root motion</a>.</td></tr><tr><td><strong>Preview</strong></td><td>Plays the clip in the scene view without pressing Play. The button plays and pauses it. Drag the time bar to scrub, which pauses it on that frame. Yellow ticks on the bar mark the clip's <a href="#animation-events">events</a>; hover one for its name. The preview follows Speed and Loop, and stops when you select something else.</td></tr></tbody></table></div>
 <p>While you edit, an animated model holds its clip's first frame, so you place
 it in its real pose instead of the T-pose. Press Play and every Animation
 with <strong>Play On Start</strong> starts.</p>
@@ -119,7 +119,7 @@ mid-fade blends on from the current pose. <code>loop=False</code> plays once.
 <code>anim.playing</code> turns False when it ends, so you can tell when to move on.
 <code>speed=</code> sets the rate, and <code>restart=True</code> starts a clip that's already
 playing over.</p>
-<div class="table"><table><thead><tr><th>Member</th><th>Meaning</th></tr></thead><tbody><tr><td><code>play(clip, loop=True, fade=0.0, speed=None, restart=False)</code></td><td>Switch clips. An unknown name raises <code>KeyError</code> (names are case-sensitive; see <code>clips</code>)</td></tr><tr><td><code>stop(fade=0.0)</code></td><td>Blend back to the rest pose</td></tr><tr><td><code>clip</code>, <code>time</code>, <code>duration</code></td><td>The clip, seconds into it, and its length. Assign <code>time</code> to jump</td></tr><tr><td><code>playing</code>, <code>looping</code>, <code>speed</code></td><td>Assign <code>speed</code> to change it mid-clip</td></tr><tr><td><code>clips</code>, <code>length(clip)</code></td><td>Every clip name, in file order, and any clip's length</td></tr><tr><td><code>springs</code>, <code>reset_springs()</code></td><td>Whether the model has <a href="#spring-bones">spring bones</a>, and put them back at rest</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Member</th><th>Meaning</th></tr></thead><tbody><tr><td><code>play(clip, loop=True, fade=0.0, speed=None, restart=False)</code></td><td>Switch clips. An unknown name raises <code>KeyError</code> (names are case-sensitive; see <code>clips</code>)</td></tr><tr><td><code>stop(fade=0.0)</code></td><td>Blend back to the rest pose</td></tr><tr><td><code>clip</code>, <code>time</code>, <code>duration</code></td><td>The clip, seconds into it, and its length. Assign <code>time</code> to jump</td></tr><tr><td><code>playing</code>, <code>looping</code>, <code>speed</code></td><td>Assign <code>speed</code> to change it mid-clip</td></tr><tr><td><code>clips</code>, <code>length(clip)</code></td><td>Every clip name, in file order, and any clip's length</td></tr><tr><td><code>springs</code>, <code>reset_springs()</code></td><td>Whether the model has <a href="#spring-bones">spring bones</a>, and put them back at rest</td></tr><tr><td><code>root_motion</code></td><td>Whether the clip's travel moves the entity. Assign to switch it</td></tr></tbody></table></div>
 <p>Reads see your own requests made earlier in the frame. The pose updates
 after every script has run.</p>
 <h3 id="from-python">From Python<a class="anchor" href="#from-python" aria-label="Link to this section">#</a></h3>
@@ -131,6 +131,59 @@ after every script has run.</p>
 )</code></pre></div>
 <p>In a <code>Game</code> update, <code>ctx.scene[&quot;Robot&quot;].animation</code> has the same members. See
 the <a href="../api-reference.html#animation">API reference</a>.</p>
+<h3 id="animation-events">Animation events<a class="anchor" href="#animation-events" aria-label="Link to this section">#</a></h3>
+<p>An event is a named moment in a clip: a foot touching the ground, the
+frame a sword connects, the instant a jump leaves the floor. Scripts hear
+the event when the playhead passes that moment. Then a footstep sound or
+a hit lands on the exact frame, whatever speed the clip plays at.</p>
+<p>Mark events in the model's import settings, next to the model:</p>
+<div class="codeblock" data-lang="ron"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>events: [
+    (clip: <span class="tok-s">&quot;Run&quot;</span>, time: <span class="tok-n">0.18</span>, name: <span class="tok-s">&quot;footstep&quot;</span>),
+    (clip: <span class="tok-s">&quot;Run&quot;</span>, time: <span class="tok-n">0.54</span>, name: <span class="tok-s">&quot;footstep&quot;</span>),
+    (clip: <span class="tok-s">&quot;emotes:Leap&quot;</span>, time: <span class="tok-n">0.85</span>, name: <span class="tok-s">&quot;land&quot;</span>),
+],</code></pre></div>
+<p><code>clip</code> is the exact clip name (<a href="#clips-from-other-files">borrowed clips</a>
+too) and <code>time</code> is seconds into it. Saving the file reloads the model, and
+the events appear as ticks on the Animation's <strong>Preview</strong> bar. A clip played
+once also fires <code>end</code> when it finishes, without your marking it.</p>
+<p>There are two ways to listen. The entity's own script can define
+<code>on_animation_event</code>:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_animation_event</span>(entity, ctx, name):
+    <span class="tok-k">if</span> name == <span class="tok-s">&quot;land&quot;</span>:
+        ctx.particles.burst(<span class="tok-s">&quot;dust&quot;</span>, entity, count=<span class="tok-n">24</span>)</code></pre></div>
+<p>Any script can also subscribe to the channel
+<code>&lt;entity name&gt;:animation:&lt;event&gt;</code>. <code>*</code> and <code>?</code> work as wildcards, so one
+subscription can cover every entity:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">kick_up_dust</span>(msg):
+    msg.ctx.particles.burst(<span class="tok-s">&quot;dust&quot;</span>, msg.entity, count=<span class="tok-n">5</span>)
+
+<span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    ctx.subscribe(<span class="tok-s">&quot;*:animation:footstep&quot;</span>, kick_up_dust)   <span class="tok-c"># every runner</span>
+    ctx.subscribe(<span class="tok-s">&quot;Player:animation:hit&quot;</span>, deal_damage)     <span class="tok-c"># just one</span></code></pre></div>
+<p>The function gets a message with <code>channel</code>, <code>entity</code>, <code>event</code>, <code>clip</code> and
+<code>ctx</code>. Subscribing the same function again does nothing, so it's safe in
+<code>update</code>. A subscription ends when the subscribing entity goes, or when you
+call <code>ctx.unsubscribe(pattern)</code> or <code>cancel()</code> on what <code>subscribe</code>
+returned. Your own messages work the same way: `ctx.publish("door:open",
+data)` reaches every subscriber at once. Events arrive at the start of the
+next frame, before <code>update</code>, in the order they happened. A clip that's
+fading out fires none, and jumping with <code>time =</code> skips the events in
+between.</p>
+<h3 id="root-motion">Root motion<a class="anchor" href="#root-motion" aria-label="Link to this section">#</a></h3>
+<p>Many animations move the character as they play: a lunge, a dodge roll,
+a vault. The hips travel in the clip, but the entity stays where it was,
+so when the clip ends the model snaps back. Turn on <strong>Root Motion</strong> in the
+Animation (or <code>at.Animation(..., root_motion=True)</code>, or
+<code>entity.animation.root_motion = True</code> from a script). The clip's travel
+across the ground then moves the entity, and the model stays over it. Up
+and down movement, like a jump's arc, stays in the animation.</p>
+<p><img src="../../../assets/models/root_motion_leap.jpg" alt="Root Motion off: after the leap she snaps back to where she started. On: the clip carries her 2.4 m forward and she stays there." loading="lazy" decoding="async"></p>
+<p>An entity with a <strong>Character Controller</strong> is moved through it, so root
+motion slides along walls and stops at them like any other movement, on top
+of the character's velocity. Without one, the transform moves directly.
+Clips that run on the spot, like most walk and run cycles, have no travel,
+so leaving Root Motion on is harmless. While a clip carries the entity,
+don't also set its position from a script every frame, or the two fight.</p>
 <h2 id="import-settings">Import settings<a class="anchor" href="#import-settings" aria-label="Link to this section">#</a></h2>
 <p>Models from different tools and stores rarely agree on size, facing or
 origin. Instead of fixing every entity that uses a model, fix the model
@@ -319,7 +372,7 @@ the files.</p>
     <footer class="pager"><a class="prev" href="code-editor.html"><small>Previous</small>The code editor</a><a class="next" href="audio.html"><small>Next</small>Audio</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/models.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l3"><a href="#animated-models">Animated models</a></li><li class="l2"><a href="#add-a-model-to-the-scene">Add a model to the scene</a></li><li class="l2"><a href="#the-assets-tab">The Assets tab</a></li><li class="l3"><a href="#what-importing-copies">What importing copies</a></li><li class="l2"><a href="#give-a-model-to-an-existing-entity">Give a model to an existing entity</a></li><li class="l2"><a href="#the-inspector">The Inspector</a></li><li class="l2"><a href="#animation">Animation</a></li><li class="l3"><a href="#from-a-script">From a script</a></li><li class="l3"><a href="#from-python">From Python</a></li><li class="l2"><a href="#import-settings">Import settings</a></li><li class="l2"><a href="#clips-from-other-files">Clips from other files</a></li><li class="l2"><a href="#spring-bones">Spring bones</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#editing-a-model-while-oberon-is-open">Editing a model while Oberon is open</a></li><li class="l2"><a href="#scene-files-and-paths">Scene files and paths</a></li><li class="l2"><a href="#from-python-1">From Python</a></li><li class="l2"><a href="#try-it">Try it</a></li><li class="l2"><a href="#troubleshooting">Troubleshooting</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l3"><a href="#animated-models">Animated models</a></li><li class="l2"><a href="#add-a-model-to-the-scene">Add a model to the scene</a></li><li class="l2"><a href="#the-assets-tab">The Assets tab</a></li><li class="l3"><a href="#what-importing-copies">What importing copies</a></li><li class="l2"><a href="#give-a-model-to-an-existing-entity">Give a model to an existing entity</a></li><li class="l2"><a href="#the-inspector">The Inspector</a></li><li class="l2"><a href="#animation">Animation</a></li><li class="l3"><a href="#from-a-script">From a script</a></li><li class="l3"><a href="#from-python">From Python</a></li><li class="l3"><a href="#animation-events">Animation events</a></li><li class="l3"><a href="#root-motion">Root motion</a></li><li class="l2"><a href="#import-settings">Import settings</a></li><li class="l2"><a href="#clips-from-other-files">Clips from other files</a></li><li class="l2"><a href="#spring-bones">Spring bones</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#editing-a-model-while-oberon-is-open">Editing a model while Oberon is open</a></li><li class="l2"><a href="#scene-files-and-paths">Scene files and paths</a></li><li class="l2"><a href="#from-python-1">From Python</a></li><li class="l2"><a href="#try-it">Try it</a></li><li class="l2"><a href="#troubleshooting">Troubleshooting</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

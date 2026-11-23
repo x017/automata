@@ -31,7 +31,7 @@ use std::time::SystemTime;
 use automata_renderer::{Mesh, MeshData, Renderer, Texture};
 use glam::Vec3;
 
-pub use anim::{Clip, PartSkin, Pose, Rig};
+pub use anim::{Clip, ClipEvent, ClipMotion, PartSkin, Pose, Rig};
 
 /// File extensions [`load`] understands (lowercase, without the dot).
 pub const MODEL_EXTENSIONS: [&str; 3] = ["glb", "gltf", "obj"];
@@ -473,6 +473,18 @@ fn load_uncached(path: &Path) -> Result<(Model, Vec<PathBuf>), ModelError> {
                 tracing::warn!("{}: clips from {}: {why}", path.display(), source.file);
             }
         }
+        for mark in &settings.events {
+            if let Some(clip) = rig.clips.iter_mut().find(|c| c.name == mark.clip) {
+                clip.add_event(mark.time, mark.name.clone());
+            } else {
+                tracing::warn!(
+                    "{}: event {:?} is on clip {:?}, which the model doesn't have",
+                    path.display(),
+                    mark.name,
+                    mark.clip
+                );
+            }
+        }
         rig.springs = settings.springs;
     } else if let Some(source) = settings.clips.first() {
         tracing::warn!(
@@ -874,6 +886,11 @@ mod tests {
             .into_iter()
             .map(import::ClipFile::new)
             .collect(),
+            events: vec![
+                import::EventMark::new("greet:Bye", 0.75, "wave"),
+                import::EventMark::new("wave", 0.25, "lift"),
+                import::EventMark::new("Missing", 0.1, "lost"),
+            ],
             ..import::ImportSettings::default()
         };
         import::write_settings(&model, &settings).unwrap();
@@ -889,6 +906,18 @@ mod tests {
             rig.clip("wave").unwrap().channels[0].node,
             rig.node("arm").unwrap()
         );
+        // Events land on clips by exact name, borrowed ones included.
+        let events = |clip: &str| -> Vec<(f32, String)> {
+            rig.clip(clip)
+                .unwrap()
+                .events
+                .iter()
+                .map(|e| (e.time, e.name.clone()))
+                .collect()
+        };
+        assert_eq!(events("greet:Bye"), [(0.75, "wave".to_string())]);
+        assert_eq!(events("wave"), [(0.25, "lift".to_string())]);
+        assert_eq!(events("greet:Hi"), []);
         // Every clip file is watched, even the broken and missing ones.
         for file in [
             "anims/Shrug.gltf",

@@ -296,6 +296,8 @@ pub enum Flag {
     AnimLoop,
     /// The animation's clip plays when the game starts.
     AnimPlayOnStart,
+    /// The clip's travel moves the entity (root motion).
+    AnimRootMotion,
 }
 
 /// An enumerated property of an entity (cycled by a dropdown-style button).
@@ -1011,6 +1013,7 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::AudioSpatial => data.audio_source.as_ref()?.spatial,
         Flag::AnimLoop => data.animation.as_ref()?.looping,
         Flag::AnimPlayOnStart => data.animation.as_ref()?.play_on_start,
+        Flag::AnimRootMotion => data.animation.as_ref()?.root_motion,
     })
 }
 
@@ -1091,17 +1094,19 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
                 None => return false,
             }
         }
-        Flag::AnimLoop | Flag::AnimPlayOnStart => match &mut data.animation {
-            Some(a) => {
-                let slot = if flag == Flag::AnimLoop {
-                    &mut a.looping
-                } else {
-                    &mut a.play_on_start
-                };
-                *slot = !*slot;
+        Flag::AnimLoop | Flag::AnimPlayOnStart | Flag::AnimRootMotion => {
+            match &mut data.animation {
+                Some(a) => {
+                    let slot = match flag {
+                        Flag::AnimLoop => &mut a.looping,
+                        Flag::AnimPlayOnStart => &mut a.play_on_start,
+                        _ => &mut a.root_motion,
+                    };
+                    *slot = !*slot;
+                }
+                None => return false,
             }
-            None => return false,
-        },
+        }
     }
     true
 }

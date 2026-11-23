@@ -115,7 +115,9 @@ def build():
             .add(at.MeshRenderer.sphere(0.5, color=LEAVES, roughness=0.9))
         )
 
-    scene.add(runner("Runner", (0.0, 0.0, 3.0), 180, at.Animation("Idle"), "scripts/player.py"))
+    # Root motion: her Leap clip carries her forward (Walk and Run stay in place).
+    scene.add(runner("Runner", (0.0, 0.0, 3.0), 180, at.Animation("Idle", root_motion=True),
+                     "scripts/player.py"))
     scene.add(runner("Jogger", JOG_START, 90, at.Animation("Idle"), "scripts/jogger.py"))
     scene.add(
         runner(

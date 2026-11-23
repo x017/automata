@@ -11,7 +11,9 @@ use crate::scene::WriteQueue;
 /// Animation. The model is the entity's `MeshRenderer.model(...)`; `clip`
 /// names one of its animations (empty: the rest pose). `play_on_start`
 /// plays it as the scene starts; off, the model holds the clip's first
-/// frame until a script plays something.
+/// frame until a script plays something. `root_motion` lets the clip's own
+/// travel across the ground move the entity (through its character
+/// controller, if it has one) instead of sliding the model away from it.
 ///
 /// ```python
 /// robot = at.Entity("Robot").add(at.Transform()).add(
@@ -27,8 +29,14 @@ pub struct PyAnimation {
 impl PyAnimation {
     /// Creates an animation component.
     #[new]
-    #[pyo3(signature = (clip="", speed=1.0, looping=true, play_on_start=true))]
-    fn new(clip: &str, speed: f32, looping: bool, play_on_start: bool) -> PyResult<Self> {
+    #[pyo3(signature = (clip="", speed=1.0, looping=true, play_on_start=true, root_motion=false))]
+    fn new(
+        clip: &str,
+        speed: f32,
+        looping: bool,
+        play_on_start: bool,
+        root_motion: bool,
+    ) -> PyResult<Self> {
         if !speed.is_finite() {
             return Err(PyValueError::new_err("speed must be a finite number"));
         }
@@ -38,8 +46,15 @@ impl PyAnimation {
                 speed,
                 looping,
                 play_on_start,
+                root_motion,
             },
         })
+    }
+
+    /// Whether the clip's travel moves the entity (root motion).
+    #[getter]
+    fn root_motion(&self) -> bool {
+        self.inner.root_motion
     }
 
     /// The clip played on start ("" for the rest pose).
@@ -75,11 +90,16 @@ impl PyAnimation {
     fn __repr__(&self) -> String {
         let py_bool = |b: bool| if b { "True" } else { "False" };
         format!(
-            "Animation({:?}, speed={}, looping={}, play_on_start={})",
+            "Animation({:?}, speed={}, looping={}, play_on_start={}{})",
             self.inner.clip,
             self.inner.speed,
             py_bool(self.inner.looping),
             py_bool(self.inner.play_on_start),
+            if self.inner.root_motion {
+                ", root_motion=True"
+            } else {
+                ""
+            },
         )
     }
 }
@@ -223,6 +243,31 @@ impl PyAnimationRef {
     /// noticed on their own; this is for small ones.
     fn reset_springs(&self) {
         self.push(AnimationCommand::ResetSprings);
+    }
+
+    /// Whether the clip's travel moves the entity (root motion). Setting
+    /// it applies after the update callback.
+    #[getter]
+    fn root_motion(&self) -> bool {
+        self.state.root_motion
+    }
+
+    #[setter]
+    fn set_root_motion(&self, on: bool) {
+        self.push(AnimationCommand::RootMotion(on));
+    }
+
+    /// The latest animation events the playhead passed, oldest first:
+    /// `(seq, clip, name)`, `seq` counting up per entity. The script
+    /// runner turns them into `on_animation_event` calls and channel
+    /// messages; most code wants those instead.
+    #[getter]
+    fn recent_events(&self) -> Vec<(u64, String, String)> {
+        self.state
+            .events
+            .iter()
+            .map(|e| (e.seq, e.clip.clone(), e.name.clone()))
+            .collect()
     }
 
     /// A clip's length in seconds (default: the current clip's). Raises

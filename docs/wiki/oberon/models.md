@@ -127,7 +127,8 @@ Add a model that has animations and Oberon gives the entity an
 | **Speed** | Playback rate: 1 is as authored, 0.5 half speed, negative backwards. |
 | **Loop** | Off plays the clip once and holds its last frame (a character that sits down stays seated). |
 | **Play On Start** | Off holds the first frame until a script calls `play`. |
-| **Preview** | Plays the clip in the scene view without pressing Play. The button plays and pauses it. Drag the time bar to scrub, which pauses it on that frame. The preview follows Speed and Loop, and stops when you select something else. |
+| **Root Motion** | The clip's own travel across the ground moves the entity. See [Root motion](#root-motion). |
+| **Preview** | Plays the clip in the scene view without pressing Play. The button plays and pauses it. Drag the time bar to scrub, which pauses it on that frame. Yellow ticks on the bar mark the clip's [events](#animation-events); hover one for its name. The preview follows Speed and Loop, and stops when you select something else. |
 
 While you edit, an animated model holds its clip's first frame, so you place
 it in its real pose instead of the T-pose. Press Play and every Animation
@@ -164,6 +165,7 @@ playing over.
 | `playing`, `looping`, `speed` | Assign `speed` to change it mid-clip |
 | `clips`, `length(clip)` | Every clip name, in file order, and any clip's length |
 | `springs`, `reset_springs()` | Whether the model has [spring bones](#spring-bones), and put them back at rest |
+| `root_motion` | Whether the clip's travel moves the entity. Assign to switch it |
 
 Reads see your own requests made earlier in the frame. The pose updates
 after every script has run.
@@ -181,6 +183,79 @@ robot = (
 
 In a `Game` update, `ctx.scene["Robot"].animation` has the same members. See
 the [API reference](../api-reference.md#animation).
+
+### Animation events
+
+An event is a named moment in a clip: a foot touching the ground, the
+frame a sword connects, the instant a jump leaves the floor. Scripts hear
+the event when the playhead passes that moment. Then a footstep sound or
+a hit lands on the exact frame, whatever speed the clip plays at.
+
+Mark events in the model's import settings, next to the model:
+
+```ron
+events: [
+    (clip: "Run", time: 0.18, name: "footstep"),
+    (clip: "Run", time: 0.54, name: "footstep"),
+    (clip: "emotes:Leap", time: 0.85, name: "land"),
+],
+```
+
+`clip` is the exact clip name ([borrowed clips](#clips-from-other-files)
+too) and `time` is seconds into it. Saving the file reloads the model, and
+the events appear as ticks on the Animation's **Preview** bar. A clip played
+once also fires `end` when it finishes, without your marking it.
+
+There are two ways to listen. The entity's own script can define
+`on_animation_event`:
+
+```python
+def on_animation_event(entity, ctx, name):
+    if name == "land":
+        ctx.particles.burst("dust", entity, count=24)
+```
+
+Any script can also subscribe to the channel
+`<entity name>:animation:<event>`. `*` and `?` work as wildcards, so one
+subscription can cover every entity:
+
+```python
+def kick_up_dust(msg):
+    msg.ctx.particles.burst("dust", msg.entity, count=5)
+
+def start(entity, ctx):
+    ctx.subscribe("*:animation:footstep", kick_up_dust)   # every runner
+    ctx.subscribe("Player:animation:hit", deal_damage)     # just one
+```
+
+The function gets a message with `channel`, `entity`, `event`, `clip` and
+`ctx`. Subscribing the same function again does nothing, so it's safe in
+`update`. A subscription ends when the subscribing entity goes, or when you
+call `ctx.unsubscribe(pattern)` or `cancel()` on what `subscribe`
+returned. Your own messages work the same way: `ctx.publish("door:open",
+data)` reaches every subscriber at once. Events arrive at the start of the
+next frame, before `update`, in the order they happened. A clip that's
+fading out fires none, and jumping with `time =` skips the events in
+between.
+
+### Root motion
+
+Many animations move the character as they play: a lunge, a dodge roll,
+a vault. The hips travel in the clip, but the entity stays where it was,
+so when the clip ends the model snaps back. Turn on **Root Motion** in the
+Animation (or `at.Animation(..., root_motion=True)`, or
+`entity.animation.root_motion = True` from a script). The clip's travel
+across the ground then moves the entity, and the model stays over it. Up
+and down movement, like a jump's arc, stays in the animation.
+
+![Root Motion off: after the leap she snaps back to where she started. On: the clip carries her 2.4 m forward and she stays there.](../../assets/models/root_motion_leap.jpg)
+
+An entity with a **Character Controller** is moved through it, so root
+motion slides along walls and stops at them like any other movement, on top
+of the character's velocity. Without one, the transform moves directly.
+Clips that run on the spot, like most walk and run cycles, have no travel,
+so leaving Root Motion on is harmless. While a clip carries the entity,
+don't also set its position from a script every frame, or the two fight.
 
 ## Import settings
 

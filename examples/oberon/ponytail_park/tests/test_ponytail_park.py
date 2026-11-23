@@ -45,8 +45,9 @@ def test_emotes_come_from_their_own_file_and_play_to_the_end_then_idle():
     def after(ctx):
         anim = ctx.scene["Runner"].animation
         if not seen:
-            # The model's clips plus the two borrowed from emotes.glb.
-            assert anim.clips == ["Idle", "Walk", "Run", "emotes:Wave", "emotes:Cheer"]
+            # The model's clips plus the three borrowed from emotes.glb.
+            assert anim.clips == ["Idle", "Walk", "Run", "emotes:Wave", "emotes:Cheer",
+                                  "emotes:Leap"]
             assert anim.length("emotes:Wave") == pytest.approx(2.0, abs=0.04)
             anim.play("emotes:Wave", loop=False)
         seen.append((anim.clip, anim.playing))
@@ -55,7 +56,7 @@ def test_emotes_come_from_their_own_file_and_play_to_the_end_then_idle():
     # The player script lets the emote finish (2 s), then goes back to Idle.
     assert seen[10] == seen[110] == ("emotes:Wave", True)
     assert seen[-1] == ("Idle", True)
-    assert set(player.EMOTES.values()) == {"emotes:Wave", "emotes:Cheer"}
+    assert set(player.EMOTES.values()) == {"emotes:Wave", "emotes:Cheer", "emotes:Leap"}
 
 
 def test_the_runner_has_spring_bones_and_every_copy_animates():
@@ -71,7 +72,7 @@ def test_the_runner_has_spring_bones_and_every_copy_animates():
         clip, playing, springs, clips = seen[name]
         assert playing, name
         assert springs, f"{name}'s model has spring bones"
-        assert clips == {"Idle", "Walk", "Run", "emotes:Wave", "emotes:Cheer"}
+        assert clips == {"Idle", "Walk", "Run", "emotes:Wave", "emotes:Cheer", "emotes:Leap"}
     assert seen["Stroller"][0] == "Walk"
     assert seen["Spectator"][0] == "Idle"
 
@@ -142,3 +143,71 @@ def test_scripts_can_put_the_springs_back_at_rest():
 
     frames = at.run_scene(LEVEL, headless=True, max_frames=10, update=after, fixed_delta=1 / 60)
     assert frames == 10 and all(calls)
+
+
+def test_root_motion_carries_her_through_the_leap():
+    seen = []
+
+    def after(ctx):
+        runner = ctx.scene["Runner"]
+        anim = runner.animation
+        if len(seen) == 5:
+            assert anim.root_motion
+            anim.play("emotes:Leap", loop=False)
+        seen.append((runner.transform.position, anim.clip))
+
+    at.run_scene(LEVEL, headless=True, max_frames=120, update=after, fixed_delta=1 / 60)
+    (x0, y0, z0), _ = seen[5]
+    (x1, y1, z1), _ = seen[-1]
+    # She faces -Z (yaw 180), so the 2.4 m forward is towards -Z.
+    assert z0 - z1 == pytest.approx(make_runner.LEAP, abs=0.05)
+    assert x1 == pytest.approx(x0, abs=1e-3) and y1 == pytest.approx(y0, abs=1e-6)
+    # Back to Idle after landing, where she landed.
+    assert seen[-1][1] == "Idle"
+
+
+LISTENER = """
+def start(entity, ctx):
+    ctx.subscribe("Jogger:animation:footstep", step)
+    ctx.subscribe("*:animation:land", landed)
+
+
+def step(msg):
+    msg.ctx.scene["Ear"].attributes["steps"] += 1
+
+
+def landed(msg):
+    msg.ctx.scene["Ear"].attributes["heard"] = msg.channel + " " + msg.clip
+"""
+
+
+def test_scripts_hear_animation_events_on_channels(tmp_path):
+    import shutil
+
+    # Scripts and models are found next to the level.
+    for folder in ("scripts", "models"):
+        shutil.copytree(os.path.join(GAME, folder), tmp_path / folder)
+    (tmp_path / "listener.py").write_text(LISTENER)
+    scene = build_level.build()
+    ear = at.Entity("Ear").add(at.Transform())
+    ear.attributes["steps"] = 0
+    ear.attributes["heard"] = ""
+    ear.script = str(tmp_path / "listener.py")
+    scene.add(ear)
+    level = tmp_path / "level.ron"
+    scene.save(str(level))
+    seen = []
+
+    def after(ctx):
+        if len(seen) == 10:
+            ctx.scene["Runner"].animation.play("emotes:Leap", loop=False)
+        jog = ctx.scene["Jogger"].animation
+        seen.append((dict(ctx.scene["Ear"].attributes.to_dict()), jog.clip,
+                     [name for _, _, name in jog.recent_events]))
+
+    at.run_scene(str(level), headless=True, max_frames=170, update=after, fixed_delta=1 / 60)
+    attrs, clip, events = seen[-1]
+    assert clip == "Run" and "footstep" in events
+    # Run is 0.72 s with two footsteps; she starts running after 1 s.
+    assert 4 <= attrs["steps"] <= 7, attrs
+    assert attrs["heard"] == "Runner:animation:land emotes:Leap"

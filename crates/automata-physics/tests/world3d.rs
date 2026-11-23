@@ -607,3 +607,75 @@ fn a_missing_model_spawns_no_collider() {
     step_n(&mut physics, &mut scene, 1);
     assert_eq!(physics.collider_count(), 0);
 }
+
+#[test]
+fn root_motion_walks_a_character_into_a_wall_and_stops() {
+    use automata_assets::anim::{Channel, Interpolation, Property, RigNode, Trs};
+    use automata_assets::{Clip, Rig};
+    use automata_scene::{Animator, CharacterMotion};
+
+    // A clip whose root bone walks +X at 2 m/s, looping every second.
+    let rig = Rig {
+        nodes: vec![RigNode {
+            name: "root".into(),
+            parent: None,
+            rest: Trs::IDENTITY,
+        }],
+        joints: vec![(0, glam::Mat4::IDENTITY)],
+        import: glam::Mat4::IDENTITY,
+        clips: vec![Clip {
+            name: "Walk".into(),
+            duration: 1.0,
+            channels: vec![Channel {
+                node: 0,
+                property: Property::Translation,
+                interpolation: Interpolation::Linear,
+                times: vec![0.0, 1.0],
+                values: vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+            }],
+            events: Vec::new(),
+        }],
+        springs: automata_assets::springs::Springs::default(),
+    };
+    let mut animator = Animator::new(std::sync::Arc::new(rig));
+    animator.root_motion = true;
+    animator.play("Walk");
+
+    let mut scene = SceneWorld::new();
+    scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        RigidBody::fixed(),
+        Collider3D::cuboid(40.0, 1.0, 40.0),
+    ));
+    // A wall whose near face is at x = 3.
+    scene.spawn((
+        Transform::from_position(Vec3::new(3.5, 2.0, 0.0)),
+        RigidBody::fixed(),
+        Collider3D::cuboid(1.0, 4.0, 10.0),
+    ));
+    // No CharacterVelocity: the animation alone moves it.
+    let character = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 1.4, 0.0)),
+        RigidBody::kinematic_position(),
+        Collider3D::capsule(0.5, 0.4),
+        CharacterController::new().snap_to_ground(0.5),
+        animator,
+    ));
+
+    let mut physics = PhysicsWorld3D::new();
+    let mut xs = Vec::new();
+    for _ in 0..180 {
+        physics.sync_from_scene(&mut scene);
+        physics.move_characters(&mut scene, DT);
+        physics.step(&mut scene, DT);
+        automata_scene::animate(&mut scene, DT);
+        xs.push(position(&scene, character).x);
+    }
+    assert!(scene.get::<&CharacterMotion>(character).is_ok());
+    // About 2 m/s while free (one frame behind the animation)...
+    assert!((xs[59] - 1.97).abs() < 0.1, "x after 1 s = {}", xs[59]);
+    // ...then held at the wall: x = 3 minus the capsule radius and offset.
+    let x = position(&scene, character).x;
+    assert!((2.4..2.65).contains(&x), "stopped at the wall, x = {x}");
+    assert!((xs[179] - xs[150]).abs() < 1e-3, "and stays there");
+}

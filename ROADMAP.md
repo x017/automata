@@ -397,12 +397,36 @@ gave, red when it gave none; × to remove). Ponytail Park's emotes (1 waves,
 `make_runner.py`. Docs:
 [Models → Clips from other files](docs/wiki/oberon/models.md#clips-from-other-files).
 
-### B3. Animation events and root motion ⬜ M
-NEXT_PLANS #4 phase 3:
-- Per-clip events, published as channels `entity:animation:<event>`:
-  `ctx.subscribe("player_1:animation:footstep", fn)`, with wildcards
-  (`"*:animation:hit"`). `on_animation_event` keeps working.
-- Root motion driving the Character Controller.
+### B3. Animation events and root motion ✅ M
+NEXT_PLANS #4 phase 3. Events are named moments in clips, marked under
+`events` in `<model>.import.ron` (`(clip: "Run", time: 0.18, name:
+"footstep")`, borrowed clips included). They're stored on the `Clip`
+(sorted, clamped). The `Animator` collects the events its playhead passes
+each step: forwards, backwards, across loop wraps, and at exactly the
+start of a fresh play. A one-shot clip fires `end`, and a clip fading out
+fires nothing. They go into a ring of the latest 32 with a per-entity
+`seq`, carried to scripts in `AnimationState.events` (bridge `ev`), so
+skipped bridge frames lose nothing. `script_api` delivers each once,
+at the start of the next frame, to `on_animation_event(entity, ctx, name)`
+and to the channel `<entity>:animation:<event>`. The new channels API is
+`ctx.subscribe(pattern, fn)` with `*`/`?` wildcards, plus `unsubscribe`,
+`publish` and `Subscription.cancel()`. Re-subscribing is a no-op,
+subscribers follow hot reloads, errors report against the subscriber's
+script, and subscriptions end with their entity.
+
+Root motion (`Animation.root_motion`, the Inspector's Root Motion row,
+`entity.animation.root_motion`) uses `ClipMotion`: the shallowest bone
+with a translation channel, measured in model space. Its ground (XZ)
+travel is pinned out of the pose and moves the entity instead, so a jump's
+height stays in the animation. Characters get a `CharacterMotion` that
+`PhysicsWorld3D::move_characters` consumes on top of their velocity, so
+walls stop them. Other entities have their transform moved directly. The
+Preview bar shows event ticks. Ponytail Park: footstep dust from one
+`*:animation:footstep` subscription, and a 3-key Leap (2.4 m, borrowed
+from `emotes.glb`) by root motion. Play sessions now pin model paths to the
+document's folder. Docs:
+[Models → Animation events](docs/wiki/oberon/models.md#animation-events),
+[Models → Root motion](docs/wiki/oberon/models.md#root-motion).
 
 ### B3b. Key store for scripts ⬜ M
 - Read and write engine state by key, Redis style:
@@ -587,7 +611,7 @@ per effort. Reorder any time by telling me.
 | 14 | B1 Animation playback | L | ✅ |
 | 15 | B2 Spring bones | M | ✅ |
 | 16 | B2b Clips from other files | S | ✅ |
-| 17 | B3 Animation events, root motion | M | ⬜ |
+| 17 | B3 Animation events, root motion | M | ✅ |
 | 18 | B3b Key store for scripts | M | ⬜ |
 | 19 | A11 Culling, instancing, LOD | M | ⬜ |
 | 20 | A12 Grass and foliage | L | ⬜ |

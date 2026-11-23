@@ -294,14 +294,16 @@ files. Guide: [Rendering & Lights](guides/rendering-and-lights.md#particles).
 ### Animation
 
 ```python
-at.Animation(clip="", speed=1.0, looping=True, play_on_start=True)
+at.Animation(clip="", speed=1.0, looping=True, play_on_start=True, root_motion=False)
 ```
 
 Plays a clip of the entity's animated model (a glTF with a skeleton or
 animated nodes on its `MeshRenderer.model`). `clip` is the clip played on
 start; `""` shows the rest pose. `speed` is the playback rate (negative plays
 backwards). A clip with `looping=False` plays once and holds its last frame.
-All four are readable properties. Saved in scene files. While the game runs,
+`root_motion=True` lets the clip's travel across the ground move the entity
+(through its Character Controller if it has one) instead of sliding the
+model away from it. All five are readable properties. Saved in scene files. While the game runs,
 `view.animation` controls it (below). Guide:
 [Models → Animation](oberon/models.md#animation).
 
@@ -318,6 +320,13 @@ names it after the file (`anims/Run Fast.glb` gives `"Run Fast"`); a file with
 several gives `"file:Clip"` (`"sword:Slash"`). They're in `anim.clips` and play
 like the model's own. Guide:
 [Models → Clips from other files](oberon/models.md#clips-from-other-files).
+
+Animation events are named moments in clips, set under `events` in the
+import settings (`(clip: "Run", time: 0.18, name: "footstep")`). A clip
+played once also fires `"end"`. `view.animation.recent_events` lists the
+latest as `(seq, clip, name)`, with `seq` counting up per entity. Behaviour
+scripts get them as `on_animation_event` calls and channel messages
+(below). Guide: [Models → Animation events](oberon/models.md#animation-events).
 
 ### Physics components
 
@@ -532,8 +541,9 @@ at.run_scene(path, *, max_frames=None, update=None, **game_options) -> int
 ```
 
 Plays an Oberon scene file with its behaviour scripts:
-`start(entity, ctx)`, `update(entity, ctx)`, `stop(entity, ctx)`. It
-returns the number of frames run.
+`start(entity, ctx)`, `update(entity, ctx)`, `stop(entity, ctx)`, and
+`on_animation_event(entity, ctx, name)` for the entity's own animation
+events. It returns the number of frames run.
 
 | `entity` | |
 |---|---|
@@ -543,7 +553,7 @@ returns the number of frames run.
 | `attributes` | Dict-like, saved in the scene |
 | `camera` | `ScriptCamera` or `None` |
 | `audio` | `play()`, `stop()`, `playing`, `source` |
-| `animation` | `play(clip, loop=True, fade=0.0, speed=None, restart=False)`, `stop(fade=0.0)`, `clip`, `time` (settable), `duration`, `length(clip)`, `playing`, `speed` (settable), `looping`, `clips`, `springs`, `reset_springs()`, or `None` without an Animation. Reads include this frame's requests |
+| `animation` | `play(clip, loop=True, fade=0.0, speed=None, restart=False)`, `stop(fade=0.0)`, `clip`, `time` (settable), `duration`, `length(clip)`, `playing`, `speed` (settable), `looping`, `clips`, `springs`, `reset_springs()`, `root_motion` (settable), or `None` without an Animation. Reads include this frame's requests |
 | `camera_3d` | The camera as a `Camera3D` (get/set) |
 | `view` | The engine's `EntityView` for this frame |
 | `despawn()` | At the end of the frame |
@@ -559,6 +569,9 @@ returns the number of frames run.
 | `audio`, `hud` | One-shot sounds; HUD images, rectangles and text (`hud.text(text, x, y, size=24, color, align, shadow, outline)`) |
 | `camera` | The first `Camera3D` in the scene as a `ScriptCamera` |
 | `events`, `resources`, `screen`, `raw`, `quit()` | Engine extras (`run_scene` only). `screen.measure_text(text, size)` gives text's pixel size |
+| `subscribe(pattern, fn)` | Calls `fn(msg)` for each message on a matching channel: an exact name, or `*` and `?` wildcards. Animation events arrive as `"<entity>:animation:<event>"`. `msg` has `channel`, `data`, `ctx`, and for animation events `entity`, `event` and `clip`. Subscribing the same function again does nothing; the subscription ends with the subscribing entity. Returns a `Subscription` (`cancel()`) |
+| `unsubscribe(pattern, fn=None)` | Ends this script's subscriptions to `pattern` (or the `Subscription` passed); returns how many |
+| `publish(channel, data=None)` | Delivers to every subscriber now; returns how many got it |
 | `log(...)`, `warn(...)` | |
 
 Reads see every write made earlier in the frame; writes apply after all

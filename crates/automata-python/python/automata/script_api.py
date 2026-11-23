@@ -26,7 +26,10 @@ with a ``get(key)`` method returning the start-of-frame value of:
 - ``attrs``: attribute dict; ``snd``: the Audio Source (truthy) or None;
 - ``anim``: an animated model's playback or None: a dict with ``clip``
   (name or None), ``time``, ``len`` (the clip's seconds), ``playing``,
-  ``speed``, ``loop``, ``clips`` (names) and ``lens`` (their seconds);
+  ``speed``, ``loop``, ``clips`` (names), ``lens`` (their seconds),
+  ``springs``, ``rm`` (root motion on) and ``ev``: the latest animation
+  events passed, ``[seq, clip, name]`` oldest first, ``seq`` counting up
+  per entity (the host delivers each new one once);
 - ``view``: the engine's own handle (run_scene only).
 
 Scripts read those values and write new ones. **Writes are visible to every
@@ -35,13 +38,25 @@ after all scripts have run.** That's why four drones doing
 ``player.attributes["health"] -= 5`` in one frame take 20 health, not 5.
 The host returns the writes (plus sounds, HUD items and cursor-lock
 requests) as a :class:`FrameOutput` for the driver to apply.
+
+Channels
+--------
+
+Scripts talk through named channels, Redis style: ``ctx.publish(channel,
+data)`` delivers a :class:`Message` at once to every function subscribed
+with ``ctx.subscribe(pattern, fn)``. Patterns match exactly, or with ``*``
+and ``?`` wildcards (``"*:animation:hit"``). The engine publishes animation
+events as ``<entity name>:animation:<event>`` at the start of the frame
+after the playhead passes them, just before ``update`` runs.
 """
 
+import fnmatch
 import importlib.util
 import math
 import os
 import sys
 import traceback
+import types
 
 __all__ = [
     "Attributes",
@@ -55,7 +70,9 @@ __all__ = [
     "Hud",
     "Input",
     "KeySource",
+    "Message",
     "ScriptHost",
+    "Subscription",
     "Time",
 ]
 
@@ -390,6 +407,18 @@ class EntityAnimation:
         appeared (after moving it somewhere new, say)."""
         self._e._anim_cmd(["reset_springs"])
 
+    @property
+    def root_motion(self):
+        """Whether the clip's own travel across the ground moves the entity
+        (through its Character Controller, if it has one) instead of
+        sliding the model away from it. Settable."""
+        return bool(self._st().get("rm"))
+
+    @root_motion.setter
+    def root_motion(self, on):
+        self._e._anim_cmd(["root_motion", bool(on)])
+        self._st()["rm"] = bool(on)
+
     def length(self, clip=None):
         """A clip's length in seconds (default: the current clip's)."""
         if clip is None:
@@ -426,6 +455,7 @@ class Entity:
         self._anim = None
         self._anim_st = None
         self._despawn = False
+        self._ev_seen = 0  # the last animation event delivered
 
     def _begin(self, record):
         """Starts a frame from a fresh record."""
@@ -971,6 +1001,71 @@ class SceneView:
         return self._host.backend.extra("scene", name)
 
 
+class Message:
+    """What a channel subscriber receives.
+
+    ``channel`` is the full channel name, ``data`` what was published and
+    ``ctx`` the usual ``ctx``. Animation events also set ``entity`` (whose
+    animation it was), ``event`` (the event's name) and ``clip``.
+    """
+
+    __slots__ = ("channel", "data", "entity", "event", "clip", "ctx")
+
+    def __init__(self, channel, data=None, entity=None, event=None, clip=None):
+        self.channel = channel
+        self.data = data
+        self.entity = entity
+        self.event = event
+        self.clip = clip
+        self.ctx = None
+
+    def __repr__(self):
+        extra = f", data={self.data!r}" if self.data is not None else ""
+        return f"Message({self.channel!r}{extra})"
+
+
+def _fn_key(fn):
+    """What makes two subscriptions the same function: plain functions by
+    where they're written (so subscribing again after a hot reload, or from
+    ``update`` every frame, doesn't add another), anything else by
+    equality."""
+    code = getattr(fn, "__code__", None)
+    if code is not None and isinstance(fn, types.FunctionType) and fn.__closure__ is None:
+        return (fn.__module__, fn.__qualname__, code.co_firstlineno)
+    return fn
+
+
+class Subscription:
+    """A ``ctx.subscribe`` registration; ``cancel()`` ends it."""
+
+    __slots__ = ("pattern", "fn", "key", "script", "owner", "active", "_host", "_wild")
+
+    def __init__(self, host, pattern, fn, script, owner):
+        self._host = host
+        self.pattern = pattern
+        self.fn = fn
+        self.key = _fn_key(fn)
+        self.script = script
+        self.owner = owner
+        self.active = True
+        self._wild = any(c in pattern for c in "*?[")
+
+    def matches(self, channel):
+        if self._wild:
+            return fnmatch.fnmatchcase(channel, self.pattern)
+        return channel == self.pattern
+
+    def cancel(self):
+        """Stops delivering to this subscriber."""
+        if self.active:
+            self.active = False
+            self._host._subs = [s for s in self._host._subs if s is not self]
+
+    def __repr__(self):
+        name = getattr(self.fn, "__qualname__", repr(self.fn))
+        return f"Subscription({self.pattern!r}, {name})"
+
+
 class Context:
     """The ``ctx`` every script function receives."""
 
@@ -999,6 +1094,31 @@ class Context:
 
     def warn(self, *parts):
         self._host.backend.log("warn", " ".join(str(p) for p in parts))
+
+    def subscribe(self, pattern, fn):
+        """Calls ``fn(message)`` for every message published on a channel
+        matching ``pattern``: an exact name, or ``*`` and ``?`` wildcards.
+        Animation events arrive as ``"<entity>:animation:<event>"``::
+
+            ctx.subscribe("Player:animation:footstep", step_sound)
+            ctx.subscribe("*:animation:hit", deal_damage)
+
+        Subscribing the same function to the same pattern again changes
+        nothing, so it's safe in ``update``. A subscription made by an
+        entity's script ends when the entity goes. Returns a
+        :class:`Subscription` (``cancel()`` it to stop)."""
+        return self._host.subscribe(pattern, fn)
+
+    def unsubscribe(self, pattern, fn=None):
+        """Ends this script's subscriptions to ``pattern`` (only those to
+        ``fn`` if given), or the :class:`Subscription` passed. Returns how
+        many ended."""
+        return self._host.unsubscribe(pattern, fn)
+
+    def publish(self, channel, data=None):
+        """Sends ``data`` to every subscriber of ``channel`` now (they run
+        before this returns). Returns how many received it."""
+        return self._host.publish(Message(str(channel), data))
 
     def __getattr__(self, name):
         return self._host.backend.extra("ctx", name)
@@ -1135,6 +1255,8 @@ class ScriptHost:
         self.started = set()
         self.ctx = Context(self, input_source if input_source is not None else KeySource())
         self._last_check = 0.0
+        self._subs = []
+        self._running = None  # (script, entity) whose code runs now
 
     # --- frames -----------------------------------------------------------
 
@@ -1148,6 +1270,7 @@ class ScriptHost:
         if self.hot_reload and (elapsed - self._last_check > 0.4 or elapsed < self._last_check):
             self._last_check = elapsed
             self.reload_changed()
+        self._deliver_animation_events()
         for e in list(self.entities.values()):
             if not e.script:
                 continue
@@ -1175,13 +1298,116 @@ class ScriptHost:
             self.entities[eid] = e
             if e.name and e.name not in self._by_name:
                 self._by_name[e.name] = e
+        if self._subs:
+            self._drop_orphans()
+
+    def _drop_orphans(self):
+        """Ends subscriptions whose entity is gone."""
+        keep = []
+        for s in self._subs:
+            if s.owner is None or s.owner.id in self.entities:
+                keep.append(s)
+            else:
+                s.active = False
+        self._subs = keep
+
+    # --- channels ---------------------------------------------------------
+
+    def subscribe(self, pattern, fn):
+        """See :meth:`Context.subscribe`."""
+        if not callable(fn):
+            raise TypeError(f"subscribe needs a function to call, not {fn!r}")
+        pattern = str(pattern)
+        script, owner = self._running or (None, None)
+        key = _fn_key(fn)
+        for s in self._subs:
+            if s.pattern == pattern and s.owner is owner and s.key == key:
+                s.fn = fn  # the latest version (after a hot reload)
+                return s
+        sub = Subscription(self, pattern, fn, script, owner)
+        self._subs.append(sub)
+        return sub
+
+    def unsubscribe(self, pattern, fn=None):
+        """See :meth:`Context.unsubscribe`."""
+        if isinstance(pattern, Subscription):
+            was = pattern.active
+            pattern.cancel()
+            return int(was)
+        _, owner = self._running or (None, None)
+        key = None if fn is None else _fn_key(fn)
+        gone = [s for s in self._subs
+                if s.pattern == pattern and s.owner is owner and (key is None or s.key == key)]
+        for s in gone:
+            s.cancel()
+        return len(gone)
+
+    def publish(self, message):
+        """Delivers ``message`` to every matching subscriber; how many got it."""
+        message.ctx = self.ctx
+        delivered = 0
+        for sub in list(self._subs):
+            if not sub.active or not sub.matches(message.channel):
+                continue
+            script = sub.script
+            fn = sub.fn
+            if script is not None:
+                if script.broken or script.module is None:
+                    continue
+                # A top-level function follows its script's hot reloads.
+                if (isinstance(fn, types.FunctionType) and fn.__qualname__ == fn.__name__
+                        and fn.__module__ == script.module.__name__):
+                    fn = getattr(script.module, fn.__name__, fn)
+            delivered += 1
+            outer = self._running
+            if script is not None:
+                self._running = (script, sub.owner)
+            try:
+                fn(message)
+            except BaseException as exc:  # noqa: BLE001 - user code
+                if script is None:
+                    raise
+                script.broken = True
+                who = sub.owner.name if sub.owner is not None else "?"
+                self._failed(exc, script.path, f"subscriber of {sub.pattern!r} ({who})")
+            finally:
+                self._running = outer
+        return delivered
+
+    def _deliver_animation_events(self):
+        """Hands each entity's new animation events to its script's
+        ``on_animation_event(entity, ctx, name)`` and to the channel
+        ``<name>:animation:<event>``."""
+        for e in list(self.entities.values()):
+            rec = e._record.get("anim")
+            events = rec.get("ev") if rec else None
+            if not events:
+                continue
+            if int(events[-1][0]) < e._ev_seen:
+                e._ev_seen = 0  # a new animator counts from 1 again
+            fresh = [ev for ev in events if int(ev[0]) > e._ev_seen]
+            if not fresh:
+                continue
+            e._ev_seen = int(fresh[-1][0])
+            for _seq, clip, name in fresh:
+                if e.script and e.id in self.started:
+                    s = self.script(e.script)
+                    if s is not None:
+                        self.call(s, "on_animation_event", e, name)
+                if e.id not in self.entities:
+                    break  # despawned by a handler
+                channel = f"{e.name or e.id}:animation:{name}"
+                self.publish(Message(channel, None, e, name, clip))
 
     def _collect(self):
         writes = [w for w in (e._writes() for e in self.entities.values()) if w]
-        for e in [e for e in self.entities.values() if e._despawn]:
+        gone = [e for e in self.entities.values() if e._despawn]
+        for e in gone:
             del self.entities[e.id]
             if self._by_name.get(e.name) is e:
                 del self._by_name[e.name]
+        if gone and self._subs:
+            self._drop_orphans()
         out = FrameOutput(writes, self.ctx.audio._queue, self.ctx.hud._items,
                           self.ctx.input._lock_request)
         self.ctx.audio._queue = []
@@ -1230,16 +1456,20 @@ class ScriptHost:
                     s.mtime = m
                     self._failed(exc, s.path, "reload")
 
-    def call(self, script, fn_name, entity):
+    def call(self, script, fn_name, entity, *args):
         fn = getattr(script.module, fn_name, None)
         if fn is None:
             return
+        outer = self._running
+        self._running = (script, entity)
         try:
-            fn(entity, self.ctx)
+            fn(entity, self.ctx, *args)
         except BaseException as exc:  # noqa: BLE001 - user code
             # One report, then the script pauses until its file changes.
             script.broken = True
             self._failed(exc, script.path, f"{fn_name}({entity.name})")
+        finally:
+            self._running = outer
 
     def _failed(self, exc, path, during):
         if self.on_error == "raise" or isinstance(exc, (KeyboardInterrupt, SystemExit)):

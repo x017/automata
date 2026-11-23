@@ -2976,13 +2976,22 @@ impl Ui {
         y = self.float_row(canvas, x, y, w, e, "Speed", Field::AnimSpeed);
         y = self.flag_row(canvas, x, y, w, e, "Loop", Flag::AnimLoop);
         y = self.flag_row(canvas, x, y, w, e, "Play On Start", Flag::AnimPlayOnStart);
+        let root = Rect::new(x, y, w, layout::FIELD_H);
+        y = self.flag_row(canvas, x, y, w, e, "Root Motion", Flag::AnimRootMotion);
+        if self.row_visible(root) {
+            self.tip(
+                root,
+                "Let the clip's own steps move the entity (through its Character Controller, if it has one)",
+            );
+        }
         if let (true, Some(clip)) = (editing, clip) {
-            y = self.anim_preview_row(canvas, x, y, w, e.id, clip.duration);
+            y = self.anim_preview_row(canvas, x, y, w, e.id, clip);
         }
         y
     }
 
-    /// Play/pause and a time bar for the Animation preview.
+    /// Play/pause and a time bar for the Animation preview, with a tick
+    /// for each of the clip's events (hover one for its name).
     fn anim_preview_row(
         &mut self,
         canvas: &mut Canvas,
@@ -2990,8 +2999,9 @@ impl Ui {
         y: f32,
         w: f32,
         id: u64,
-        duration: f32,
+        clip: &automata_assets::Clip,
     ) -> f32 {
+        let duration = clip.duration;
         let mut preview = self
             .anim_preview
             .filter(|p| p.id == id)
@@ -3080,6 +3090,17 @@ impl Ui {
                 color::text(),
                 bar.w - 8.0,
             );
+            if duration > 0.0 {
+                for event in &clip.events {
+                    let ex = bar.x + bar.w * (event.time / duration).clamp(0.0, 1.0);
+                    let ex = ex.clamp(bar.x + 1.0, bar.x + bar.w - 3.0);
+                    canvas.fill_rect(ex, bar.y + bar.h - 6.0, 2.0, 6.0, color::warn());
+                    let near = Rect::new(ex - 3.0, bar.y + bar.h - 7.0, 8.0, 7.0);
+                    if self.hot(near) {
+                        self.tip(near, &format!("{} at {:.2} s", event.name, event.time));
+                    }
+                }
+            }
             if self.hot(bar) {
                 self.cursor = CursorHint::Pointer;
                 if self.p.pressed {
@@ -5596,14 +5617,15 @@ mod tests {
         let p = ui.anim_preview.unwrap();
         assert!(!p.playing, "{p:?}");
         assert!((p.time - 3.3333 * 0.5).abs() < 0.1, "half of Idle: {p:?}");
-        // Four rows up, the clip menu lists the model's clips.
+        // Five rows up (past Speed, Loop, Play On Start and Root
+        // Motion), the clip menu lists the model's clips.
         ui.menu = None;
         click(
             &mut ui,
             &mut c,
             &doc,
             value_x + 40.0,
-            button_y - 4.0 * layout::ROW_STEP,
+            button_y - 5.0 * layout::ROW_STEP,
         );
         let menu = ui.menu.as_ref().expect("the clip menu");
         let labels: Vec<&str> = menu.items.iter().map(|i| i.label.trim()).collect();

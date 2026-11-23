@@ -17,4 +17,11 @@
     clips: [
         (file: "anims/emotes.glb"),
     ],
+    events: [
+        (clip: "Walk", time: 0.275, name: "footstep"),
+        (clip: "Walk", time: 0.825, name: "footstep"),
+        (clip: "Run", time: 0.18, name: "footstep"),
+        (clip: "Run", time: 0.54, name: "footstep"),
+        (clip: "emotes:Leap", time: 0.85, name: "land"),
+    ],
 )
