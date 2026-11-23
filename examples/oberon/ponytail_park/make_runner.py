@@ -4,7 +4,10 @@ skirt for showing spring bones (no dependencies).
 
     python3 examples/oberon/ponytail_park/make_runner.py
 
-The model is a skinned glTF with three clips (Idle, Walk, Run). The
+The model is a skinned glTF with three clips (Idle, Walk, Run). It also
+writes ``models/anims/emotes.glb``: just the skeleton and two more clips
+(Wave, Cheer), the way animation packs ship one file per move. The model's
+import settings borrow them as ``emotes:Wave`` and ``emotes:Cheer``. The
 ponytail (``Hair1`` … ``HairEnd``) and the skirt (``Skirt`` and its eight
 panels) have bones but no animation: ``models/runner.glb.import.ron`` makes
 them spring bones, so they swing on their own. It faces +Z, stands on its
@@ -20,6 +23,7 @@ import struct
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "models", "runner.glb")
+EMOTES = os.path.join(HERE, "models", "anims", "emotes.glb")
 
 # --- Skeleton -------------------------------------------------------------
 
@@ -369,6 +373,34 @@ def idle(t, period):
     return pose, 0.92 - 0.006 * (1 - math.cos(phase)) / 2
 
 
+def wave(t, length):
+    """Right hand up, waving three times, then back down."""
+    up = math.sin(math.pi * min(1.0, t / length)) ** 0.5  # raise, hold, lower
+    pose, hips = idle(t, length)
+    pose["UpperArmR"] = euler(z=-2.5 * up, x=-0.2 * up)
+    pose["ForearmR"] = euler(z=-0.5 * up * math.sin(6 * math.pi * t / length))
+    pose["Head"] = euler(z=-0.12 * up)
+    return pose, hips
+
+
+def cheer(t, length):
+    """Both arms up and a little hop."""
+    k = math.sin(math.pi * min(1.0, t / length))
+    pose, _ = idle(t, length)
+    for side, sign in (("L", 1), ("R", -1)):
+        pose[f"UpperArm{side}"] = euler(z=2.7 * k * sign)
+        pose[f"Forearm{side}"] = euler(z=0.3 * k * sign)
+        pose[f"Thigh{side}"] = euler(x=-0.5 * k)
+        pose[f"Shin{side}"] = euler(x=0.9 * k)
+    hop = max(0.0, math.sin(2 * math.pi * t / length)) * 0.12
+    return pose, 0.92 - 0.08 * k + hop
+
+
+EMOTE_CLIPS = {
+    "Wave": (2.0, lambda t: wave(t, 2.0)),
+    "Cheer": (1.2, lambda t: cheer(t, 1.2)),
+}
+
 CLIPS = {
     "Idle": (2.4, lambda t: idle(t, 2.4)),
     "Walk": (1.1, lambda t: gait(t, 1.1, 0.45, 0.65, 0.35, 0.3, 0.02, 0.05, 0.08, 0.91)),
@@ -436,13 +468,7 @@ def build() -> bytes:
             "indices": g.accessor("I", part.tris, 5125, "SCALAR"),
             "material": len(materials) - 1,
         })
-    nodes = []
-    for name, parent, t in BONES:
-        node = {"name": name, "translation": list(t)}
-        kids = [INDEX[n] for n, p, _ in BONES if p == name]
-        if kids:
-            node["children"] = kids
-        nodes.append(node)
+    nodes = skeleton_nodes()
     nodes.append({"name": "Runner", "mesh": 0, "skin": 0})
     inverse_binds = []
     for name, _, _ in BONES:
@@ -453,8 +479,48 @@ def build() -> bytes:
         "skeleton": 0,
         "inverseBindMatrices": g.accessor("16f", inverse_binds, 5126, "MAT4"),
     }
+    doc = {
+        "asset": {"version": "2.0", "generator": "AUTOMATA make_runner.py (CC0)"},
+        "scene": 0,
+        "scenes": [{"nodes": [0, len(BONES)]}],
+        "nodes": nodes,
+        "meshes": [{"name": "Runner", "primitives": primitives}],
+        "materials": materials,
+        "skins": [skin],
+        "animations": animations(g, CLIPS),
+    }
+    return pack(g, doc)
+
+
+def skeleton_nodes() -> list[dict]:
+    """The bones as glTF nodes."""
+    nodes = []
+    for name, parent, t in BONES:
+        node = {"name": name, "translation": list(t)}
+        kids = [INDEX[n] for n, p, _ in BONES if p == name]
+        if kids:
+            node["children"] = kids
+        nodes.append(node)
+    return nodes
+
+
+def build_emotes() -> bytes:
+    """``emotes.glb``: the bones and the emote clips, no mesh."""
+    g = Glb()
+    doc = {
+        "asset": {"version": "2.0", "generator": "AUTOMATA make_runner.py (CC0)"},
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+        "nodes": skeleton_nodes(),
+        "animations": animations(g, EMOTE_CLIPS),
+    }
+    return pack(g, doc)
+
+
+def animations(g: Glb, clips) -> list[dict]:
+    """``clips`` (name: (length, frame)) sampled at FPS into glTF animations."""
     animations = []
-    for clip, (length, frame) in CLIPS.items():
+    for clip, (length, frame) in clips.items():
         count = round(length * FPS)
         times = [i / FPS for i in range(count + 1)]
         frames = [frame(min(t, length - 1e-6) if i < count else 0.0) for i, t in enumerate(times)]
@@ -470,19 +536,14 @@ def build() -> bytes:
         channels.append({"sampler": len(samplers) - 1,
                          "target": {"node": INDEX["Hips"], "path": "translation"}})
         animations.append({"name": clip, "samplers": samplers, "channels": channels})
-    doc = {
-        "asset": {"version": "2.0", "generator": "AUTOMATA make_runner.py (CC0)"},
-        "scene": 0,
-        "scenes": [{"nodes": [0, len(BONES)]}],
-        "nodes": nodes,
-        "meshes": [{"name": "Runner", "primitives": primitives}],
-        "materials": materials,
-        "skins": [skin],
-        "animations": animations,
-        "buffers": [{"byteLength": len(g.bin)}],
-        "bufferViews": g.views,
-        "accessors": g.accessors,
-    }
+    return animations
+
+
+def pack(g: Glb, doc: dict) -> bytes:
+    """``doc`` and ``g``'s buffer as a binary glTF."""
+    doc["buffers"] = [{"byteLength": len(g.bin)}]
+    doc["bufferViews"] = g.views
+    doc["accessors"] = g.accessors
     text = json.dumps(doc, separators=(",", ":")).encode()
     text += b" " * (-len(text) % 4)
     data = bytes(g.bin) + b"\0" * (-len(g.bin) % 4)
@@ -492,8 +553,9 @@ def build() -> bytes:
 
 
 if __name__ == "__main__":
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    blob = build()
-    with open(OUT, "wb") as f:
-        f.write(blob)
-    print(f"wrote {OUT} ({len(blob) // 1024} KB, {len(BONES)} bones)")
+    for path, make in ((OUT, build), (EMOTES, build_emotes)):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        blob = make()
+        with open(path, "wb") as f:
+            f.write(blob)
+        print(f"wrote {path} ({len(blob) // 1024} KB)")

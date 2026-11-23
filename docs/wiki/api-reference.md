@@ -312,6 +312,13 @@ component: they're set up in the model's import settings
 `view.animation.reset_springs()` puts them back at rest. Guide:
 [Models → Spring bones](oberon/models.md#spring-bones).
 
+Clips can also come from other glTF files made for the same skeleton,
+listed under `clips` in the model's import settings. A file with one clip
+names it after the file (`anims/Run Fast.glb` gives `"Run Fast"`); a file with
+several gives `"file:Clip"` (`"sword:Slash"`). They're in `anim.clips` and play
+like the model's own. Guide:
+[Models → Clips from other files](oberon/models.md#clips-from-other-files).
+
 ### Physics components
 
 ```text
@@ -395,7 +402,7 @@ anim.time                # seconds into the clip; assign to jump
 anim.duration            # the clip's length; anim.length("Jump") for any clip
 anim.playing             # False once a one-shot ends or after stop()
 anim.speed               # get/set; anim.looping
-anim.clips               # every clip in the model, in file order
+anim.clips               # every clip in the model, in file order, then borrowed ones
 ```
 
 Reads show the start of the frame. `play`, `stop` and setting `time` or

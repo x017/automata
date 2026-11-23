@@ -7,7 +7,7 @@ forwards, and then they settle.
 
 | Runner | What it shows |
 | --- | --- |
-| **Runner** (you) | `scripts/player.py` picks Idle, Walk or Run as you move. Press R to put the springs back at rest. |
+| **Runner** (you) | `scripts/player.py` picks Idle, Walk or Run as you move. 1 waves and 2 cheers: those two clips come from another file. Press R to put the springs back at rest. |
 | **Jogger** | `scripts/jogger.py` runs up the track, stops dead and turns round: the clearest swing and settle. |
 | **Stroller** | `scripts/stroller.py` walks round the flowerbed. The turn leans the hair and skirt out a little. |
 | **Spectator** | Just an Animation set to Idle. Watch the ponytail follow her head as she looks around. |
@@ -16,12 +16,13 @@ forwards, and then they settle.
 | --- | --- |
 | W A S D / arrows | Walk |
 | Shift | Run |
+| 1 / 2 | Wave / cheer |
 | R | Reset the springs |
 | Q / E | Orbit the camera |
 
 ```bash
 python examples/oberon/ponytail_park/build_level.py      # rewrites level.ron
-python examples/oberon/ponytail_park/make_runner.py      # rewrites models/runner.glb
+python examples/oberon/ponytail_park/make_runner.py      # rewrites models/runner.glb and models/anims/emotes.glb
 cargo run -p oberon --release examples/oberon/ponytail_park/level.ron
 pytest examples/oberon/ponytail_park/tests
 ```
@@ -65,4 +66,28 @@ glTF with 49 bones and three clips (Idle, Walk, Run). The hair and skirt
 bones have no animation. Rust tests run this same model through a run and a
 stop: `crates/automata-scene/tests/spring_runner.rs`.
 
-Guide: [Models → Spring bones](../../../docs/wiki/oberon/models.md#spring-bones).
+### Clips from another file
+
+The wave and the cheer aren't in `runner.glb`. They're in
+`models/anims/emotes.glb`, which holds only the skeleton and those two
+clips, the way animation packs ship one file per move. The import settings
+borrow them:
+
+```ron
+clips: [
+    (file: "anims/emotes.glb"),
+],
+```
+
+The file has two clips, so they're called `emotes:Wave` and `emotes:Cheer`,
+and `player.py` plays them like any other clip:
+
+```python
+anim.play("emotes:Wave", loop=False, fade=0.15, restart=True)
+```
+
+In Oberon they're under **Clip files** in the Import block, and in the
+Animation component's **Clip** menu.
+
+Guide: [Models → Clips from other files](../../../docs/wiki/oberon/models.md#clips-from-other-files),
+[Models → Spring bones](../../../docs/wiki/oberon/models.md#spring-bones).

@@ -1410,7 +1410,7 @@ pub(crate) mod tests {
     /// A `.gltf` (buffer as a data URI) with two quads sharing a material:
     /// a static `body` at the origin and an `arm` at x = 2 whose `wave` clip
     /// turns it 90° about Z over one second.
-    fn waving_gltf() -> String {
+    pub(crate) fn waving_gltf() -> String {
         let mut bin: Vec<u8> = Vec::new();
         let mut push = |values: &[f32]| {
             for v in values {

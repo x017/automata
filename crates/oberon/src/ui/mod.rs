@@ -28,6 +28,7 @@ use crate::view::{self, Gizmo, GizmoMode, Projector};
 
 pub mod assets_panel;
 pub mod attributes;
+pub mod clip_files;
 mod code_view;
 pub mod dialogs;
 pub mod file_browser;
@@ -3223,6 +3224,7 @@ impl Ui {
         if let Ok(model) = &loaded {
             y = self.import_rows(canvas, x, y, w, e.id, &file, editing);
             if let Some(rig) = model.rig.as_ref().filter(|r| !r.joints.is_empty()) {
+                y = self.clip_files_rows(canvas, x, y, w, &file, rig, editing);
                 y = self.springs_rows(canvas, x, y, w, e.id, &file, rig, editing);
             }
         }

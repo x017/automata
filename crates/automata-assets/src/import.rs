@@ -62,6 +62,55 @@ pub struct ImportSettings {
     /// Bones that swing on their own (see [`crate::springs`]).
     #[serde(skip_serializing_if = "crate::springs::Springs::is_unset")]
     pub springs: crate::springs::Springs,
+    /// Animations kept in other files, added to this model's clips (see
+    /// [`ClipFile`]).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub clips: Vec<ClipFile>,
+}
+
+/// A file whose animations a model borrows: a glTF made for the same
+/// skeleton (same bone names), like the one-animation-per-file downloads
+/// from Mixamo. Its clips are matched to the model's bones by name.
+///
+/// Its clips are named after the file: a file with one clip gives a clip
+/// called after the file (`run.glb` gives `run`); a file with several gives
+/// `file:Clip` (`sword.glb` with Slash and Block gives `sword:Slash` and
+/// `sword:Block`). Names are exact, like every clip name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClipFile {
+    /// The file, relative to the model's folder.
+    pub file: String,
+}
+
+impl ClipFile {
+    /// A clip file at `file` (relative to the model's folder).
+    #[must_use]
+    pub fn new(file: impl Into<String>) -> Self {
+        Self { file: file.into() }
+    }
+
+    /// What clips from this file are called: `stem` for a file with one
+    /// clip, `stem:clip` otherwise.
+    #[must_use]
+    pub fn clip_names(&self, clips: &[&str]) -> Vec<String> {
+        let path = std::path::Path::new(&self.file);
+        let stem = path
+            .file_stem()
+            .map_or_else(|| self.file.clone(), |s| s.to_string_lossy().into_owned());
+        match clips {
+            [_] => vec![stem],
+            _ => clips.iter().map(|c| format!("{stem}:{c}")).collect(),
+        }
+    }
+
+    /// Where the file is, for a model at `model`.
+    #[must_use]
+    pub fn path(&self, model: &std::path::Path) -> std::path::PathBuf {
+        model
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(""))
+            .join(&self.file)
+    }
 }
 
 impl Default for ImportSettings {
@@ -71,6 +120,7 @@ impl Default for ImportSettings {
             rotation: [0.0; 3],
             pivot: Pivot::File,
             springs: crate::springs::Springs::default(),
+            clips: Vec::new(),
         }
     }
 }
@@ -79,7 +129,7 @@ impl ImportSettings {
     /// Whether these settings change nothing (no file needed).
     #[must_use]
     pub fn is_identity(&self) -> bool {
-        self.keeps_geometry() && self.springs.is_unset()
+        self.keeps_geometry() && self.springs.is_unset() && self.clips.is_empty()
     }
 
     /// Whether the scale, rotation and pivot leave the geometry as it is.
@@ -211,6 +261,26 @@ mod tests {
     }
 
     #[test]
+    fn clip_files_name_their_clips_after_the_file() {
+        let one = ClipFile::new("anims/Run Fast.glb");
+        assert_eq!(one.clip_names(&["mixamo.com"]), ["Run Fast"]);
+        let many = ClipFile::new("sword.glb");
+        assert_eq!(
+            many.clip_names(&["Slash", "Block"]),
+            ["sword:Slash", "sword:Block"]
+        );
+        assert_eq!(
+            one.path(std::path::Path::new("models/hero.glb")),
+            std::path::Path::new("models/anims/Run Fast.glb")
+        );
+        assert!(!ImportSettings {
+            clips: vec![one],
+            ..ImportSettings::default()
+        }
+        .is_identity());
+    }
+
+    #[test]
     fn scale_rotation_and_pivot_bake_into_the_geometry() {
         let mut parts = [part()];
         ImportSettings {
@@ -295,6 +365,7 @@ mod tests {
                 chains: vec![crate::springs::SpringChain::new("Tail")],
                 colliders: vec![],
             },
+            clips: vec![ClipFile::new("anims/run.glb")],
         };
         write_settings(&model, &s).unwrap();
         assert_eq!(read_settings(&model), s);

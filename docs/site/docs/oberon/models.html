@@ -151,6 +151,35 @@ as it is. The settings apply wherever the model is used: in Play, under
 <p>Commit these files with your models. A model without one is used exactly
 as the file describes it. Fitted colliders use the model's size after the
 import settings, so press <strong>Fit Collider</strong> after changing them.</p>
+<h2 id="clips-from-other-files">Clips from other files<a class="anchor" href="#clips-from-other-files" aria-label="Link to this section">#</a></h2>
+<p><img src="../../../assets/models/clip_files.jpg" alt="The Import block's Clip files section: anims/emotes.glb, which gave the clips emotes:Wave and emotes:Cheer" loading="lazy" decoding="async"></p>
+<p>Animations often come one per file: a store's animation pack, or a
+download per move from Mixamo. A model can borrow the clips of any glTF
+made for the <strong>same skeleton</strong> (the same bone names). Under <strong>Clip files</strong>
+in the Import block (rigged models only), press <strong>+ Clips from file…</strong> and
+pick the file from the project's <code>.glb</code> and <code>.gltf</code> files. Its clips join the
+model's own: they show in the Animation component's <strong>Clip</strong> menu, and
+scripts play them like any other clip.</p>
+<p>Borrowed clips are named after their file, so two files can both have a
+clip called "Take 001":</p>
+<div class="table"><table><thead><tr><th>The file has</th><th>Its clips are called</th><th>For example</th></tr></thead><tbody><tr><td>One clip</td><td>The file's name, without the extension</td><td><code>anims/Run Fast.glb</code> gives <code>Run Fast</code></td></tr><tr><td>Several clips</td><td><code>file:Clip</code></td><td><code>sword.glb</code> with Slash and Block gives <code>sword:Slash</code> and <code>sword:Block</code></td></tr></tbody></table></div>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>anim.play(<span class="tok-s">&quot;Run Fast&quot;</span>, fade=<span class="tok-n">0.2</span>)
+anim.play(<span class="tok-s">&quot;sword:Slash&quot;</span>, loop=<span class="tok-b">False</span>)</code></pre></div>
+<p>Names are exact and case-sensitive, like every clip name. Bones are matched
+by name, and keys for bones the model doesn't have are skipped. A file
+turns red in the list when it gave no clips: it's missing, has no
+animations, or its bones have other names. If a borrowed name is already
+taken, the model's own clip wins and Oberon logs a warning. The ×
+next to a file removes it.</p>
+<p>The files are saved in the import settings, relative to the model:</p>
+<div class="codeblock" data-lang="ron"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>clips: [
+    (file: <span class="tok-s">&quot;anims/emotes.glb&quot;</span>),
+],</code></pre></div>
+<p>Editing a clip file while Oberon is open reloads the model, as if you'd
+edited the model itself. Exported games include the clip files.
+<a href="https://github.com/x017/automata/blob/main/examples/oberon/ponytail_park/README.md#clips-from-another-file" rel="noopener">Ponytail Park</a>
+borrows its wave and cheer this way.</p>
+<p><img src="../../../assets/models/clip_files_wave.jpg" alt="The runner waving: the wave clip comes from emotes.glb, not from the runner's own file" loading="lazy" decoding="async"></p>
 <h2 id="spring-bones">Spring bones<a class="anchor" href="#spring-bones" aria-label="Link to this section">#</a></h2>
 <p><img src="../../../assets/models/spring_bones.jpg" alt="The runner without and with spring bones: running, her ponytail streams out behind and her skirt flares; just after she stops, both swing on forwards" loading="lazy" decoding="async"></p>
 <p>Hair, skirts, tails, capes and antennae don't need to be animated by hand.
@@ -290,7 +319,7 @@ the files.</p>
     <footer class="pager"><a class="prev" href="code-editor.html"><small>Previous</small>The code editor</a><a class="next" href="audio.html"><small>Next</small>Audio</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/models.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l3"><a href="#animated-models">Animated models</a></li><li class="l2"><a href="#add-a-model-to-the-scene">Add a model to the scene</a></li><li class="l2"><a href="#the-assets-tab">The Assets tab</a></li><li class="l3"><a href="#what-importing-copies">What importing copies</a></li><li class="l2"><a href="#give-a-model-to-an-existing-entity">Give a model to an existing entity</a></li><li class="l2"><a href="#the-inspector">The Inspector</a></li><li class="l2"><a href="#animation">Animation</a></li><li class="l3"><a href="#from-a-script">From a script</a></li><li class="l3"><a href="#from-python">From Python</a></li><li class="l2"><a href="#import-settings">Import settings</a></li><li class="l2"><a href="#spring-bones">Spring bones</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#editing-a-model-while-oberon-is-open">Editing a model while Oberon is open</a></li><li class="l2"><a href="#scene-files-and-paths">Scene files and paths</a></li><li class="l2"><a href="#from-python-1">From Python</a></li><li class="l2"><a href="#try-it">Try it</a></li><li class="l2"><a href="#troubleshooting">Troubleshooting</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l3"><a href="#animated-models">Animated models</a></li><li class="l2"><a href="#add-a-model-to-the-scene">Add a model to the scene</a></li><li class="l2"><a href="#the-assets-tab">The Assets tab</a></li><li class="l3"><a href="#what-importing-copies">What importing copies</a></li><li class="l2"><a href="#give-a-model-to-an-existing-entity">Give a model to an existing entity</a></li><li class="l2"><a href="#the-inspector">The Inspector</a></li><li class="l2"><a href="#animation">Animation</a></li><li class="l3"><a href="#from-a-script">From a script</a></li><li class="l3"><a href="#from-python">From Python</a></li><li class="l2"><a href="#import-settings">Import settings</a></li><li class="l2"><a href="#clips-from-other-files">Clips from other files</a></li><li class="l2"><a href="#spring-bones">Spring bones</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#editing-a-model-while-oberon-is-open">Editing a model while Oberon is open</a></li><li class="l2"><a href="#scene-files-and-paths">Scene files and paths</a></li><li class="l2"><a href="#from-python-1">From Python</a></li><li class="l2"><a href="#try-it">Try it</a></li><li class="l2"><a href="#troubleshooting">Troubleshooting</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

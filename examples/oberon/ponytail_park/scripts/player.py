@@ -1,6 +1,9 @@
-"""player: you. W A S D (or the arrows) walk, hold Shift to run.
+"""player: you. W A S D (or the arrows) walk, hold Shift to run, 1 waves
+and 2 cheers.
 
-Moving sets the clip: Idle, Walk or Run. Nothing here touches the hair or
+Moving sets the clip: Idle, Walk or Run. The two emotes live in another
+file, ``models/anims/emotes.glb``, which the model's import settings borrow
+(Clip files): its clips are called ``emotes:Wave`` and ``emotes:Cheer``. Nothing here touches the hair or
 the skirt; their swing comes from the spring bones in the model's import
 settings. Press R to put them back at rest with
 ``entity.animation.reset_springs()``.
@@ -10,6 +13,7 @@ import math
 
 WALK = 1.4
 RUN = 4.2
+EMOTES = {"1": "emotes:Wave", "2": "emotes:Cheer"}  # Q and E orbit the camera
 TURN = 10.0  # how fast she turns to face where she's going
 EDGE = 14.0  # stay on the grass
 
@@ -63,6 +67,12 @@ def update(entity, ctx):
         entity.transform.rotation_euler = (0.0, entity.state["yaw"], 0.0)
 
     anim = entity.animation
-    anim.play(clip_for(math.hypot(vx, vz)), fade=0.2)
+    for key, emote in EMOTES.items():
+        if keys.just_pressed(key):
+            anim.play(emote, loop=False, fade=0.15, restart=True)
+    # An emote plays to its end unless she moves.
+    emoting = anim.clip in EMOTES.values() and anim.playing
+    if length > 0.1 or not emoting:
+        anim.play(clip_for(math.hypot(vx, vz)), fade=0.2)
     if keys.just_pressed("r"):
         anim.reset_springs()

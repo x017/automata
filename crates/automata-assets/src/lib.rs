@@ -464,9 +464,22 @@ fn load_uncached(path: &Path) -> Result<(Model, Vec<PathBuf>), ModelError> {
     let mut rig = loaded.rig;
     let settings = import::read_settings(path);
     let import = settings.apply(&mut parts);
+    // Clip files are watched even when they fail to load.
+    let clip_files: Vec<PathBuf> = settings.clips.iter().map(|c| c.path(path)).collect();
     if let Some(rig) = &mut rig {
         rig.import = import;
+        for source in &settings.clips {
+            if let Err(why) = add_clip_file(path, source, rig) {
+                tracing::warn!("{}: clips from {}: {why}", path.display(), source.file);
+            }
+        }
         rig.springs = settings.springs;
+    } else if let Some(source) = settings.clips.first() {
+        tracing::warn!(
+            "{}: can't add clips from {}: the model has no skeleton",
+            path.display(),
+            source.file
+        );
     }
     let model = Model::new(path.to_path_buf(), parts).with_rig(rig);
     if model.parts.is_empty() {
@@ -479,7 +492,44 @@ fn load_uncached(path: &Path) -> Result<(Model, Vec<PathBuf>), ModelError> {
     // reloads the model.
     let mut deps = loaded.deps;
     deps.push(import::settings_path(path));
+    deps.extend(clip_files);
     Ok((model, deps))
+}
+
+/// Adds the clips of `source` (a glTF for the same skeleton) to `rig`,
+/// matching bones by name. Returns how many were added.
+fn add_clip_file(model: &Path, source: &import::ClipFile, rig: &mut Rig) -> Result<usize, String> {
+    let file = source.path(model);
+    let ext = file
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if ext != "glb" && ext != "gltf" {
+        return Err("only glTF files (.glb, .gltf) hold animations".into());
+    }
+    let bytes = std::fs::read(&file).map_err(|_| "file not found".to_string())?;
+    let other = gltf::load(&file, &bytes)?
+        .rig
+        .filter(|r| !r.clips.is_empty())
+        .ok_or("it has no animations")?;
+    let clip_names: Vec<&str> = other.clips.iter().map(|c| c.name.as_str()).collect();
+    let names = source.clip_names(&clip_names);
+    let mut added = 0;
+    for (clip, name) in other.clips.iter().zip(names) {
+        if rig.clip(&name).is_some() {
+            tracing::warn!("{}: a clip called {name:?} already exists", model.display());
+            continue;
+        }
+        if let Some(clip) = clip.retarget(&other.nodes, rig, name) {
+            rig.clips.push(clip);
+            added += 1;
+        }
+    }
+    if added == 0 {
+        return Err("none of its animated bones are in the model".into());
+    }
+    Ok(added)
 }
 
 /// The files a model reads besides itself (external buffers, textures, the
@@ -502,6 +552,12 @@ pub fn dependencies(path: &Path) -> Vec<PathBuf> {
     };
     let settings = import::settings_path(path);
     if settings.is_file() {
+        deps.extend(
+            import::read_settings(path)
+                .clips
+                .iter()
+                .map(|c| c.path(path)),
+        );
         deps.push(settings);
     }
     deps
@@ -784,6 +840,67 @@ mod tests {
             Err(ModelError::NotFound(_))
         ));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clip_files_add_clips_matched_by_bone_name() {
+        use crate::gltf::tests::waving_gltf;
+        let dir = std::env::temp_dir().join(format!("clip-files-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("anims")).unwrap();
+        let model = dir.join("robot.gltf");
+        std::fs::write(&model, waving_gltf()).unwrap();
+        // The same two nodes listed the other way round, so node 1 is
+        // `body` here: the clip must follow the name, not the index.
+        let swapped = waving_gltf()
+            .replace(r#""name":"body""#, r#""name":"TMP""#)
+            .replace(r#""name":"arm""#, r#""name":"body""#)
+            .replace(r#""name":"TMP""#, r#""name":"arm""#)
+            .replace(r#""name":"wave""#, r#""name":"mixamo.com""#);
+        std::fs::write(dir.join("anims/Shrug.gltf"), &swapped).unwrap();
+        let two = waving_gltf().replace(
+            r#""animations":[{"name":"wave","#,
+            r#""animations":[{"name":"Hi","channels":[{"sampler":0,"target":{"node":1,"path":"rotation"}}],
+              "samplers":[{"input":2,"output":3,"interpolation":"LINEAR"}]},{"name":"Bye","#,
+        );
+        std::fs::write(dir.join("anims/greet.gltf"), &two).unwrap();
+        std::fs::write(dir.join("anims/broken.gltf"), "not json").unwrap();
+        let settings = import::ImportSettings {
+            clips: [
+                "anims/Shrug.gltf",
+                "anims/greet.gltf",
+                "anims/broken.gltf",
+                "nope.glb",
+            ]
+            .into_iter()
+            .map(import::ClipFile::new)
+            .collect(),
+            ..import::ImportSettings::default()
+        };
+        import::write_settings(&model, &settings).unwrap();
+
+        let (loaded, deps) = load_uncached(&model).unwrap();
+        let rig = loaded.rig.as_ref().unwrap();
+        // Broken and missing files are skipped with a warning.
+        assert_eq!(rig.clip_names(), ["wave", "Shrug", "greet:Hi", "greet:Bye"]);
+        let shrug = rig.clip("Shrug").unwrap();
+        assert_eq!(shrug.channels.len(), 1);
+        assert_eq!(shrug.channels[0].node, rig.node("body").unwrap());
+        assert_eq!(
+            rig.clip("wave").unwrap().channels[0].node,
+            rig.node("arm").unwrap()
+        );
+        // Every clip file is watched, even the broken and missing ones.
+        for file in [
+            "anims/Shrug.gltf",
+            "anims/greet.gltf",
+            "anims/broken.gltf",
+            "nope.glb",
+        ] {
+            assert!(deps.contains(&dir.join(file)), "{file} isn't watched");
+        }
+        let listed = dependencies(&model);
+        assert!(listed.contains(&dir.join("anims/greet.gltf")));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -271,6 +271,12 @@ component: they're set up in the model's import settings
 <code>view.animation.springs</code> says whether it has any, and
 <code>view.animation.reset_springs()</code> puts them back at rest. Guide:
 <a href="oberon/models.html#spring-bones">Models → Spring bones</a>.</p>
+<p>Clips can also come from other glTF files made for the same skeleton,
+listed under <code>clips</code> in the model's import settings. A file with one clip
+names it after the file (<code>anims/Run Fast.glb</code> gives <code>&quot;Run Fast&quot;</code>); a file with
+several gives <code>&quot;file:Clip&quot;</code> (<code>&quot;sword:Slash&quot;</code>). They're in <code>anim.clips</code> and play
+like the model's own. Guide:
+<a href="oberon/models.html#clips-from-other-files">Models → Clips from other files</a>.</p>
 <h3 id="physics-components">Physics components<a class="anchor" href="#physics-components" aria-label="Link to this section">#</a></h3>
 <div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.RigidBody(body_type=&quot;dynamic&quot;, *, gravity_scale=1.0,
              linear_damping=0.0, angular_damping=0.0, enabled=True)
@@ -329,7 +335,7 @@ anim.time                # seconds into the clip; assign to jump
 anim.duration            # the clip&#x27;s length; anim.length(&quot;Jump&quot;) for any clip
 anim.playing             # False once a one-shot ends or after stop()
 anim.speed               # get/set; anim.looping
-anim.clips               # every clip in the model, in file order</code></pre></div>
+anim.clips               # every clip in the model, in file order, then borrowed ones</code></pre></div>
 <p>Reads show the start of the frame. <code>play</code>, <code>stop</code> and setting <code>time</code> or
 <code>speed</code> apply after your update.</p>
 <h3 id="input">Input<a class="anchor" href="#input" aria-label="Link to this section">#</a></h3>

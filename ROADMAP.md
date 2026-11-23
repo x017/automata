@@ -376,10 +376,43 @@ test runs it, stops it and checks the hair trails, swings forward, stays
 out of the head and settles. Docs:
 [Models → Spring bones](docs/wiki/oberon/models.md#spring-bones).
 
+### B2b. Clips from other files ✅ S
+- A model borrows the animations of other glTF files made for the same
+  skeleton (one file per move, as animation packs and Mixamo ship them).
+- **Done when:** a clip from another file plays on the model like its own.
+
+Done: `ImportSettings.clips` lists the files (relative to the model, saved
+in `<model>.import.ron`). Loading the model loads each file's clips and
+retargets them onto the model's rig by bone name (`Clip::retarget`), so the
+node order may differ and keys for missing bones are dropped. A file with
+one clip names it after the file (`run.glb` gives `run`); a file with
+several gives `file:Clip` (`sword:Slash`). Names stay exact, and a name the
+model already has keeps the model's clip, with a warning. Missing or broken
+files are skipped with a warning but still watched, so hot reload and
+`automata_assets::dependencies` (Oberon's reload, the export check) cover
+them. Oberon's Import block has a Clip files section (+ Clips from file…,
+a palette of the project's other glTF files; each file with the clips it
+gave, red when it gave none; × to remove). Ponytail Park's emotes (1 waves,
+2 cheers) come from `models/anims/emotes.glb`, a skeleton-only file from
+`make_runner.py`. Docs:
+[Models → Clips from other files](docs/wiki/oberon/models.md#clips-from-other-files).
+
 ### B3. Animation events and root motion ⬜ M
 NEXT_PLANS #4 phase 3:
-- Per-clip events delivered to `on_animation_event`.
+- Per-clip events, published as channels `entity:animation:<event>`:
+  `ctx.subscribe("player_1:animation:footstep", fn)`, with wildcards
+  (`"*:animation:hit"`). `on_animation_event` keeps working.
 - Root motion driving the Character Controller.
+
+### B3b. Key store for scripts ⬜ M
+- Read and write engine state by key, Redis style:
+  `ctx.get("player_1:animation:clip")`, `ctx.set("player_1:animation:speed", 1.5)`,
+  `ctx.scan("enemy_*:animation")`, and `ctx.ref(...)` for a handle kept
+  from `start()`. Animation, transform and attributes first.
+- Keys are `entity:component:field`. A `get` that matches two entities is
+  an error (`scan` returns all); colons aren't allowed in entity names, and
+  Oberon warns about duplicate names. A wrong key's error suggests the
+  nearest right one. `entity.animation.play` stays the main API.
 
 ### B4. Animation state machine and graph editor ⬜ L
 NEXT_PLANS #4 phase 4:
@@ -553,33 +586,35 @@ per effort. Reorder any time by telling me.
 | 13 | A10 Style presets | L | ✅ |
 | 14 | B1 Animation playback | L | ✅ |
 | 15 | B2 Spring bones | M | ✅ |
-| 16 | A11 Culling, instancing, LOD | M | ⬜ |
-| 17 | A12 Grass and foliage | L | ⬜ |
-| 18 | C2 Tweens and timers | S | ⬜ |
-| 19 | C3 Save games and settings | S | ⬜ |
-| 20 | C1 Physics joints | M | ⬜ |
-| 21 | D1 UI widgets | M | ⬜ |
-| 22 | D2 Custom fonts | S | ⬜ |
-| 23 | D3 UI layout, focus, screens | M | ⬜ |
-| 24 | B3 Animation events, root motion | M | ⬜ |
-| 25 | B4 Animation state machine | L | ⬜ |
-| 26 | B5 Attachments and IK | M | ⬜ |
-| 27 | C4 Navigation | L | ⬜ |
-| 28 | C5 AI helpers | S | ⬜ |
-| 29 | D5 Material assets and editor | M | ⬜ |
-| 30 | A13 Terrain | L | ⬜ |
-| 31 | B6 Ragdolls | M | ⬜ |
-| 32 | C6 2D toolkit | L | ⬜ |
-| 33 | D6 Editor workflow | M | ⬜ |
-| 34 | D4 UI editor | L | ⬜ |
-| 35 | D7 Localization | S | ⬜ |
-| 36 | E1 Android export | L | ⬜ |
-| 37 | E2 macOS export | M | ⬜ |
-| 38 | E3 Web export | L | ⬜ |
-| 39 | E4 Steam integration | M | ⬜ |
-| 40 | F3 Custom shaders | M | ⬜ |
-| 41 | F2 Video playback | M | ⬜ |
-| 42 | F1 Multiplayer | L | ⬜ |
+| 16 | B2b Clips from other files | S | ✅ |
+| 17 | B3 Animation events, root motion | M | ⬜ |
+| 18 | B3b Key store for scripts | M | ⬜ |
+| 19 | A11 Culling, instancing, LOD | M | ⬜ |
+| 20 | A12 Grass and foliage | L | ⬜ |
+| 21 | C2 Tweens and timers | S | ⬜ |
+| 22 | C3 Save games and settings | S | ⬜ |
+| 23 | C1 Physics joints | M | ⬜ |
+| 24 | D1 UI widgets | M | ⬜ |
+| 25 | D2 Custom fonts | S | ⬜ |
+| 26 | D3 UI layout, focus, screens | M | ⬜ |
+| 27 | B4 Animation state machine | L | ⬜ |
+| 28 | B5 Attachments and IK | M | ⬜ |
+| 29 | C4 Navigation | L | ⬜ |
+| 30 | C5 AI helpers | S | ⬜ |
+| 31 | D5 Material assets and editor | M | ⬜ |
+| 32 | A13 Terrain | L | ⬜ |
+| 33 | B6 Ragdolls | M | ⬜ |
+| 34 | C6 2D toolkit | L | ⬜ |
+| 35 | D6 Editor workflow | M | ⬜ |
+| 36 | D4 UI editor | L | ⬜ |
+| 37 | D7 Localization | S | ⬜ |
+| 38 | E1 Android export | L | ⬜ |
+| 39 | E2 macOS export | M | ⬜ |
+| 40 | E3 Web export | L | ⬜ |
+| 41 | E4 Steam integration | M | ⬜ |
+| 42 | F3 Custom shaders | M | ⬜ |
+| 43 | F2 Video playback | M | ⬜ |
+| 44 | F1 Multiplayer | L | ⬜ |
 
 Large phases may span several "proceed"s. Each one ends with a pushed,
 working step and a report on what's left in that phase.

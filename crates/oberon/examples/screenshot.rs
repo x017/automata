@@ -53,7 +53,7 @@ fn main() {
 
     // Optional scene: `picker`, `menu`, `dialog`, `project`, `code`,
     // `code-complete`, `code-api`, `settings`, `build`, `build-menu`, `palette`,
-    // `assets`, `assets-sounds`, `bone-picker`.
+    // `assets`, `assets-sounds`, `bone-picker`, `clip-picker`.
     let scene = std::env::args().nth(2).unwrap_or_default();
     let selected = doc.selected;
     let pointer = Pointer {
@@ -274,6 +274,16 @@ fn main() {
                     bare.springs = automata_assets::springs::Springs::default();
                     ui.open_bone_picker(&path, &bare, oberon::ui::springs::SpringPick::Chain);
                 }
+            }
+        }
+        "clip-picker" => {
+            // The "+ Clips from file…" picker for the selected model.
+            let entity = selected.and_then(|id| doc.entities.iter().find(|e| e.id == id));
+            if let Some(path) = entity
+                .and_then(|e| oberon::doc::model_path(&e.data))
+                .map(|p| doc.base_dir().join(p))
+            {
+                ui.open_clip_file_picker(&path);
             }
         }
         "palette" => {

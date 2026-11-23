@@ -222,6 +222,27 @@ pub struct Clip {
 }
 
 impl Clip {
+    /// This clip moved onto `rig` under `name`: each channel follows its
+    /// node by name, from `nodes` (the clip's own file's nodes) to the
+    /// rig's. Channels for nodes the rig lacks are dropped; `None` when
+    /// none are left.
+    #[must_use]
+    pub fn retarget(&self, nodes: &[RigNode], rig: &Rig, name: String) -> Option<Clip> {
+        let channels: Vec<Channel> = self
+            .channels
+            .iter()
+            .filter_map(|c| {
+                let node = rig.node(&nodes.get(c.node)?.name)?;
+                Some(Channel { node, ..c.clone() })
+            })
+            .collect();
+        (!channels.is_empty()).then_some(Clip {
+            name,
+            duration: self.duration,
+            channels,
+        })
+    }
+
     /// Writes the clip's values at `time` (seconds, clamped to the clip)
     /// into `pose`. Nodes the clip doesn't animate keep their values.
     pub fn sample_into(&self, time: f32, pose: &mut Pose) {

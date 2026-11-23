@@ -14,4 +14,7 @@
             (bone: "ThighR", offset: (0.0, -0.02, 0.0), radius: 0.07, length: -0.38),
         ],
     ),
+    clips: [
+        (file: "anims/emotes.glb"),
+    ],
 )

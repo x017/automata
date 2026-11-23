@@ -50,6 +50,13 @@ pub enum PaletteAction {
         /// Chain or collider.
         pick: super::springs::SpringPick,
     },
+    /// Add a glTF file's animations to a model's clips.
+    ClipFile {
+        /// The model file (its import settings get the clip file).
+        model: PathBuf,
+        /// The glTF file with the animations.
+        file: PathBuf,
+    },
 }
 
 /// One searchable entry.
@@ -387,6 +394,9 @@ impl Ui {
             PaletteAction::SpringBone { model, bone, pick } => {
                 self.out.push(super::springs::add_bone(model, bone, pick));
             }
+            PaletteAction::ClipFile { model, file } => {
+                self.out.push(super::clip_files::add_file(model, &file));
+            }
         }
     }
 
@@ -410,6 +420,26 @@ impl Ui {
                 SpringPick::Chain => "Choose the first bone of the chain…",
                 SpringPick::Collider => "Choose a body bone for the collider…",
             }),
+        });
+    }
+
+    /// The clip file picker: the project's other glTF files, whose
+    /// animations `model` can borrow.
+    pub fn open_clip_file_picker(&mut self, model: &Path) {
+        let items = super::clip_files::file_items(&self.project_root, model);
+        let placeholder = if items.is_empty() {
+            "No other glTF files here: put animation files in the project first"
+        } else {
+            "Choose a glTF with animations for this skeleton…"
+        };
+        self.menu = None;
+        self.picker = None;
+        self.palette = Some(Palette {
+            query: String::new(),
+            selected: 0,
+            items,
+            files_only: true,
+            placeholder: Some(placeholder),
         });
     }
 

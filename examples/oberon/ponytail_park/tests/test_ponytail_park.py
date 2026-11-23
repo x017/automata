@@ -34,6 +34,30 @@ def test_the_model_file_matches_make_runner():
         assert f.read() == make_runner.build()
 
 
+def test_the_emotes_file_matches_make_runner():
+    with open(make_runner.EMOTES, "rb") as f:
+        assert f.read() == make_runner.build_emotes()
+
+
+def test_emotes_come_from_their_own_file_and_play_to_the_end_then_idle():
+    seen = []
+
+    def after(ctx):
+        anim = ctx.scene["Runner"].animation
+        if not seen:
+            # The model's clips plus the two borrowed from emotes.glb.
+            assert anim.clips == ["Idle", "Walk", "Run", "emotes:Wave", "emotes:Cheer"]
+            assert anim.length("emotes:Wave") == pytest.approx(2.0, abs=0.04)
+            anim.play("emotes:Wave", loop=False)
+        seen.append((anim.clip, anim.playing))
+
+    at.run_scene(LEVEL, headless=True, max_frames=150, update=after, fixed_delta=1 / 60)
+    # The player script lets the emote finish (2 s), then goes back to Idle.
+    assert seen[10] == seen[110] == ("emotes:Wave", True)
+    assert seen[-1] == ("Idle", True)
+    assert set(player.EMOTES.values()) == {"emotes:Wave", "emotes:Cheer"}
+
+
 def test_the_runner_has_spring_bones_and_every_copy_animates():
     seen = {}
 
@@ -47,7 +71,7 @@ def test_the_runner_has_spring_bones_and_every_copy_animates():
         clip, playing, springs, clips = seen[name]
         assert playing, name
         assert springs, f"{name}'s model has spring bones"
-        assert clips == {"Idle", "Walk", "Run"}
+        assert clips == {"Idle", "Walk", "Run", "emotes:Wave", "emotes:Cheer"}
     assert seen["Stroller"][0] == "Walk"
     assert seen["Spectator"][0] == "Idle"
 

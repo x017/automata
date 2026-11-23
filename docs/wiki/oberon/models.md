@@ -215,6 +215,53 @@ Commit these files with your models. A model without one is used exactly
 as the file describes it. Fitted colliders use the model's size after the
 import settings, so press **Fit Collider** after changing them.
 
+## Clips from other files
+
+![The Import block's Clip files section: anims/emotes.glb, which gave the clips emotes:Wave and emotes:Cheer](../../assets/models/clip_files.jpg)
+
+Animations often come one per file: a store's animation pack, or a
+download per move from Mixamo. A model can borrow the clips of any glTF
+made for the **same skeleton** (the same bone names). Under **Clip files**
+in the Import block (rigged models only), press **+ Clips from file…** and
+pick the file from the project's `.glb` and `.gltf` files. Its clips join the
+model's own: they show in the Animation component's **Clip** menu, and
+scripts play them like any other clip.
+
+Borrowed clips are named after their file, so two files can both have a
+clip called "Take 001":
+
+| The file has | Its clips are called | For example |
+|---|---|---|
+| One clip | The file's name, without the extension | `anims/Run Fast.glb` gives `Run Fast` |
+| Several clips | `file:Clip` | `sword.glb` with Slash and Block gives `sword:Slash` and `sword:Block` |
+
+```python
+anim.play("Run Fast", fade=0.2)
+anim.play("sword:Slash", loop=False)
+```
+
+Names are exact and case-sensitive, like every clip name. Bones are matched
+by name, and keys for bones the model doesn't have are skipped. A file
+turns red in the list when it gave no clips: it's missing, has no
+animations, or its bones have other names. If a borrowed name is already
+taken, the model's own clip wins and Oberon logs a warning. The ×
+next to a file removes it.
+
+The files are saved in the import settings, relative to the model:
+
+```ron
+clips: [
+    (file: "anims/emotes.glb"),
+],
+```
+
+Editing a clip file while Oberon is open reloads the model, as if you'd
+edited the model itself. Exported games include the clip files.
+[Ponytail Park](../../../examples/oberon/ponytail_park/README.md#clips-from-another-file)
+borrows its wave and cheer this way.
+
+![The runner waving: the wave clip comes from emotes.glb, not from the runner's own file](../../assets/models/clip_files_wave.jpg)
+
 ## Spring bones
 
 ![The runner without and with spring bones: running, her ponytail streams out behind and her skirt flares; just after she stops, both swing on forwards](../../assets/models/spring_bones.jpg)
