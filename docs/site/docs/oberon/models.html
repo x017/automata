@@ -204,6 +204,30 @@ as it is. The settings apply wherever the model is used: in Play, under
 <p>Commit these files with your models. A model without one is used exactly
 as the file describes it. Fitted colliders use the model's size after the
 import settings, so press <strong>Fit Collider</strong> after changing them.</p>
+<h2 id="levels-of-detail">Levels of detail<a class="anchor" href="#levels-of-detail" aria-label="Link to this section">#</a></h2>
+<p>A model that is used many times, such as a tree, a rock or a fence, can
+carry simpler versions of itself for far away. Put them in the same file
+as nodes whose names end in <code>_LOD1</code>, <code>_LOD2</code> and so on (any case, for
+example <code>Pine_LOD1</code>). Everything under such a node belongs to that level;
+everything else is the full-detail model. The engine draws one level at
+a time, and the levels never show up as parts of their own.</p>
+<p>Each level takes over at a camera distance. By default that's 15, 30,
+60… times the model's radius. To choose the distances yourself, list them
+in the import settings, nearest first:</p>
+<div class="codeblock" data-lang="ron"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>(
+    lod_distances: [<span class="tok-n">25.0</span>, <span class="tok-n">60.0</span>],
+)</code></pre></div>
+<p>The graphics preset scales these distances: Low switches to simpler levels
+at half the distance and Beautiful at twice the distance. Animated models
+always draw at full detail. A file with <code>_LOD</code> nodes and a skeleton logs a
+warning and leaves the levels out.</p>
+<p>To stop drawing a model altogether past some distance, give its entity a
+<strong>draw distance</strong>. Set <code>draw_distance: 80.0</code> in the scene file's
+<code>mesh_visual</code>, or pass <code>draw_distance=80</code> to <code>MeshRenderer.model</code> (or any
+other constructor) in Python. The model then dithers away over the last
+tenth of that distance instead of popping. Fog that hides distant objects
+makes this cut invisible, so a draw distance just past where the fog
+turns opaque costs nothing in looks.</p>
 <h2 id="clips-from-other-files">Clips from other files<a class="anchor" href="#clips-from-other-files" aria-label="Link to this section">#</a></h2>
 <p><img src="../../../assets/models/clip_files.jpg" alt="The Import block's Clip files section: anims/emotes.glb, which gave the clips emotes:Wave and emotes:Cheer" loading="lazy" decoding="async"></p>
 <p>Animations often come one per file: a store's animation pack, or a
@@ -372,7 +396,7 @@ the files.</p>
     <footer class="pager"><a class="prev" href="code-editor.html"><small>Previous</small>The code editor</a><a class="next" href="audio.html"><small>Next</small>Audio</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/models.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l3"><a href="#animated-models">Animated models</a></li><li class="l2"><a href="#add-a-model-to-the-scene">Add a model to the scene</a></li><li class="l2"><a href="#the-assets-tab">The Assets tab</a></li><li class="l3"><a href="#what-importing-copies">What importing copies</a></li><li class="l2"><a href="#give-a-model-to-an-existing-entity">Give a model to an existing entity</a></li><li class="l2"><a href="#the-inspector">The Inspector</a></li><li class="l2"><a href="#animation">Animation</a></li><li class="l3"><a href="#from-a-script">From a script</a></li><li class="l3"><a href="#from-python">From Python</a></li><li class="l3"><a href="#animation-events">Animation events</a></li><li class="l3"><a href="#root-motion">Root motion</a></li><li class="l2"><a href="#import-settings">Import settings</a></li><li class="l2"><a href="#clips-from-other-files">Clips from other files</a></li><li class="l2"><a href="#spring-bones">Spring bones</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#editing-a-model-while-oberon-is-open">Editing a model while Oberon is open</a></li><li class="l2"><a href="#scene-files-and-paths">Scene files and paths</a></li><li class="l2"><a href="#from-python-1">From Python</a></li><li class="l2"><a href="#try-it">Try it</a></li><li class="l2"><a href="#troubleshooting">Troubleshooting</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l3"><a href="#animated-models">Animated models</a></li><li class="l2"><a href="#add-a-model-to-the-scene">Add a model to the scene</a></li><li class="l2"><a href="#the-assets-tab">The Assets tab</a></li><li class="l3"><a href="#what-importing-copies">What importing copies</a></li><li class="l2"><a href="#give-a-model-to-an-existing-entity">Give a model to an existing entity</a></li><li class="l2"><a href="#the-inspector">The Inspector</a></li><li class="l2"><a href="#animation">Animation</a></li><li class="l3"><a href="#from-a-script">From a script</a></li><li class="l3"><a href="#from-python">From Python</a></li><li class="l3"><a href="#animation-events">Animation events</a></li><li class="l3"><a href="#root-motion">Root motion</a></li><li class="l2"><a href="#import-settings">Import settings</a></li><li class="l2"><a href="#levels-of-detail">Levels of detail</a></li><li class="l2"><a href="#clips-from-other-files">Clips from other files</a></li><li class="l2"><a href="#spring-bones">Spring bones</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l2"><a href="#editing-a-model-while-oberon-is-open">Editing a model while Oberon is open</a></li><li class="l2"><a href="#scene-files-and-paths">Scene files and paths</a></li><li class="l2"><a href="#from-python-1">From Python</a></li><li class="l2"><a href="#try-it">Try it</a></li><li class="l2"><a href="#troubleshooting">Troubleshooting</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

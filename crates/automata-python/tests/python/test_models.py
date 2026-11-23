@@ -25,6 +25,30 @@ def test_model_meshes_report_their_file_and_bounds():
     assert cube.path is None and cube.bounds is None
 
 
+def test_draw_distances_save_load_and_validate(tmp_path):
+    tree = at.MeshRenderer.model(TREE, draw_distance=80.0)
+    assert tree.draw_distance == 80.0
+    assert at.MeshRenderer.cube().draw_distance == 0.0
+    assert at.MeshRenderer.sphere(draw_distance=12.5).draw_distance == 12.5
+    scene = at.Scene()
+    scene.add(at.Entity("tree").add(tree))
+    scene.add(at.Entity("box").add(at.MeshRenderer.cube()))
+    text = scene.to_ron()
+    assert text.count("draw_distance") == 1, "unset distances stay out of the file"
+    path = tmp_path / "level.ron"
+    scene.save(str(path))
+    again = at.Scene.load(str(path))
+
+    def mesh(name):
+        return next(c for c in again.find(name).components() if isinstance(c, at.MeshRenderer))
+
+    assert mesh("tree").draw_distance == 80.0
+    assert mesh("box").draw_distance == 0.0
+    for bad in (-1.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="draw_distance"):
+            at.MeshRenderer.quad(draw_distance=bad)
+
+
 def test_relative_paths_resolve_against_the_asset_root(tmp_path):
     shutil.copy(CRATE, tmp_path / "crate.obj")
     shutil.copy(os.path.join(MODELS, "crate.mtl"), tmp_path / "crate.mtl")

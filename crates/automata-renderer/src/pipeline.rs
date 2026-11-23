@@ -136,8 +136,8 @@ pub(crate) struct PipelineShared {
     pub camera_layout: wgpu::BindGroupLayout,
     pub texture_layout: wgpu::BindGroupLayout,
     pub material_layout: wgpu::BindGroupLayout,
-    pub model_layout: wgpu::BindGroupLayout,
-    /// The model matrix plus the joint palette, for skinned draws.
+    /// The model matrix plus the joint palette, for skinned draws (plain
+    /// draws take their model matrices per instance, `batch.rs`).
     pub skinned_model_layout: wgpu::BindGroupLayout,
     pub light_layout: wgpu::BindGroupLayout,
     /// The light group plus the screen-space occlusion (binding 5), for
@@ -220,10 +220,6 @@ impl PipelineShared {
                     count: None,
                 },
             ],
-        });
-        let model_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("model"),
-            entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX)],
         });
         let skinned_model_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -321,7 +317,6 @@ impl PipelineShared {
             camera_layout,
             texture_layout,
             material_layout,
-            model_layout,
             skinned_model_layout,
             light_layout,
             beautiful_light_layout,
@@ -431,37 +426,51 @@ const SKIN_ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![
     4 => Float32x4
 ];
 
-/// The vertex buffers of a mesh pipeline: geometry, plus joints and weights
-/// when `skinned`.
-fn mesh_buffers(skinned: bool) -> Vec<Option<wgpu::VertexBufferLayout<'static>>> {
-    let mut buffers = vec![Some(wgpu::VertexBufferLayout {
+/// The geometry vertex buffer layout (slot 0).
+fn geometry_buffer() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &MESH_ATTRIBUTES,
-    })];
-    if skinned {
-        buffers.push(Some(wgpu::VertexBufferLayout {
+    }
+}
+
+/// The vertex buffers of a mesh pipeline: geometry, then joints and
+/// weights when `skinned`, or else the per-instance model matrices.
+fn mesh_buffers(skinned: bool) -> Vec<Option<wgpu::VertexBufferLayout<'static>>> {
+    let second = if skinned {
+        wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<SkinVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &SKIN_ATTRIBUTES,
-        }));
-    }
-    buffers
+        }
+    } else {
+        crate::batch::instance_layout()
+    };
+    vec![Some(geometry_buffer()), Some(second)]
 }
 
-/// The plain and skinned variants of a pipeline.
+/// The bind group 1 layout of a mesh pipeline: skinned draws' model and
+/// joints; plain ones have none (their model matrices are per instance).
+fn model_group(shared: &PipelineShared, skinned: bool) -> Option<&wgpu::BindGroupLayout> {
+    skinned.then_some(&shared.skinned_model_layout)
+}
+
+/// The plain and skinned variants of a pipeline, and for the shaded mesh
+/// pipelines a fading one (plain, dithering copies away, see `batch.rs`).
 pub(crate) struct PipelinePair {
     pub plain: wgpu::RenderPipeline,
     pub skinned: wgpu::RenderPipeline,
+    pub faded: Option<wgpu::RenderPipeline>,
 }
 
 impl PipelinePair {
-    /// The variant for a draw.
-    pub(crate) fn get(&self, skinned: bool) -> &wgpu::RenderPipeline {
-        if skinned {
-            &self.skinned
-        } else {
-            &self.plain
+    /// The variant for a batch.
+    pub(crate) fn get(&self, kind: crate::batch::BatchKind) -> &wgpu::RenderPipeline {
+        match kind {
+            crate::batch::BatchKind::Skinned => &self.skinned,
+            crate::batch::BatchKind::Faded => self.faded.as_ref().unwrap_or(&self.plain),
+            crate::batch::BatchKind::Plain => &self.plain,
         }
     }
 }
@@ -524,9 +533,11 @@ pub(crate) fn create_mesh_pipelines(
     depth_format: wgpu::TextureFormat,
     shadows: ForwardShadows,
 ) -> PipelinePair {
+    let variant = |kind| create_mesh_pipeline(device, shared, format, depth_format, kind, shadows);
     PipelinePair {
-        plain: create_mesh_pipeline(device, shared, format, depth_format, false, shadows),
-        skinned: create_mesh_pipeline(device, shared, format, depth_format, true, shadows),
+        plain: variant(crate::batch::BatchKind::Plain),
+        skinned: variant(crate::batch::BatchKind::Skinned),
+        faded: Some(variant(crate::batch::BatchKind::Faded)),
     }
 }
 
@@ -564,7 +575,7 @@ pub(crate) fn create_water_pipeline(
             module: &shared.water_shader,
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &mesh_buffers(false),
+            buffers: &[Some(geometry_buffer())],
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -655,6 +666,7 @@ pub(crate) fn create_shadow_pipelines(
     PipelinePair {
         plain: create_shadow_pipeline(device, shared, false),
         skinned: create_shadow_pipeline(device, shared, true),
+        faded: None,
     }
 }
 
@@ -665,13 +677,17 @@ fn create_mesh_pipeline(
     shared: &PipelineShared,
     format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
-    skinned: bool,
+    kind: crate::batch::BatchKind,
     shadows: ForwardShadows,
 ) -> wgpu::RenderPipeline {
-    let model_layout = if skinned {
-        &shared.skinned_model_layout
+    let skinned = kind == crate::batch::BatchKind::Skinned;
+    // The fading variant compiles the dither (an override constant), so the
+    // others keep early depth testing.
+    let fading = [("FADING", 1.0)];
+    let constants: &[(&str, f64)] = if kind == crate::batch::BatchKind::Faded {
+        &fading
     } else {
-        &shared.model_layout
+        &[]
     };
     // Beautiful (HDR) meshes read the screen-space occlusion too.
     let light_layout = if format == HDR_FORMAT {
@@ -683,7 +699,7 @@ fn create_mesh_pipeline(
         label: Some("mesh"),
         bind_group_layouts: &[
             Some(&shared.camera_layout),
-            Some(model_layout),
+            model_group(shared, skinned),
             Some(&shared.material_layout),
             Some(light_layout),
         ],
@@ -691,7 +707,11 @@ fn create_mesh_pipeline(
     });
 
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some(if skinned { "skinned mesh" } else { "mesh" }),
+        label: Some(match kind {
+            crate::batch::BatchKind::Skinned => "skinned mesh",
+            crate::batch::BatchKind::Faded => "fading mesh",
+            crate::batch::BatchKind::Plain => "mesh",
+        }),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &shared.mesh_shader,
@@ -721,7 +741,10 @@ fn create_mesh_pipeline(
             } else {
                 shadows.entry_point()
             }),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants,
+                ..wgpu::PipelineCompilationOptions::default()
+            },
             targets: &if format == HDR_FORMAT {
                 coverage_target(format)
             } else {
@@ -741,6 +764,7 @@ pub(crate) fn create_depth_prepass_pipelines(
     PipelinePair {
         plain: create_depth_prepass_pipeline(device, shared, false),
         skinned: create_depth_prepass_pipeline(device, shared, true),
+        faded: None,
     }
 }
 
@@ -751,14 +775,9 @@ fn create_depth_prepass_pipeline(
     shared: &PipelineShared,
     skinned: bool,
 ) -> wgpu::RenderPipeline {
-    let model_layout = if skinned {
-        &shared.skinned_model_layout
-    } else {
-        &shared.model_layout
-    };
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("depth prepass"),
-        bind_group_layouts: &[Some(&shared.camera_layout), Some(model_layout)],
+        bind_group_layouts: &[Some(&shared.camera_layout), model_group(shared, skinned)],
         immediate_size: 0,
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -799,14 +818,12 @@ fn create_shadow_pipeline(
     shared: &PipelineShared,
     skinned: bool,
 ) -> wgpu::RenderPipeline {
-    let model_layout = if skinned {
-        &shared.skinned_model_layout
-    } else {
-        &shared.model_layout
-    };
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("shadow"),
-        bind_group_layouts: &[Some(&shared.shadow_light_layout), Some(model_layout)],
+        bind_group_layouts: &[
+            Some(&shared.shadow_light_layout),
+            model_group(shared, skinned),
+        ],
         immediate_size: 0,
     });
 

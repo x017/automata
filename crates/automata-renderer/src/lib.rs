@@ -9,6 +9,7 @@
 //! API types that originate in `wgpu` (such as [`Color`]) are re-exported so
 //! that simple consumers do not need a direct `wgpu` dependency.
 
+mod batch;
 mod camera;
 mod composite;
 mod context;
@@ -32,7 +33,7 @@ mod water;
 
 pub use camera::{Camera2D, Camera3D};
 pub use context::RenderContext;
-pub use draw::{DrawList, Sprite};
+pub use draw::{DrawList, MeshLod, Sprite};
 pub use environment::{Environment, PostEffects, Tonemapping};
 pub use error::{Error, Result};
 pub use light::{

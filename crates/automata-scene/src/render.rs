@@ -38,6 +38,10 @@ pub struct MeshRenderer {
     /// [`automata_renderer::DrawList::skinned_mesh`]); set every frame by
     /// [`crate::animate`]. Skinned meshes need one to draw correctly.
     pub joints: Option<Arc<[glam::Mat4]>>,
+    /// Levels of detail and draw distance per mesh: `[0]` for `mesh`,
+    /// then one per part. Missing entries (or `None`) draw at full detail
+    /// at any distance.
+    pub lods: Vec<Option<Arc<automata_renderer::MeshLod>>>,
 }
 
 impl MeshRenderer {
@@ -49,6 +53,7 @@ impl MeshRenderer {
             material,
             parts: Vec::new(),
             joints: None,
+            lods: Vec::new(),
         }
     }
 
@@ -370,10 +375,13 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
         let model = global.matrix();
         let parts = std::iter::once((&renderer.mesh, &renderer.material))
             .chain(renderer.parts.iter().map(|(m, mat)| (m, mat)));
-        for (mesh, material) in parts {
+        for (i, (mesh, material)) in parts.enumerate() {
             match &renderer.joints {
                 Some(joints) => draw.skinned_mesh(mesh, model, material, joints),
                 None => draw.mesh(mesh, model, material),
+            }
+            if let Some(Some(lod)) = renderer.lods.get(i) {
+                draw.set_lod(lod);
             }
         }
     }
@@ -439,6 +447,11 @@ pub struct MeshVisual {
     /// surface (primitives) or the file's own materials (models).
     #[serde(default, skip_serializing_if = "Surface::is_default")]
     pub surface: Surface,
+    /// Beyond this camera distance (metres) it isn't drawn, shadow
+    /// included; over the last tenth it dithers away. 0 draws it at any
+    /// distance.
+    #[serde(default)]
+    pub draw_distance: f32,
 }
 
 /// How a [`MeshVisual`]'s surface responds to light, on top of its color.
@@ -592,6 +605,7 @@ impl MeshVisual {
             color,
             model: None,
             surface: Surface::default(),
+            draw_distance: 0.0,
         }
     }
 
@@ -605,6 +619,7 @@ impl MeshVisual {
             color,
             model: None,
             surface: Surface::default(),
+            draw_distance: 0.0,
         }
     }
 
@@ -617,6 +632,7 @@ impl MeshVisual {
             color,
             model: None,
             surface: Surface::default(),
+            draw_distance: 0.0,
         }
     }
 
@@ -629,6 +645,7 @@ impl MeshVisual {
             color,
             model: None,
             surface: Surface::default(),
+            draw_distance: 0.0,
         }
     }
 
@@ -636,6 +653,13 @@ impl MeshVisual {
     #[must_use]
     pub fn with_surface(mut self, surface: Surface) -> Self {
         self.surface = surface;
+        self
+    }
+
+    /// This visual with a draw distance (see [`Self::draw_distance`]).
+    #[must_use]
+    pub fn with_draw_distance(mut self, draw_distance: f32) -> Self {
+        self.draw_distance = draw_distance;
         self
     }
 
@@ -672,6 +696,7 @@ impl MeshVisual {
             color: tint,
             model,
             surface: Surface::default(),
+            draw_distance: 0.0,
         }
     }
 }
@@ -744,6 +769,24 @@ pub fn materialize_visuals(
             };
             let mut component = MeshRenderer::new(mesh, material);
             component.parts.extend(parts);
+            // One shared level list per part (drawn for every copy).
+            let draw_distance = visual.draw_distance;
+            component.lods = model
+                .gpu(renderer)
+                .iter()
+                .map(|gpu| {
+                    (!gpu.lods.is_empty() || draw_distance > 0.0).then(|| {
+                        Arc::new(automata_renderer::MeshLod {
+                            levels: if model.rig.is_some() {
+                                Vec::new()
+                            } else {
+                                gpu.lods.clone()
+                            },
+                            draw_distance,
+                        })
+                    })
+                })
+                .collect();
             // An Animator that already ran keeps its pose; otherwise the
             // rest pose until one poses it.
             let posed = world
@@ -759,7 +802,14 @@ pub fn materialize_visuals(
                 &visual.surface.params(visual.color),
                 automata_renderer::MaterialTextures::default(),
             );
-            MeshRenderer::new(mesh, material)
+            let mut component = MeshRenderer::new(mesh, material);
+            if visual.draw_distance > 0.0 {
+                component.lods = vec![Some(Arc::new(automata_renderer::MeshLod {
+                    levels: Vec::new(),
+                    draw_distance: visual.draw_distance,
+                }))];
+            }
+            component
         };
         if world.insert_one(entity, component).is_ok() {
             materialized += 1;

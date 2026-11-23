@@ -205,6 +205,20 @@ pub(crate) struct MeshInner {
     /// The vertices' bounding box `(min, max)` in model space (the bind
     /// pose for skinned meshes): where a glowing mesh's light sits.
     pub bounds: (glam::Vec3, glam::Vec3),
+    /// A hash of the geometry: meshes with equal keys draw identically, so
+    /// draws of them batch into one instanced draw (a hundred cubes made
+    /// one by one included).
+    pub key: u64,
+}
+
+/// [`MeshInner::key`] for `data` (and its skin).
+pub(crate) fn content_key(data: &MeshData, skin: Option<&[SkinVertex]>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytemuck::cast_slice::<_, u8>(&data.vertices).hash(&mut h);
+    bytemuck::cast_slice::<_, u8>(&data.indices).hash(&mut h);
+    skin.map(bytemuck::cast_slice::<_, u8>).hash(&mut h);
+    h.finish()
 }
 
 #[cfg(test)]

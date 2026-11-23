@@ -322,6 +322,7 @@ impl ComponentKind {
                     primitive: PrimitiveData::Cube { size: 1.0 },
                     color: [0.85, 0.87, 0.92, 1.0],
                     surface: automata_scene::Surface::default(),
+                    draw_distance: 0.0,
                 });
             }
             Self::Animation => {
@@ -522,6 +523,7 @@ fn test_box(pos: [f32; 3], scale: [f32; 3], color: [f32; 4]) -> EntityData {
             primitive: PrimitiveData::Cube { size: 1.0 },
             color,
             surface: automata_scene::Surface::default(),
+            draw_distance: 0.0,
         }),
         ..Default::default()
     }
@@ -687,6 +689,7 @@ impl Document {
             primitive: PrimitiveData::Cube { size: 1.0 },
             color: [0.16, 0.17, 0.20, 1.0],
             surface: automata_scene::Surface::default(),
+            draw_distance: 0.0,
         });
         // A static collider so physics objects land on the ground in play mode.
         doc.entities[ground].data.rigid_body = Some(automata_physics::RigidBody::fixed());
@@ -701,6 +704,7 @@ impl Document {
             primitive: PrimitiveData::Cube { size: 1.0 },
             color: [0.62, 0.78, 1.0, 1.0],
             surface: automata_scene::Surface::default(),
+            draw_distance: 0.0,
         });
         // Something to play with: a player and a stack of crates.
         let player = doc.create(CreateKind::Player);
@@ -895,6 +899,7 @@ impl Document {
             },
             color: [1.0, 1.0, 1.0, 1.0],
             surface: automata_scene::Surface::default(),
+            draw_distance: 0.0,
         });
         self.touch();
         true
@@ -1003,6 +1008,7 @@ impl Document {
                 },
                 color: [1.0; 4],
                 surface: automata_scene::Surface::default(),
+                draw_distance: 0.0,
             }),
             ..Default::default()
         };
@@ -1032,6 +1038,7 @@ impl Document {
                 primitive: PrimitiveData::Model { path: rel.clone() },
                 color,
                 surface: automata_scene::Surface::default(),
+                draw_distance: 0.0,
             });
             fit_animation(d);
         })
@@ -1172,6 +1179,7 @@ impl Document {
                     primitive: PrimitiveData::Sphere { size: 1.0 },
                     color: [1.0, 1.0, 1.0, 1.0],
                     surface: automata_scene::Surface::default(),
+                    draw_distance: 0.0,
                 });
             }
             CreateKind::Plane => {
@@ -1184,6 +1192,7 @@ impl Document {
                     primitive: PrimitiveData::Quad { size: 10.0 },
                     color: [0.55, 0.58, 0.64, 1.0],
                     surface: automata_scene::Surface::default(),
+                    draw_distance: 0.0,
                 });
             }
             CreateKind::Light => {
@@ -1239,6 +1248,7 @@ impl Document {
                     primitive: PrimitiveData::Cube { size: 1.0 },
                     color: [1.0, 0.56, 0.24, 1.0],
                     surface: automata_scene::Surface::default(),
+                    draw_distance: 0.0,
                 });
                 ComponentKind::Character.add_to(&mut data);
             }

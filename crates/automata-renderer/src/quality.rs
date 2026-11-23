@@ -110,6 +110,20 @@ impl GraphicsQuality {
         }
     }
 
+    /// How far each level of detail reaches, relative to the distances a
+    /// mesh's [`crate::MeshLod`] gives: lower presets switch to the simpler
+    /// meshes sooner. Draw distances aren't scaled.
+    #[must_use]
+    pub fn lod_scale(self) -> f32 {
+        match self {
+            Self::Low => 0.5,
+            Self::Medium => 0.75,
+            Self::High => 1.0,
+            Self::Ultra => 1.5,
+            Self::Beautiful => 2.0,
+        }
+    }
+
     /// Sun shadow cascades: each splits off a slice of the camera's view
     /// (up to the sun's shadow distance) with its own map, so nearby
     /// shadows get the most texels. With one, the map covers the whole

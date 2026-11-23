@@ -91,6 +91,7 @@ at.MeshRenderer.model(path, color=(<span class="tok-n">1</span>, <span class="to
 <span class="tok-c"># every constructor also takes the keyword-only surface arguments:</span>
 <span class="tok-c">#   roughness=None, metallic=None, emissive=(0, 0, 0), emissive_strength=1.0,</span>
 <span class="tok-c">#   glow_light=1.0, glow_shadows=True</span>
+<span class="tok-c"># and draw_distance=0.0 (metres; 0 = drawn at any distance)</span>
 m.kind                      <span class="tok-c"># &quot;cube&quot;, &quot;sphere&quot;, &quot;quad&quot; or &quot;model&quot;</span>
 m.color                     <span class="tok-c"># (r, g, b, a); tints a model</span>
 m.roughness                 <span class="tok-c"># 0 = mirror .. 1 = chalk, or None (default)</span>
@@ -99,6 +100,7 @@ m.emissive                  <span class="tok-c"># (r, g, b) glow colour, (0, 0, 
 m.emissive_strength         <span class="tok-c"># glow multiplier</span>
 m.glow_light                <span class="tok-c"># how much the glow lights its surroundings</span>
 m.glow_shadows              <span class="tok-c"># whether objects block that light (HIGH and up)</span>
+m.draw_distance             <span class="tok-c"># hidden past this camera distance, 0 = never</span>
 m.path                      <span class="tok-c"># the model file, or None</span>
 m.bounds                    <span class="tok-c"># ((min x, y, z), (max x, y, z)) or None</span>
 
@@ -114,6 +116,10 @@ raised. A glowing mesh also lights the surfaces around it like a real
 glowing object of its size; <code>glow_light</code> scales that (0 = off). On HIGH and
 up, objects in the way block that light and cast shadows from it, unless
 <code>glow_shadows=False</code>.
+<code>draw_distance</code> hides the mesh, shadow included, when the camera is farther
+away than that many metres; it dithers out over the last tenth instead of
+popping. It must not be negative. Model files can also carry simpler levels
+of detail (<a href="oberon/models.html#levels-of-detail">Models</a>).
 The glow added is <code>emissive × emissive_strength</code>; above 1 it blooms
 on Ultra and Beautiful. Guide: <a href="guides/rendering-and-lights.html#surfaces">Rendering &amp; Lights</a>.</p>
 <p><code>model</code> loads the file right away, so a missing file raises

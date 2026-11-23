@@ -173,6 +173,10 @@ pub struct ModelPart {
     /// How the part follows the model's [`Rig`]: bind-space vertices plus
     /// joints and weights. `mesh` then holds the rest pose.
     pub skin: Option<PartSkin>,
+    /// Simpler versions for far away, nearest first: the file's
+    /// `…_LOD1`, `…_LOD2`… nodes with this part's material (an empty mesh
+    /// where a level has none of it). See [`Model::lod_distances`].
+    pub lods: Vec<MeshData>,
     /// Roughness, metalness, glow and the extra PBR maps.
     pub surface: PartSurface,
 }
@@ -236,6 +240,9 @@ pub struct GpuPart {
     /// The bind-space geometry with joints and weights, for parts that
     /// follow the model's rig (drawn with a joint palette).
     pub skinned: Option<Mesh>,
+    /// The part's simpler levels ([`ModelPart::lods`]), each with the
+    /// distance it takes over at ([`Model::lod_distances`]).
+    pub lods: Vec<(Mesh, f32)>,
 }
 
 /// A loaded model: its parts plus model-space bounds.
@@ -252,6 +259,10 @@ pub struct Model {
     /// The node hierarchy, joints and animations of an animated or skinned
     /// file.
     pub rig: Option<Arc<Rig>>,
+    /// The camera distance (metres) each simpler level takes over at,
+    /// nearest first: from the import settings, or else 15, 30, 60…
+    /// times the model's radius.
+    pub lod_distances: Vec<f32>,
     gpu: OnceLock<Vec<GpuPart>>,
 }
 
@@ -275,14 +286,32 @@ impl Model {
             min = Vec3::ZERO;
             max = Vec3::ZERO;
         }
+        let levels = parts.iter().map(|p| p.lods.len()).max().unwrap_or(0);
+        let radius = ((max - min) * 0.5).length().max(0.1);
+        let lod_distances = (0..levels)
+            .map(|k| radius * 15.0 * f32::powi(2.0, i32::try_from(k).unwrap_or(0)))
+            .collect();
         Self {
             path,
             parts,
             min,
             max,
             rig: None,
+            lod_distances,
             gpu: OnceLock::new(),
         }
+    }
+
+    /// Replaces the first of [`Self::lod_distances`] with `distances`
+    /// (the import settings'); the rest keep theirs.
+    #[must_use]
+    pub fn with_lod_distances(mut self, distances: &[f32]) -> Self {
+        for (slot, d) in self.lod_distances.iter_mut().zip(distances) {
+            if d.is_finite() && *d > 0.0 {
+                *slot = *d;
+            }
+        }
+        self
     }
 
     /// Attaches a rig (see [`Model::rig`]).
@@ -407,11 +436,18 @@ impl Model {
                         ),
                         emissive: upload_map(&surface.emissive_map, MAP_EMISSIVE),
                     };
+                    let lods = part
+                        .lods
+                        .iter()
+                        .zip(&self.lod_distances)
+                        .map(|(mesh, d)| (renderer.create_mesh(mesh), *d))
+                        .collect();
                     GpuPart {
                         mesh: renderer.create_mesh(&part.mesh),
                         texture,
                         maps,
                         skinned,
+                        lods,
                     }
                 })
                 .collect()
@@ -493,7 +529,9 @@ fn load_uncached(path: &Path) -> Result<(Model, Vec<PathBuf>), ModelError> {
             source.file
         );
     }
-    let model = Model::new(path.to_path_buf(), parts).with_rig(rig);
+    let model = Model::new(path.to_path_buf(), parts)
+        .with_rig(rig)
+        .with_lod_distances(&settings.lod_distances);
     if model.parts.is_empty() {
         return Err(ModelError::Invalid {
             path: shown,

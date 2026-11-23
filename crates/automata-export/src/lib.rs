@@ -1150,6 +1150,7 @@ mod tests {
                 primitive: PrimitiveData::Model { path },
                 color: [1.0; 4],
                 surface: automata_core::scene_file::Surface::default(),
+                draw_distance: 0.0,
             }),
             ..Default::default()
         };

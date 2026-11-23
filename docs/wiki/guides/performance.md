@@ -116,5 +116,50 @@ The runners can also be used on their own:
   `AUTOMATA_FRAME_STATS_WARMUP` sets the frames to skip (default 30).
   An exported game takes `--headless --frames N --fixed-delta 0.0166667`.
 
+## Rendering a big world
+
+`run.py` measures scripts and physics, not drawing. The renderer has its
+own benchmark: a forest of 10,000 copies of `examples/models/tree.glb`
+with a sun casting shadows, fog, and a camera standing among the trees.
+
+```sh
+python examples/bench/forest.py                       # 10,000 trees, High, 1280x720
+python examples/bench/forest.py --draw-distance 80    # trees vanish past 80 m
+python examples/bench/forest.py --trees 2000 --quality ultra --frames 30
+```
+
+It renders with Oberon's `render_still` example and prints the median
+frame time, including the time to read the image back. Measured in
+software rendering (lavapipe, 2026-11, 5 frames, High):
+
+| Renderer | ms/frame | Speed-up |
+|---|---:|---:|
+| Before A11 (one draw per mesh part, no culling outside shadows) | 9,493 | 1× |
+| Culling + instancing + batching | 1,098 | 8.6× |
+| Same, with `draw_distance=80` on the trees | 723 | 13× |
+
+The first two produce identical images. With the draw distance, 110
+pixels out of 921,600 differ, because the fog already hides trees that
+far away. On a real GPU every number is far lower. Compare runs on the
+same machine.
+
+The renderer does three things for big worlds:
+
+- **Culling.** Meshes outside the camera's view aren't drawn. Each
+  shadow cascade only draws the meshes that can throw a shadow into it.
+- **Instancing and batching.** Every copy of the same mesh with the same
+  material, from the same model file or built the same way, is drawn in a
+  single call. Materials with equal colors, surfaces and textures count as
+  the same. Shadow passes group by mesh alone. Skinned (animated) meshes
+  are still drawn one by one.
+- **Levels of detail and draw distance.** Far copies switch to the
+  model's `_LOD1`, `_LOD2`… versions, and meshes past their draw distance
+  aren't drawn at all, shadow included. See
+  [Models](../oberon/models.md#levels-of-detail).
+
+What helps your scenes most: reuse the same model files and materials
+instead of building near-identical copies, and give scattered props a draw
+distance that ends inside the fog.
+
 **Rerun the benchmark before each release** and update this page, so that
 a slowdown shows up as a change in the table.

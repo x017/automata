@@ -18,6 +18,9 @@
 //! moves the mouse that many pixels on the first frame. `KEYS` holds keys
 //! down over moments of Play: `KEYS=tab@0-0.1,w@0.5-1.5,space@1.2-1.3`
 //! (key names as scripts see them; a bare `name@t` is one step).
+//! `FRAMES=n` times that many frames after a warm-up one and prints the
+//! median time a frame takes (`ms/frame`), in the editor view and in Play
+//! alike: `examples/bench/forest.py` reads it.
 //! `POST=bleached` (or `neutral`, `vivid`, `film`, `noir`) swaps the
 //! scene Environment's post effects for that look. `STYLE=nier` (or any
 //! name `Environment::with_style` takes) applies a style first.
@@ -91,12 +94,10 @@ fn main() {
     }
     // Warm up (pipelines, uploads), then time a few frames.
     let _ = viewport.render(Some(&mut gpu), &doc, cam, w, h);
-    let start = Instant::now();
-    let frames = 5;
-    for _ in 0..frames {
+    let frames = timed_frames().unwrap_or(5);
+    let ms = median_ms(frames, || {
         let _ = viewport.render(Some(&mut gpu), &doc, cam, w, h);
-    }
-    let ms = start.elapsed().as_secs_f64() * 1000.0 / f64::from(frames);
+    });
     let (rgba, fw, fh) = viewport.render(Some(&mut gpu), &doc, cam, w, h);
     image::save_buffer(out, rgba, fw, fh, image::ColorType::Rgba8).expect("write png");
     println!("{out}: {fw}x{fh} {quality:?}, {ms:.1} ms/frame (incl. readback)");
@@ -192,8 +193,36 @@ fn render_play(
             let _ = world.remove_one::<automata_renderer::Camera3D>(e);
         }
     }
+    if let Some(frames) = timed_frames() {
+        let _ = viewport.render_play(Some(gpu), &mut play, cam, w, h);
+        let ms = median_ms(frames, || {
+            let _ = viewport.render_play(Some(gpu), &mut play, cam, w, h);
+        });
+        println!("{ms:.2} ms/frame (median of {frames}, incl. readback)");
+    }
     let (rgba, fw, fh) = viewport.render_play(Some(gpu), &mut play, cam, w, h);
     (rgba.to_vec(), fw, fh)
+}
+
+/// `FRAMES` from the environment: how many frames to time.
+fn timed_frames() -> Option<usize> {
+    std::env::var("FRAMES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|&n| n > 0)
+}
+
+/// The median wall time of `frames` calls to `frame`, in milliseconds.
+fn median_ms(frames: usize, mut frame: impl FnMut()) -> f64 {
+    let mut times: Vec<f64> = (0..frames)
+        .map(|_| {
+            let start = Instant::now();
+            frame();
+            start.elapsed().as_secs_f64() * 1000.0
+        })
+        .collect();
+    times.sort_by(f64::total_cmp);
+    times[times.len() / 2]
 }
 
 /// `STYLE` and `POST` from the environment: a style, then a post look, for

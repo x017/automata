@@ -108,6 +108,9 @@ class MeshRenderer:
     glow_light: float
     """Whether objects block the glow's light, casting shadows (HIGH and up)."""
     glow_shadows: bool
+    draw_distance: float
+    """Beyond this camera distance (metres) it isn't drawn, shadow included;
+    it dithers out over the last tenth. 0 = any distance."""
     @classmethod
     def model(
         cls,
@@ -120,6 +123,7 @@ class MeshRenderer:
         emissive_strength: float = 1.0,
         glow_light: float = 1.0,
         glow_shadows: bool = True,
+        draw_distance: float = 0.0,
     ) -> MeshRenderer:
         """A glTF 2.0 (.glb / .gltf) or .obj model, tinted by `color`.
 
@@ -141,6 +145,7 @@ class MeshRenderer:
         emissive_strength: float = 1.0,
         glow_light: float = 1.0,
         glow_shadows: bool = True,
+        draw_distance: float = 0.0,
     ) -> MeshRenderer:
         """A cube `size` units a side. `roughness`/`metallic` 0..1; `emissive`
         with `emissive_strength` above 1 glows (and blooms on BEAUTIFUL), and
@@ -160,6 +165,7 @@ class MeshRenderer:
         emissive_strength: float = 1.0,
         glow_light: float = 1.0,
         glow_shadows: bool = True,
+        draw_distance: float = 0.0,
     ) -> MeshRenderer:
         """A smooth sphere `size` units across."""
         ...
@@ -175,6 +181,7 @@ class MeshRenderer:
         emissive_strength: float = 1.0,
         glow_light: float = 1.0,
         glow_shadows: bool = True,
+        draw_distance: float = 0.0,
     ) -> MeshRenderer: ...
 
 class DirectionalLight:

@@ -300,6 +300,7 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
             texture,
             skin: None,
             surface: crate::PartSurface::default(),
+            lods: Vec::new(),
         });
     }
     Ok(Loaded {

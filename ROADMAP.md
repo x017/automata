@@ -281,7 +281,7 @@ and `style_name`. Oberon has a Style group (dropdown plus every knob) in
 the Graphics tab and the Inspector. `docs/assets/rendering/styles.jpg`
 shows the Lagoon in all five.
 
-### A11. Big worlds: culling, instancing, LOD ⬜ M
+### A11. Big worlds: culling, instancing, LOD ✅ M
 The main pass draws every mesh. Only shadows are culled today
 (`mesh_spheres` in `renderer.rs`).
 - Frustum culling in the main and shadow passes.
@@ -290,6 +290,23 @@ The main pass draws every mesh. Only shadows are culled today
   a distance.
 - `examples/bench` gains a 10,000-tree forest.
 - **Done when:** the forest runs at least 3× faster than today on High.
+
+Done: `examples/bench/forest.py` renders 10,000 trees, with a sun casting
+shadows, fog, and the camera among the trees. On lavapipe at 1280×720
+High it went from 9,493 to 1,098 ms per frame (8.6×, pixel-identical),
+and to 723 ms (13×) with `draw_distance=80`. Every frame, the renderer
+picks each mesh's level and fade, culls against the camera frustum (sun
+cascades and point-light faces cull their own way), and groups what's
+left into instanced batches. Batches are keyed by content: a mesh's
+geometry hash and a material's uniform plus textures. Per-instance
+transforms go in one growing vertex buffer, which avoids per-mesh uniform
+buffers and bind groups, and binding at an offset keeps it working on
+GLES and WebGL. Skinned meshes still draw one by one. glTF nodes named
+`…_LODn` become per-part levels, with distances from the import settings
+(`lod_distances`) or from the model's size, scaled by the graphics preset.
+`draw_distance` (scene files, Python constructors) culls past a distance,
+shadow included, and dithers out over the last tenth through a pipeline
+override constant. Not done yet: an Inspector field for the draw distance.
 
 ### A12. Grass and foliage (BotW-style fields) ⬜ L
 Builds on A11's instancing.
@@ -668,7 +685,7 @@ per effort. Reorder any time by telling me.
 | 16 | B2b Clips from other files | S | ✅ |
 | 17 | B3 Animation events, root motion | M | ✅ |
 | 18 | B3b Key store for scripts | M | ✅ |
-| 19 | A11 Culling, instancing, LOD | M | ⬜ |
+| 19 | A11 Culling, instancing, LOD | M | ✅ |
 | 20 | D0 The oberon command, new projects, bundled Python | M | ⬜ |
 | 21 | A12 Grass and foliage | L | ⬜ |
 | 22 | C2 Tweens and timers | S | ⬜ |

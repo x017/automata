@@ -94,7 +94,16 @@ impl DrawList {
             model,
             material: material.clone(),
             joints: None,
+            lod: None,
         });
+    }
+
+    /// Gives the mesh just drawn levels of detail and a draw distance
+    /// (see [`MeshLod`]). Does nothing before the first mesh.
+    pub fn set_lod(&mut self, lod: &Arc<MeshLod>) {
+        if let Some(last) = self.meshes.last_mut() {
+            last.lod = Some(Arc::clone(lod));
+        }
     }
 
     /// Draws a skinned mesh posed by `joints`: one matrix per joint, taking
@@ -113,6 +122,7 @@ impl DrawList {
             model,
             material: material.clone(),
             joints: mesh.is_skinned().then(|| Arc::clone(joints)),
+            lod: None,
         });
     }
 
@@ -264,6 +274,45 @@ pub(crate) struct MeshDraw {
     pub material: Material,
     /// The joint palette, for skinned meshes.
     pub joints: Option<Arc<[Mat4]>>,
+    /// Simpler meshes for far away, and where it stops drawing.
+    pub lod: Option<Arc<MeshLod>>,
+}
+
+/// How a mesh simplifies and disappears with distance from the camera.
+/// Share one between every draw of the same mesh (it's an `Arc`), and
+/// attach it with [`DrawList::set_lod`].
+#[derive(Debug, Clone, Default)]
+pub struct MeshLod {
+    /// Simpler versions of the mesh, nearest first, each with the camera
+    /// distance (metres, to the mesh's origin) it takes over at. The
+    /// preset's [`crate::GraphicsQuality::lod_scale`] scales the distances.
+    pub levels: Vec<(Mesh, f32)>,
+    /// Beyond this distance the mesh isn't drawn, shadow included; over
+    /// the last tenth of it the mesh dithers away instead of popping.
+    /// 0 draws it at any distance.
+    pub draw_distance: f32,
+}
+
+impl MeshLod {
+    /// The mesh to draw at `distance`: 0 is the mesh itself, `k` is
+    /// `levels[k - 1]`.
+    #[must_use]
+    pub(crate) fn level_at(&self, distance: f32, scale: f32) -> usize {
+        self.levels
+            .iter()
+            .take_while(|(_, from)| distance >= from * scale)
+            .count()
+    }
+
+    /// How much of the mesh shows at `distance`: 1 is all of it, 0 none.
+    #[must_use]
+    pub(crate) fn fade_at(&self, distance: f32) -> f32 {
+        if self.draw_distance <= 0.0 {
+            return 1.0;
+        }
+        let band = (self.draw_distance * 0.1).max(1e-3);
+        ((self.draw_distance - distance) / band).clamp(0.0, 1.0)
+    }
 }
 
 /// A textured 2D quad.

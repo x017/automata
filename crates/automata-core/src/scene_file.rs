@@ -223,6 +223,15 @@ pub struct MeshVisualData {
     /// Roughness, metalness and glow (omitted from the file when unset).
     #[serde(default, skip_serializing_if = "Surface::is_default")]
     pub surface: Surface,
+    /// Beyond this camera distance (metres) it isn't drawn; 0 (the
+    /// default, omitted from the file) draws it at any distance.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub draw_distance: f32,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's signature
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
 }
 
 /// Primitive geometry descriptors compact enough to hand-edit.
@@ -271,6 +280,7 @@ impl From<&MeshVisual> for MeshVisualData {
             primitive,
             color: visual.color,
             surface: visual.surface,
+            draw_distance: visual.draw_distance,
         }
     }
 }
@@ -285,6 +295,7 @@ impl From<&MeshVisualData> for MeshVisual {
             PrimitiveData::Model { path } => MeshVisual::model(path, data.color),
         }
         .with_surface(data.surface)
+        .with_draw_distance(data.draw_distance)
     }
 }
 
@@ -572,6 +583,7 @@ mod tests {
                     primitive: PrimitiveData::Cube { size: 1.0 },
                     color: [1.0; 4],
                     surface,
+                    draw_distance: 0.0,
                 }),
                 ..Default::default()
             }],
@@ -611,6 +623,43 @@ mod tests {
     }
 
     #[test]
+    fn draw_distances_round_trip_and_default_to_unlimited() {
+        let file = SceneFile {
+            version: SCENE_FILE_VERSION,
+            entities: vec![EntityData {
+                mesh_visual: Some(MeshVisualData {
+                    primitive: PrimitiveData::Cube { size: 1.0 },
+                    color: [1.0; 4],
+                    surface: Surface::default(),
+                    draw_distance: 80.0,
+                }),
+                ..Default::default()
+            }],
+        };
+        let text = file.to_ron().unwrap();
+        assert!(text.contains("draw_distance: 80.0"), "{text}");
+        assert_eq!(SceneFile::from_ron(&text).unwrap(), file);
+        let mut world = SceneWorld::new();
+        file.apply_to_world(&mut world);
+        let again = SceneFile::from_world(&world);
+        assert_eq!(again.entities[0].mesh_visual, file.entities[0].mesh_visual);
+        // Files from before draw distances load as "any distance" and
+        // don't gain the field when saved.
+        let old = text.replace("draw_distance: 80.0,", "");
+        assert_ne!(old, text);
+        let loaded = SceneFile::from_ron(&old).unwrap();
+        assert_eq!(
+            loaded.entities[0]
+                .mesh_visual
+                .as_ref()
+                .unwrap()
+                .draw_distance,
+            0.0
+        );
+        assert!(!loaded.to_ron().unwrap().contains("draw_distance"));
+    }
+
+    #[test]
     fn model_meshes_and_collider_offsets_round_trip() {
         let dir = std::env::temp_dir().join(format!("scene-model-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -624,6 +673,7 @@ mod tests {
                 primitive: PrimitiveData::Model { path: path.clone() },
                 color: [0.5, 1.0, 1.0, 1.0],
                 surface: Surface::default(),
+                draw_distance: 0.0,
             }),
             collider_3d: Some(
                 automata_physics::Collider3D::cuboid(1.0, 1.0, 0.02).offset([0.5, 0.5, 0.0]),

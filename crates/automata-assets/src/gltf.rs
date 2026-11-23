@@ -717,6 +717,36 @@ fn node_trs(node: &Json) -> Trs {
     }
 }
 
+/// The level of detail of the node at traversal position `at`: `n` when it
+/// or an ancestor is named `…_LODn` (any case), 0 otherwise (`_LOD0` is
+/// the model itself too).
+fn lod_level(tree: &[TreeNode], nodes: &[Json], at: usize) -> usize {
+    let mut at = Some(at);
+    while let Some(i) = at {
+        let name = nodes[tree[i].index]
+            .get("name")
+            .and_then(Json::as_str)
+            .unwrap_or("");
+        if let Some(level) = lod_suffix(name) {
+            return level;
+        }
+        at = tree[i].parent;
+    }
+    0
+}
+
+/// `n` for a name ending in `_LODn` (any case).
+fn lod_suffix(name: &str) -> Option<usize> {
+    let (_, tail) = name.rsplit_once('_')?;
+    let (lod, digits) = (tail.get(..3)?, tail.get(3..)?);
+    let numeric = !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit());
+    if lod.eq_ignore_ascii_case("lod") && numeric {
+        digits.parse().ok()
+    } else {
+        None
+    }
+}
+
 /// A node of the scene tree, in traversal order (parents first).
 struct TreeNode {
     /// The node's index in the file.
@@ -953,10 +983,25 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
         instances = (0..meshes.len()).map(|m| (m, None)).collect();
     }
 
+    // Level 0 is the model itself; nodes named `…_LOD1`, `…_LOD2`… (or
+    // under one) are its simpler levels, merged per material like it.
     let mut parts: Vec<PartBuilder> = Vec::new();
+    let mut lod_parts: std::collections::BTreeMap<usize, Vec<PartBuilder>> =
+        std::collections::BTreeMap::new();
+    let mut dropped_lods = false;
     for (mesh_index, at) in instances {
         let Some(mesh) = meshes.get(mesh_index) else {
             continue;
+        };
+        let level = at.map_or(0, |at| lod_level(&tree, &nodes, at));
+        if level > 0 && rigged {
+            dropped_lods = true; // animated files draw their full detail
+            continue;
+        }
+        let parts = if level == 0 {
+            &mut parts
+        } else {
+            lod_parts.entry(level).or_default()
         };
         let world = at.map_or(Mat4::IDENTITY, |at| tree_world(&tree, at));
         // A glTF skin replaces the node's transform with its joints.
@@ -1096,6 +1141,26 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
         }
     }
 
+    if dropped_lods {
+        tracing::warn!(
+            "{}: levels of detail (_LOD nodes) in animated files aren't supported; they're left out",
+            path.display()
+        );
+    }
+    // Each part's simpler levels: the same material's geometry from each
+    // level, empty where a level has none of it.
+    let lods_of = |key: Option<usize>| -> Vec<MeshData> {
+        lod_parts
+            .values()
+            .map(|level| {
+                level.iter().find(|p| p.key == key).map_or_else(
+                    || MeshData::new(Vec::new(), Vec::new()),
+                    |p| MeshData::new(p.vertices.clone(), p.indices.clone()),
+                )
+            })
+            .collect()
+    };
+
     let rig = rigged.then(|| Rig {
         nodes: tree
             .iter()
@@ -1143,6 +1208,7 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
                     }
                     None => (p.vertices, None),
                 };
+                let lods = lods_of(p.key);
                 ModelPart {
                     name: p.name,
                     mesh: MeshData::new(vertices, p.indices),
@@ -1151,6 +1217,7 @@ pub(crate) fn load(path: &Path, bytes: &[u8]) -> Result<Loaded, String> {
                     pixelated: p.pixelated,
                     skin,
                     surface: p.surface,
+                    lods,
                 }
             })
             .collect(),
@@ -1253,6 +1320,67 @@ pub(crate) mod tests {
             .vertices
             .iter()
             .all(|v| (Vec3::from(v.normal) - Vec3::Z).length() < 1e-6));
+    }
+
+    #[test]
+    fn lod_nodes_become_simpler_levels_of_their_part() {
+        let original = quad_glb(&[[0.0, 0.0, 0.0]], true);
+        let json = r#"{"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0,1,2]}],
+            "nodes":[
+              {"name":"Tree","mesh":0},
+              {"name":"Tree_LOD1","mesh":0,"scale":[2,2,2]},
+              {"name":"far_lod2","children":[3]},
+              {"name":"Leaves","mesh":0,"translation":[5,0,0]}],
+            "meshes":[{"name":"Quad","primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":2,"material":0}]}],
+            "materials":[{"name":"Red","pbrMetallicRoughness":{"baseColorFactor":[1,0,0,1]}}],
+            "buffers":[{"byteLength":108}],
+            "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":48},{"buffer":0,"byteOffset":48,"byteLength":48},{"buffer":0,"byteOffset":96,"byteLength":12}],
+            "accessors":[
+              {"bufferView":0,"componentType":5126,"count":4,"type":"VEC3","min":[-0.5,-0.5,0],"max":[0.5,0.5,0]},
+              {"bufferView":1,"componentType":5126,"count":4,"type":"VEC3"},
+              {"bufferView":2,"componentType":5123,"count":6,"type":"SCALAR"}]}"#;
+        let loaded = load(Path::new("tree.glb"), &rebuild_glb(&original, json)).unwrap();
+        assert_eq!(
+            loaded.parts.len(),
+            1,
+            "the levels aren't parts of their own"
+        );
+        let part = &loaded.parts[0];
+        let xs = |m: &MeshData| {
+            m.vertices
+                .iter()
+                .map(|v| v.position[0])
+                .fold(f32::MIN, f32::max)
+        };
+        assert!(
+            (xs(&part.mesh) - 0.5).abs() < 1e-6,
+            "the base is the unscaled quad"
+        );
+        assert_eq!(part.lods.len(), 2);
+        assert!(
+            (xs(&part.lods[0]) - 1.0).abs() < 1e-6,
+            "LOD1 is the doubled quad"
+        );
+        assert!(
+            (xs(&part.lods[1]) - 5.5).abs() < 1e-6,
+            "LOD2 is everything under far_lod2"
+        );
+        let model = crate::Model::new("tree.glb".into(), loaded.parts);
+        let radius = 0.5_f32.hypot(0.5);
+        assert_eq!(model.lod_distances, [radius * 15.0, radius * 30.0]);
+        let model = model.with_lod_distances(&[40.0]);
+        assert_eq!(model.lod_distances, [40.0, radius * 30.0]);
+    }
+
+    #[test]
+    fn lod_suffixes_are_read_in_any_case() {
+        assert_eq!(lod_suffix("Tree_LOD1"), Some(1));
+        assert_eq!(lod_suffix("rock_lod12"), Some(12));
+        assert_eq!(lod_suffix("Tree_LOD0"), Some(0));
+        assert_eq!(lod_suffix("Tree"), None);
+        assert_eq!(lod_suffix("Tree_LOD"), None);
+        assert_eq!(lod_suffix("Tree_LODx"), None);
+        assert_eq!(lod_suffix("Tree_Lid1"), None);
     }
 
     #[test]

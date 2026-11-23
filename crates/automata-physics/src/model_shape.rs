@@ -121,6 +121,7 @@ mod tests {
                 pixelated: false,
                 skin: None,
                 surface: automata_assets::PartSurface::default(),
+                lods: Vec::new(),
             }],
         )
     }

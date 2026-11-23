@@ -290,6 +290,38 @@ Commit these files with your models. A model without one is used exactly
 as the file describes it. Fitted colliders use the model's size after the
 import settings, so press **Fit Collider** after changing them.
 
+## Levels of detail
+
+A model that is used many times, such as a tree, a rock or a fence, can
+carry simpler versions of itself for far away. Put them in the same file
+as nodes whose names end in `_LOD1`, `_LOD2` and so on (any case, for
+example `Pine_LOD1`). Everything under such a node belongs to that level;
+everything else is the full-detail model. The engine draws one level at
+a time, and the levels never show up as parts of their own.
+
+Each level takes over at a camera distance. By default that's 15, 30,
+60… times the model's radius. To choose the distances yourself, list them
+in the import settings, nearest first:
+
+```ron
+(
+    lod_distances: [25.0, 60.0],
+)
+```
+
+The graphics preset scales these distances: Low switches to simpler levels
+at half the distance and Beautiful at twice the distance. Animated models
+always draw at full detail. A file with `_LOD` nodes and a skeleton logs a
+warning and leaves the levels out.
+
+To stop drawing a model altogether past some distance, give its entity a
+**draw distance**. Set `draw_distance: 80.0` in the scene file's
+`mesh_visual`, or pass `draw_distance=80` to `MeshRenderer.model` (or any
+other constructor) in Python. The model then dithers away over the last
+tenth of that distance instead of popping. Fog that hides distant objects
+makes this cut invisible, so a draw distance just past where the fog
+turns opaque costs nothing in looks.
+
 ## Clips from other files
 
 ![The Import block's Clip files section: anims/emotes.glb, which gave the clips emotes:Wave and emotes:Cheer](../../assets/models/clip_files.jpg)

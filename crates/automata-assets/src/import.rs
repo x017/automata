@@ -69,6 +69,12 @@ pub struct ImportSettings {
     /// Named moments in clips that scripts hear about (see [`EventMark`]).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<EventMark>,
+    /// The camera distance (metres) each simpler level (`…_LOD1`,
+    /// `…_LOD2`… nodes) takes over at, nearest first. Levels without one
+    /// get a distance from the model's size (see
+    /// [`crate::Model::lod_distances`]).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub lod_distances: Vec<f32>,
 }
 
 /// An animation event: when `clip` passes `time` seconds, scripts hear
@@ -150,6 +156,7 @@ impl Default for ImportSettings {
             springs: crate::springs::Springs::default(),
             clips: Vec::new(),
             events: Vec::new(),
+            lod_distances: Vec::new(),
         }
     }
 }
@@ -162,6 +169,7 @@ impl ImportSettings {
             && self.springs.is_unset()
             && self.clips.is_empty()
             && self.events.is_empty()
+            && self.lod_distances.is_empty()
     }
 
     /// Whether the scale, rotation and pivot leave the geometry as it is.
@@ -185,14 +193,18 @@ impl ImportSettings {
         };
         let [rx, ry, rz] = self.rotation.map(f32::to_radians);
         let rot = Quat::from_euler(EulerRot::XYZ, rx, ry, rz);
-        for part in parts.iter_mut() {
-            for v in &mut part.mesh.vertices {
+        // Simpler levels move with the part.
+        for mesh in parts
+            .iter_mut()
+            .flat_map(|p| std::iter::once(&mut p.mesh).chain(&mut p.lods))
+        {
+            for v in &mut mesh.vertices {
                 v.position = (rot * (Vec3::from(v.position) * scale)).to_array();
                 v.normal = (rot * Vec3::from(v.normal) * scale.signum()).to_array();
             }
             if scale < 0.0 {
                 // A mirror turns faces inside out; swap the winding back.
-                for t in part.mesh.indices.chunks_exact_mut(3) {
+                for t in mesh.indices.chunks_exact_mut(3) {
                     t.swap(1, 2);
                 }
             }
@@ -216,7 +228,10 @@ impl ImportSettings {
             Pivot::BottomCenter => Vec3::new(center.x, lo.y, center.z),
             Pivot::Center => center,
         };
-        for v in parts.iter_mut().flat_map(|p| &mut p.mesh.vertices) {
+        let meshes = parts
+            .iter_mut()
+            .flat_map(|p| std::iter::once(&mut p.mesh).chain(&mut p.lods));
+        for v in meshes.flat_map(|m| &mut m.vertices) {
             v.position = (Vec3::from(v.position) - origin).to_array();
         }
         Mat4::from_translation(-origin) * transform
@@ -285,6 +300,7 @@ mod tests {
             pixelated: false,
             skin: None,
             surface: crate::PartSurface::default(),
+            lods: Vec::new(),
         }
     }
 
@@ -399,6 +415,7 @@ mod tests {
             },
             clips: vec![ClipFile::new("anims/run.glb")],
             events: vec![EventMark::new("Run", 0.3, "footstep")],
+            lod_distances: vec![30.0, 80.0],
         };
         write_settings(&model, &s).unwrap();
         assert_eq!(read_settings(&model), s);

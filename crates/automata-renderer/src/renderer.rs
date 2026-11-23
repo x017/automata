@@ -58,7 +58,15 @@ fn camera_in_water(draw: &DrawList) -> bool {
 struct PreparedFrame {
     camera_2d_bind: wgpu::BindGroup,
     camera_3d_bind: wgpu::BindGroup,
-    model_bind_groups: Vec<wgpu::BindGroup>,
+    /// Per mesh draw: the skinned ones' model and joint bind groups.
+    model_bind_groups: Vec<Option<wgpu::BindGroup>>,
+    /// Per mesh draw: what the camera sees of it (`None`: past its draw
+    /// distance, so drawn nowhere).
+    seen: Vec<Option<crate::batch::Seen>>,
+    /// The camera's batches (culled to its view), and each sun shadow
+    /// cascade's, over [`Renderer::instance_buffer`].
+    main_batches: Vec<crate::batch::Batch>,
+    cascade_batches: Vec<Vec<crate::batch::Batch>>,
     sprite_runs: Vec<SpriteRun>,
     light_bind: wgpu::BindGroup,
     /// The light group plus the screen-space occlusion (Beautiful meshes).
@@ -133,6 +141,9 @@ pub struct Renderer {
     /// What each point shadow layer last rendered (a hash of its view and
     /// the casters it saw), so unchanged faces aren't drawn again.
     point_shadow_keys: Vec<Option<u64>>,
+    /// The frame's instances (model matrices) for the camera's and the
+    /// sun shadows' batches, rewritten each frame and grown as needed.
+    instance_buffer: wgpu::Buffer,
     quality: GraphicsQuality,
     /// The unit grid water surfaces draw with (built on first use).
     water_mesh: Option<Mesh>,
@@ -274,6 +285,7 @@ impl Renderer {
         let ssao = crate::ssao::Ssao::new(device);
         let scene_placeholder = placeholder_scene_bind_group(device, &shared);
         let particles = crate::particles::Particles::new(device, ctx.queue());
+        let instances = instance_buffer(device, 1024);
         Self {
             shared,
             sprite_pipeline,
@@ -297,6 +309,7 @@ impl Renderer {
             shadows_enabled: quality.shadows_enabled(),
             point_shadows,
             point_shadow_keys: Vec::new(),
+            instance_buffer: instances,
             quality,
             water_mesh: None,
             water_pipelines: Vec::new(),
@@ -461,6 +474,7 @@ impl Renderer {
                     .map(|v| glam::Vec3::from(v.position).length())
                     .fold(0.0_f32, f32::max),
                 bounds: mesh_bounds(data),
+                key: crate::mesh::content_key(data, skin),
             }),
         }
     }
@@ -608,11 +622,17 @@ impl Renderer {
                 },
             ],
         });
+        let key = crate::material::content_key(
+            &uniform,
+            [&base, &normal, &metallic_roughness, &emissive],
+        );
         Material {
             inner: Arc::new(MaterialInner {
                 bind_group,
                 params: *params,
                 texture: base,
+                _maps: [normal, metallic_roughness, emissive],
+                key,
             }),
         }
     }
@@ -1277,6 +1297,7 @@ impl Renderer {
                 prepared,
                 mesh_pipeline,
                 &prepared.light_bind,
+                &self.instance_buffer,
             );
         }
         if depth_view.is_some() {
@@ -1470,7 +1491,14 @@ impl Renderer {
                 }),
                 ..wgpu::RenderPassDescriptor::default()
             });
-            Self::record_meshes(&mut pass, draw, prepared, mesh_pipeline, light_bind);
+            Self::record_meshes(
+                &mut pass,
+                draw,
+                prepared,
+                mesh_pipeline,
+                light_bind,
+                &self.instance_buffer,
+            );
             self.record_sky(&mut pass, draw, prepared, pipeline::HDR_FORMAT);
         }
 
@@ -1645,27 +1673,18 @@ impl Renderer {
                 }),
                 ..wgpu::RenderPassDescriptor::default()
             });
-            let mut current: Option<bool> = None;
-            for (mesh_draw, model_bind) in draw.meshes.iter().zip(&prepared.model_bind_groups) {
-                // See-through meshes don't hide what's behind them.
-                if mesh_draw.material.inner.params.color[3] < 1.0 {
-                    continue;
-                }
-                let skinned = mesh_draw.joints.is_some();
-                if current != Some(skinned) {
-                    pass.set_pipeline(pipelines.get(skinned));
-                    pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
-                    current = Some(skinned);
-                }
-                let mesh = &mesh_draw.mesh.inner;
-                pass.set_bind_group(1, model_bind, &[]);
-                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                if let (Some(_), Some(skin)) = (&mesh_draw.joints, &mesh.skin_buffer) {
-                    pass.set_vertex_buffer(1, skin.slice(..));
-                }
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.index_count, 0, 0..1);
-            }
+            pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
+            // See-through meshes don't hide what's behind them; fading ones
+            // go in whole (the occlusion only darkens what's drawn).
+            let solid = prepared.main_batches.iter().filter(|b| !b.transparent);
+            Self::record_depth_batches(
+                &mut pass,
+                draw,
+                prepared,
+                solid,
+                pipelines,
+                &self.instance_buffer,
+            );
         }
         let frame = crate::ssao::SsaoFrame {
             ambient_occlusion: frame.ambient_occlusion && !draw.meshes.is_empty(),
@@ -1692,17 +1711,78 @@ impl Renderer {
         prepared: &PreparedFrame,
         pipelines: &pipeline::PipelinePair,
         light_bind: &wgpu::BindGroup,
+        instances: &wgpu::Buffer,
     ) {
-        let mut current: Option<bool> = None;
-        for (mesh_draw, model_bind) in draw.meshes.iter().zip(&prepared.model_bind_groups) {
-            let skinned = mesh_draw.joints.is_some();
-            if current != Some(skinned) {
-                pass.set_pipeline(pipelines.get(skinned));
-                pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
-                pass.set_bind_group(3, light_bind, &[]);
-                current = Some(skinned);
+        pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
+        pass.set_bind_group(3, light_bind, &[]);
+        let mut current = None;
+        for batch in &prepared.main_batches {
+            if current != Some(batch.kind) {
+                pass.set_pipeline(pipelines.get(batch.kind));
+                current = Some(batch.kind);
             }
-            Self::record_mesh(pass, mesh_draw, model_bind);
+            let mesh_draw = &draw.meshes[batch.draw];
+            pass.set_bind_group(2, &mesh_draw.material.inner.bind_group, &[]);
+            Self::record_batch(pass, draw, prepared, batch, instances);
+        }
+    }
+
+    /// Records one batch's geometry and draw call: a skinned mesh with its
+    /// bind group and skin, or instanced copies from `instances`.
+    fn record_batch(
+        pass: &mut wgpu::RenderPass<'_>,
+        draw: &DrawList,
+        prepared: &PreparedFrame,
+        batch: &crate::batch::Batch,
+        instances: &wgpu::Buffer,
+    ) {
+        let mesh = &batch.mesh.inner;
+        pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+        if batch.kind == crate::batch::BatchKind::Skinned {
+            let (Some(model_bind), Some(skin)) =
+                (&prepared.model_bind_groups[batch.draw], &mesh.skin_buffer)
+            else {
+                return;
+            };
+            debug_assert!(draw.meshes[batch.draw].joints.is_some());
+            pass.set_bind_group(1, model_bind, &[]);
+            pass.set_vertex_buffer(1, skin.slice(..));
+        } else {
+            let start = u64::from(batch.first) * crate::batch::INSTANCE_SIZE;
+            let end = start + u64::from(batch.count) * crate::batch::INSTANCE_SIZE;
+            pass.set_vertex_buffer(1, instances.slice(start..end));
+        }
+        pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        let copies = if batch.kind == crate::batch::BatchKind::Skinned {
+            1
+        } else {
+            batch.count
+        };
+        pass.draw_indexed(0..mesh.index_count, 0, 0..copies);
+    }
+
+    /// Records depth-only batches (shadows, the depth prepass) with
+    /// `pipelines`, their copies in `instances`.
+    fn record_depth_batches<'b>(
+        pass: &mut wgpu::RenderPass<'_>,
+        draw: &DrawList,
+        prepared: &PreparedFrame,
+        batches: impl IntoIterator<Item = &'b crate::batch::Batch>,
+        pipelines: &pipeline::PipelinePair,
+        instances: &wgpu::Buffer,
+    ) {
+        let mut current = None;
+        for batch in batches {
+            // Depth passes draw fading copies solid.
+            let kind = match batch.kind {
+                crate::batch::BatchKind::Faded => crate::batch::BatchKind::Plain,
+                kind => kind,
+            };
+            if current != Some(kind) {
+                pass.set_pipeline(pipelines.get(kind));
+                current = Some(kind);
+            }
+            Self::record_batch(pass, draw, prepared, batch, instances);
         }
     }
 
@@ -1872,17 +1952,15 @@ impl Renderer {
         let sprite_runs = batch_sprites(&draw.sprites);
         self.sprite_batch.write(self.ctx.queue(), &draw.sprites);
 
-        // Per-mesh model bind groups (shared by the shadow and main passes).
+        // Skinned meshes' model and joint bind groups (shared by the shadow
+        // and main passes); the rest draw instanced.
         let model_bind_groups = draw
             .meshes
             .iter()
-            .map(|m| match &m.joints {
-                Some(joints) => self.skinned_model_bind_group(m.model, joints),
-                None => self.uniform_bind_group(
-                    Some("model"),
-                    bytemuck::cast_slice(&m.model.to_cols_array()),
-                    &self.shared.model_layout,
-                ),
+            .map(|m| {
+                m.joints
+                    .as_ref()
+                    .map(|joints| self.skinned_model_bind_group(m.model, joints))
             })
             .collect();
 
@@ -1901,6 +1979,13 @@ impl Renderer {
             sun.shadow_distance,
         );
         let render_shadows = sun.shadows && self.shadows_enabled && !draw.meshes.is_empty();
+        let (seen, main_batches, cascade_batches) = self.batch_frame(
+            draw,
+            &mesh_spheres,
+            &camera_3d,
+            viewport,
+            render_shadows.then_some(&shadows),
+        );
         let env = draw.environment.unwrap_or_default();
         let c = draw.clear_color;
         let time = draw
@@ -1945,6 +2030,9 @@ impl Renderer {
             camera_2d_bind,
             camera_3d_bind,
             model_bind_groups,
+            seen,
+            main_batches,
+            cascade_batches,
             sprite_runs,
             light_bind,
             beautiful_light_bind,
@@ -2061,34 +2149,83 @@ impl Renderer {
                 }),
                 ..wgpu::RenderPassDescriptor::default()
             });
-            let mut current: Option<bool> = None;
-            let draws = draw
-                .meshes
-                .iter()
-                .zip(&prepared.model_bind_groups)
-                .zip(&prepared.mesh_spheres);
-            for ((mesh_draw, model_bind), sphere) in draws {
-                if shadows.count > 1 && !shadows.touches(cascade, *sphere) {
-                    continue;
-                }
-                let skinned = mesh_draw.joints.is_some();
-                if current != Some(skinned) {
-                    pass.set_pipeline(self.shadow_pipeline.get(skinned));
-                    pass.set_bind_group(0, &light_vp_bind, &[]);
-                    current = Some(skinned);
-                }
-                pass.set_bind_group(1, model_bind, &[]);
-                pass.set_vertex_buffer(0, mesh_draw.mesh.inner.vertex_buffer.slice(..));
-                if let (true, Some(skin)) = (skinned, &mesh_draw.mesh.inner.skin_buffer) {
-                    pass.set_vertex_buffer(1, skin.slice(..));
-                }
-                pass.set_index_buffer(
-                    mesh_draw.mesh.inner.index_buffer.slice(..),
-                    wgpu::IndexFormat::Uint32,
-                );
-                pass.draw_indexed(0..mesh_draw.mesh.inner.index_count, 0, 0..1);
-            }
+            let Some(batches) = prepared.cascade_batches.get(cascade) else {
+                continue;
+            };
+            pass.set_bind_group(0, &light_vp_bind, &[]);
+            Self::record_depth_batches(
+                &mut pass,
+                draw,
+                prepared,
+                batches,
+                &self.shadow_pipeline,
+                &self.instance_buffer,
+            );
         }
+    }
+
+    /// Culls and batches the frame's meshes: what the camera sees of each
+    /// (level of detail, fade, or past its draw distance), the camera's
+    /// batches, and each sun cascade's (`shadows`, when they render). Writes
+    /// all their instances to [`Self::instance_buffer`].
+    fn batch_frame(
+        &mut self,
+        draw: &DrawList,
+        spheres: &[Sphere],
+        camera: &crate::Camera3D,
+        viewport: (u32, u32),
+        shadows: Option<&ShadowCascades>,
+    ) -> (
+        Vec<Option<crate::batch::Seen>>,
+        Vec<crate::batch::Batch>,
+        Vec<Vec<crate::batch::Batch>>,
+    ) {
+        use crate::batch::{batch, choose, Frustum, PassKind};
+        let lod_scale = self.quality.lod_scale();
+        let seen: Vec<_> = draw
+            .meshes
+            .iter()
+            .zip(spheres)
+            .map(|(m, s)| choose(m, *s, camera.position, lod_scale))
+            .collect();
+        let frustum = Frustum::new(&camera.view_proj(viewport));
+        let mut instances = Vec::new();
+        let visible = seen
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| Some((i, (*s)?)))
+            .filter(|(i, _)| frustum.sees(spheres[*i]));
+        let main = batch(&draw.meshes, visible, PassKind::Shaded, &mut instances);
+        let cascades = shadows.map_or_else(Vec::new, |shadows| {
+            (0..shadows.count)
+                .map(|cascade| {
+                    let casters = seen
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, s)| Some((i, (*s)?)))
+                        .filter(|(i, _)| shadows.touches(cascade, spheres[*i]));
+                    batch(&draw.meshes, casters, PassKind::Depth, &mut instances)
+                })
+                .collect()
+        });
+        self.upload_instances(&instances);
+        (seen, main, cascades)
+    }
+
+    /// Writes `instances` to the instance buffer, growing it first if
+    /// they don't fit.
+    fn upload_instances(&mut self, instances: &[crate::batch::Instance]) {
+        if instances.is_empty() {
+            return;
+        }
+        let bytes: &[u8] = bytemuck::cast_slice(instances);
+        if bytes.len() as u64 > self.instance_buffer.size() {
+            let count = (instances.len() as u64).next_power_of_two();
+            self.instance_buffer = instance_buffer(self.ctx.device(), count);
+        }
+        self.ctx
+            .queue()
+            .write_buffer(&self.instance_buffer, 0, bytes);
     }
 
     /// Which point shadow layers need drawing this frame: those whose view
@@ -2134,6 +2271,45 @@ impl Renderer {
         prepared: &PreparedFrame,
         stale: &[bool],
     ) {
+        // Every stale face's batches first, so one buffer holds all their
+        // copies (most frames redraw none, and make none).
+        let mut instances = Vec::new();
+        let mut faces = Vec::new();
+        for point in &prepared.points {
+            let Some((first, view)) = &point.shadow else {
+                continue;
+            };
+            for face in 0..view.count.min(view.faces.len()) {
+                if stale.get(first + face).copied().unwrap_or(false) {
+                    let casters = face_casters(prepared, point, face)
+                        .filter_map(|i| Some((i, prepared.seen[i]?)));
+                    let batches = crate::batch::batch(
+                        &draw.meshes,
+                        casters,
+                        crate::batch::PassKind::Depth,
+                        &mut instances,
+                    );
+                    faces.push(batches);
+                }
+            }
+        }
+        if faces.is_empty() {
+            return;
+        }
+        let instance_buffer =
+            self.ctx
+                .device()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("point shadow instances"),
+                    // A copy of nothing still needs a buffer to bind.
+                    contents: if instances.is_empty() {
+                        &[0; std::mem::size_of::<crate::batch::Instance>()]
+                    } else {
+                        bytemuck::cast_slice(&instances)
+                    },
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+        let mut faces = faces.into_iter();
         for point in &prepared.points {
             let Some((first, view)) = &point.shadow else {
                 continue;
@@ -2163,51 +2339,29 @@ impl Renderer {
                     }),
                     ..wgpu::RenderPassDescriptor::default()
                 });
-                let mut current: Option<bool> = None;
-                for i in face_casters(prepared, point, face) {
-                    let (mesh_draw, model_bind) = (&draw.meshes[i], &prepared.model_bind_groups[i]);
-                    let skinned = mesh_draw.joints.is_some();
-                    if current != Some(skinned) {
-                        pass.set_pipeline(self.shadow_pipeline.get(skinned));
-                        pass.set_bind_group(0, &light_vp_bind, &[]);
-                        current = Some(skinned);
-                    }
-                    pass.set_bind_group(1, model_bind, &[]);
-                    pass.set_vertex_buffer(0, mesh_draw.mesh.inner.vertex_buffer.slice(..));
-                    if let (true, Some(skin)) = (skinned, &mesh_draw.mesh.inner.skin_buffer) {
-                        pass.set_vertex_buffer(1, skin.slice(..));
-                    }
-                    pass.set_index_buffer(
-                        mesh_draw.mesh.inner.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    pass.draw_indexed(0..mesh_draw.mesh.inner.index_count, 0, 0..1);
-                }
+                let batches = faces.next().unwrap_or_default();
+                pass.set_bind_group(0, &light_vp_bind, &[]);
+                Self::record_depth_batches(
+                    &mut pass,
+                    draw,
+                    prepared,
+                    &batches,
+                    &self.shadow_pipeline,
+                    &instance_buffer,
+                );
             }
         }
     }
+}
 
-    /// Records one depth-tested mesh draw into the pass.
-    fn record_mesh(
-        pass: &mut wgpu::RenderPass<'_>,
-        mesh_draw: &MeshDraw,
-        model_bind: &wgpu::BindGroup,
-    ) {
-        let MeshDraw {
-            mesh,
-            model: _,
-            material,
-            joints,
-        } = mesh_draw;
-        pass.set_bind_group(1, model_bind, &[]);
-        pass.set_bind_group(2, &material.inner.bind_group, &[]);
-        pass.set_vertex_buffer(0, mesh.inner.vertex_buffer.slice(..));
-        if let (Some(_), Some(skin)) = (joints, &mesh.inner.skin_buffer) {
-            pass.set_vertex_buffer(1, skin.slice(..));
-        }
-        pass.set_index_buffer(mesh.inner.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..mesh.inner.index_count, 0, 0..1);
-    }
+/// A vertex buffer for `count` [`crate::batch::Instance`]s.
+fn instance_buffer(device: &wgpu::Device, count: u64) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("instances"),
+        size: count.max(1) * crate::batch::INSTANCE_SIZE,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
 }
 
 /// Creates the depth buffer for the given size (no-op for empty sizes).
@@ -2380,7 +2534,8 @@ fn face_casters<'a>(
         .iter()
         .enumerate()
         .filter(move |(i, sphere)| {
-            point.source != Some(*i)
+            prepared.seen[*i].is_some()
+                && point.source != Some(*i)
                 && !point.light.inside_fixture(sphere.center, sphere.radius)
                 && crate::light::PointShadow::light_face_sees(
                     &point.light,
@@ -2412,8 +2567,10 @@ fn point_face_key(
     for i in face_casters(prepared, point, face) {
         let m = &draw.meshes[i];
         i.hash(&mut h);
-        std::sync::Arc::as_ptr(&m.mesh.inner).hash(&mut h);
-        m.mesh.inner.index_count.hash(&mut h);
+        let level = prepared.seen[i].map_or(0, |s| s.level);
+        let mesh = crate::batch::mesh_at(m, level);
+        std::sync::Arc::as_ptr(&mesh.inner).hash(&mut h);
+        mesh.inner.index_count.hash(&mut h);
         bits(&m.model, &mut h);
         if let Some(joints) = &m.joints {
             for j in joints.iter() {
@@ -2605,10 +2762,19 @@ fn scene_bounds(draw: &DrawList) -> (Vec<Sphere>, Sphere) {
         .meshes
         .iter()
         .map(|mesh_draw| {
-            let (scale, _, center) = mesh_draw.model.to_scale_rotation_translation();
+            // The model's origin, and its largest axis scale (no full
+            // decomposition: this runs for every mesh every frame).
+            let m = &mesh_draw.model;
+            let scale = m
+                .x_axis
+                .truncate()
+                .length_squared()
+                .max(m.y_axis.truncate().length_squared())
+                .max(m.z_axis.truncate().length_squared())
+                .sqrt();
             Sphere {
-                center,
-                radius: posed_radius(mesh_draw) * scale.max_element(),
+                center: m.w_axis.truncate(),
+                radius: posed_radius(mesh_draw) * scale,
             }
         })
         .collect();
@@ -3053,6 +3219,69 @@ mod tests {
             center[0] > 20 || center[1] > 20 || center[2] > 20,
             "expected lit cube at center, got {center:?}"
         );
+    }
+
+    #[test]
+    fn offscreen_levels_of_detail_swap_meshes_and_fade_out_at_the_draw_distance() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping LOD test");
+            return;
+        };
+        renderer.set_quality(GraphicsQuality::High); // LOD scale 1
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let full = renderer.create_mesh(&MeshData::cube(4.0));
+        let small = renderer.create_mesh(&MeshData::cube(1.0));
+        let material = renderer.create_material([1.0, 1.0, 1.0, 1.0], None);
+        let swaps = Arc::new(crate::MeshLod {
+            levels: vec![(small, 8.0)],
+            draw_distance: 0.0,
+        });
+        let fades = Arc::new(crate::MeshLod {
+            levels: Vec::new(),
+            draw_distance: 20.0,
+        });
+        // Lit pixels with the camera `distance` away.
+        let mut lit = |distance: f32, lod: Option<&Arc<crate::MeshLod>>| {
+            let mut draw = DrawList::new();
+            draw.set_clear_color(Color::BLACK);
+            draw.set_camera_3d(Camera3D::new(
+                glam::Vec3::new(0.0, 0.0, distance),
+                glam::Vec3::ZERO,
+            ));
+            // Several copies, so they draw as one instanced batch.
+            for x in [-40.0, 0.0, 40.0] {
+                let at = glam::Mat4::from_translation(glam::Vec3::new(x, 0.0, 0.0));
+                draw.mesh(&full, at, &material);
+                if let Some(lod) = lod {
+                    draw.set_lod(lod);
+                }
+            }
+            renderer.render_offscreen(&draw, &target);
+            read_pixels(&renderer, &target, size)
+                .chunks_exact(4)
+                .filter(|p| p[0] > 20 || p[1] > 20 || p[2] > 20)
+                .count()
+        };
+        // Near: the mesh itself.
+        assert_eq!(lit(6.0, Some(&swaps)), lit(6.0, None));
+        // Past 8 m: the small level, a sixteenth of the area.
+        let (plain, simple) = (lit(12.0, None), lit(12.0, Some(&swaps)));
+        assert!(plain > 200, "the cube shows at 12 m ({plain} px)");
+        assert!(
+            simple > 0 && simple * 6 < plain,
+            "the small level draws ({simple} vs {plain} px)"
+        );
+        // Up to the last tenth before 20 m it all shows; then it dithers.
+        assert_eq!(lit(17.0, Some(&fades)), lit(17.0, None));
+        let (plain, fading) = (lit(19.0, None), lit(19.0, Some(&fades)));
+        assert!(
+            fading > 0 && fading * 4 < plain * 3,
+            "part of it shows while fading ({fading} vs {plain} px)"
+        );
+        // Past the draw distance: gone.
+        assert!(lit(21.0, None) > 0);
+        assert_eq!(lit(21.0, Some(&fades)), 0);
     }
 
     #[test]

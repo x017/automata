@@ -150,6 +150,23 @@ pub(crate) struct MaterialInner {
     pub bind_group: wgpu::BindGroup,
     pub params: MaterialParams,
     pub texture: Texture,
+    /// The normal, metallic-roughness and emissive maps. Held so their
+    /// addresses (part of [`Self::key`]) can't be reused while it lives.
+    pub _maps: [Texture; 3],
+    /// A hash of the uniform and the textures: materials with equal keys
+    /// shade identically, so their draws batch (see `batch.rs`).
+    pub key: u64,
+}
+
+/// [`MaterialInner::key`]: the uniform's bytes and the textures' identities.
+pub(crate) fn content_key(uniform: &MaterialUniform, textures: [&Texture; 4]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytemuck::bytes_of(uniform).hash(&mut h);
+    for t in textures {
+        std::ptr::hash(std::sync::Arc::as_ptr(&t.inner), &mut h);
+    }
+    h.finish()
 }
 
 #[cfg(test)]

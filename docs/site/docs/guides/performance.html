@@ -99,13 +99,41 @@ runs a scene the way Play mode does, without a window.</li><li><strong><code>run
 and the run writes every frame's time and script time when it ends.
 <code>AUTOMATA_FRAME_STATS_WARMUP</code> sets the frames to skip (default 30).
 An exported game takes <code>--headless --frames N --fixed-delta 0.0166667</code>.</li></ul>
+<h2 id="rendering-a-big-world">Rendering a big world<a class="anchor" href="#rendering-a-big-world" aria-label="Link to this section">#</a></h2>
+<p><code>run.py</code> measures scripts and physics, not drawing. The renderer has its
+own benchmark: a forest of 10,000 copies of <code>examples/models/tree.glb</code>
+with a sun casting shadows, fog, and a camera standing among the trees.</p>
+<div class="codeblock" data-lang="sh"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>python examples/bench/forest.py                       # 10,000 trees, High, 1280x720
+python examples/bench/forest.py --draw-distance 80    # trees vanish past 80 m
+python examples/bench/forest.py --trees 2000 --quality ultra --frames 30</code></pre></div>
+<p>It renders with Oberon's <code>render_still</code> example and prints the median
+frame time, including the time to read the image back. Measured in
+software rendering (lavapipe, 2026-11, 5 frames, High):</p>
+<div class="table"><table><thead><tr><th>Renderer</th><th style="text-align:right">ms/frame</th><th style="text-align:right">Speed-up</th></tr></thead><tbody><tr><td>Before A11 (one draw per mesh part, no culling outside shadows)</td><td style="text-align:right">9,493</td><td style="text-align:right">1×</td></tr><tr><td>Culling + instancing + batching</td><td style="text-align:right">1,098</td><td style="text-align:right">8.6×</td></tr><tr><td>Same, with <code>draw_distance=80</code> on the trees</td><td style="text-align:right">723</td><td style="text-align:right">13×</td></tr></tbody></table></div>
+<p>The first two produce identical images. With the draw distance, 110
+pixels out of 921,600 differ, because the fog already hides trees that
+far away. On a real GPU every number is far lower. Compare runs on the
+same machine.</p>
+<p>The renderer does three things for big worlds:</p>
+<ul><li><strong>Culling.</strong> Meshes outside the camera's view aren't drawn. Each
+shadow cascade only draws the meshes that can throw a shadow into it.</li><li><strong>Instancing and batching.</strong> Every copy of the same mesh with the same
+material, from the same model file or built the same way, is drawn in a
+single call. Materials with equal colors, surfaces and textures count as
+the same. Shadow passes group by mesh alone. Skinned (animated) meshes
+are still drawn one by one.</li><li><strong>Levels of detail and draw distance.</strong> Far copies switch to the
+model's <code>_LOD1</code>, <code>_LOD2</code>… versions, and meshes past their draw distance
+aren't drawn at all, shadow included. See
+<a href="../oberon/models.html#levels-of-detail">Models</a>.</li></ul>
+<p>What helps your scenes most: reuse the same model files and materials
+instead of building near-identical copies, and give scattered props a draw
+distance that ends inside the fog.</p>
 <p><strong>Rerun the benchmark before each release</strong> and update this page, so that
 a slowdown shows up as a change in the table.</p>
     </article>
     <footer class="pager"><a class="prev" href="testing.html"><small>Previous</small>Testing</a><a class="next" href="../api-reference.html"><small>Next</small>API reference</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/performance.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#practical-limits">Practical limits</a></li><li class="l2"><a href="#the-numbers">The numbers</a></li><li class="l2"><a href="#what-is-measured">What is measured</a></li><li class="l2"><a href="#measure-on-your-machine">Measure on your machine</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#practical-limits">Practical limits</a></li><li class="l2"><a href="#the-numbers">The numbers</a></li><li class="l2"><a href="#what-is-measured">What is measured</a></li><li class="l2"><a href="#measure-on-your-machine">Measure on your machine</a></li><li class="l2"><a href="#rendering-a-big-world">Rendering a big world</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

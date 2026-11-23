@@ -10,12 +10,28 @@
 //
 // Bind groups:
 //   0 — camera (common.wgsl)
-//   1 — model matrix (per draw); skinned draws add the joint palette
+//   1 — skinned draws only: model matrix and joint palette (plain draws
+//       are instanced: model matrices per instance, locations 5–9)
 //   2 — material (base color texture + sampler, parameters, normal /
 //       metallic-roughness / emissive maps + their shared sampler)
 //   3 — light (common.wgsl)
 
 @group(1) @binding(0) var<uniform> model: mat4x4<f32>;
+
+// One copy of an instanced mesh (`batch.rs`): model matrix columns, and
+// how much of it shows (`params.x`, 1 solid, dithered away toward 0).
+struct InstanceInput {
+    @location(5) m0: vec4<f32>,
+    @location(6) m1: vec4<f32>,
+    @location(7) m2: vec4<f32>,
+    @location(8) m3: vec4<f32>,
+    @location(9) params: vec4<f32>,
+};
+
+// Set by the fading pipeline (copies near their draw distance): the
+// dither below is compiled only there, so every other mesh keeps early
+// depth testing.
+override FADING: bool = false;
 
 // Skinned draws only (`vs_skinned`): one matrix per joint, taking a vertex
 // from bind space to model space. Must match `MAX_JOINTS` in Rust.
@@ -53,17 +69,20 @@ struct VertexOutput {
     @location(0) world_position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
+    @location(3) @interpolate(flat) fade: f32,
 };
 
 @vertex
-fn vs_main(in: VertexInput) -> VertexOutput {
+fn vs_main(in: VertexInput, inst: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
-    let world = model * vec4<f32>(in.position, 1.0);
+    let m = mat4x4<f32>(inst.m0, inst.m1, inst.m2, inst.m3);
+    let world = m * vec4<f32>(in.position, 1.0);
     out.clip_position = camera.view_proj * world;
     out.world_position = world.xyz;
     // Upper 3x3 of the model matrix — correct for rotation + uniform scale.
-    out.normal = (model * vec4<f32>(in.normal, 0.0)).xyz;
+    out.normal = (m * vec4<f32>(in.normal, 0.0)).xyz;
     out.uv = in.uv;
+    out.fade = inst.params.x;
     return out;
 }
 
@@ -89,6 +108,7 @@ fn vs_skinned(in: VertexInput, skin: SkinInput) -> VertexOutput {
     out.world_position = world.xyz;
     out.normal = (posed * vec4<f32>(in.normal, 0.0)).xyz;
     out.uv = in.uv;
+    out.fade = 1.0;
     return out;
 }
 
@@ -125,6 +145,15 @@ fn perturb_normal(n: vec3<f32>, p: vec3<f32>, uv: vec2<f32>, ts: vec3<f32>) -> v
 }
 
 fn surface(in: VertexOutput) -> Surface {
+    if FADING {
+        // Interleaved gradient noise: a fine, even dither that thins the
+        // mesh out as `fade` drops.
+        let p = floor(in.clip_position.xy);
+        let noise = fract(52.9829189 * fract(dot(p, vec2<f32>(0.06711056, 0.00583715))));
+        if in.fade <= noise {
+            discard;
+        }
+    }
     var out: Surface;
     let maps = u32(material.params.w);
     var n = normalize(in.normal);

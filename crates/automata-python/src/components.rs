@@ -1398,6 +1398,17 @@ impl PyCamera2D {
     }
 }
 
+/// Rejects negative or non-finite draw distances.
+fn check_draw_distance(value: f32) -> PyResult<()> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "draw_distance must be 0 (any distance) or a positive number of metres, not {value}"
+        )))
+    }
+}
+
 /// A mesh rendered in 3D: a built-in primitive with a flat color, or a
 /// model file (`MeshRenderer.model("models/tree.glb")`).
 ///
@@ -1423,10 +1434,14 @@ impl PyMeshRenderer {
     /// `glow_light` (how much the glow lights nearby surfaces: 1 like a
     /// real glowing object of that size, 0 not at all) and `glow_shadows`
     /// (whether objects block that light; on High and up).
+    ///
+    /// `draw_distance` (metres; 0 = any distance) hides it, shadow included,
+    /// when the camera is farther away, dithering it out over the last
+    /// tenth. Model files' `_LOD1`, `_LOD2`… levels apply either way.
     #[classmethod]
     #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
                         emissive=(0.0, 0.0, 0.0), emissive_strength=1.0, glow_light=1.0,
-                        glow_shadows=true))]
+                        glow_shadows=true, draw_distance=0.0))]
     #[allow(clippy::too_many_arguments)] // Python keyword arguments
     fn cube(
         _cls: &Bound<'_, pyo3::types::PyType>,
@@ -1438,7 +1453,9 @@ impl PyMeshRenderer {
         emissive_strength: f32,
         glow_light: f32,
         glow_shadows: bool,
+        draw_distance: f32,
     ) -> PyResult<Self> {
+        check_draw_distance(draw_distance)?;
         let surface = surface_from(
             roughness,
             metallic,
@@ -1448,7 +1465,9 @@ impl PyMeshRenderer {
             glow_shadows,
         )?;
         Ok(Self {
-            inner: automata_scene::MeshVisual::cube(size, color.into()).with_surface(surface),
+            inner: automata_scene::MeshVisual::cube(size, color.into())
+                .with_surface(surface)
+                .with_draw_distance(draw_distance),
             kind: "cube",
         })
     }
@@ -1458,7 +1477,7 @@ impl PyMeshRenderer {
     #[classmethod]
     #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
                         emissive=(0.0, 0.0, 0.0), emissive_strength=1.0, glow_light=1.0,
-                        glow_shadows=true))]
+                        glow_shadows=true, draw_distance=0.0))]
     #[allow(clippy::too_many_arguments)] // Python keyword arguments
     fn sphere(
         _cls: &Bound<'_, pyo3::types::PyType>,
@@ -1470,7 +1489,9 @@ impl PyMeshRenderer {
         emissive_strength: f32,
         glow_light: f32,
         glow_shadows: bool,
+        draw_distance: f32,
     ) -> PyResult<Self> {
+        check_draw_distance(draw_distance)?;
         let surface = surface_from(
             roughness,
             metallic,
@@ -1480,7 +1501,9 @@ impl PyMeshRenderer {
             glow_shadows,
         )?;
         Ok(Self {
-            inner: automata_scene::MeshVisual::sphere(size, color.into()).with_surface(surface),
+            inner: automata_scene::MeshVisual::sphere(size, color.into())
+                .with_surface(surface)
+                .with_draw_distance(draw_distance),
             kind: "sphere",
         })
     }
@@ -1490,7 +1513,7 @@ impl PyMeshRenderer {
     #[classmethod]
     #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
                         emissive=(0.0, 0.0, 0.0), emissive_strength=1.0, glow_light=1.0,
-                        glow_shadows=true))]
+                        glow_shadows=true, draw_distance=0.0))]
     #[allow(clippy::too_many_arguments)] // Python keyword arguments
     fn quad(
         _cls: &Bound<'_, pyo3::types::PyType>,
@@ -1502,7 +1525,9 @@ impl PyMeshRenderer {
         emissive_strength: f32,
         glow_light: f32,
         glow_shadows: bool,
+        draw_distance: f32,
     ) -> PyResult<Self> {
+        check_draw_distance(draw_distance)?;
         let surface = surface_from(
             roughness,
             metallic,
@@ -1512,7 +1537,9 @@ impl PyMeshRenderer {
             glow_shadows,
         )?;
         Ok(Self {
-            inner: automata_scene::MeshVisual::quad(size, color.into()).with_surface(surface),
+            inner: automata_scene::MeshVisual::quad(size, color.into())
+                .with_surface(surface)
+                .with_draw_distance(draw_distance),
             kind: "quad",
         })
     }
@@ -1534,7 +1561,7 @@ impl PyMeshRenderer {
     #[classmethod]
     #[pyo3(signature = (path, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
                         emissive=(0.0, 0.0, 0.0), emissive_strength=1.0, glow_light=1.0,
-                        glow_shadows=true))]
+                        glow_shadows=true, draw_distance=0.0))]
     #[allow(clippy::too_many_arguments)] // Python keyword arguments
     fn model(
         cls: &Bound<'_, pyo3::types::PyType>,
@@ -1546,7 +1573,9 @@ impl PyMeshRenderer {
         emissive_strength: f32,
         glow_light: f32,
         glow_shadows: bool,
+        draw_distance: f32,
     ) -> PyResult<Self> {
+        check_draw_distance(draw_distance)?;
         let surface = surface_from(
             roughness,
             metallic,
@@ -1564,7 +1593,9 @@ impl PyMeshRenderer {
                 _ => pyo3::exceptions::PyValueError::new_err(e.to_string()),
             })?;
         Ok(Self {
-            inner: inner.with_surface(surface),
+            inner: inner
+                .with_surface(surface)
+                .with_draw_distance(draw_distance),
             kind: "model",
         })
     }
@@ -1619,6 +1650,13 @@ impl PyMeshRenderer {
     #[getter]
     fn glow_shadows(&self) -> bool {
         self.inner.surface.glow_shadows
+    }
+
+    /// Beyond this camera distance (metres) it isn't drawn; 0 = any
+    /// distance.
+    #[getter]
+    fn draw_distance(&self) -> f32 {
+        self.inner.draw_distance
     }
 
     /// The model file, for `MeshRenderer.model`; otherwise `None`.
