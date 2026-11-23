@@ -228,6 +228,15 @@ ctx.ui.theme.font = PIXEL   # every widget's text from now on
 three match either side of the keyboard; use `"shift_left"` or
 `"shift_right"` (and likewise for ctrl and alt) to require one side.
 
+**Gamepad buttons** are key names too, on any connected pad: `"pad_south"`,
+`"pad_east"`, `"pad_west"` and `"pad_north"` (A, B, X and Y on an Xbox pad),
+`"pad_up"`, `"pad_down"`, `"pad_left"` and `"pad_right"` (the d-pad, or the
+left stick pushed past halfway), `"pad_start"`, `"pad_select"`, the
+shoulders `"pad_lb"` / `"pad_rb"`, the triggers `"pad_lt"` / `"pad_rt"`,
+and the stick clicks `"pad_l3"` / `"pad_r3"`. Bind them like keys
+(`ctx.settings.bind("jump", "space", "pad_south")`). They work in Play,
+under `run_scene` with the engine and in exported games.
+
 ## Game UI
 
 `ctx.ui` draws menus and HUD widgets over the game: buttons, labels,
@@ -235,7 +244,7 @@ toggles, sliders, progress bars, panels and images. Call them in `update`
 every frame they should show (immediate mode). There are no widget objects
 to create or remove: whatever you call this frame is the UI.
 
-![A pause menu with Resume, Settings and Reset kicks buttons over a dusk scene of three shapes on pedestals](../../assets/ui/pause_menu.jpg)
+![A pause menu with Resume, Settings (focused by the keyboard, with a yellow ring) and Reset kicks buttons over a dusk scene of three shapes on pedestals](../../assets/ui/pause_menu.jpg)
 
 ```python
 def update(entity, ctx):
@@ -262,9 +271,11 @@ def update(entity, ctx):
 | `ui.theme` | Colours, the default text size and font (below) |
 
 Rules that apply to every widget:
-- **Position:** `x, y` is the **top-left** corner in screen pixels, unlike
-  `ctx.hud` shapes, which are placed by their centre. Use `ctx.hud.size`
-  to lay out against the screen edges.
+- **Position:** `x, y` is the **top-left** corner in UI units (screen
+  pixels unless you set a [design size](#scaling-to-any-screen)), unlike
+  `ctx.hud` shapes, which are placed by their centre. Inside a
+  [layout](#layouts) leave `x, y` out, along with the size if the layout
+  gives one.
 - **States:** buttons show hover and pressed states.
   `enabled=False` dims a widget and ignores clicks on it.
 - **Clicks stay with the UI:** a press that starts on a widget or a panel
@@ -273,6 +284,7 @@ Rules that apply to every widget:
   a click on a button never also fires the gun. The UI decides from where
   things were drawn the frame before, so a widget takes clicks from the
   second frame it's shown.
+- **Keys and gamepads:** see [focus](#keyboard-and-gamepad-focus).
 - **Identity:** widgets are told apart by their text and the entity whose
   script draws them. Give `id=` when the text changes (`f"Reset ({n})"`)
   or two widgets share the same text.
@@ -289,14 +301,142 @@ ctx.ui.theme.accent = (1.0, 0.75, 0.2, 1.0)   # fills: sliders, bars, toggles
 ctx.ui.theme.button = (0.1, 0.12, 0.2, 0.95)  # also hover, press, panel, text, text_dim, track, border
 ctx.ui.theme.text_size = 24
 ctx.ui.theme.font = "fonts/Pixel.ttf"            # None: the built-in font
+ctx.ui.theme.focus = (1.0, 0.78, 0.3, 1.0)     # the keyboard focus ring
 ```
 
+### Layouts
+
+Columns, rows and stacks place the widgets drawn inside them, so you don't
+work out coordinates. They're `with` blocks and they nest:
+
+```python
+def update(entity, ctx):
+    ui = ctx.ui
+    with ui.column(width=380, anchor="center", padding=40, gap=14, panel=True):
+        ui.label("PAUSED", size=28, align="center")
+        if ui.button("Resume", height=52):
+            ui.screens.clear()
+        with ui.row(columns=3, height=40, gap=8):   # three equal buttons
+            for preset in ("low", "medium", "high"):
+                if ui.button(preset.title()):
+                    ctx.settings.graphics = preset
+```
+
+| Layout | Places widgets |
+|---|---|
+| `ui.column(x=None, y=None, width=None, height=None, *, gap=10, padding=0, anchor=None, margin=0, panel=False, title=None, id=None)` | Top to bottom. With a `width`, each widget fills it |
+| `ui.row(..., columns=None, ...)` | Left to right. With `columns=n` and a width (given, or from the layout around it), each widget gets an equal share |
+| `ui.stack(...)` | On top of each other: an image with a label over it |
+
+- **Where:** give `x, y`, or an `anchor` (below) with a `margin`, or
+  neither inside another layout to take its next slot. A layout without a
+  size grows to fit what's in it.
+- **Sizes:** a widget's own `width` and `height` still apply. A button
+  without one fills the column's width.
+- **`panel=True`** draws a panel behind everything in the layout (or pass
+  a colour), and `title=` adds a title to it. `padding` is the space
+  inside it.
+- **Mistakes raise errors:** an `x` without a `y`, or `columns=0`.
+
+### Scaling to any screen
+
+**Anchors** put things against the screen's edges and corners:
+`"top_left"`, `"top"`, `"top_right"`, `"left"`, `"center"`, `"right"`,
+`"bottom_left"`, `"bottom"` and `"bottom_right"`. Layouts take
+`anchor=`, and `ui.place(anchor, width, height, margin=0)` returns the
+top-left corner of a box anchored that way, for a single widget:
+
+```python
+ui.button("Menu", *ui.place("top_right", 120, 44, margin=24), 120, 44)
+```
+
+An anchored layout uses its size from the frame before, then moves into
+place when the `with` block ends, so it's right on its first frame too.
+
+**Design size.** Set `ui.design_size = (1280, 720)` once and lay the UI
+out for that screen. It scales to fit whatever window or phone the game
+runs on: `ui.scale` is the smaller of the width and height ratios. All
+`ctx.ui` positions and sizes are in these UI units, and so are
+`ui.size` (the screen, in UI units) and `ui.mouse_position`. Without a
+design size, one unit is one pixel.
+
+The player can make the UI bigger or smaller with
+`ctx.settings.ui_scale` (0.5 to 3, 1 by default), which multiplies the
+scale and is saved with the other [settings](#player-settings). Use it for
+high-DPI screens and phones.
+
+![The same pause menu in a tall, phone-shaped window, scaled down to fit its width](../../assets/ui/ui_portrait.jpg)
+
+### Screens
+
+`ctx.ui.screens` keeps track of which menus are open, as a stack: the
+pause menu, a settings screen over it, an inventory.
+
+```python
+def start(entity, ctx):
+    ctx.settings.bind("pause", "p", "escape", "pad_start")
+
+def update(entity, ctx):
+    ui = ctx.ui
+    if ctx.input.just_pressed("pause") and not ui.screens.top:
+        ui.screens.show("pause", pause=True)
+    if ui.screen("pause"):          # True while it's shown
+        with ui.column(width=300, anchor="center", panel=True):
+            if ui.button("Resume"):
+                ui.screens.hide("pause")
+            if ui.button("Settings"):
+                ui.screens.show("settings")
+    if ui.screen("settings"):
+        ...
+```
+
+| | |
+|---|---|
+| `show(name, *, modal=True, pause=False, escape=True)` | Opens a screen on top (or moves it there) |
+| `hide(name)`, `toggle(name, **options)`, `back()`, `clear()` | Close one, flip one, close the top one, close them all |
+| `shown(name)`, `top`, `names`, `modal` | Is it open, the top one, all of them bottom to top, and the top modal one |
+| `paused` | A screen shown with `pause=True` is open |
+
+- **Widgets belong to a screen:** `ui.screen(name)` returns whether it's
+  shown, and the widgets drawn after it belong to it. They draw above the
+  screens under it, whatever order the scripts run in. `ui.screen(None)`
+  goes back to the plain HUD.
+- **Modal** screens (the default) take all the input: widgets under them
+  draw but don't react, and clicks on them never reach the game.
+- **Pausing:** `paused` is a flag your game scripts check
+  (`if ctx.ui.screens.paused: return`). It doesn't stop physics.
+- **Escape**, or B (`"pad_east"`) on a gamepad, closes the top screen, and
+  the script doesn't see that press. Show a screen with `escape=False` to
+  keep it open; then the script gets Escape as usual. With no screen open,
+  Escape is the game's, so it can open the pause menu.
+
+### Keyboard and gamepad focus
+
+While a modal screen is open, the arrow keys and the gamepad's d-pad (or
+left stick) move a focus ring to the nearest widget in that direction.
+**Enter**, **Space** or **A** (`"pad_south"`) presses the focused widget,
+and left and right move a focused slider by its `step` (or a twentieth of
+its range). **Tab** and **Shift+Tab** go through the widgets in order. A
+held direction repeats.
+
+- A screen opened from the keyboard or a gamepad focuses its first widget.
+  The mouse still works, and a click hides the ring.
+- Outside screens, set `ui.keyboard_navigation = True` to get focus in the
+  HUD too. `ui.focused` is the focused widget's id, or None.
+- Keys the UI uses are hidden from `ctx.input` until they're released, so
+  Enter on a menu button doesn't also make the player jump.
+
 `ctx.ui` works the same way in Play, under `run_scene` and in exported games.
-`examples/oberon/pause_menu` is a complete pause menu: a settings screen
-that changes `ctx.settings` (volume, graphics preset and a toggle of its
-own), a HUD with a spin meter and a Menu button, and shapes that turn
-faster when you click in the game but not when you click the UI. Its
-titles and HUD numbers use a pixel font from its `fonts/` folder.
+`examples/oberon/pause_menu` is a complete pause menu, built from anchored
+columns and rows and laid out for 1280×720. It has a menu screen and a
+settings screen that changes `ctx.settings` (volume, graphics preset, UI
+size and a toggle of its own). Both work with the mouse, the keyboard or a
+gamepad. There's also a HUD with a spin meter and a Menu button, and
+shapes that turn faster when you click in the game but not when you click
+the UI. Its titles and HUD numbers use a pixel font from its `fonts/`
+folder.
+
+![The settings screen: a volume slider, a Spin meter toggle, and graphics preset and UI size buttons, with Small focused](../../assets/ui/pause_settings.jpg)
 
 ## Keys
 
@@ -530,6 +670,7 @@ game starts:
 |---|---|
 | `ctx.settings.volume = 0.5` | Master volume, 0 to 1 (1 by default) |
 | `ctx.settings.graphics = "low"` | Graphics preset: `"low"`, `"medium"`, `"high"`, `"ultra"` or `"beautiful"`. Until the player picks one, it reads as the preset the game is running at |
+| `ctx.settings.ui_scale = 1.25` | How big `ctx.ui` draws, 0.5 to 3 (1 by default). See [scaling](#scaling-to-any-screen) |
 | `ctx.settings["sensitivity"] = 0.4` | Any other setting, with the same JSON rules as `ctx.save` |
 | `ctx.settings.reset()` | Everything back to the game's defaults |
 
@@ -567,7 +708,7 @@ def update(entity, ctx):
 
 | | |
 |---|---|
-| `bind(action, *keys)` | Default keys: [key names](#ctx) or `"mouse_left"`/`"mouse_right"`/`"mouse_middle"`. Binding again replaces the defaults |
+| `bind(action, *keys)` | Default keys: [key names](#ctx), gamepad buttons (`"pad_south"`) or `"mouse_left"`/`"mouse_right"`/`"mouse_middle"`. Binding again replaces the defaults |
 | `rebind(action, *keys)` | The player's keys, saved. With no keys, the action has none |
 | `keys(action)`, `bindings()` | One action's keys now, or every action's |
 | `reset_keys(action=None)` | Back to the defaults (one action or all) |

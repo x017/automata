@@ -1,8 +1,9 @@
 """Turns the shape at its ``speed`` attribute (radians per second).
 
 A click in the game kicks it faster, and it eases back. It holds still
-while the menu is open. Presses on the menu are the UI's, so
-``mouse_just_pressed`` doesn't see them.
+while a screen shown with ``pause=True`` is up (``ctx.ui.screens.paused``).
+Presses on the menu are the UI's, so ``mouse_just_pressed`` doesn't see
+them.
 """
 
 
@@ -11,7 +12,7 @@ def start(entity, ctx):
 
 
 def update(entity, ctx):
-    if ctx.scene["Menu"].attributes.get("paused"):
+    if ctx.ui.screens.paused:
         return
     s = entity.state
     if ctx.input.mouse_just_pressed("left"):

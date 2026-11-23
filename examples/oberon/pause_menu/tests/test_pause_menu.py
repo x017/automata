@@ -3,8 +3,9 @@
     pytest examples/oberon/pause_menu/tests
 
 The scripts run the way Oberon's Play runs them: a ScriptHost fed the
-scripted entities, the mouse buttons and the cursor each frame, on an
-800x600 screen.
+scripted entities, the keys, the mouse buttons and the cursor each frame,
+on an 800x600 screen. Widgets are found by where their text is drawn, so
+the tests don't depend on the exact layout.
 """
 
 import os
@@ -19,11 +20,8 @@ GAME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEVEL = os.path.join(GAME, "level.ron")
 build_level = load_script(os.path.join(GAME, "build_level.py"))
 
-# Where the menus put things on an 800x600 screen (see scripts/menu.py).
-RESUME, SETTINGS, RESET = (400, 258), (400, 322), (400, 386)
-SLIDER_Y, TOGGLE, LOW, BACK = 227, (262, 274), (284, 362), (400, 444)
-MENU_BUTTON = (716, 42)
-GAME_SPOT = (400, 520)
+# A spot in the game with no UI on it, while playing (800x600).
+GAME_SPOT = (400, 420)
 
 
 class Backend(api.Backend):
@@ -34,7 +32,8 @@ class Backend(api.Backend):
 class Play:
     """The scene's scripted entities, stepped one 60 Hz frame at a time."""
 
-    def __init__(self):
+    def __init__(self, screen=(800, 600)):
+        self.screen = screen
         self.keys = api.KeySource()
         self.host = api.ScriptHost(Backend(), self.keys)
         menu = os.path.join(GAME, "scripts", "menu.py")
@@ -53,7 +52,7 @@ class Play:
         self.n += 1
         self.keys.update(keys, buttons, (0.0, 0.0), False, self.cursor)
         out = self.host.frame(self.records, delta=1 / 60, elapsed=self.n / 60, frame=self.n,
-                              screen=(800, 600))
+                              screen=self.screen)
         by_id = {r["id"]: r for r in self.records}
         for w in out.writes:
             record = by_id[w["id"]]
@@ -84,6 +83,23 @@ class Play:
     def texts(self):
         return [item["text"] for item in self.out.hud if item["k"] == "text"]
 
+    def at(self, text):
+        """Where ``text`` was drawn last frame, in pixels (a button's middle)."""
+        item = next(i for i in self.out.hud if i["k"] == "text" and i["text"] == text)
+        return (item["x"], item["y"])
+
+    def press(self, text):
+        """Clicks the widget whose text is ``text``."""
+        return self.click(self.at(text))
+
+    def tap(self, *keys):
+        self.step(keys=keys)
+        return self.step()
+
+    @property
+    def screens(self):
+        return self.host.ctx.ui.screens.names
+
 
 @pytest.fixture
 def play():
@@ -105,15 +121,26 @@ def test_saved_level_matches_the_build_script():
 
 def test_it_starts_paused_on_the_menu_with_the_shapes_still(play):
     play.run(30)
-    assert play.menu["screen"] == "menu"
+    assert play.screens == ["menu"]
     assert "PAUSED" in play.texts() and "Resume" in play.texts()
     assert play.records[1]["r"] == (0.0, 0.5, 0.0), "paused shapes don't turn"
     assert play.records[0]["attrs"]["paused"] is True
 
 
+def test_the_menu_is_centred_and_scaled_to_any_window():
+    for size, scale in (((800, 600), 0.625), ((1920, 1080), 1.5), ((1280, 720), 1.0)):
+        p = Play(size)
+        p.step()
+        p.step()
+        x, _ = p.at("Resume")
+        assert x == pytest.approx(size[0] / 2)
+        title = next(i for i in p.out.hud if i["k"] == "text" and i["text"] == "PAUSED")
+        assert title["size"] == pytest.approx(28 * scale)
+
+
 def test_resume_plays_and_its_click_never_kicks(play):
-    play.click(RESUME)
-    assert play.menu["screen"] is None
+    play.press("Resume")
+    assert play.screens == []
     play.run(30)
     assert play.menu["kicks"] == 0, "the press began on the Resume button"
     assert play.speed() == pytest.approx(1.2, abs=0.01)
@@ -122,7 +149,8 @@ def test_resume_plays_and_its_click_never_kicks(play):
 
 
 def test_a_click_in_the_game_kicks_the_shapes(play):
-    play.click(RESUME)
+    play.press("Resume")
+    play.step()  # the menu's shade was there last frame
     play.click(GAME_SPOT)
     assert play.menu["kicks"] == 1
     assert play.speed() > 4.5 and play.speed("Slab") > 5.0
@@ -131,54 +159,95 @@ def test_a_click_in_the_game_kicks_the_shapes(play):
 
 
 def test_the_hud_menu_button_pauses_without_a_kick(play):
-    play.click(RESUME)
+    play.press("Resume")
     play.step()  # widgets take presses where they were last drawn
-    play.step(MENU_BUTTON, ["left"])
-    play.step(MENU_BUTTON, ["left"])  # held: still the UI's
-    play.step(MENU_BUTTON)
-    assert play.menu["screen"] == "menu"
+    menu = play.at("Menu")
+    play.step(menu, ["left"])
+    play.step(menu, ["left"])  # held: still the UI's
+    play.step(menu)
+    assert play.screens == ["menu"]
     assert play.menu["kicks"] == 0 and play.speed() < 1.3
 
 
-def test_p_toggles_the_menu(play):
-    play.step(keys=["p"])
+def test_the_hud_doesnt_react_under_the_menu(play):
     play.step()
-    assert play.menu["screen"] is None
-    play.step(keys=["p"])
-    assert play.menu["screen"] == "menu"
+    play.press("Menu")  # the HUD's Menu button, under the modal menu
+    assert play.screens == ["menu"] and play.menu["kicks"] == 0
+
+
+def test_p_and_escape_open_and_close_the_menu(play):
+    play.tap("p")
+    assert play.screens == []
+    play.tap("p")
+    assert play.screens == ["menu"]
+    play.tap("escape")  # the UI closes the top screen...
+    assert play.screens == []
+    play.tap("escape")  # ...and with none open, Escape is the game's: it opens the menu
+    assert play.screens == ["menu"]
+
+
+def test_keys_and_a_gamepad_drive_the_menus(play):
+    play.tap("arrow_down")  # focuses Resume
+    play.tap("arrow_down")  # Settings
+    play.tap("enter")
+    assert play.screens == ["menu", "settings"]
+    play.step()  # opened from the keyboard: it focuses its first widget, the volume
+    play.tap("arrow_left")
+    play.tap("arrow_left")
+    assert play.host.ctx.settings.volume == pytest.approx(0.9)
+    play.tap("pad_east")  # B: back to the menu
+    assert play.screens == ["menu"]
+    play.tap("pad_up")  # wraps from the top to the last enabled button: Settings
+    play.tap("pad_up")  # Resume
+    play.tap("pad_south")
+    assert play.screens == [] and play.menu["kicks"] == 0
+    play.tap("pad_start")
+    assert play.screens == ["menu"]
 
 
 def test_reset_kicks_is_disabled_until_there_are_kicks(play):
-    play.click(RESET)
-    assert play.menu["screen"] == "menu"
-    play.click(RESUME)
+    play.step()
+    play.press("Reset kicks (0)")
+    assert play.screens == ["menu"]
+    play.press("Resume")
+    play.step()
     play.click(GAME_SPOT)
     play.click(GAME_SPOT)
-    play.step(keys=["p"])
+    play.tap("p")
     play.step()
     assert "Reset kicks (2)" in play.texts()
-    play.click(RESET)
+    play.press("Reset kicks (2)")
     assert play.menu["kicks"] == 0
 
 
-def test_settings_change_volume_meter_and_graphics(play):
-    play.click(SETTINGS)
-    assert play.menu["screen"] == "settings"
+def test_settings_change_volume_meter_graphics_and_ui_size(play):
+    play.press("Settings")
+    assert play.screens == ["menu", "settings"]
     play.step()
     assert "SETTINGS" in play.texts()
-    # Drag the volume from full down to the middle of the slider.
-    play.step((540, SLIDER_Y), ["left"])
-    play.step((400, SLIDER_Y), ["left"])
-    play.step((400, SLIDER_Y))
+    # Drag the volume from full down to the middle of the slider, which
+    # sits between the "Volume" row and the toggle.
+    left, label_y = play.at("Volume")
+    right, _ = play.at("100%")
+    _, toggle_y = play.at("Spin meter")
+    y = (label_y + toggle_y) / 2
+    play.step((right - 2, y), ["left"])
+    play.step(((left + right) / 2, y), ["left"])
+    play.step(((left + right) / 2, y))
     assert play.host.ctx.settings.volume == pytest.approx(0.5, abs=0.05)
     assert play.applied["volume"] == pytest.approx(0.5, abs=0.05)
-    play.click(TOGGLE)
+    play.press("Spin meter")
     assert play.host.ctx.settings["spin_meter"] is False
-    play.click(LOW)
+    play.press("Low")
     assert play.applied["graphics"] == "low"
-    play.click(BACK)
-    assert play.menu["screen"] == "menu"
-    play.click(RESUME)
+    play.press("Large")
+    assert play.host.ctx.settings.ui_scale == 1.25
+    assert play.host.ctx.ui.scale == pytest.approx(0.625 * 1.25)
+    play.step()
+    play.press("Back")
+    assert play.screens == ["menu"]
+    play.step()
+    play.press("Resume")
     play.step()
     assert not any("rad/s" in t for t in play.texts()), "the spin meter is off"
     assert play.menu["kicks"] == 0, "none of those clicks reached the game"
@@ -192,6 +261,6 @@ def test_titles_and_hud_numbers_use_the_projects_pixel_font(play):
     assert os.path.isfile(os.path.join(GAME, pixel)), "the font ships with the scene"
     assert fonts()["PAUSED"] == pixel
     assert fonts()["Resume"] is None, "buttons keep the built-in font"
-    play.click(RESUME)
+    play.press("Resume")
     play.step()
     assert fonts()["KICKS 0"] == pixel and fonts()["SPIN"] == pixel

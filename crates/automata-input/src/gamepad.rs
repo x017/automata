@@ -81,7 +81,15 @@ impl Gamepads {
     /// (never observed on Linux/Windows/macOS).
     #[must_use]
     pub fn new() -> Self {
-        let gilrs = Gilrs::new().expect("gilrs init");
+        Self::try_new().expect("gilrs init")
+    }
+
+    /// Like [`new`](Self::new), but `None` instead of a panic when the
+    /// platform's gamepad backend can't start (for tools that mustn't
+    /// crash over a missing gamepad, like the editor).
+    #[must_use]
+    pub fn try_new() -> Option<Self> {
+        let gilrs = Gilrs::new().ok()?;
         let mut this = Self {
             gilrs,
             connected: HashSet::new(),
@@ -91,7 +99,7 @@ impl Gamepads {
         for (id, _) in this.gilrs.gamepads() {
             this.connected.insert(id);
         }
-        this
+        Some(this)
     }
 
     /// Drain gilrs' event queue. Called once per frame by the engine.

@@ -158,6 +158,14 @@ fn is_game_key(code: KeyCode) -> bool {
     )
 }
 
+/// The gamepad backend, opened lazily.
+enum Pads {
+    NotOpened,
+    /// It couldn't start (no backend on this system): don't retry.
+    Unavailable,
+    Open(Box<automata_input::Gamepads>),
+}
+
 /// The running editor: document, UI state, and the window/GPU once resumed.
 struct EditorApp {
     doc: Document,
@@ -177,6 +185,9 @@ struct EditorApp {
     lsp_failed: bool,
     /// Whether the "scripts are slow" warning was shown this session.
     bridge_slow_warned: bool,
+    /// Gamepads for scripts (`"pad_*"` keys), opened when Play first sends
+    /// a frame.
+    gamepads: Pads,
     /// The editor camera to restore when play mode ends.
     edit_camera: Option<ViewCamera>,
     last_frame: Instant,
@@ -242,6 +253,7 @@ impl EditorApp {
             lsp: None,
             lsp_failed: false,
             bridge_slow_warned: false,
+            gamepads: Pads::NotOpened,
             edit_camera: None,
             last_frame: Instant::now(),
             last_title: String::new(),
@@ -1552,6 +1564,15 @@ impl EditorApp {
             .iter()
             .filter_map(|&k| bridge::key_name(k))
             .collect();
+        if matches!(self.gamepads, Pads::NotOpened) {
+            self.gamepads = automata_input::Gamepads::try_new()
+                .map_or(Pads::Unavailable, |p| Pads::Open(Box::new(p)));
+        }
+        if let Pads::Open(pads) = &mut self.gamepads {
+            pads.update();
+            let _ = pads.drain_events();
+            keys.extend(bridge::held_pad_keys(pads));
+        }
         keys.sort_unstable();
         let mut frame = play.frame_input();
         let mut buttons: Vec<&'static str> = self.input.game_buttons.iter().copied().collect();

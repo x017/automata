@@ -147,12 +147,20 @@ font.</li></ul>
 <code>&quot;right&quot;</code>, <code>&quot;up&quot;</code>, <code>&quot;down&quot;</code>), and <code>&quot;shift&quot;</code> / <code>&quot;ctrl&quot;</code> / <code>&quot;alt&quot;</code>. The last
 three match either side of the keyboard; use <code>&quot;shift_left&quot;</code> or
 <code>&quot;shift_right&quot;</code> (and likewise for ctrl and alt) to require one side.</p>
+<p><strong>Gamepad buttons</strong> are key names too, on any connected pad: <code>&quot;pad_south&quot;</code>,
+<code>&quot;pad_east&quot;</code>, <code>&quot;pad_west&quot;</code> and <code>&quot;pad_north&quot;</code> (A, B, X and Y on an Xbox pad),
+<code>&quot;pad_up&quot;</code>, <code>&quot;pad_down&quot;</code>, <code>&quot;pad_left&quot;</code> and <code>&quot;pad_right&quot;</code> (the d-pad, or the
+left stick pushed past halfway), <code>&quot;pad_start&quot;</code>, <code>&quot;pad_select&quot;</code>, the
+shoulders <code>&quot;pad_lb&quot;</code> / <code>&quot;pad_rb&quot;</code>, the triggers <code>&quot;pad_lt&quot;</code> / <code>&quot;pad_rt&quot;</code>,
+and the stick clicks <code>&quot;pad_l3&quot;</code> / <code>&quot;pad_r3&quot;</code>. Bind them like keys
+(<code>ctx.settings.bind(&quot;jump&quot;, &quot;space&quot;, &quot;pad_south&quot;)</code>). They work in Play,
+under <code>run_scene</code> with the engine and in exported games.</p>
 <h2 id="game-ui">Game UI<a class="anchor" href="#game-ui" aria-label="Link to this section">#</a></h2>
 <p><code>ctx.ui</code> draws menus and HUD widgets over the game: buttons, labels,
 toggles, sliders, progress bars, panels and images. Call them in <code>update</code>
 every frame they should show (immediate mode). There are no widget objects
 to create or remove: whatever you call this frame is the UI.</p>
-<p><img src="../../../assets/ui/pause_menu.jpg" alt="A pause menu with Resume, Settings and Reset kicks buttons over a dusk scene of three shapes on pedestals" loading="lazy" decoding="async"></p>
+<p><img src="../../../assets/ui/pause_menu.jpg" alt="A pause menu with Resume, Settings (focused by the keyboard, with a yellow ring) and Reset kicks buttons over a dusk scene of three shapes on pedestals" loading="lazy" decoding="async"></p>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
     ui = ctx.ui
     s = entity.state
@@ -164,15 +172,17 @@ to create or remove: whatever you call this frame is the UI.</p>
     ui.progress(s.get(<span class="tok-s">&quot;health&quot;</span>, <span class="tok-n">80</span>), <span class="tok-n">20</span>, <span class="tok-n">260</span>, <span class="tok-n">260</span>, <span class="tok-b">max</span>=<span class="tok-n">100</span>, text=<span class="tok-b">True</span>)</code></pre></div>
 <div class="table"><table><thead><tr><th>Widget</th><th>What it does</th></tr></thead><tbody><tr><td><code>ui.button(text, x, y, width=160, height=44, *, id=None, enabled=True, size=None)</code></td><td>Returns <code>True</code> on the frame it's clicked: pressed and released on it. Sliding off before letting go cancels</td></tr><tr><td><code>ui.toggle(text, value, x, y, *, id=None, enabled=True, size=None)</code></td><td>A check box with its label. Returns the new value, flipped when the box or the text is clicked</td></tr><tr><td><code>ui.slider(value, x, y, width=200, height=24, *, min=0, max=1, step=None, id=None, enabled=True)</code></td><td>Drag the knob, or press anywhere on the track. Returns the new value, rounded to <code>step</code> if given</td></tr><tr><td><code>ui.progress(value, x, y, width=200, height=18, *, max=1, color=None, text=None)</code></td><td>A bar filled to <code>value / max</code>. <code>text</code> is drawn on it, and <code>True</code> shows the percentage</td></tr><tr><td><code>ui.label(text, x, y, size=None, color=None, align=&quot;left&quot;, shadow=None, font=None)</code></td><td>Text with its top at <code>y</code>. <code>align</code> says where <code>x</code> is, like <code>ctx.hud.text</code>. <code>font</code> defaults to <code>ui.theme.font</code></td></tr><tr><td><code>ui.panel(x, y, width, height, *, color=None, title=None)</code></td><td>A background box. Clicks on it belong to the UI too</td></tr><tr><td><code>ui.image(path, x, y, width, height, color=(1,1,1,1))</code></td><td>An image stretched over the box</td></tr><tr><td><code>ui.mouse_over</code></td><td>The same as <code>ctx.input.mouse_over_ui</code></td></tr><tr><td><code>ui.theme</code></td><td>Colours, the default text size and font (below)</td></tr></tbody></table></div>
 <p>Rules that apply to every widget:</p>
-<ul><li><strong>Position:</strong> <code>x, y</code> is the <strong>top-left</strong> corner in screen pixels, unlike
-<code>ctx.hud</code> shapes, which are placed by their centre. Use <code>ctx.hud.size</code>
-to lay out against the screen edges.</li><li><strong>States:</strong> buttons show hover and pressed states.
+<ul><li><strong>Position:</strong> <code>x, y</code> is the <strong>top-left</strong> corner in UI units (screen
+pixels unless you set a <a href="#scaling-to-any-screen">design size</a>), unlike
+<code>ctx.hud</code> shapes, which are placed by their centre. Inside a
+<a href="#layouts">layout</a> leave <code>x, y</code> out, along with the size if the layout
+gives one.</li><li><strong>States:</strong> buttons show hover and pressed states.
 <code>enabled=False</code> dims a widget and ignores clicks on it.</li><li><strong>Clicks stay with the UI:</strong> a press that starts on a widget or a panel
 is the UI's until it's released. <code>ctx.input.mouse_pressed</code>,
 <code>mouse_just_pressed</code> and actions bound to mouse buttons don't see it, so
 a click on a button never also fires the gun. The UI decides from where
 things were drawn the frame before, so a widget takes clicks from the
-second frame it's shown.</li><li><strong>Identity:</strong> widgets are told apart by their text and the entity whose
+second frame it's shown.</li><li><strong>Keys and gamepads:</strong> see <a href="#keyboard-and-gamepad-focus">focus</a>.</li><li><strong>Identity:</strong> widgets are told apart by their text and the entity whose
 script draws them. Give <code>id=</code> when the text changes (<code>f&quot;Reset ({n})&quot;</code>)
 or two widgets share the same text.</li><li><strong>Touch:</strong> in the exported game, the first finger down on a touch screen
 acts as the left mouse button wherever it touches. Taps press buttons and
@@ -183,13 +193,97 @@ from 0 to 1, as a paint program shows them. Change any of them at any time:</p>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.ui.theme.accent = (<span class="tok-n">1.0</span>, <span class="tok-n">0.75</span>, <span class="tok-n">0.2</span>, <span class="tok-n">1.0</span>)   <span class="tok-c"># fills: sliders, bars, toggles</span>
 ctx.ui.theme.button = (<span class="tok-n">0.1</span>, <span class="tok-n">0.12</span>, <span class="tok-n">0.2</span>, <span class="tok-n">0.95</span>)  <span class="tok-c"># also hover, press, panel, text, text_dim, track, border</span>
 ctx.ui.theme.text_size = <span class="tok-n">24</span>
-ctx.ui.theme.font = <span class="tok-s">&quot;fonts/Pixel.ttf&quot;</span>            <span class="tok-c"># None: the built-in font</span></code></pre></div>
+ctx.ui.theme.font = <span class="tok-s">&quot;fonts/Pixel.ttf&quot;</span>            <span class="tok-c"># None: the built-in font</span>
+ctx.ui.theme.focus = (<span class="tok-n">1.0</span>, <span class="tok-n">0.78</span>, <span class="tok-n">0.3</span>, <span class="tok-n">1.0</span>)     <span class="tok-c"># the keyboard focus ring</span></code></pre></div>
+<h3 id="layouts">Layouts<a class="anchor" href="#layouts" aria-label="Link to this section">#</a></h3>
+<p>Columns, rows and stacks place the widgets drawn inside them, so you don't
+work out coordinates. They're <code>with</code> blocks and they nest:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    ui = ctx.ui
+    <span class="tok-k">with</span> ui.column(width=<span class="tok-n">380</span>, anchor=<span class="tok-s">&quot;center&quot;</span>, padding=<span class="tok-n">40</span>, gap=<span class="tok-n">14</span>, panel=<span class="tok-b">True</span>):
+        ui.label(<span class="tok-s">&quot;PAUSED&quot;</span>, size=<span class="tok-n">28</span>, align=<span class="tok-s">&quot;center&quot;</span>)
+        <span class="tok-k">if</span> ui.button(<span class="tok-s">&quot;Resume&quot;</span>, height=<span class="tok-n">52</span>):
+            ui.screens.clear()
+        <span class="tok-k">with</span> ui.row(columns=<span class="tok-n">3</span>, height=<span class="tok-n">40</span>, gap=<span class="tok-n">8</span>):   <span class="tok-c"># three equal buttons</span>
+            <span class="tok-k">for</span> preset <span class="tok-k">in</span> (<span class="tok-s">&quot;low&quot;</span>, <span class="tok-s">&quot;medium&quot;</span>, <span class="tok-s">&quot;high&quot;</span>):
+                <span class="tok-k">if</span> ui.button(preset.title()):
+                    ctx.settings.graphics = preset</code></pre></div>
+<div class="table"><table><thead><tr><th>Layout</th><th>Places widgets</th></tr></thead><tbody><tr><td><code>ui.column(x=None, y=None, width=None, height=None, *, gap=10, padding=0, anchor=None, margin=0, panel=False, title=None, id=None)</code></td><td>Top to bottom. With a <code>width</code>, each widget fills it</td></tr><tr><td><code>ui.row(..., columns=None, ...)</code></td><td>Left to right. With <code>columns=n</code> and a width (given, or from the layout around it), each widget gets an equal share</td></tr><tr><td><code>ui.stack(...)</code></td><td>On top of each other: an image with a label over it</td></tr></tbody></table></div>
+<ul><li><strong>Where:</strong> give <code>x, y</code>, or an <code>anchor</code> (below) with a <code>margin</code>, or
+neither inside another layout to take its next slot. A layout without a
+size grows to fit what's in it.</li><li><strong>Sizes:</strong> a widget's own <code>width</code> and <code>height</code> still apply. A button
+without one fills the column's width.</li><li><strong><code>panel=True</code></strong> draws a panel behind everything in the layout (or pass
+a colour), and <code>title=</code> adds a title to it. <code>padding</code> is the space
+inside it.</li><li><strong>Mistakes raise errors:</strong> an <code>x</code> without a <code>y</code>, or <code>columns=0</code>.</li></ul>
+<h3 id="scaling-to-any-screen">Scaling to any screen<a class="anchor" href="#scaling-to-any-screen" aria-label="Link to this section">#</a></h3>
+<p><strong>Anchors</strong> put things against the screen's edges and corners:
+<code>&quot;top_left&quot;</code>, <code>&quot;top&quot;</code>, <code>&quot;top_right&quot;</code>, <code>&quot;left&quot;</code>, <code>&quot;center&quot;</code>, <code>&quot;right&quot;</code>,
+<code>&quot;bottom_left&quot;</code>, <code>&quot;bottom&quot;</code> and <code>&quot;bottom_right&quot;</code>. Layouts take
+<code>anchor=</code>, and <code>ui.place(anchor, width, height, margin=0)</code> returns the
+top-left corner of a box anchored that way, for a single widget:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ui.button(<span class="tok-s">&quot;Menu&quot;</span>, *ui.place(<span class="tok-s">&quot;top_right&quot;</span>, <span class="tok-n">120</span>, <span class="tok-n">44</span>, margin=<span class="tok-n">24</span>), <span class="tok-n">120</span>, <span class="tok-n">44</span>)</code></pre></div>
+<p>An anchored layout uses its size from the frame before, then moves into
+place when the <code>with</code> block ends, so it's right on its first frame too.</p>
+<p><strong>Design size.</strong> Set <code>ui.design_size = (1280, 720)</code> once and lay the UI
+out for that screen. It scales to fit whatever window or phone the game
+runs on: <code>ui.scale</code> is the smaller of the width and height ratios. All
+<code>ctx.ui</code> positions and sizes are in these UI units, and so are
+<code>ui.size</code> (the screen, in UI units) and <code>ui.mouse_position</code>. Without a
+design size, one unit is one pixel.</p>
+<p>The player can make the UI bigger or smaller with
+<code>ctx.settings.ui_scale</code> (0.5 to 3, 1 by default), which multiplies the
+scale and is saved with the other <a href="#player-settings">settings</a>. Use it for
+high-DPI screens and phones.</p>
+<p><img src="../../../assets/ui/ui_portrait.jpg" alt="The same pause menu in a tall, phone-shaped window, scaled down to fit its width" loading="lazy" decoding="async"></p>
+<h3 id="screens">Screens<a class="anchor" href="#screens" aria-label="Link to this section">#</a></h3>
+<p><code>ctx.ui.screens</code> keeps track of which menus are open, as a stack: the
+pause menu, a settings screen over it, an inventory.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    ctx.settings.bind(<span class="tok-s">&quot;pause&quot;</span>, <span class="tok-s">&quot;p&quot;</span>, <span class="tok-s">&quot;escape&quot;</span>, <span class="tok-s">&quot;pad_start&quot;</span>)
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    ui = ctx.ui
+    <span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;pause&quot;</span>) <span class="tok-k">and</span> <span class="tok-k">not</span> ui.screens.top:
+        ui.screens.show(<span class="tok-s">&quot;pause&quot;</span>, pause=<span class="tok-b">True</span>)
+    <span class="tok-k">if</span> ui.screen(<span class="tok-s">&quot;pause&quot;</span>):          <span class="tok-c"># True while it&#x27;s shown</span>
+        <span class="tok-k">with</span> ui.column(width=<span class="tok-n">300</span>, anchor=<span class="tok-s">&quot;center&quot;</span>, panel=<span class="tok-b">True</span>):
+            <span class="tok-k">if</span> ui.button(<span class="tok-s">&quot;Resume&quot;</span>):
+                ui.screens.hide(<span class="tok-s">&quot;pause&quot;</span>)
+            <span class="tok-k">if</span> ui.button(<span class="tok-s">&quot;Settings&quot;</span>):
+                ui.screens.show(<span class="tok-s">&quot;settings&quot;</span>)
+    <span class="tok-k">if</span> ui.screen(<span class="tok-s">&quot;settings&quot;</span>):
+        ...</code></pre></div>
+<div class="table"><table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><code>show(name, *, modal=True, pause=False, escape=True)</code></td><td>Opens a screen on top (or moves it there)</td></tr><tr><td><code>hide(name)</code>, <code>toggle(name, **options)</code>, <code>back()</code>, <code>clear()</code></td><td>Close one, flip one, close the top one, close them all</td></tr><tr><td><code>shown(name)</code>, <code>top</code>, <code>names</code>, <code>modal</code></td><td>Is it open, the top one, all of them bottom to top, and the top modal one</td></tr><tr><td><code>paused</code></td><td>A screen shown with <code>pause=True</code> is open</td></tr></tbody></table></div>
+<ul><li><strong>Widgets belong to a screen:</strong> <code>ui.screen(name)</code> returns whether it's
+shown, and the widgets drawn after it belong to it. They draw above the
+screens under it, whatever order the scripts run in. <code>ui.screen(None)</code>
+goes back to the plain HUD.</li><li><strong>Modal</strong> screens (the default) take all the input: widgets under them
+draw but don't react, and clicks on them never reach the game.</li><li><strong>Pausing:</strong> <code>paused</code> is a flag your game scripts check
+(<code>if ctx.ui.screens.paused: return</code>). It doesn't stop physics.</li><li><strong>Escape</strong>, or B (<code>&quot;pad_east&quot;</code>) on a gamepad, closes the top screen, and
+the script doesn't see that press. Show a screen with <code>escape=False</code> to
+keep it open; then the script gets Escape as usual. With no screen open,
+Escape is the game's, so it can open the pause menu.</li></ul>
+<h3 id="keyboard-and-gamepad-focus">Keyboard and gamepad focus<a class="anchor" href="#keyboard-and-gamepad-focus" aria-label="Link to this section">#</a></h3>
+<p>While a modal screen is open, the arrow keys and the gamepad's d-pad (or
+left stick) move a focus ring to the nearest widget in that direction.
+<strong>Enter</strong>, <strong>Space</strong> or <strong>A</strong> (<code>&quot;pad_south&quot;</code>) presses the focused widget,
+and left and right move a focused slider by its <code>step</code> (or a twentieth of
+its range). <strong>Tab</strong> and <strong>Shift+Tab</strong> go through the widgets in order. A
+held direction repeats.</p>
+<ul><li>A screen opened from the keyboard or a gamepad focuses its first widget.
+The mouse still works, and a click hides the ring.</li><li>Outside screens, set <code>ui.keyboard_navigation = True</code> to get focus in the
+HUD too. <code>ui.focused</code> is the focused widget's id, or None.</li><li>Keys the UI uses are hidden from <code>ctx.input</code> until they're released, so
+Enter on a menu button doesn't also make the player jump.</li></ul>
 <p><code>ctx.ui</code> works the same way in Play, under <code>run_scene</code> and in exported games.
-<code>examples/oberon/pause_menu</code> is a complete pause menu: a settings screen
-that changes <code>ctx.settings</code> (volume, graphics preset and a toggle of its
-own), a HUD with a spin meter and a Menu button, and shapes that turn
-faster when you click in the game but not when you click the UI. Its
-titles and HUD numbers use a pixel font from its <code>fonts/</code> folder.</p>
+<code>examples/oberon/pause_menu</code> is a complete pause menu, built from anchored
+columns and rows and laid out for 1280×720. It has a menu screen and a
+settings screen that changes <code>ctx.settings</code> (volume, graphics preset, UI
+size and a toggle of its own). Both work with the mouse, the keyboard or a
+gamepad. There's also a HUD with a spin meter and a Menu button, and
+shapes that turn faster when you click in the game but not when you click
+the UI. Its titles and HUD numbers use a pixel font from its <code>fonts/</code>
+folder.</p>
+<p><img src="../../../assets/ui/pause_settings.jpg" alt="The settings screen: a volume slider, a Spin meter toggle, and graphics preset and UI size buttons, with Small focused" loading="lazy" decoding="async"></p>
 <h2 id="keys">Keys<a class="anchor" href="#keys" aria-label="Link to this section">#</a></h2>
 <p>Scripts can read and write any entity's state with a key, Redis style.
 A key is <code>entity:component:field</code>:</p>
@@ -340,7 +434,7 @@ them. <code>.oberon/</code> is never exported, so your test saves don't ship.</p
 <p><code>ctx.settings</code> holds the player's settings. It's saved in the same folder
 as <code>settings.json</code>, shared by every save slot, and applied as soon as the
 game starts:</p>
-<div class="table"><table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><code>ctx.settings.volume = 0.5</code></td><td>Master volume, 0 to 1 (1 by default)</td></tr><tr><td><code>ctx.settings.graphics = &quot;low&quot;</code></td><td>Graphics preset: <code>&quot;low&quot;</code>, <code>&quot;medium&quot;</code>, <code>&quot;high&quot;</code>, <code>&quot;ultra&quot;</code> or <code>&quot;beautiful&quot;</code>. Until the player picks one, it reads as the preset the game is running at</td></tr><tr><td><code>ctx.settings[&quot;sensitivity&quot;] = 0.4</code></td><td>Any other setting, with the same JSON rules as <code>ctx.save</code></td></tr><tr><td><code>ctx.settings.reset()</code></td><td>Everything back to the game's defaults</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><code>ctx.settings.volume = 0.5</code></td><td>Master volume, 0 to 1 (1 by default)</td></tr><tr><td><code>ctx.settings.graphics = &quot;low&quot;</code></td><td>Graphics preset: <code>&quot;low&quot;</code>, <code>&quot;medium&quot;</code>, <code>&quot;high&quot;</code>, <code>&quot;ultra&quot;</code> or <code>&quot;beautiful&quot;</code>. Until the player picks one, it reads as the preset the game is running at</td></tr><tr><td><code>ctx.settings.ui_scale = 1.25</code></td><td>How big <code>ctx.ui</code> draws, 0.5 to 3 (1 by default). See <a href="#scaling-to-any-screen">scaling</a></td></tr><tr><td><code>ctx.settings[&quot;sensitivity&quot;] = 0.4</code></td><td>Any other setting, with the same JSON rules as <code>ctx.save</code></td></tr><tr><td><code>ctx.settings.reset()</code></td><td>Everything back to the game's defaults</td></tr></tbody></table></div>
 <p>In Oberon's Play mode, the graphics setting overrides the editor's preset
 until you press Stop.</p>
 <p><strong>Key bindings.</strong> Name your controls as <em>actions</em> and give them default
@@ -364,7 +458,7 @@ wins over <code>bind</code> from then on:</p>
     <span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;f1&quot;</span>):
         entity.state[<span class="tok-s">&quot;waiting&quot;</span>] = <span class="tok-b">True</span>
     ctx.hud.text(<span class="tok-s">f&quot;Jump: {&#x27;, &#x27;.join(ctx.settings.keys(&#x27;jump&#x27;))}&quot;</span>, <span class="tok-n">16</span>, <span class="tok-n">16</span>)</code></pre></div>
-<div class="table"><table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><code>bind(action, *keys)</code></td><td>Default keys: <a href="#ctx">key names</a> or <code>&quot;mouse_left&quot;</code>/<code>&quot;mouse_right&quot;</code>/<code>&quot;mouse_middle&quot;</code>. Binding again replaces the defaults</td></tr><tr><td><code>rebind(action, *keys)</code></td><td>The player's keys, saved. With no keys, the action has none</td></tr><tr><td><code>keys(action)</code>, <code>bindings()</code></td><td>One action's keys now, or every action's</td></tr><tr><td><code>reset_keys(action=None)</code></td><td>Back to the defaults (one action or all)</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><code>bind(action, *keys)</code></td><td>Default keys: <a href="#ctx">key names</a>, gamepad buttons (<code>&quot;pad_south&quot;</code>) or <code>&quot;mouse_left&quot;</code>/<code>&quot;mouse_right&quot;</code>/<code>&quot;mouse_middle&quot;</code>. Binding again replaces the defaults</td></tr><tr><td><code>rebind(action, *keys)</code></td><td>The player's keys, saved. With no keys, the action has none</td></tr><tr><td><code>keys(action)</code>, <code>bindings()</code></td><td>One action's keys now, or every action's</td></tr><tr><td><code>reset_keys(action=None)</code></td><td>Back to the defaults (one action or all)</td></tr></tbody></table></div>
 <p>A misspelt key (<code>&quot;spce&quot;</code>) raises an error that suggests the right one. An
 action name that was never bound is treated as a key name, so
 <code>ctx.input.pressed(&quot;space&quot;)</code> keeps working.</p>
@@ -413,7 +507,7 @@ scenes through both runners in CI.</p>
     <footer class="pager"><a class="prev" href="command-line.html"><small>Previous</small>The oberon command</a><a class="next" href="cameras.html"><small>Next</small>Cameras</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/scripting.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#types-and-completion">Types and completion</a></li><li class="l2"><a href="#attach-a-script">Attach a script</a></li><li class="l2"><a href="#the-frame-model">The frame model</a></li><li class="l2"><a href="#entity">entity</a></li><li class="l2"><a href="#ctx">ctx</a></li><li class="l3"><a href="#fonts">Fonts</a></li><li class="l2"><a href="#game-ui">Game UI</a></li><li class="l2"><a href="#keys">Keys</a></li><li class="l2"><a href="#channels">Channels</a></li><li class="l2"><a href="#tweens-and-timers">Tweens and timers</a></li><li class="l2"><a href="#save-games">Save games</a></li><li class="l2"><a href="#player-settings">Player settings</a></li><li class="l2"><a href="#hot-reload">Hot reload</a></li><li class="l2"><a href="#errors">Errors</a></li><li class="l2"><a href="#testing-scripts-headless">Testing scripts headless</a></li><li class="l2"><a href="#which-python">Which Python?</a></li><li class="l2"><a href="#same-scripts-real-engine">Same scripts, real engine</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#types-and-completion">Types and completion</a></li><li class="l2"><a href="#attach-a-script">Attach a script</a></li><li class="l2"><a href="#the-frame-model">The frame model</a></li><li class="l2"><a href="#entity">entity</a></li><li class="l2"><a href="#ctx">ctx</a></li><li class="l3"><a href="#fonts">Fonts</a></li><li class="l2"><a href="#game-ui">Game UI</a></li><li class="l3"><a href="#layouts">Layouts</a></li><li class="l3"><a href="#scaling-to-any-screen">Scaling to any screen</a></li><li class="l3"><a href="#screens">Screens</a></li><li class="l3"><a href="#keyboard-and-gamepad-focus">Keyboard and gamepad focus</a></li><li class="l2"><a href="#keys">Keys</a></li><li class="l2"><a href="#channels">Channels</a></li><li class="l2"><a href="#tweens-and-timers">Tweens and timers</a></li><li class="l2"><a href="#save-games">Save games</a></li><li class="l2"><a href="#player-settings">Player settings</a></li><li class="l2"><a href="#hot-reload">Hot reload</a></li><li class="l2"><a href="#errors">Errors</a></li><li class="l2"><a href="#testing-scripts-headless">Testing scripts headless</a></li><li class="l2"><a href="#which-python">Which Python?</a></li><li class="l2"><a href="#same-scripts-real-engine">Same scripts, real engine</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

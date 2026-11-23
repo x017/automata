@@ -40,6 +40,8 @@ pub enum Ty {
     Hud,
     /// `ctx.ui.theme`.
     UiTheme,
+    /// `ctx.ui.screens`.
+    Screens,
 }
 
 /// What a string argument names.
@@ -141,7 +143,7 @@ const CONTEXT: &[Member] = &[
     prop(
         "settings",
         "Settings",
-        "The player's settings, kept between runs: volume, graphics, bind(action, *keys).",
+        "The player's settings, kept between runs: volume, graphics, ui_scale, bind(action, *keys).",
         None,
     ),
     meth(
@@ -307,36 +309,90 @@ const UI_THEME: &[Member] = &[
     ),
     prop("track", "Color", "Empty slider and progress tracks.", None),
     prop("border", "Color", "Outlines.", None),
+    prop(
+        "focus",
+        "Color",
+        "The ring around the widget keys and gamepads focus.",
+        None,
+    ),
+];
+
+const SCREENS: &[Member] = &[
+    meth(
+        "show",
+        "(name, *, modal=True, pause=False, escape=True) -> None",
+        "Shows a screen on top. Modal screens take the UI's input; Escape closes them.",
+        None,
+    ),
+    meth("hide", "(name) -> None", "Hides a screen.", None),
+    meth(
+        "toggle",
+        "(name, **options) -> bool",
+        "Hides the screen if shown, else shows it. Returns whether it's shown.",
+        None,
+    ),
+    meth(
+        "back",
+        "() -> str | None",
+        "Hides the top screen and returns its name.",
+        None,
+    ),
+    meth("clear", "() -> None", "Hides every screen.", None),
+    meth(
+        "shown",
+        "(name) -> bool",
+        "Whether a screen is shown.",
+        None,
+    ),
+    prop("top", "str | None", "The newest shown screen.", None),
+    prop(
+        "names",
+        "list[str]",
+        "The shown screens, bottom first.",
+        None,
+    ),
+    prop(
+        "paused",
+        "bool",
+        "A screen shown with pause=True is up: game scripts should hold still.",
+        None,
+    ),
+    prop(
+        "modal",
+        "str | None",
+        "The top modal screen: the one taking input.",
+        None,
+    ),
 ];
 
 const UI: &[Member] = &[
     meth(
         "button",
-        "(text, x, y, width=160, height=44, *, id=None, enabled=True, size=None) -> bool",
-        "A button at top-left (x, y): True on the frame it's clicked.",
+        "(text, x=None, y=None, width=160, height=44, *, id=None, enabled=True, size=None) -> bool",
+        "A button at top-left (x, y), or placed by a layout: True on the frame it's clicked.",
         None,
     ),
     meth(
         "toggle",
-        "(text, value, x, y, *, id=None, enabled=True, size=None) -> bool",
+        "(text, value, x=None, y=None, *, id=None, enabled=True, size=None) -> bool",
         "A check box with a label: returns the value, flipped when clicked.",
         None,
     ),
     meth(
         "slider",
-        "(value, x, y, width=200, height=24, *, min=0, max=1, step=None, id=None, enabled=True) -> float",
+        "(value, x=None, y=None, width=200, height=24, *, min=0, max=1, step=None, id=None, enabled=True) -> float",
         "A horizontal slider: returns the value after dragging.",
         None,
     ),
     meth(
         "progress",
-        "(value, x, y, width=200, height=18, *, max=1, color=None, text=None) -> None",
+        "(value, x=None, y=None, width=200, height=18, *, max=1, color=None, text=None) -> None",
         "A bar filled to value / max; text=True shows the percentage.",
         None,
     ),
     meth(
         "label",
-        "(text, x, y, size=None, color=None, align=\"left\", shadow=None, font=None) -> None",
+        "(text, x=None, y=None, size=None, color=None, align=\"left\", shadow=None, font=None) -> None",
         "Text with its top at y. font: a .ttf/.otf path (None: theme.font).",
         None,
     ),
@@ -348,7 +404,7 @@ const UI: &[Member] = &[
     ),
     meth(
         "image",
-        "(path, x, y, width, height, color=(1, 1, 1, 1)) -> None",
+        "(path, x=None, y=None, width=64, height=64, color=(1, 1, 1, 1)) -> None",
         "An image stretched over the box.",
         None,
     ),
@@ -362,6 +418,68 @@ const UI: &[Member] = &[
         "mouse_over",
         "bool",
         "Whether the cursor is over a widget or panel.",
+        None,
+    ),
+    meth(
+        "column",
+        "(x=None, y=None, width=None, height=None, *, gap=10, padding=0, anchor=None, margin=0, panel=False, title=None, id=None)",
+        "with ctx.ui.column(...): widgets inside go one under another, filling its width.",
+        None,
+    ),
+    meth(
+        "row",
+        "(x=None, y=None, width=None, height=None, *, gap=10, padding=0, columns=None, anchor=None, margin=0, panel=False, title=None, id=None)",
+        "with ctx.ui.row(...): widgets inside go side by side; columns=n shares the width.",
+        None,
+    ),
+    meth(
+        "stack",
+        "(x=None, y=None, width=None, height=None, *, padding=0, anchor=None, margin=0, panel=False, id=None)",
+        "with ctx.ui.stack(...): widgets inside go on top of each other.",
+        None,
+    ),
+    meth(
+        "place",
+        "(anchor, width, height, margin=0) -> tuple[float, float]",
+        "Top-left of a box at an anchor: top_left, top, top_right, left, center, right, bottom_left, bottom, bottom_right.",
+        None,
+    ),
+    meth(
+        "screen",
+        "(name) -> bool",
+        "Whether a screen is shown; widgets drawn after it belong to it.",
+        None,
+    ),
+    prop(
+        "screens",
+        "Screens",
+        "Shown screens: show, hide, toggle, back, top, paused.",
+        Some(Ty::Screens),
+    ),
+    prop(
+        "design_size",
+        "tuple[float, float] | None",
+        "The screen size the UI is laid out for, e.g. (1280, 720): scaled to fit any screen.",
+        None,
+    ),
+    prop("scale", "float", "Screen pixels per UI unit.", None),
+    prop("size", "tuple[float, float]", "The screen in UI units.", None),
+    prop(
+        "mouse_position",
+        "tuple[float, float] | None",
+        "The cursor in UI units.",
+        None,
+    ),
+    prop(
+        "focused",
+        "bool",
+        "A widget has keyboard / gamepad focus.",
+        None,
+    ),
+    prop(
+        "keyboard_navigation",
+        "bool",
+        "Arrow keys and gamepads move focus even without a modal screen.",
         None,
     ),
 ];
@@ -638,6 +756,22 @@ pub const KEY_NAMES: &[&str] = &[
     "f9",
     "f10",
     "f11",
+    "pad_south",
+    "pad_east",
+    "pad_west",
+    "pad_north",
+    "pad_up",
+    "pad_down",
+    "pad_left",
+    "pad_right",
+    "pad_start",
+    "pad_select",
+    "pad_lb",
+    "pad_rb",
+    "pad_lt",
+    "pad_rt",
+    "pad_l3",
+    "pad_r3",
     "f12",
 ];
 
@@ -659,6 +793,7 @@ impl Ty {
             Self::Ui => UI,
             Self::Hud => HUD,
             Self::UiTheme => UI_THEME,
+            Self::Screens => SCREENS,
         }
     }
 
@@ -679,6 +814,7 @@ impl Ty {
             Self::Ui => "Ui",
             Self::Hud => "Hud",
             Self::UiTheme => "UiTheme",
+            Self::Screens => "Screens",
         }
     }
 
@@ -699,6 +835,7 @@ impl Ty {
             Self::Ui => "Game UI widgets, drawn by calling them every frame.",
             Self::Hud => "Text, rectangles and images over the game for one frame.",
             Self::UiTheme => "The colours, text size and font ctx.ui draws with.",
+            Self::Screens => "Which game UI screens are shown, newest on top.",
         }
     }
 
@@ -1093,6 +1230,8 @@ mod tests {
             ("ctx.ui.sl", "slider"),
             ("ctx.hud.", "text"),
             ("ctx.ui.theme.", "font"),
+            ("ctx.ui.", "column"),
+            ("ctx.ui.screens.", "show"),
             ("ctx.input.", "mouse_over_ui"),
             ("entity.", "joint"),
         ] {

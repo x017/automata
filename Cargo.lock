@@ -1552,6 +1552,7 @@ dependencies = [
  "automata-audio",
  "automata-core",
  "automata-export",
+ "automata-input",
  "automata-physics",
  "automata-renderer",
  "automata-scene",

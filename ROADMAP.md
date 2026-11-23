@@ -760,12 +760,45 @@ Done:
 - **Demo:** `examples/oberon/pause_menu` draws its titles and HUD numbers
   in Press Start 2P (OFL) from its `fonts/` folder.
 
-### D3. UI layout, focus and screens ⬜ M
+### D3. UI layout, focus and screens ✅ M
 #3 phase 4:
 - Anchors and resolution scaling.
 - Rows, columns and stacks.
 - Gamepad and keyboard focus.
 - Menu, pause and HUD screens.
+
+Done:
+- **Layouts:** `ctx.ui.column`, `row` (with `columns=n` equal shares) and
+  `stack` are `with` blocks that nest. Widgets inside them leave out
+  `x, y`. A layout can draw a panel and a title behind its contents.
+- **Anchors and scaling:**
+  - Layouts take the nine anchors (`"top_left"` … `"bottom_right"`) with a
+    margin, and `ui.place` anchors a single box. Anchored layouts are
+    right on their first frame.
+  - `ui.design_size` scales the UI to fit any window, and the player's
+    saved `ctx.settings.ui_scale` multiplies that.
+- **Screens:**
+  - `ctx.ui.screens` is a stack (`show`, `hide`, `toggle`, `back`,
+    `clear`, `paused`, `modal`). `ui.screen(name)` puts the widgets drawn
+    after it on that screen.
+  - Modal screens draw on top and block the widgets and clicks under
+    them.
+  - Escape or the pad's B closes the top screen.
+- **Focus:**
+  - Inside a modal screen (or with `ui.keyboard_navigation`), the arrow
+    keys, the d-pad or the left stick move a focus ring to the nearest
+    widget.
+  - Enter, Space or A presses the focused widget, left and right move
+    sliders, and Tab cycles. Held directions repeat.
+  - Keys the UI used are hidden from `ctx.input`.
+- **Gamepads as keys:** `"pad_south"` … `"pad_r3"` work with
+  `ctx.input` and `settings.bind` in Play (Oberon now reads gamepads),
+  `run_scene` and exports.
+- **Oberon:** completions for the new `ctx.ui.` members, `ctx.ui.screens.`
+  and the `pad_*` key names.
+- **Demo:** `examples/oberon/pause_menu` is rebuilt with these. It's laid
+  out for 1280×720 and has menu and settings screens with a UI size
+  setting, and it works with the mouse, the keys or a gamepad.
 
 ### D4. UI editor in Oberon ⬜ L
 #3 phase 5: `hud.ui.ron` documents composed on a canvas, with themes;
@@ -869,7 +902,7 @@ per effort. Reorder any time by telling me.
 | 24 | C1 Physics joints | M | ✅ |
 | 25 | D1 UI widgets | M | ✅ |
 | 26 | D2 Custom fonts | S | ✅ |
-| 27 | D3 UI layout, focus, screens | M | ⬜ |
+| 27 | D3 UI layout, focus, screens | M | ✅ |
 | 28 | B4 Animation state machine | L | ⬜ |
 | 29 | B5 Attachments and IK | M | ⬜ |
 | 30 | C4 Navigation | L | ⬜ |

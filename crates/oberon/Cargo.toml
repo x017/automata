@@ -28,6 +28,7 @@ automata-assets = { path = "../automata-assets" }
 automata-audio = { path = "../automata-audio" }
 automata-core = { path = "../automata-core" }
 automata-export = { path = "../automata-export" }
+automata-input = { path = "../automata-input" }
 automata-physics = { path = "../automata-physics" }
 automata-renderer = { path = "../automata-renderer" }
 automata-scene = { path = "../automata-scene" }

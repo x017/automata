@@ -1134,6 +1134,67 @@ pub fn parse_msg(line: &str) -> Option<BridgeMsg> {
     })
 }
 
+/// Gamepad buttons and the script key names they press (`ctx.input`'s
+/// `"pad_*"` keys, the same in `run_scene` and exports).
+const PAD_BUTTONS: &[(automata_input::GamepadButton, &str)] = {
+    use automata_input::GamepadButton as B;
+    &[
+        (B::South, "pad_south"),
+        (B::East, "pad_east"),
+        (B::West, "pad_west"),
+        (B::North, "pad_north"),
+        (B::DPadUp, "pad_up"),
+        (B::DPadDown, "pad_down"),
+        (B::DPadLeft, "pad_left"),
+        (B::DPadRight, "pad_right"),
+        (B::Start, "pad_start"),
+        (B::Select, "pad_select"),
+        (B::LeftTrigger, "pad_lb"),
+        (B::RightTrigger, "pad_rb"),
+        (B::LeftTrigger2, "pad_lt"),
+        (B::RightTrigger2, "pad_rt"),
+        (B::LeftThumb, "pad_l3"),
+        (B::RightThumb, "pad_r3"),
+    ]
+};
+
+/// The `"pad_*"` keys one gamepad holds: its buttons, with the left
+/// stick pushed past halfway counting as the d-pad (`+y` is up).
+pub fn pad_keys(
+    pressed: impl Fn(automata_input::GamepadButton) -> bool,
+    stick: (f32, f32),
+    out: &mut Vec<&'static str>,
+) {
+    for &(button, name) in PAD_BUTTONS {
+        if pressed(button) {
+            out.push(name);
+        }
+    }
+    let (x, y) = stick;
+    for (on, name) in [
+        (x < -0.5, "pad_left"),
+        (x > 0.5, "pad_right"),
+        (y > 0.5, "pad_up"),
+        (y < -0.5, "pad_down"),
+    ] {
+        if on {
+            out.push(name);
+        }
+    }
+}
+
+/// The `"pad_*"` keys held on any connected gamepad, sorted, no repeats.
+#[must_use]
+pub fn held_pad_keys(pads: &automata_input::Gamepads) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    for id in pads.connected_ids() {
+        pad_keys(|b| pads.pressed(id, b), pads.left_stick(id), &mut out);
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
 /// The Python key name (`"a"`, `"space"`, `"arrow_left"` …) of a physical
 /// key — the same names the `automata` runtime uses.
 #[must_use]
@@ -1427,6 +1488,25 @@ mod tests {
             "{json}"
         );
         assert!(!state_json(&EntityState::default()).dump().contains("anim"));
+    }
+
+    #[test]
+    fn gamepad_buttons_and_the_stick_become_pad_keys() {
+        use automata_input::GamepadButton as B;
+        let mut out = Vec::new();
+        pad_keys(|b| matches!(b, B::South | B::Start), (0.0, 0.0), &mut out);
+        assert_eq!(out, ["pad_south", "pad_start"]);
+        out.clear();
+        pad_keys(|b| b == B::DPadUp, (-0.8, 0.9), &mut out);
+        assert_eq!(out, ["pad_up", "pad_left", "pad_up"]);
+        out.clear();
+        pad_keys(|_| false, (0.4, -0.6), &mut out);
+        assert_eq!(out, ["pad_down"]);
+        // Every name is one the script API knows (script_api.PAD_KEYS).
+        let api = include_str!("../../automata-python/python/automata/script_api.py");
+        for &(_, name) in PAD_BUTTONS {
+            assert!(api.contains(&format!("\"{name}\"")), "{name}");
+        }
     }
 
     #[test]

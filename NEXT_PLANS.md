@@ -248,6 +248,15 @@ engine (wgpu sprites).
    - rows, columns and stacks;
    - keyboard / gamepad focus navigation;
    - screens (main menu, pause menu, HUD) that can be shown and hidden.
+
+   ✅ **Done** (ROADMAP D3).
+   - `ctx.ui.column` / `row` / `stack` with nine anchors, `ui.design_size`
+     plus the saved `ctx.settings.ui_scale`, and a `ctx.ui.screens` stack
+     whose modal screens block what's under them.
+   - Arrow-key and gamepad focus, with gamepad buttons as `pad_*` key
+     names everywhere. Oberon's Play now reads gamepads.
+   - `ui.screen(name)` returns a truthy scope object, so phase 5's
+     `ctx.ui.screen("hud").set(...)` can grow from it.
 5. **UI editor in Oberon:** compose screens visually into UI documents
    (e.g. `hud.ui.ron`) on a canvas view with anchors, styles and a theme.
    Scripts bind to them by name:

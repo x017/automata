@@ -867,8 +867,17 @@ class Input:
             return on_button
         return lambda b: b not in ui._captured and on_button(b)
 
+    def _keys(self, on_key):
+        """``on_key`` minus the keys ``ctx.ui`` used to navigate (until
+        released)."""
+        ui = self._ui
+        if ui is None or not ui._taken:
+            return on_key
+        return lambda k: k not in ui._taken and on_key(k)
+
     def _any(self, key, on_key, on_button):
         on_button = self._game(on_button)
+        on_key = self._keys(on_key)
         settings = self._settings
         if settings is not None and isinstance(key, str) and settings.is_action(key):
             for k in settings.keys(key):
@@ -1308,7 +1317,7 @@ class UiTheme:
     """
 
     __slots__ = ("text", "text_dim", "panel", "button", "hover", "press", "accent",
-                 "on_accent", "track", "border", "text_size", "font")
+                 "on_accent", "track", "border", "focus", "text_size", "font")
 
     def __init__(self):
         #: Labels and button text.
@@ -1329,6 +1338,8 @@ class UiTheme:
         self.track: Color = (0.0, 0.0, 0.0, 0.6)
         #: The thin edge around buttons and panels.
         self.border: Color = (1.0, 1.0, 1.0, 0.16)
+        #: The ring around the widget keys and gamepads have focused.
+        self.focus: Color = (1.0, 0.78, 0.3, 1.0)
         #: Text height in pixels when a widget isn't given a ``size``.
         self.text_size: float = 20.0
         #: A ``.ttf`` / ``.otf`` file for every widget's text, relative to
@@ -1338,6 +1349,251 @@ class UiTheme:
 
 def _dim(c, k=0.45):
     return (c[0], c[1], c[2], c[3] * k)
+
+
+#: Where ``anchor=`` puts a box on the screen: (x, y) as fractions.
+ANCHORS = {
+    "top_left": (0.0, 0.0), "top": (0.5, 0.0), "top_right": (1.0, 0.0),
+    "left": (0.0, 0.5), "center": (0.5, 0.5), "right": (1.0, 0.5),
+    "bottom_left": (0.0, 1.0), "bottom": (0.5, 1.0), "bottom_right": (1.0, 1.0),
+}
+
+
+def _anchor(name):
+    key = str(name).strip().lower().replace("-", "_").replace(" ", "_")
+    key = {"centre": "center", "middle": "center", "top_center": "top",
+           "bottom_center": "bottom", "center_left": "left", "center_right": "right"}.get(key, key)
+    if key not in ANCHORS:
+        raise ValueError(f"there's no anchor {name!r}{_did_you_mean(key, ANCHORS)} "
+                         f"(anchors: {', '.join(ANCHORS)})")
+    return ANCHORS[key]
+
+
+def _margins(margin):
+    if isinstance(margin, (tuple, list)):
+        return float(margin[0]), float(margin[1])
+    return float(margin), float(margin)
+
+
+# Keys and gamepad buttons the UI navigates with.
+_NAV = {
+    "up": ("arrow_up", "pad_up"),
+    "down": ("arrow_down", "pad_down"),
+    "left": ("arrow_left", "pad_left"),
+    "right": ("arrow_right", "pad_right"),
+}
+_ACTIVATE = ("enter", "space", "pad_south")
+_CANCEL = ("escape", "pad_east")
+
+
+class Screen:
+    """One shown screen in :attr:`Ui.screens` (read-only)."""
+
+    __slots__ = ("name", "modal", "pause", "escape")
+
+    def __init__(self, name, modal, pause, escape):
+        self.name = name
+        self.modal = modal
+        self.pause = pause
+        self.escape = escape
+
+    def __repr__(self):
+        return f"Screen({self.name!r}, modal={self.modal}, pause={self.pause})"
+
+
+class Screens:
+    """``ctx.ui.screens``: which screens are shown, newest on top.
+
+    A screen is a name: a script draws it when ``ctx.ui.screen(name)``
+    says it's shown. A **modal** screen (the default) takes all the UI's
+    clicks and keys: widgets under it still draw but don't react, and
+    arrow keys / the gamepad move focus between its widgets. Escape (or the
+    gamepad's east button) closes the top screen unless it was shown with
+    ``escape=False``::
+
+        if ctx.input.just_pressed("pause"):
+            ctx.ui.screens.show("pause", pause=True)
+        if ctx.ui.screen("pause"):
+            ...  # draw the pause menu
+    """
+
+    def __init__(self, ui):
+        self._ui = ui
+        self._stack: list[Screen] = []
+
+    def show(self, name: str, *, modal: bool = True, pause: bool = False,
+             escape: bool = True) -> None:
+        """Shows ``name`` on top of the others (moving it up if it's already
+        shown). ``pause=True`` sets :attr:`paused` while it's shown, for
+        game scripts to check. ``escape=False``: Escape doesn't close it."""
+        if not isinstance(name, str) or not name:
+            raise TypeError(f"a screen is a name like 'pause', not {name!r}")
+        self._stack = [s for s in self._stack if s.name != name]
+        self._stack.append(Screen(name, bool(modal), bool(pause), bool(escape)))
+        self._ui._opened(modal)
+
+    def hide(self, name: str) -> None:
+        """Hides ``name`` (nothing happens if it isn't shown)."""
+        self._stack = [s for s in self._stack if s.name != name]
+
+    def toggle(self, name: str, **options: Any) -> bool:
+        """Hides ``name`` if it's shown, otherwise shows it (``options`` as
+        for :meth:`show`). Returns whether it's shown now."""
+        if self.shown(name):
+            self.hide(name)
+            return False
+        self.show(name, **options)
+        return True
+
+    def back(self) -> str | None:
+        """Hides the top screen and returns its name (None if none)."""
+        if not self._stack:
+            return None
+        return self._stack.pop().name
+
+    def clear(self) -> None:
+        """Hides every screen."""
+        self._stack = []
+
+    def shown(self, name: str) -> bool:
+        return any(s.name == name for s in self._stack)
+
+    @property
+    def top(self) -> str | None:
+        """The newest shown screen's name, or None."""
+        return self._stack[-1].name if self._stack else None
+
+    @property
+    def names(self) -> list[str]:
+        """The shown screens, bottom first."""
+        return [s.name for s in self._stack]
+
+    @property
+    def paused(self) -> bool:
+        """A screen shown with ``pause=True`` is up: game scripts should
+        hold still (``if ctx.ui.screens.paused: return``)."""
+        return any(s.pause for s in self._stack)
+
+    @property
+    def modal(self) -> str | None:
+        """The top modal screen's name: the one taking input (or None)."""
+        for s in reversed(self._stack):
+            if s.modal:
+                return s.name
+        return None
+
+    def _layer(self, name):
+        """Draw order of a screen's widgets: 0 below every screen."""
+        for i, s in enumerate(self._stack):
+            if s.name == name:
+                return i + 1
+        return 0
+
+    def __contains__(self, name):
+        return self.shown(name)
+
+    def __repr__(self):
+        return f"Screens({self.names!r})"
+
+
+class _ScreenScope:
+    """What :meth:`Ui.screen` returns: truthy while the screen is shown."""
+
+    __slots__ = ("_ui", "_shown", "_before")
+
+    def __init__(self, ui, shown, before):
+        self._ui = ui
+        self._shown = shown
+        self._before = before
+
+    def __bool__(self):
+        return self._shown
+
+    def __enter__(self):
+        return self._shown
+
+    def __exit__(self, *exc):
+        self._ui._screen_ctx = self._before
+        return False
+
+
+class _Layout:
+    """A column, row or stack being filled (see :meth:`Ui.column`)."""
+
+    def __init__(self, ui, kind, key, x, y, w, h, gap, pad, columns, anchor, margin, panel,
+                 title):
+        self.ui, self.kind, self.key = ui, kind, key
+        self.gap, self.pad, self.columns = gap, pad, columns
+        self.anchor, self.margin, self.panel, self.title = anchor, margin, panel, title
+        self.w, self.h = w, h  # outer size, None: fit the contents
+        self.x, self.y = x, y  # outer top-left
+        self.parent: _Layout | None = None
+        self.top = 0.0  # title space
+        if title:
+            self.top = ui._size(None) + 12.0
+        self.used_w = 0.0
+        self.used_h = 0.0
+        self.count = 0
+        self.items0 = 0
+        self.rects0 = 0
+        self.focus0 = 0
+
+    @property
+    def inner_w(self):
+        return None if self.w is None else max(self.w - 2 * self.pad, 0.0)
+
+    @property
+    def inner_h(self):
+        return None if self.h is None else max(self.h - 2 * self.pad - self.top, 0.0)
+
+    def peek(self, w, h):
+        """Where the next child would go, and the size this layout would
+        give it (None: its own), without taking the slot."""
+        gap = self.gap if self.count else 0.0
+        x0, y0 = self.x + self.pad, self.y + self.pad + self.top
+        if self.kind == "column":
+            return x0, y0 + self.used_h + gap, (w if w is not None else self.inner_w), h
+        if self.kind == "row":
+            if w is None and self.columns and self.inner_w is not None:
+                w = (self.inner_w - self.gap * (self.columns - 1)) / self.columns
+            return x0 + self.used_w + gap, y0, w, (h if h is not None else self.inner_h)
+        return (x0, y0, w if w is not None else self.inner_w,
+                h if h is not None else self.inner_h)
+
+    def next(self, w, h, dw, dh):
+        """The next child's (x, y, width, height)."""
+        gap = self.gap if self.count else 0.0
+        self.count += 1
+        x0, y0 = self.x + self.pad, self.y + self.pad + self.top
+        if self.kind == "column":
+            cw = w if w is not None else (self.inner_w if self.inner_w is not None else dw)
+            ch = h if h is not None else dh
+            x, y = x0, y0 + self.used_h + gap
+            self.used_h += gap + ch
+            self.used_w = max(self.used_w, cw)
+        elif self.kind == "row":
+            if w is not None:
+                cw = w
+            elif self.columns and self.inner_w is not None:
+                cw = (self.inner_w - self.gap * (self.columns - 1)) / self.columns
+            else:
+                cw = dw
+            ch = h if h is not None else (self.inner_h if self.inner_h is not None else dh)
+            x, y = x0 + self.used_w + gap, y0
+            self.used_w += gap + cw
+            self.used_h = max(self.used_h, ch)
+        else:  # stack: everything at the same spot
+            cw = w if w is not None else (self.inner_w if self.inner_w is not None else dw)
+            ch = h if h is not None else (self.inner_h if self.inner_h is not None else dh)
+            x, y = x0, y0
+            self.used_w = max(self.used_w, cw)
+            self.used_h = max(self.used_h, ch)
+        return float(x), float(y), float(cw), float(ch)
+
+    def size(self):
+        w = self.w if self.w is not None else self.used_w + 2 * self.pad
+        h = self.h if self.h is not None else self.used_h + 2 * self.pad + self.top
+        return w, h
 
 
 class Ui:
@@ -1352,13 +1608,21 @@ class Ui:
             entity.state["music"] = ctx.ui.toggle("Music", entity.state["music"], 40, 100)
             entity.state["vol"] = ctx.ui.slider(entity.state["vol"], 40, 140, 180)
 
-    Positions are screen pixels and ``x, y`` is a widget's **top-left**
-    corner (``ctx.hud`` shapes are placed by their centre). A press that
-    starts on a widget or panel belongs to the UI: ``ctx.input`` doesn't
-    see it, so clicking a button doesn't also fire a weapon. The UI
-    decides that from where things were drawn the frame before, so a
-    widget takes clicks from the second frame it's shown. On a touch
-    screen the first finger down is the left button.
+    Or let a layout place them, against any edge of any screen::
+
+        ctx.ui.design_size = (1280, 720)
+        with ctx.ui.column(width=300, anchor="center", panel=True, padding=24):
+            if ctx.ui.button("Play"):
+                start_game()
+            ctx.ui.button("Quit")
+
+    Positions are in UI units: screen pixels, unless :attr:`design_size`
+    is set. ``x, y`` is a widget's **top-left** corner (``ctx.hud`` shapes
+    are placed by their centre). A press that starts on a widget or panel
+    belongs to the UI: ``ctx.input`` doesn't see it, so clicking a button
+    doesn't also fire a weapon. The UI decides that from where things were
+    drawn the frame before, so a widget takes clicks from the second frame
+    it's shown. On a touch screen the first finger down is the left button.
 
     A widget is known from frame to frame by its text (and which entity's
     script draws it). Give ``id=`` when the text changes while it's held,
@@ -1370,9 +1634,19 @@ class Ui:
         self._hud = hud
         self._input = input
         input._ui = self
+        self._settings: Settings | None = None
         #: Colours and text size (see :class:`UiTheme`).
         self.theme = UiTheme()
-        self._rects = []  # this frame's widgets and panels: (x, y, w, h)
+        #: The screen size the UI is laid out for, like ``(1280, 720)``:
+        #: UI units are scaled so that size fits the real screen (the other
+        #: side gets more room). None: UI units are screen pixels.
+        self.design_size: tuple[float, float] | None = None
+        #: Arrow keys and the gamepad move focus between widgets even with
+        #: no modal screen shown (they always do while one is).
+        self.keyboard_navigation = False
+        #: Shown screens (see :class:`Screens`).
+        self.screens = Screens(self)
+        self._rects = []  # this frame's widgets and panels, in pixels: (x, y, w, h)
         self._prev = []  # last frame's: what the mouse is over
         self._active = None  # the widget being pressed or dragged
         self._live = False  # it was drawn this frame
@@ -1383,6 +1657,22 @@ class Ui:
         self._down = False
         self._pressed = False
         self._released = False
+        self._layouts: list[_Layout] = []
+        self._sizes = {}  # anchored layouts' sizes last frame, by id
+        self._screen_ctx = None  # (owner id, screen name) widgets belong to
+        self._layered = []  # (item, layer) for HUD items drawn in screens
+        # Focus: keys and gamepads.
+        self._focus = None
+        self._focusables = []  # this frame's: (id, rect)
+        self._prev_focusables = []
+        self._focus_drawn = False
+        self._autofocus = False
+        self._key_mode = False  # the last input was keys / a gamepad: show the ring
+        self._taken = set()  # keys the UI used, hidden from ctx.input until released
+        self._activate = False
+        self._slide = 0
+        self._repeat = None  # (direction, seconds to the next repeat)
+        self._last_pos = None
 
     # -- frame bookkeeping (the host calls these) --
 
@@ -1405,13 +1695,149 @@ class Ui:
                     self._captured.discard(b)
             elif b in self._captured and not src.button_down(b) and not src.button_released(b):
                 self._captured.discard(b)
+        self._layouts = []
+        self._screen_ctx = None
+        self._keys(src)
+
+    def _keys(self, src):
+        """Keyboard / gamepad navigation, decided before scripts run."""
+        # A used key stays the UI's until it's released; each new press is
+        # decided again below.
+        self._taken = {k for k in self._taken
+                       if not src.key_pressed(k) and (src.key_down(k) or src.key_released(k))}
+        self._activate = False
+        self._slide = 0
+        if self._pressed or (self._pos is not None and self._last_pos is not None
+                             and self._pos != self._last_pos):
+            self._key_mode = False
+            if self._pressed:
+                self._focus = None
+        self._last_pos = self._pos
+
+        def hit(names):
+            return [k for k in names if src.key_pressed(k)]
+
+        # Escape / the gamepad's east button closes the top screen.
+        top = self.screens._stack[-1] if self.screens._stack else None
+        cancel = hit(_CANCEL)
+        if cancel and top is not None and top.escape:
+            self.screens.back()
+            self._taken.update(cancel)
+            self._focus = None
+            self._autofocus = self._key_mode or cancel[0].startswith("pad_")
+            return
+        if not (self.keyboard_navigation or self.screens.modal is not None):
+            self._repeat = None
+            return
+        items = self._prev_focusables
+        # Directions, repeating while held.
+        fired, keys = None, []
+        dt = float(self._host.ctx.time.delta) if self._host.ctx is not None else 0.0
+        for d, names in _NAV.items():
+            pressed = hit(names)
+            if pressed:
+                fired, keys = d, pressed
+                self._repeat = (d, 0.4)
+                break
+        if fired is None and self._repeat is not None:
+            d, left = self._repeat
+            held = [k for k in _NAV[d] if src.key_down(k)]
+            if not held:
+                self._repeat = None
+            else:
+                left -= dt
+                if left <= 0:
+                    fired, keys, left = d, held, 0.08
+                self._repeat = (d, left)
+                self._taken.update(held)
+        tab = src.key_pressed("tab")
+        if tab and items:
+            back = src.key_down("shift_left") or src.key_down("shift_right")
+            self._taken.add("tab")
+            self._key_mode = True
+            ids = [i for i, _ in items]
+            if self._focus in ids:
+                k = ids.index(self._focus) + (-1 if back else 1)
+                self._focus = ids[k % len(ids)]
+            else:
+                self._focus = ids[-1 if back else 0]
+        if fired is not None and items:
+            self._taken.update(keys)
+            woke = not self._key_mode and self._focus is not None
+            self._key_mode = True
+            ids = [i for i, _ in items]
+            if self._focus not in ids:
+                self._focus = ids[-1] if fired == "up" else ids[0]
+            elif woke:
+                pass  # the first key press after the mouse just shows the ring
+            elif self._focus_kind() == "slider" and fired in ("left", "right"):
+                self._slide = -1 if fired == "left" else 1
+            else:
+                self._focus = self._step(fired, items)
+        act = hit(_ACTIVATE)
+        if act and self._focus is not None and self._focus in [i for i, _ in items]:
+            self._activate = True
+            self._key_mode = True
+            self._taken.update(act)
+
+    def _focus_kind(self):
+        return self._focus[1] if self._focus is not None else None
+
+    def _step(self, d, items):
+        """The focusable nearest the focused one in direction ``d``."""
+        rects = dict(items)
+        x, y, w, h = rects[self._focus]
+        cx, cy = x + w / 2, y + h / 2
+        best, best_score = None, None
+        for wid, (ox, oy, ow, oh) in items:
+            if wid == self._focus:
+                continue
+            dx, dy = ox + ow / 2 - cx, oy + oh / 2 - cy
+            main, cross = {"down": (dy, dx), "up": (-dy, dx),
+                           "right": (dx, dy), "left": (-dx, dy)}[d]
+            if main <= 1.0:
+                continue
+            score = main + 2.0 * abs(cross)
+            if best_score is None or score < best_score:
+                best, best_score = wid, score
+        if best is None and d in ("up", "down"):
+            # Wrap around a menu: the far end, nearest in line.
+            def key(item):
+                ox, oy, ow, oh = item[1]
+                return ((oy if d == "down" else -oy), abs(ox + ow / 2 - cx))
+            others = [it for it in items if it[0] != self._focus]
+            if others:
+                best = min(others, key=key)[0]
+        return self._focus if best is None else best
+
+    def _opened(self, modal):
+        """A screen was shown: keys and gamepads focus its first widget."""
+        if modal:
+            self._focus = None
+            self._autofocus = self._key_mode
+
+    def _layer_items(self, items):
+        """Puts HUD items drawn inside screens above the rest, in screen
+        order (the host calls this before sending the frame's HUD)."""
+        if self._layered:
+            layer = {id(item): n for item, n in self._layered}
+            items.sort(key=lambda item: layer.get(id(item), 0))
+            self._layered = []
 
     def _end(self):
         self._prev, self._rects = self._rects, []
+        self._prev_focusables, self._focusables = self._focusables, []
         self._seen.clear()
         if not self._live:
             self._active = None
         self._live = False
+        if not self._focus_drawn:
+            # The focused widget is gone (its screen closed): the next
+            # direction starts over.
+            self._focus = None
+        self._focus_drawn = False
+        self._layouts = []
+        self._layered = []
 
     def _id(self, kind, label, given):
         running = self._host._running
@@ -1421,12 +1847,238 @@ class Ui:
         self._seen[base] = n + 1
         return base + (n,)
 
-    def _press(self, wid, rect, enabled):
-        """Hover / press tracking for one widget: (hovered, held, clicked)."""
+    # -- scale, screens, layers --
+
+    @property
+    def scale(self) -> float:
+        """Screen pixels per UI unit: from :attr:`design_size` and the
+        player's ``ctx.settings.ui_scale``."""
+        s = 1.0
+        if self.design_size is not None:
+            dw, dh = float(self.design_size[0]), float(self.design_size[1])
+            if dw > 0 and dh > 0:
+                w, h = self._hud.size
+                s = min(w / dw, h / dh)
+        if self._settings is not None:
+            s *= self._settings.ui_scale
+        return max(s, 0.05)
+
+    @property
+    def size(self) -> tuple[float, float]:
+        """The screen in UI units: ``design_size`` stretched to the
+        screen's shape (or the screen in pixels)."""
+        s = self.scale
+        w, h = self._hud.size
+        return (w / s, h / s)
+
+    @property
+    def mouse_position(self) -> tuple[float, float] | None:
+        """The cursor in UI units, or None (see ``ctx.input.mouse_position``)."""
+        if self._pos is None:
+            return None
+        s = self.scale
+        return (self._pos[0] / s, self._pos[1] / s)
+
+    def place(self, anchor: str, width: float, height: float,
+              margin: float | tuple[float, float] = 0.0) -> tuple[float, float]:
+        """The top-left of a ``width × height`` box at ``anchor`` on the
+        screen (``"top_left"``, ``"top"``, ``"top_right"``, ``"left"``,
+        ``"center"``, ``"right"``, ``"bottom_left"``, ``"bottom"``,
+        ``"bottom_right"``), ``margin`` units in from the edges::
+
+            if ctx.ui.button("Menu", *ctx.ui.place("top_right", 120, 44, margin=20)):
+                ...
+        """
+        fx, fy = _anchor(anchor)
+        mx, my = _margins(margin)
+        sw, sh = self.size
+        w, h = float(width), float(height)
+        x = mx + (sw - 2 * mx - w) * fx
+        y = my + (sh - 2 * my - h) * fy
+        return (x, y)
+
+    def screen(self, name: str) -> _ScreenScope:
+        """Whether screen ``name`` is shown (see :attr:`screens`). Widgets
+        this script draws after it belong to that screen: they draw above
+        the screens under it, and take input only when no modal screen is
+        above it. Use it as ``if ctx.ui.screen("pause"):`` or as
+        ``with ctx.ui.screen("hud"):``."""
+        before = self._screen_ctx
+        running = self._host._running
+        owner = running[1].id if running else None
+        self._screen_ctx = (owner, name)
+        return _ScreenScope(self, self.screens.shown(name), before)
+
+    def _current_screen(self):
+        ctx = self._screen_ctx
+        if ctx is None:
+            return None
+        running = self._host._running
+        owner = running[1].id if running else None
+        return ctx[1] if ctx[0] == owner else None
+
+    def _blocked(self):
+        """Widgets drawn now are under a modal screen."""
+        modal = self.screens.modal
+        if modal is None:
+            return False
+        name = self._current_screen()
+        return name is None or self.screens._layer(name) < self.screens._layer(modal)
+
+    def _tag(self, start):
+        """Marks HUD items from ``start`` on with the current screen's layer."""
+        name = self._current_screen()
+        if name is None:
+            return
+        layer = self.screens._layer(name)
+        if layer:
+            items = self._hud._items
+            for item in items[start:]:
+                self._layered.append((item, layer))
+
+    # -- layouts --
+
+    def column(self, x: float | None = None, y: float | None = None,
+               width: float | None = None, height: float | None = None, *,
+               gap: float = 10.0, padding: float = 0.0, anchor: str | None = None,
+               margin: float | tuple[float, float] = 0.0, panel: bool | Color = False,
+               title: str | None = None, id: Any = None) -> _LayoutScope:
+        """Places the widgets drawn inside it one under another::
+
+            with ctx.ui.column(width=300, anchor="center", panel=True, padding=24):
+                ctx.ui.label("PAUSED", align="center")
+                resume = ctx.ui.button("Resume")
+
+        Widgets inside take no ``x, y`` and fill its ``width``. It goes at
+        ``x, y``, or at ``anchor`` on the screen, or (inside another layout)
+        where that one puts it. ``panel=True`` (or a colour) draws a backdrop
+        that fits it, with an optional ``title``."""
+        return self._layout("column", x, y, width, height, gap, padding, None, anchor,
+                            margin, panel, title, id)
+
+    def row(self, x: float | None = None, y: float | None = None,
+            width: float | None = None, height: float | None = None, *,
+            gap: float = 10.0, padding: float = 0.0, columns: int | None = None,
+            anchor: str | None = None, margin: float | tuple[float, float] = 0.0,
+            panel: bool | Color = False, title: str | None = None,
+            id: Any = None) -> _LayoutScope:
+        """Places the widgets drawn inside it side by side, left to right.
+        With ``columns=n`` (and a width, given or from the layout around
+        it) each widget gets an equal share."""
+        return self._layout("row", x, y, width, height, gap, padding, columns, anchor,
+                            margin, panel, title, id)
+
+    def stack(self, x: float | None = None, y: float | None = None,
+              width: float | None = None, height: float | None = None, *,
+              padding: float = 0.0, anchor: str | None = None,
+              margin: float | tuple[float, float] = 0.0, panel: bool | Color = False,
+              id: Any = None) -> _LayoutScope:
+        """Places the widgets drawn inside it on top of each other (an
+        image with a label over it)."""
+        return self._layout("stack", x, y, width, height, 0.0, padding, None, anchor,
+                            margin, panel, None, id)
+
+    def _layout(self, kind, x, y, w, h, gap, pad, columns, anchor, margin, panel, title, id):
+        if (x is None) != (y is None):
+            raise TypeError(f"ui.{kind}: give both x and y, or neither")
+        if columns is not None and int(columns) < 1:
+            raise ValueError("columns must be 1 or more")
+        # Unnamed layouts are told apart by screen and anchor too, so one
+        # appearing or going elsewhere doesn't hand its size to another.
+        key = self._id(kind, (self._current_screen(), anchor), id)
+        parent = self._layouts[-1] if self._layouts else None
+        w = None if w is None else float(w)
+        h = None if h is None else float(h)
+        if anchor is not None:
+            known = self._sizes.get(key, (0.0, 0.0))
+            ox, oy = self.place(anchor, w if w is not None else known[0],
+                                h if h is not None else known[1], margin)
+        elif x is not None:
+            ox, oy = float(x), float(y)
+        elif parent is not None:
+            # Inside another layout: its next slot (taken when this closes).
+            ox, oy, w, h = parent.peek(w, h)
+        else:
+            ox, oy = 0.0, 0.0
+        lay = _Layout(self, kind, key, ox, oy, w, h, float(gap), float(pad),
+                      None if columns is None else int(columns), anchor, margin, panel, title)
+        lay.parent = parent
+        lay.items0 = len(self._hud._items)
+        lay.rects0 = len(self._rects)
+        lay.focus0 = len(self._focusables)
+        self._layouts.append(lay)
+        return _LayoutScope(self, lay)
+
+    def _close(self, lay):
+        if self._layouts and self._layouts[-1] is lay:
+            self._layouts.pop()
+        w, h = lay.size()
+        if lay.anchor is not None:
+            self._sizes[lay.key] = (w, h)
+            x, y = self.place(lay.anchor, w, h, lay.margin)
+            dx, dy = x - lay.x, y - lay.y
+            if dx or dy:
+                # The guess (last frame's size) was off: move what was drawn.
+                s = self.scale
+                for item in self._hud._items[lay.items0:]:
+                    item["x"] += dx * s
+                    item["y"] += dy * s
+                rects = self._rects
+                for i in range(lay.rects0, len(rects)):
+                    rx, ry, rw, rh = rects[i]
+                    rects[i] = (rx + dx * s, ry + dy * s, rw, rh)
+                for i in range(lay.focus0, len(self._focusables)):
+                    wid, (rx, ry, rw, rh) = self._focusables[i]
+                    self._focusables[i] = (wid, (rx + dx * s, ry + dy * s, rw, rh))
+                lay.x, lay.y = x, y
+        if lay.panel is not False and lay.panel is not None:
+            items = self._hud._items
+            n = len(items)
+            fill = self.theme.panel if lay.panel is True else lay.panel
+            self._box(lay.x, lay.y, w, h, fill)
+            if lay.title:
+                size = self._size(None)
+                self._text(lay.title, lay.x + 14, lay.y + 10 + size / 2, size,
+                           self.theme.text_dim, "left")
+            backdrop = items[n:]
+            del items[n:]
+            items[lay.items0:lay.items0] = backdrop
+            s = self.scale
+            self._rects.append((lay.x * s, lay.y * s, w * s, h * s))
+        if lay.parent is not None and lay.anchor is None:
+            lay.parent.next(w, h, w, h)
+
+    def _place(self, kind, x, y, w, h, dw, dh):
+        """A widget's (x, y, width, height) in UI units: as given, or from
+        the layout it's drawn in."""
+        if x is None or y is None:
+            if x is not None or y is not None:
+                raise TypeError(f"ui.{kind}: give both x and y, or neither")
+            if not self._layouts:
+                raise TypeError(f"ui.{kind} needs x and y, or to be inside ui.column(), "
+                                "ui.row() or ui.stack()")
+            return self._layouts[-1].next(None if w is None else float(w),
+                                          None if h is None else float(h), dw, dh)
+        return (float(x), float(y), float(dw if w is None else w), float(dh if h is None else h))
+
+    def _press(self, wid, rect, enabled, focusable=True):
+        """Hover / press tracking for one widget (``rect`` in UI units):
+        (hovered, held, clicked, focused)."""
+        s = self.scale
+        rect = (rect[0] * s, rect[1] * s, rect[2] * s, rect[3] * s)
         self._rects.append(rect)
+        blocked = self._blocked()
+        focused = False
+        if focusable and enabled and not blocked:
+            self._focusables.append((wid, rect))
+            if self._autofocus and self._focus is None:
+                self._focus, self._autofocus = wid, False
+            focused = self._focus == wid
+            if focused:
+                self._focus_drawn = True
         pos = self._pos
         free = self._active is None or self._active == wid
-        hot = enabled and free and pos is not None and _inside(pos, rect)
+        hot = enabled and not blocked and free and pos is not None and _inside(pos, rect)
         clicked = False
         if hot and self._pressed:
             self._active = wid
@@ -1435,9 +2087,20 @@ class Ui:
             if not self._down:
                 clicked = hot
                 self._active = None
-        return hot, self._active == wid, clicked
+        if focused and self._activate:
+            clicked = True
+            self._activate = False
+        return hot, self._active == wid, clicked, focused
 
-    # -- drawing helpers --
+    # -- drawing helpers (UI units in, pixels out) --
+
+    def _ring(self, x, y, w, h):
+        """The focus ring around a widget."""
+        t, c = 2.0, self.theme.focus
+        self._rect(x + w / 2, y - t / 2 - 1, w + 2 * t + 2, t, c)
+        self._rect(x + w / 2, y + h + t / 2 + 1, w + 2 * t + 2, t, c)
+        self._rect(x - t / 2 - 1, y + h / 2, t, h + 2, c)
+        self._rect(x + w + t / 2 + 1, y + h / 2, t, h + 2, c)
 
     def _box(self, x, y, w, h, fill, border=True):
         if border:
@@ -1453,7 +2116,10 @@ class Ui:
         return t if height is None else min(t, height * 0.5)
 
     def _rect(self, x, y, w, h, color):
-        self._hud.rect(x, y, w, h, _linear(color))
+        s = self.scale
+        n = len(self._hud._items)
+        self._hud.rect(x * s, y * s, w * s, h * s, _linear(color))
+        self._tag(n)
 
     def _text(self, text, x, y, size, color, align, shadow=None, outline=None, font=None):
         if shadow is not None and shadow is not True and shadow is not False:
@@ -1462,7 +2128,11 @@ class Ui:
             outline = _linear(outline)
         if font is None:
             font = self.theme.font
-        self._hud.text(text, x, y, size, _linear(color), align, shadow, outline, font)
+        s = self.scale
+        n = len(self._hud._items)
+        self._hud.text(text, x * s, y * s, size * s, _linear(color), align, shadow, outline,
+                       font)
+        self._tag(n)
 
     # -- widgets --
 
@@ -1472,11 +2142,16 @@ class Ui:
         a slider is being dragged. Same as ``ctx.input.mouse_over_ui``."""
         return self._over
 
+    @property
+    def focused(self) -> bool:
+        """A widget has keyboard / gamepad focus."""
+        return self._focus is not None
+
     def label(
         self,
         text: str,
-        x: float,
-        y: float,
+        x: float | None = None,
+        y: float | None = None,
         size: float | None = None,
         color: Color | None = None,
         align: str = "left",
@@ -1484,41 +2159,52 @@ class Ui:
         font: str | None = None,
     ) -> None:
         """Text whose first line's top is at ``y``. ``align`` says where
-        ``x`` is: ``"left"``, ``"center"`` or ``"right"``. ``font`` is a
-        ``.ttf`` / ``.otf`` file (None: ``theme.font``). Labels don't take
-        clicks."""
+        ``x`` is: ``"left"``, ``"center"`` or ``"right"`` (in a layout:
+        where in its slot). ``font`` is a ``.ttf`` / ``.otf`` file (None:
+        ``theme.font``). Labels don't take clicks."""
         size = self._size(size)
-        lines = str(text).count("\n") + 1
-        self._text(text, x, y + size * lines / 2.0, size,
+        text = str(text)
+        lines = text.split("\n")
+        if x is None or y is None:
+            # The text can't be measured on every runner; estimate its width.
+            est = max(len(line) for line in lines) * size * 0.55
+            x0, y, w, _ = self._place("label", x, y, None, None, est, size * len(lines))
+            a = str(align).lower()
+            x = x0 + (w / 2 if a in ("center", "centre") else w if a == "right" else 0.0)
+        self._text(text, float(x), float(y) + size * len(lines) / 2.0, size,
                    self.theme.text if color is None else color, align, shadow, font=font)
 
     def button(
         self,
         text: str,
-        x: float,
-        y: float,
-        width: float = 160.0,
-        height: float = 44.0,
+        x: float | None = None,
+        y: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
         *,
         id: Any = None,
         enabled: bool = True,
         size: float | None = None,
     ) -> bool:
-        """A button; True on the frame it's clicked (pressed and released
-        on it). Disabled buttons are dimmed and never click."""
-        x, y, w, h = float(x), float(y), float(width), float(height)
-        hot, held, clicked = self._press(self._id("button", text, id), (x, y, w, h),
-                                         bool(enabled))
+        """A button (160 × 44 unless told otherwise, or as wide as its
+        layout); True on the frame it's clicked (pressed and released on
+        it) or activated with Enter / Space / the gamepad's south button
+        while focused. Disabled buttons are dimmed and never click."""
+        x, y, w, h = self._place("button", x, y, width, height, 160.0, 44.0)
+        hot, held, clicked, focused = self._press(self._id("button", text, id), (x, y, w, h),
+                                                  bool(enabled))
         t = self.theme
         if not enabled:
             fill = _dim(t.button, 0.6)
         elif held and hot:
             fill = t.press
-        elif hot or held:
+        elif hot or held or (focused and self._key_mode):
             fill = t.hover
         else:
             fill = t.button
         self._box(x, y, w, h, fill)
+        if focused and self._key_mode:
+            self._ring(x, y, w, h)
         size = self._size(size, h)
         nudge = 1.0 if held and hot else 0.0
         self._text(text, x + w / 2, y + h / 2 + nudge, size,
@@ -1529,24 +2215,27 @@ class Ui:
         self,
         text: str,
         value: bool,
-        x: float,
-        y: float,
+        x: float | None = None,
+        y: float | None = None,
         *,
         id: Any = None,
         enabled: bool = True,
         size: float | None = None,
     ) -> bool:
         """A checkbox with ``text`` beside it. Returns the value after this
-        frame: flipped when it's clicked (on the box or the text)."""
+        frame: flipped when it's clicked (on the box or the text) or
+        activated while focused."""
         size = self._size(size)
         box = size * 1.2
-        x, y = float(x), float(y)
         # The text can't be measured on every runner; estimate its width.
-        w = box + size * 0.5 + len(str(text)) * size * 0.55
-        hot, held, clicked = self._press(self._id("toggle", text, id), (x, y, w, box),
-                                         bool(enabled))
+        est = box + size * 0.5 + len(str(text)) * size * 0.55
+        x, y, w, h = self._place("toggle", x, y, None, None, est, box)
+        hot, held, clicked, focused = self._press(self._id("toggle", text, id), (x, y, w, box),
+                                                  bool(enabled))
         value = bool(value) != clicked
         t = self.theme
+        if focused and self._key_mode:
+            self._ring(x, y, w, box)
         edge = t.hover if hot else t.border
         self._rect(x + box / 2, y + box / 2, box, box, edge if enabled else _dim(edge))
         self._rect(x + box / 2, y + box / 2, box - 2, box - 2, t.track)
@@ -1561,10 +2250,10 @@ class Ui:
     def slider(
         self,
         value: float,
-        x: float,
-        y: float,
-        width: float = 200.0,
-        height: float = 24.0,
+        x: float | None = None,
+        y: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
         *,
         min: float = 0.0,
         max: float = 1.0,
@@ -1572,25 +2261,34 @@ class Ui:
         id: Any = None,
         enabled: bool = True,
     ) -> float:
-        """A horizontal slider from ``min`` to ``max``: press or drag on it
-        to set the value. Returns the value after this frame, clamped (and
-        rounded to ``step`` if given). Label it with :meth:`label`."""
+        """A horizontal slider from ``min`` to ``max`` (200 × 24 unless
+        told otherwise): press or drag on it, or focus it and press left /
+        right, to set the value. Returns the value after this frame,
+        clamped (and rounded to ``step`` if given). Label it with
+        :meth:`label`."""
         lo, hi = float(min), float(max)
         if not hi > lo:
             raise ValueError("slider max must be more than min")
-        x, y, w, h = float(x), float(y), float(width), float(height)
+        x, y, w, h = self._place("slider", x, y, width, height, 200.0, 24.0)
         knob = h * 0.6
-        hot, held, _ = self._press(self._id("slider", None, id), (x, y, w, h), bool(enabled))
+        hot, held, _, focused = self._press(self._id("slider", None, id), (x, y, w, h),
+                                            bool(enabled))
         v = float(value)
-        if held and self._pos is not None:
+        mouse = self.mouse_position
+        if held and mouse is not None:
             span = w - knob
-            k = 0.0 if span <= 0 else (self._pos[0] - x - knob / 2) / span
+            k = 0.0 if span <= 0 else (mouse[0] - x - knob / 2) / span
             v = lo + (hi - lo) * k
+        if focused and self._slide:
+            v += self._slide * (float(step) if step else (hi - lo) / 20.0)
+            self._slide = 0
         if step:
             v = lo + round((v - lo) / float(step)) * float(step)
         v = lo if v < lo else hi if v > hi else v
         t = self.theme
         k = (v - lo) / (hi - lo)
+        if focused and self._key_mode:
+            self._ring(x, y, w, h)
         track_h = h / 4
         cy = y + h / 2
         self._rect(x + w / 2, cy, w, track_h, t.track)
@@ -1605,19 +2303,19 @@ class Ui:
     def progress(
         self,
         value: float,
-        x: float,
-        y: float,
-        width: float = 200.0,
-        height: float = 18.0,
+        x: float | None = None,
+        y: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
         *,
         max: float = 1.0,
         color: Color | None = None,
         text: Any = None,
     ) -> None:
         """A bar filled ``value / max`` of the way (a health bar, a loading
-        bar). ``text`` is drawn on it; True shows the percentage. Progress
-        bars don't take clicks."""
-        x, y, w, h = float(x), float(y), float(width), float(height)
+        bar), 200 × 18 unless told otherwise. ``text`` is drawn on it;
+        True shows the percentage. Progress bars don't take clicks."""
+        x, y, w, h = self._place("progress", x, y, width, height, 200.0, 18.0)
         top = float(max)
         k = 0.0 if top <= 0 else float(value) / top
         k = 0.0 if k < 0 else 1.0 if k > 1 else k
@@ -1644,9 +2342,11 @@ class Ui:
         title: str | None = None,
     ) -> None:
         """A backdrop for a group of widgets (draw it first). Clicks on it
-        belong to the UI, like clicks on its widgets."""
+        belong to the UI, like clicks on its widgets. Layouts draw their
+        own with ``panel=True``."""
         x, y, w, h = float(x), float(y), float(width), float(height)
-        self._rects.append((x, y, w, h))
+        s = self.scale
+        self._rects.append((x * s, y * s, w * s, h * s))
         t = self.theme
         self._box(x, y, w, h, t.panel if color is None else color)
         if title:
@@ -1656,16 +2356,43 @@ class Ui:
     def image(
         self,
         path: str,
-        x: float,
-        y: float,
-        width: float,
-        height: float,
+        x: float | None = None,
+        y: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
         color: Color = (1.0, 1.0, 1.0, 1.0),
     ) -> None:
-        """An image (project-relative path) stretched over the rectangle.
-        Images don't take clicks; put a :meth:`button` behind one for that."""
-        w, h = float(width), float(height)
-        self._hud.image(path, float(x) + w / 2, float(y) + h / 2, (w, h), _linear(color))
+        """An image (project-relative path) stretched over the rectangle
+        (64 × 64 unless told otherwise, or as wide as its layout). Images
+        don't take clicks; put a :meth:`button` behind one for that."""
+        x, y, w, h = self._place("image", x, y, width, height, 64.0, 64.0)
+        s = self.scale
+        n = len(self._hud._items)
+        self._hud.image(path, (x + w / 2) * s, (y + h / 2) * s, (w * s, h * s), _linear(color))
+        self._tag(n)
+
+
+class _LayoutScope:
+    """What :meth:`Ui.column`, :meth:`Ui.row` and :meth:`Ui.stack` return:
+    use it with ``with``."""
+
+    __slots__ = ("_ui", "_layout")
+
+    def __init__(self, ui, layout):
+        self._ui = ui
+        self._layout = layout
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._ui._close(self._layout)
+        return False
+
+    @property
+    def width(self) -> float | None:
+        """The layout's inside width (None: fits its contents)."""
+        return self._layout.inner_w
 
 
 def _linear(c):
@@ -2566,9 +3293,7 @@ class Tween(_Scheduled):
 # Save games and player settings: ctx.save / ctx.settings
 # --------------------------------------------------------------------------
 
-#: The key names both runners know, in the order
-#: ``ctx.input.any_just_pressed()`` checks them.
-KEY_NAMES = (
+_KEYBOARD = (
     tuple("abcdefghijklmnopqrstuvwxyz")
     + tuple("0123456789")
     + ("space", "enter", "escape", "tab", "backspace",
@@ -2576,6 +3301,15 @@ KEY_NAMES = (
        "shift_left", "shift_right", "ctrl_left", "ctrl_right", "alt_left", "alt_right")
     + tuple(f"f{i}" for i in range(1, 13))
 )
+#: Gamepad buttons as key names, on any connected pad. ``"pad_up"`` …
+#: ``"pad_right"`` are the d-pad or the left stick pushed past halfway;
+#: south / east / west / north are A / B / X / Y on an Xbox pad.
+PAD_KEYS = ("pad_south", "pad_east", "pad_west", "pad_north", "pad_up", "pad_down",
+            "pad_left", "pad_right", "pad_start", "pad_select", "pad_lb", "pad_rb",
+            "pad_lt", "pad_rt", "pad_l3", "pad_r3")
+#: The key names both runners know, in the order
+#: ``ctx.input.any_just_pressed()`` checks them.
+KEY_NAMES = _KEYBOARD + PAD_KEYS
 #: Mouse buttons as bindings: ``"mouse_left"``, ``"mouse_right"``,
 #: ``"mouse_middle"``.
 MOUSE_BINDINGS = {"mouse_left": "left", "mouse_right": "right", "mouse_middle": "middle"}
@@ -2921,6 +3655,7 @@ class Settings:
         self._current_graphics = current_graphics
         self._loaded = False
         self._volume = None
+        self._ui_scale = None
         self._graphics = None
         self._rebound = {}
         self._values = {}
@@ -2939,6 +3674,9 @@ class Settings:
             if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
                 self._volume = min(max(float(v), 0.0), 1.0)
                 self._apply["volume"] = self._volume
+            u = raw.get("ui_scale")
+            if isinstance(u, (int, float)) and not isinstance(u, bool) and math.isfinite(u):
+                self._ui_scale = min(max(float(u), 0.5), 3.0)
             g = raw.get("graphics")
             if g in GRAPHICS_PRESETS:
                 self._graphics = g
@@ -2959,6 +3697,8 @@ class Settings:
                 "keys": {a: list(ks) for a, ks in self._rebound.items()}}
         if self._volume is not None:
             data["volume"] = self._volume
+        if self._ui_scale is not None:
+            data["ui_scale"] = self._ui_scale
         if self._graphics is not None:
             data["graphics"] = self._graphics
         self._store.write("settings.json", data)
@@ -2985,6 +3725,24 @@ class Settings:
             return  # unchanged: safe to assign every frame (``ctx.ui.slider``)
         self._volume = v
         self._apply["volume"] = v
+        self._dirty = True
+
+    @property
+    def ui_scale(self) -> float:
+        """How big ``ctx.ui`` draws, 0.5 to 3 (1, the default, is the size
+        the game was made at): for players on phones or big screens."""
+        v = self._load()._ui_scale
+        return 1.0 if v is None else v
+
+    @ui_scale.setter
+    def ui_scale(self, v: float) -> None:
+        v = float(v)
+        if not math.isfinite(v):
+            raise ValueError(f"ui_scale is 0.5 to 3, not {v!r}")
+        v = min(max(v, 0.5), 3.0)
+        if self._load()._ui_scale == v:
+            return
+        self._ui_scale = v
         self._dirty = True
 
     @property
@@ -3025,8 +3783,8 @@ class Settings:
             if name not in KEY_NAMES and name not in KEY_ALIASES and name not in MOUSE_BINDINGS:
                 options = (*KEY_NAMES, *KEY_ALIASES, *MOUSE_BINDINGS)
                 raise ValueError(f"{action!r}: there's no key {k!r}{_did_you_mean(name, options)} "
-                                 "(keys are like 'space', 'w', 'arrow_up', 'shift' or "
-                                 "'mouse_left')")
+                                 "(keys are like 'space', 'w', 'arrow_up', 'shift', "
+                                 "'mouse_left' or 'pad_south')")
             out.append(name)
         return out
 
@@ -3109,6 +3867,7 @@ class Settings:
         if self._graphics is not None and self._initial_graphics in GRAPHICS_PRESETS:
             self._apply["graphics"] = self._initial_graphics
         self._volume, self._graphics, self._rebound, self._values = None, None, {}, {}
+        self._ui_scale = None
         self._dirty = True
 
     @property
@@ -3117,7 +3876,8 @@ class Settings:
         return self._store.path("settings.json")
 
     def __repr__(self):
-        return (f"Settings(volume={self.volume:g}, graphics={self.graphics!r}, "
+        return (f"Settings(volume={self.volume:g}, ui_scale={self.ui_scale:g}, "
+                f"graphics={self.graphics!r}, "
                 f"keys={self.bindings()!r}, values={self._values!r})")
 
 
@@ -3143,6 +3903,7 @@ class Context:
         #: The player's settings (see :class:`Settings`).
         self.settings = Settings(store, host.backend.graphics)
         self.input._settings = self.settings
+        self.ui._settings = self.settings
 
     @property
     def camera(self) -> Camera | None:
@@ -3779,6 +4540,7 @@ class ScriptHost:
         if gone and self._subs:
             self._drop_orphans()
         self._persist()
+        self.ctx.ui._layer_items(self.ctx.hud._items)
         out = FrameOutput(writes, self.ctx.audio._queue, self.ctx.hud._items,
                           self.ctx.input._lock_request, self.ctx.settings._take_apply())
         self.ctx.audio._queue = []

@@ -67,6 +67,41 @@ def _unwrapping(attr: Any) -> Any:
     return call
 
 
+#: The engine's gamepad button names as the shared API's ``pad_*`` keys.
+_PAD_BUTTONS = {
+    "south": "pad_south", "east": "pad_east", "west": "pad_west", "north": "pad_north",
+    "dpad_up": "pad_up", "dpad_down": "pad_down", "dpad_left": "pad_left",
+    "dpad_right": "pad_right", "start": "pad_start", "select": "pad_select",
+    "left_trigger": "pad_lb", "right_trigger": "pad_rb", "left_trigger2": "pad_lt",
+    "right_trigger2": "pad_rt", "left_thumb": "pad_l3", "right_thumb": "pad_r3",
+}
+
+
+def _pad_keys(gamepads: Any) -> frozenset[str]:
+    """The ``pad_*`` keys held on any connected gamepad (the left stick
+    past halfway counts as the d-pad)."""
+    if gamepads is None:
+        return frozenset()
+    held = set()
+    for pid in gamepads.ids():
+        pad = gamepads.get(pid)
+        if pad is None:
+            continue
+        for button, key in _PAD_BUTTONS.items():
+            if pad.pressed(button):
+                held.add(key)
+        x, y = pad.left_stick()
+        if x < -0.5:
+            held.add("pad_left")
+        elif x > 0.5:
+            held.add("pad_right")
+        if y > 0.5:
+            held.add("pad_up")
+        elif y < -0.5:
+            held.add("pad_down")
+    return frozenset(held)
+
+
 class _EngineKeys:
     """The engine's input, as the shared API's key source."""
 
@@ -77,14 +112,24 @@ class _EngineKeys:
     def begin(self, ctx: Any) -> None:
         self.raw = ctx.input
         self._screen = ctx.screen
+        self._pad_prev, self._pads = self._pads, _pad_keys(getattr(ctx.input, "gamepads", None))
+
+    _pads: frozenset[str] = frozenset()
+    _pad_prev: frozenset[str] = frozenset()
 
     def key_down(self, k: str) -> bool:
+        if k.startswith("pad_"):
+            return k in self._pads
         return bool(self.raw.pressed(k))
 
     def key_pressed(self, k: str) -> bool:
+        if k.startswith("pad_"):
+            return k in self._pads and k not in self._pad_prev
         return bool(self.raw.just_pressed(k))
 
     def key_released(self, k: str) -> bool:
+        if k.startswith("pad_"):
+            return k in self._pad_prev and k not in self._pads
         return bool(self.raw.just_released(k))
 
     def button_down(self, b: str) -> bool:
