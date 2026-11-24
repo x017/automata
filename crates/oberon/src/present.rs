@@ -679,6 +679,13 @@ impl EditorApp {
                     }
                 }
             }
+            Intent::SetMaterial { id, path } => self.set_material(id, path.as_deref()),
+            Intent::NewMaterial(path) => {
+                if let Some(path) = self.ensure_material(path) {
+                    self.ui.files_changed(Some(&path));
+                    self.open_script(&path, None);
+                }
+            }
             Intent::AddSound { path, at } => self.add_sound(&path, at),
             Intent::SetAudioClip { id, path } => {
                 if let Some(rel) = self.import_sound(&path) {
@@ -858,8 +865,10 @@ impl EditorApp {
     }
 
     /// Keeps model paths resolving against the scene's folder, and reloads
-    /// models whose files changed on disk (checked twice a second).
+    /// models, materials and textures whose files changed on disk (checked
+    /// twice a second).
     fn watch_models(&mut self) {
+        self.sync_material_previews();
         let root = self.doc.base_dir();
         if automata_assets::root().as_deref() != Some(root.as_path()) {
             automata_assets::set_root(Some(&root));
@@ -870,7 +879,7 @@ impl EditorApp {
             if automata_assets::refresh() {
                 self.viewport.invalidate();
                 self.ui
-                    .log(LogLevel::Info, "Model files changed on disk; reloaded");
+                    .log(LogLevel::Info, "Asset files changed on disk; reloaded");
             }
         }
     }
@@ -1147,6 +1156,122 @@ impl EditorApp {
                 );
                 false
             }
+        }
+    }
+
+    /// Puts a material file on an entity's Mesh Renderer (`None` clears
+    /// it), stored relative to the scene folder.
+    fn set_material(&mut self, id: u64, path: Option<&std::path::Path>) {
+        let who = self
+            .doc
+            .index_of(id)
+            .map(|i| self.doc.entities[i].name().to_string())
+            .unwrap_or_default();
+        let Some(path) = path else {
+            if self.doc.set_material(id, "") {
+                self.ui
+                    .log(LogLevel::Info, format!("{who} uses its own colour again"));
+            }
+            return;
+        };
+        if !automata_assets::is_material_path(path) {
+            self.ui.log(
+                LogLevel::Warn,
+                format!("{} isn't a material (.mat.ron)", path.display()),
+            );
+            return;
+        }
+        let has_mesh = self
+            .doc
+            .index_of(id)
+            .is_some_and(|i| self.doc.entities[i].data.mesh_visual.is_some());
+        if !has_mesh {
+            self.ui.log(
+                LogLevel::Warn,
+                format!("{who} has no Mesh Renderer to put a material on"),
+            );
+            return;
+        }
+        let rel = self.doc.relative(path);
+        if std::path::Path::new(&rel).is_absolute() {
+            self.ui.log(
+                LogLevel::Warn,
+                format!(
+                    "{} is outside the scene's folder and won't ship with the game: \
+                     move it into the project",
+                    path.display()
+                ),
+            );
+        }
+        if let Err(e) = automata_assets::load_material(&rel) {
+            self.ui.log(LogLevel::Warn, format!("{e}"));
+        }
+        if self.doc.set_material(id, &rel) {
+            self.ui.log(LogLevel::Info, format!("{who} now uses {rel}"));
+        }
+    }
+
+    /// Creates a material file unless it exists (any name gets the
+    /// `.mat.ron` ending). Returns its path.
+    fn ensure_material(&mut self, path: std::path::PathBuf) -> Option<std::path::PathBuf> {
+        let path = if automata_assets::is_material_path(&path) {
+            path
+        } else {
+            let name = path
+                .file_name()
+                .map_or_else(|| "material".into(), |s| s.to_string_lossy().into_owned());
+            let mut stem = name.as_str();
+            for suffix in [".ron", ".mat"] {
+                if stem.to_ascii_lowercase().ends_with(suffix) {
+                    stem = &stem[..stem.len() - suffix.len()];
+                }
+            }
+            path.with_file_name(format!("{stem}.mat.ron"))
+        };
+        if path.exists() {
+            return Some(path);
+        }
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        match automata_assets::MaterialFile::default().save(&path) {
+            Ok(()) => {
+                self.ui.log(
+                    LogLevel::Info,
+                    format!(
+                        "Created {} · drag it onto an object to use it",
+                        path.display()
+                    ),
+                );
+                Some(path)
+            }
+            Err(e) => {
+                self.ui.log(
+                    LogLevel::Error,
+                    format!("Create {} failed: {e}", path.display()),
+                );
+                None
+            }
+        }
+    }
+
+    /// Shows open material tabs' unsaved edits on every object using them
+    /// (and stops once they're saved or closed).
+    fn sync_material_previews(&mut self) {
+        let canonical =
+            |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        let wanted = self.ui.material_tab_previews();
+        let mut changed = false;
+        for (path, file) in &wanted {
+            changed |= automata_assets::set_material_preview(path, file.as_ref());
+        }
+        for shown in automata_assets::material::material_previews() {
+            if !wanted.iter().any(|(p, _)| canonical(p) == shown) {
+                changed |= automata_assets::set_material_preview(&shown, None);
+            }
+        }
+        if changed {
+            self.viewport.invalidate();
         }
     }
 
@@ -2176,6 +2301,11 @@ impl EditorApp {
             let vh = (view.h * s).round().max(1.0) as u32;
 
             let cam = ui.camera;
+            // The material editor's preview (its own little world).
+            if let Some((path, shape, pw, ph)) = ui.material_preview_request(s) {
+                let img = viewport.render_material(renderer.as_mut(), &path, shape, pw, ph);
+                ui.set_material_preview_image(img);
+            }
             match play {
                 // A script tab covers the scene view: skip the 3D render.
                 Some(session) if !ui.scene_visible() => {

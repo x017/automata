@@ -111,6 +111,10 @@ class MeshRenderer:
     draw_distance: float
     """Beyond this camera distance (metres) it isn't drawn, shadow included;
     it dithers out over the last tenth. 0 = any distance."""
+    material: str | None
+    """The material file (``"materials/brick.mat.ron"``) it draws with
+    instead of its color and surface, or None. Every constructor takes
+    ``material=``; entities naming the same file share it."""
     @classmethod
     def model(
         cls,
@@ -124,13 +128,15 @@ class MeshRenderer:
         glow_light: float = 1.0,
         glow_shadows: bool = True,
         draw_distance: float = 0.0,
+        material: str | None = None,
     ) -> MeshRenderer:
         """A glTF 2.0 (.glb / .gltf) or .obj model, tinted by `color`.
 
         Relative paths resolve against the asset root (the scene's folder,
         else the running script's folder). Unset `roughness` / `metallic`
-        keep the file's materials; `emissive` adds to its glow. Raises
-        FileNotFoundError or ValueError.
+        keep the file's materials; `emissive` adds to its glow.
+        `material` replaces every part's material with a .mat.ron file.
+        Raises FileNotFoundError or ValueError.
         """
         ...
     @classmethod
@@ -146,6 +152,7 @@ class MeshRenderer:
         glow_light: float = 1.0,
         glow_shadows: bool = True,
         draw_distance: float = 0.0,
+        material: str | None = None,
     ) -> MeshRenderer:
         """A cube `size` units a side. `roughness`/`metallic` 0..1; `emissive`
         with `emissive_strength` above 1 glows (and blooms on BEAUTIFUL), and
@@ -166,6 +173,7 @@ class MeshRenderer:
         glow_light: float = 1.0,
         glow_shadows: bool = True,
         draw_distance: float = 0.0,
+        material: str | None = None,
     ) -> MeshRenderer:
         """A smooth sphere `size` units across."""
         ...
@@ -182,6 +190,7 @@ class MeshRenderer:
         glow_light: float = 1.0,
         glow_shadows: bool = True,
         draw_distance: float = 0.0,
+        material: str | None = None,
     ) -> MeshRenderer: ...
 
 class DirectionalLight:

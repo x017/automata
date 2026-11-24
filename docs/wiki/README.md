@@ -61,6 +61,7 @@ hours.
 | Paint grass, flowers and rocks onto the ground | [Grass & foliage](oberon/foliage.md) |
 | Use the built-in code editor and language servers | [The code editor](oberon/code-editor.md) |
 | Lay out game menus and HUDs in Oberon | [The UI editor](oberon/ui-editor.md) |
+| Share textured looks between objects | [Materials](oberon/materials.md) |
 | Reuse objects and add custom data | [Prefabs & attributes](oberon/prefabs-and-attributes.md) |
 | Ship your game for Windows and Linux | [Exporting your game](oberon/exporting.md) |
 | Look up a shortcut | [Keyboard shortcuts](oberon/shortcuts.md) |

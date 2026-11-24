@@ -1,0 +1,9 @@
+// A material. Entities that use it share its colour, surface and
+// textures: material: "materials/brushed_steel.mat.ron" on a Mesh Renderer. Texture paths are
+// relative to this file's folder.
+(
+    color: (0.86, 0.87, 0.9, 1.0),
+    roughness: 1.0,
+    metallic: 1.0,
+    roughness_metal_map: "../textures/brushed_rm.png",
+)

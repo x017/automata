@@ -15,11 +15,15 @@
 //!
 //! Relative paths resolve against the asset root ([`set_root`], normally the
 //! scene file's folder), then the working directory.
+//!
+//! [`material`] loads `.mat.ron` material files the same way: cached,
+//! shared by every entity that uses one, and reloaded when they change.
 
 pub mod anim;
 mod gltf;
 pub mod import;
 pub mod json;
+pub mod material;
 mod obj;
 pub mod springs;
 
@@ -32,6 +36,10 @@ use automata_renderer::{Mesh, MeshData, Renderer, Texture};
 use glam::Vec3;
 
 pub use anim::{Clip, ClipEvent, ClipMotion, PartSkin, Pose, Rig};
+pub use material::{
+    is_material_path, load_material, set_material_preview, MapSlot, MaterialAsset, MaterialError,
+    MaterialFile,
+};
 
 /// File extensions [`load`] understands (lowercase, without the dot).
 pub const MODEL_EXTENSIONS: [&str; 3] = ["glb", "gltf", "obj"];
@@ -748,15 +756,20 @@ pub fn load(path: &str) -> Result<Arc<Model>, ModelError> {
 /// Drops cached models whose files changed on disk. Returns true when any
 /// did, so callers (editors) know to reload the scene's visuals.
 pub fn refresh() -> bool {
-    let mut cache = CACHE.lock().unwrap_or_else(PoisonError::into_inner);
-    let before = cache.len();
-    cache.retain(|_, entry| !entry.stale());
-    cache.len() != before
+    let models = {
+        let mut cache = CACHE.lock().unwrap_or_else(PoisonError::into_inner);
+        let before = cache.len();
+        cache.retain(|_, entry| !entry.stale());
+        cache.len() != before
+    };
+    let materials = material::refresh_materials();
+    models || materials
 }
 
 /// Empties the cache (the next [`load`] of every model reads the file).
 pub fn clear_cache() {
     CACHE.lock().unwrap_or_else(PoisonError::into_inner).clear();
+    material::clear_materials();
 }
 
 // ---------------------------------------------------------------------------

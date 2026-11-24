@@ -107,6 +107,7 @@ With a model selected, the **Mesh Renderer** section shows:
 | *summary* | Parts (one per material), triangle count, size in metres, and whether it's textured. If loading failed, this line shows the error instead. |
 | **Change…** | Pick a different model. |
 | **Add Collider / Fit Collider** | Adds a collider shaped for the model, or refits the existing one. |
+| **Material** | A shared [material file](materials.md) that replaces the model's own materials on every part. Empty keeps them. |
 | **Tint** | Multiplies every material's colour. Leave it white to see the model as authored. |
 | **Surface**, **Roughness**, **Metallic**, **Emission** | Leave them at Default to keep the file's materials. Setting one overrides it on every part. See [Surfaces](interface.md#surfaces). |
 | **Glow Light** | Glowing parts of the model light their surroundings. This scales that light (0 = off). |

@@ -1455,16 +1455,23 @@ impl PyMeshRenderer {
     /// real glowing object of that size, 0 not at all) and `glow_shadows`
     /// (whether objects block that light; on High and up).
     ///
+    /// `material` names a material file (`"materials/brick.mat.ron"`,
+    /// made in Oberon or by hand) to draw with instead of `color` and the
+    /// surface arguments: its colour, surface and texture maps, shared with
+    /// every entity that uses the same file. Relative paths resolve like
+    /// model paths. Raises `FileNotFoundError` when the file is missing
+    /// and `ValueError` when it isn't a material.
+    ///
     /// `draw_distance` (metres; 0 = any distance) hides it, shadow included,
     /// when the camera is farther away, dithering it out over the last
     /// tenth. Model files' `_LOD1`, `_LOD2`… levels apply either way.
     #[classmethod]
     #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
                         emissive=(0.0, 0.0, 0.0), emissive_strength=1.0, glow_light=1.0,
-                        glow_shadows=true, draw_distance=0.0))]
+                        glow_shadows=true, draw_distance=0.0, material=None))]
     #[allow(clippy::too_many_arguments)] // Python keyword arguments
     fn cube(
-        _cls: &Bound<'_, pyo3::types::PyType>,
+        cls: &Bound<'_, pyo3::types::PyType>,
         size: f32,
         color: (f32, f32, f32, f32),
         roughness: Option<f32>,
@@ -1474,6 +1481,7 @@ impl PyMeshRenderer {
         glow_light: f32,
         glow_shadows: bool,
         draw_distance: f32,
+        material: Option<&str>,
     ) -> PyResult<Self> {
         check_draw_distance(draw_distance)?;
         let surface = surface_from(
@@ -1487,7 +1495,8 @@ impl PyMeshRenderer {
         Ok(Self {
             inner: automata_scene::MeshVisual::cube(size, color.into())
                 .with_surface(surface)
-                .with_draw_distance(draw_distance),
+                .with_draw_distance(draw_distance)
+                .with_material(&material_from(cls.py(), material)?),
             kind: "cube",
         })
     }
@@ -1497,10 +1506,10 @@ impl PyMeshRenderer {
     #[classmethod]
     #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
                         emissive=(0.0, 0.0, 0.0), emissive_strength=1.0, glow_light=1.0,
-                        glow_shadows=true, draw_distance=0.0))]
+                        glow_shadows=true, draw_distance=0.0, material=None))]
     #[allow(clippy::too_many_arguments)] // Python keyword arguments
     fn sphere(
-        _cls: &Bound<'_, pyo3::types::PyType>,
+        cls: &Bound<'_, pyo3::types::PyType>,
         size: f32,
         color: (f32, f32, f32, f32),
         roughness: Option<f32>,
@@ -1510,6 +1519,7 @@ impl PyMeshRenderer {
         glow_light: f32,
         glow_shadows: bool,
         draw_distance: f32,
+        material: Option<&str>,
     ) -> PyResult<Self> {
         check_draw_distance(draw_distance)?;
         let surface = surface_from(
@@ -1523,7 +1533,8 @@ impl PyMeshRenderer {
         Ok(Self {
             inner: automata_scene::MeshVisual::sphere(size, color.into())
                 .with_surface(surface)
-                .with_draw_distance(draw_distance),
+                .with_draw_distance(draw_distance)
+                .with_material(&material_from(cls.py(), material)?),
             kind: "sphere",
         })
     }
@@ -1533,10 +1544,10 @@ impl PyMeshRenderer {
     #[classmethod]
     #[pyo3(signature = (size=1.0, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
                         emissive=(0.0, 0.0, 0.0), emissive_strength=1.0, glow_light=1.0,
-                        glow_shadows=true, draw_distance=0.0))]
+                        glow_shadows=true, draw_distance=0.0, material=None))]
     #[allow(clippy::too_many_arguments)] // Python keyword arguments
     fn quad(
-        _cls: &Bound<'_, pyo3::types::PyType>,
+        cls: &Bound<'_, pyo3::types::PyType>,
         size: f32,
         color: (f32, f32, f32, f32),
         roughness: Option<f32>,
@@ -1546,6 +1557,7 @@ impl PyMeshRenderer {
         glow_light: f32,
         glow_shadows: bool,
         draw_distance: f32,
+        material: Option<&str>,
     ) -> PyResult<Self> {
         check_draw_distance(draw_distance)?;
         let surface = surface_from(
@@ -1559,7 +1571,8 @@ impl PyMeshRenderer {
         Ok(Self {
             inner: automata_scene::MeshVisual::quad(size, color.into())
                 .with_surface(surface)
-                .with_draw_distance(draw_distance),
+                .with_draw_distance(draw_distance)
+                .with_material(&material_from(cls.py(), material)?),
             kind: "quad",
         })
     }
@@ -1581,7 +1594,7 @@ impl PyMeshRenderer {
     #[classmethod]
     #[pyo3(signature = (path, color=(1.0, 1.0, 1.0, 1.0), *, roughness=None, metallic=None,
                         emissive=(0.0, 0.0, 0.0), emissive_strength=1.0, glow_light=1.0,
-                        glow_shadows=true, draw_distance=0.0))]
+                        glow_shadows=true, draw_distance=0.0, material=None))]
     #[allow(clippy::too_many_arguments)] // Python keyword arguments
     fn model(
         cls: &Bound<'_, pyo3::types::PyType>,
@@ -1594,6 +1607,7 @@ impl PyMeshRenderer {
         glow_light: f32,
         glow_shadows: bool,
         draw_distance: f32,
+        material: Option<&str>,
     ) -> PyResult<Self> {
         check_draw_distance(draw_distance)?;
         let surface = surface_from(
@@ -1615,7 +1629,8 @@ impl PyMeshRenderer {
         Ok(Self {
             inner: inner
                 .with_surface(surface)
-                .with_draw_distance(draw_distance),
+                .with_draw_distance(draw_distance)
+                .with_material(&material_from(cls.py(), material)?),
             kind: "model",
         })
     }
@@ -1679,6 +1694,12 @@ impl PyMeshRenderer {
         self.inner.draw_distance
     }
 
+    /// The material file it draws with, or `None`.
+    #[getter]
+    fn material(&self) -> Option<String> {
+        (!self.inner.material.is_empty()).then(|| self.inner.material.clone())
+    }
+
     /// The model file, for `MeshRenderer.model`; otherwise `None`.
     #[getter]
     fn path(&self) -> Option<String> {
@@ -1727,6 +1748,27 @@ impl PyMeshRenderer {
             automata_scene::MeshVisualKind::Model { .. } => "model",
         };
         Self { inner, kind }
+    }
+}
+
+/// Checks a `material=` argument: a material file that loads (relative
+/// paths against the asset root). `None` is no material.
+fn material_from(py: Python<'_>, material: Option<&str>) -> PyResult<String> {
+    let Some(path) = material.map(str::trim).filter(|m| !m.is_empty()) else {
+        return Ok(String::new());
+    };
+    if !automata_assets::is_material_path(std::path::Path::new(path)) {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "material={path:?}: a material is a .mat.ron file, like \"materials/brick.mat.ron\""
+        )));
+    }
+    default_asset_root(py);
+    match automata_assets::load_material(path) {
+        Ok(_) => Ok(path.replace('\\', "/")),
+        Err(e @ automata_assets::MaterialError::NotFound(_)) => Err(
+            pyo3::exceptions::PyFileNotFoundError::new_err(e.to_string()),
+        ),
+        Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e.to_string())),
     }
 }
 

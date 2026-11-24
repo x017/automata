@@ -170,6 +170,11 @@ Below **Color** the Mesh Renderer has the material rows:
 Metal and gloss show best on a **Sphere** under a sky. On models, Default
 keeps the file's own materials. See [Rendering & Lights](../guides/rendering-and-lights.md#surfaces).
 
+The **Material** row above them names a shared [material file](materials.md)
+instead: drop a `.mat.ron` on it (or on the object), click it to choose one,
+or **×** to go back to the object's own colour. With a material set, these
+rows are hidden, since the material decides colour and surface.
+
 ## Graphics
 
 The second tab in the right dock. It's a single place to test and tune how

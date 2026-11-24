@@ -54,6 +54,95 @@ pub struct ViewportRenderer {
     entities: Vec<automata_scene::Entity>,
     /// The entity the Inspector's animation preview last posed.
     previewed: Option<automata_scene::Entity>,
+    /// The material editor's preview.
+    material: MaterialPreview,
+}
+
+/// What a material preview shows: the material as loaded, the shape, the
+/// pixel size.
+type PreviewKey = (
+    Option<std::sync::Arc<automata_assets::MaterialAsset>>,
+    crate::ui::MaterialShape,
+    (u32, u32),
+);
+
+/// The material editor's preview: one shape lit like a studio shot, in a
+/// world of its own, redrawn only when the material, shape or size change.
+#[derive(Default)]
+struct MaterialPreview {
+    scene: Scene,
+    /// What the pixels show: the material as loaded, the shape, the size.
+    shown: Option<PreviewKey>,
+    target: Option<(RenderTarget, (u32, u32))>,
+    frame: Vec<u8>,
+}
+
+impl MaterialPreview {
+    /// The preview world: a shape wearing the material at `path`, a key
+    /// light from the upper left, and a soft, fogless sky.
+    fn build(path: &Path, shape: crate::ui::MaterialShape) -> Scene {
+        use crate::ui::MaterialShape;
+        use automata_core::scene_file::{EntityData, SceneFile, TransformData};
+        use automata_core::{MeshVisualData, PrimitiveData};
+        let primitive = match shape {
+            MaterialShape::Sphere => PrimitiveData::Sphere { size: 1.7 },
+            MaterialShape::Cube => PrimitiveData::Cube { size: 1.15 },
+            MaterialShape::Plane => PrimitiveData::Quad { size: 1.9 },
+        };
+        let rotation_euler = match shape {
+            MaterialShape::Sphere => [0.0, 0.0, 0.0],
+            MaterialShape::Cube => [0.45, 0.65, 0.0],
+            MaterialShape::Plane => [-0.35, 0.0, 0.0],
+        };
+        let environment = automata_renderer::Environment {
+            fog: false,
+            god_rays: 0.0,
+            sky: false,
+            clouds: 0.0,
+            background: [0.035, 0.037, 0.042],
+            // A soft studio: bright above, warm grey below, no hard horizon
+            // for metals to mirror.
+            sky_color: [0.95, 0.96, 1.0],
+            ground_color: [0.42, 0.4, 0.38],
+            ..automata_renderer::Environment::daylight()
+        };
+        let file = SceneFile {
+            version: automata_core::scene_file::SCENE_FILE_VERSION,
+            entities: vec![
+                EntityData {
+                    environment: Some(environment),
+                    ..Default::default()
+                },
+                EntityData {
+                    directional_light: Some(automata_scene::DirectionalLight {
+                        direction: glam::Vec3::new(0.6, -0.55, -0.6).normalize(),
+                        color: [1.0, 0.97, 0.92],
+                        ambient: 0.35,
+                        shadows: false,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                EntityData {
+                    transform: Some(TransformData {
+                        rotation_euler,
+                        ..TransformData::default()
+                    }),
+                    mesh_visual: Some(MeshVisualData {
+                        primitive,
+                        color: [1.0; 4],
+                        surface: automata_scene::Surface::default(),
+                        draw_distance: 0.0,
+                        material: path.to_string_lossy().into_owned(),
+                    }),
+                    ..Default::default()
+                },
+            ],
+        };
+        let mut scene = Scene::new();
+        file.apply_to_world(scene.world_mut());
+        scene
+    }
 }
 
 /// A path a script gave (`"sprites/x.png"`), relative to the scene folder.
@@ -128,7 +217,55 @@ impl ViewportRenderer {
             hud_font_errors: Vec::new(),
             entities: Vec::new(),
             previewed: None,
+            material: MaterialPreview::default(),
         }
+    }
+
+    /// Renders the material at `path` (its editor's unsaved version, if
+    /// any) on `shape` into a `width`×`height` buffer for the material
+    /// editor. Redraws only when the material, shape or size changed.
+    /// `None` without a GPU renderer.
+    pub fn render_material(
+        &mut self,
+        renderer: Option<&mut Renderer>,
+        path: &Path,
+        shape: crate::ui::MaterialShape,
+        width: u32,
+        height: u32,
+    ) -> Option<(&[u8], u32, u32)> {
+        let renderer = renderer?;
+        let size = (width.max(1), height.max(1));
+        let asset = automata_assets::load_material(&path.to_string_lossy()).ok();
+        let p = &mut self.material;
+        let same = p.shown.as_ref().is_some_and(|(a, s, z)| {
+            *s == shape
+                && *z == size
+                && match (a, &asset) {
+                    (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+                    (None, None) => true,
+                    _ => false,
+                }
+        });
+        if !same {
+            p.scene = MaterialPreview::build(path, shape);
+            automata_scene::materialize_visuals(p.scene.world_mut(), renderer);
+            let camera = automata_renderer::Camera3D {
+                fov_y_degrees: 30.0,
+                ..automata_renderer::Camera3D::new(glam::Vec3::new(0.0, 0.0, 4.4), glam::Vec3::ZERO)
+            };
+            Self::draw_world(
+                renderer,
+                &mut p.target,
+                &mut p.frame,
+                p.scene.world(),
+                Some(camera),
+                size,
+                Vec::new(),
+                None,
+            );
+            p.shown = Some((asset, shape, size));
+        }
+        Some((p.frame.as_slice(), size.0, size.1))
     }
 
     /// Turns a script HUD into sprites (screen pixels, top-left origin).

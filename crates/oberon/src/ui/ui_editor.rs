@@ -27,10 +27,10 @@ pub const PREVIEWS: [(f32, f32, &str); 4] = [
 ];
 
 const ALIGNS: [&str; 3] = ["left", "center", "right"];
-const TOOLBAR_H: f32 = 36.0;
-const STATUS_H: f32 = 22.0;
-const ROW_H: f32 = 26.0;
-const LABEL_W: f32 = 92.0;
+pub(super) const TOOLBAR_H: f32 = 36.0;
+pub(super) const STATUS_H: f32 = 22.0;
+pub(super) const ROW_H: f32 = 26.0;
+pub(super) const LABEL_W: f32 = 92.0;
 
 /// A screen option's check box: its label, whether it's on, and how to flip it.
 type ScreenFlag = (&'static str, bool, fn(&mut UiDoc));
@@ -172,7 +172,7 @@ fn tree_rows(doc: &UiDoc) -> Vec<TreeRow> {
     out
 }
 
-fn rgba(c: [f32; 4]) -> Color {
+pub(super) fn rgba(c: [f32; 4]) -> Color {
     let f = |v: f32| {
         if v.is_finite() {
             v.clamp(0.0, 1.0)
@@ -1610,7 +1610,7 @@ impl Ui {
         });
     }
 
-    fn section_head(&self, canvas: &mut Canvas, x: f32, y: f32, title: &str) -> f32 {
+    pub(super) fn section_head(&self, canvas: &mut Canvas, x: f32, y: f32, title: &str) -> f32 {
         let y = if y > 0.0 { y + 6.0 } else { y };
         canvas.text_in(
             crate::canvas::Face::Medium,
@@ -1656,13 +1656,35 @@ impl Ui {
         value: &str,
         placeholder: &str,
     ) {
+        let numeric = !matches!(
+            prop,
+            UiProp::Name | UiProp::Text | UiProp::Title | UiProp::Font | UiProp::ThemeFont
+        );
+        self.field_box(
+            canvas,
+            field,
+            EditTarget::UiProp(prop),
+            numeric,
+            value,
+            placeholder,
+        );
+    }
+
+    /// A text field editing `target` (committed through
+    /// [`Ui::commit_edit`]); a click on a `numeric` one selects it all.
+    pub(super) fn field_box(
+        &mut self,
+        canvas: &mut Canvas,
+        field: Rect,
+        target: EditTarget,
+        numeric: bool,
+        value: &str,
+        placeholder: &str,
+    ) {
         if !self.row_visible(field) {
             return;
         }
-        let editing = self
-            .edit
-            .as_ref()
-            .is_some_and(|e| e.target == EditTarget::UiProp(prop));
+        let editing = self.edit.as_ref().is_some_and(|e| e.target == target);
         canvas.fill_rounded(
             field.x,
             field.y,
@@ -1708,13 +1730,9 @@ impl Ui {
                 if let Some(intent) = self.commit_edit() {
                     self.out.push(intent);
                 }
-                let numeric = !matches!(
-                    prop,
-                    UiProp::Name | UiProp::Text | UiProp::Title | UiProp::Font | UiProp::ThemeFont
-                );
                 self.edit = Some(TextEdit {
                     id: 0,
-                    target: EditTarget::UiProp(prop),
+                    target,
                     buffer: value.to_string(),
                     rect: field,
                     fresh: numeric,
@@ -1759,7 +1777,7 @@ impl Ui {
         y + ROW_H
     }
 
-    fn prop_check(
+    pub(super) fn prop_check(
         &mut self,
         canvas: &mut Canvas,
         x: f32,
@@ -1817,7 +1835,7 @@ impl Ui {
         (y + ROW_H, hot && self.p.pressed)
     }
 
-    fn prop_menu(
+    pub(super) fn prop_menu(
         &mut self,
         canvas: &mut Canvas,
         x: f32,
@@ -1959,7 +1977,7 @@ impl Ui {
 }
 
 /// The small ▾ at the right of a button that opens a menu.
-fn menu_caret(canvas: &mut Canvas, r: Rect, c: Color) {
+pub(super) fn menu_caret(canvas: &mut Canvas, r: Rect, c: Color) {
     let (cx, cy) = (r.x + r.w - 13.0, r.y + r.h / 2.0);
     canvas.fill_polygon(
         &[(cx - 4.0, cy - 2.0), (cx + 4.0, cy - 2.0), (cx, cy + 3.0)],

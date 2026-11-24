@@ -93,6 +93,8 @@ at.MeshRenderer.model(path, color=(1, 1, 1, 1))   # .glb / .gltf / .obj
 #   roughness=None, metallic=None, emissive=(0, 0, 0), emissive_strength=1.0,
 #   glow_light=1.0, glow_shadows=True
 # and draw_distance=0.0 (metres; 0 = drawn at any distance)
+# and material=None: a shared .mat.ron file that sets colour, surface and
+#   textures (cube(material="materials/brick.mat.ron"))
 m.kind                      # "cube", "sphere", "quad" or "model"
 m.color                     # (r, g, b, a); tints a model
 m.roughness                 # 0 = mirror .. 1 = chalk, or None (default)
@@ -102,6 +104,7 @@ m.emissive_strength         # glow multiplier
 m.glow_light                # how much the glow lights its surroundings
 m.glow_shadows              # whether objects block that light (HIGH and up)
 m.draw_distance             # hidden past this camera distance, 0 = never
+m.material                  # the material file's path, or None (own colour)
 m.path                      # the model file, or None
 m.bounds                    # ((min x, y, z), (max x, y, z)) or None
 
@@ -126,6 +129,12 @@ popping. It must not be negative. Model files can also carry simpler levels
 of detail ([Models](oberon/models.md#levels-of-detail)).
 The glow added is `emissive × emissive_strength`; above 1 it blooms
 on Ultra and Beautiful. Guide: [Rendering & Lights](guides/rendering-and-lights.md#surfaces).
+
+`material=` names a [material file](oberon/materials.md) (relative to the
+asset root, like model paths). It replaces the colour and surface arguments
+(and a model's own materials) and is read right away: a missing file raises
+`FileNotFoundError`; a broken one, or a path not ending in `.mat.ron`,
+raises `ValueError`.
 
 `model` loads the file right away, so a missing file raises
 `FileNotFoundError` and a broken one raises `ValueError` where you create the

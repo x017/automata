@@ -836,12 +836,45 @@ Done:
 - **Demo:** `examples/oberon/shape_signal` is a game whose title, HUD and
   results screens are all documents. Its script only binds by name.
 
-### D5. Material assets and editor ⬜ M
-- `.mat.ron` material files shared across entities, with texture slots
-  (base, normal, roughness/metal, emissive) for primitives too. Today
-  only models bring textures.
-- An Oberon material panel with a live sphere preview; drag a material
-  onto an object.
+### D5. Material assets and editor ✅ M
+`.mat.ron` material files shared across entities, with texture slots for
+primitives too; an Oberon material editor with a live preview; drag a
+material onto an object.
+
+Done:
+- **Material files:** `materials/<name>.mat.ron` holds a colour, roughness,
+  metalness, glow (emission, strength, glow light and shadows), four
+  texture slots (base colour, normal, glTF roughness-metal, emission),
+  normal strength, tiling, offset and *pixelated*. Map paths are relative
+  to the material file. A Mesh Renderer names one with `material:` in the
+  scene; it overrides the colour and surface (and a model's own
+  materials). Every entity naming a file shares one GPU material, so they
+  batch. A missing or broken file logs once and falls back to the
+  object's own colour.
+- **Renderer:** materials gained UV tiling and offset, applied to every
+  map and the normal perturbation.
+- **Hot reload:** `automata_assets::refresh` notices material and texture
+  changes on disk; editors preview unsaved edits everywhere with
+  `set_material_preview`.
+- **The material editor:** `.mat.ron` tabs open on a live GPU preview
+  (sphere, cube or plane, in a studio world of its own) beside sliders,
+  colour fields, texture slots with thumbnails, **Choose…** and drag-in
+  images, and tiling. The tab's text is the source of truth (undo, save,
+  *Edit as Text*); a slider drag is one undo step and shows on every
+  object using the material before it's saved.
+- **Using materials:** drag a material from the Files panel (or the
+  editor's preview) onto an object in the scene view, a Hierarchy row or
+  the Inspector; the Inspector's **Material** row chooses, opens or
+  clears it; **File → New Material…**; Files-panel icons and **Edit
+  Material** / **Use on** items. Moving a material retargets the scene.
+- **Python and export:** `MeshRenderer.cube/sphere/quad/model(material=…)`
+  (validated eagerly) and a read-only `.material`. Export validation
+  errors on missing, broken or outside-project materials and warns about
+  missing textures.
+- **Demo:** `examples/oberon/workshop`, a room dressed only with shared
+  materials whose textures `textures.py` draws with the standard library.
+- Not yet: a colour picker for material colours (hex fields today) and
+  editing materials at runtime from scripts.
 
 ### D6. Editor workflow ⬜ M
 - Multi-select editing (change a field on 20 entities at once).
@@ -939,7 +972,7 @@ per effort. Reorder any time by telling me.
 | 29 | B5 Attachments and IK | M | ⬜ |
 | 30 | C4 Navigation | L | ⬜ |
 | 31 | C5 AI helpers | S | ⬜ |
-| 32 | D5 Material assets and editor | M | ⬜ |
+| 32 | D5 Material assets and editor | M | ✅ |
 | 33 | A13 Terrain | L | ⬜ |
 | 34 | B6 Ragdolls | M | ⬜ |
 | 35 | C6 2D toolkit | L | ⬜ |

@@ -444,12 +444,18 @@ Agreed: **quick wins first.**
 3. **Mesh colliders** (#5) ✅.
 4. **Performance baseline** (#6) ✅.
 5. **Skeletal animation** (#4, phases 1–4): phase 1 ✅.
-6. **Game UI**, the rest (#3, phases 2–5).
+6. **Game UI**, the rest (#3, phases 2–5) ✅ (ROADMAP D1–D4).
 7. **Android** (#1), then the web.
 
 Placing UI phases 2–5 after animation is a proposal, since you chose
 the full UI system after picking this order. Swap them if menus and buttons
 matter sooner.
+
+Beyond this list, work follows ROADMAP's order table. Latest: **D5
+material assets and editor** ✅: shared `.mat.ron` materials with base,
+normal, roughness-metal and emission textures on any mesh, Oberon's
+material editor with a live GPU preview, and dragging materials onto
+objects (demo: `examples/oberon/workshop`). Next: D6 editor workflow.
 
 ## Process note
 

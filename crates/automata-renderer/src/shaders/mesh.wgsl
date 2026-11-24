@@ -43,6 +43,8 @@ struct MaterialData {
     emissive: vec4<f32>,
     // Roughness, metallic, normal-map scale, map flags (see MAP_*).
     params: vec4<f32>,
+    // Texture coordinate scale (xy) and offset (zw): tiling.
+    uv: vec4<f32>,
 };
 @group(2) @binding(0) var material_texture: texture_2d<f32>;
 @group(2) @binding(1) var material_sampler: sampler;
@@ -255,28 +257,30 @@ fn surface(in: VertexOutput) -> Surface {
     }
     var out: Surface;
     let maps = u32(material.params.w);
+    // Tiled texture coordinates (the identity unless the material repeats).
+    let uv = in.uv * material.uv.xy + material.uv.zw;
     var n = normalize(in.normal);
     if (maps & MAP_NORMAL) != 0u {
-        var ts = textureSample(normal_map, map_sampler, in.uv).xyz * 2.0 - 1.0;
+        var ts = textureSample(normal_map, map_sampler, uv).xyz * 2.0 - 1.0;
         // glTF normal maps are +Y up in a V-down UV space: flip green.
         ts = vec3<f32>(ts.xy * vec2<f32>(material.params.z, -material.params.z), ts.z);
-        n = perturb_normal(n, in.world_position, in.uv, ts);
+        n = perturb_normal(n, in.world_position, uv, ts);
     }
     out.p = in.world_position;
     out.n = n;
     out.l = normalize(-light.direction.xyz);
     out.v = normalize(camera.view_pos.xyz - in.world_position);
-    out.base = textureSample(material_texture, material_sampler, in.uv) * material.color;
+    out.base = textureSample(material_texture, material_sampler, uv) * material.color;
     out.roughness = material.params.x;
     out.metallic = material.params.y;
     if (maps & MAP_METAL_ROUGH) != 0u {
-        let mr = textureSample(metal_rough_map, map_sampler, in.uv);
+        let mr = textureSample(metal_rough_map, map_sampler, uv);
         out.roughness = clamp(out.roughness * mr.g, 0.04, 1.0);
         out.metallic = out.metallic * mr.b;
     }
     out.emissive = material.emissive.rgb;
     if (maps & MAP_EMISSIVE) != 0u {
-        out.emissive = out.emissive * textureSample(emissive_map, map_sampler, in.uv).rgb;
+        out.emissive = out.emissive * textureSample(emissive_map, map_sampler, uv).rgb;
     }
     return out;
 }

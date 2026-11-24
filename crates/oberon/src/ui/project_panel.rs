@@ -128,6 +128,11 @@ pub enum AssetKind {
     Font,
     /// A UI document (`.ui.ron`), edited in the UI editor.
     UiScreen,
+    /// A material (`.mat.ron`), edited in the material editor and
+    /// dragged onto objects.
+    Material,
+    /// An image (`.png`, `.jpg`): material textures, sprites.
+    Image,
     /// Anything else.
     Other,
 }
@@ -148,6 +153,12 @@ pub fn asset_kind(path: &Path, dir: bool) -> AssetKind {
     }
     if crate::uidoc::is_ui_doc_path(path) {
         return AssetKind::UiScreen;
+    }
+    if automata_assets::is_material_path(path) {
+        return AssetKind::Material;
+    }
+    if automata_assets::material::is_image_path(path) {
+        return AssetKind::Image;
     }
     match path
         .extension()
@@ -171,14 +182,16 @@ pub fn open_intent(path: &Path, dir: bool) -> Option<Intent> {
     match asset_kind(path, dir) {
         AssetKind::Scene => Some(Intent::Open(path.to_path_buf())),
         AssetKind::Prefab => Some(Intent::InstantiatePrefab(path.to_path_buf())),
-        AssetKind::Script | AssetKind::UiScreen => Some(Intent::OpenScript(path.to_path_buf())),
+        AssetKind::Script | AssetKind::UiScreen | AssetKind::Material => {
+            Some(Intent::OpenScript(path.to_path_buf()))
+        }
         AssetKind::Model => Some(Intent::AddModel {
             path: path.to_path_buf(),
             at: None,
         }),
         AssetKind::Audio => Some(Intent::PreviewSound(path.to_path_buf())),
         AssetKind::Font => Some(Intent::ImportFont(path.to_path_buf())),
-        AssetKind::Folder | AssetKind::Other => None,
+        AssetKind::Folder | AssetKind::Image | AssetKind::Other => None,
     }
 }
 
@@ -593,6 +606,21 @@ impl Ui {
             AssetKind::UiScreen => {
                 menu.push(item_menu("Edit UI Screen", open_intent(&item.path, false)));
             }
+            AssetKind::Material => {
+                menu.push(item_menu("Edit Material", open_intent(&item.path, false)));
+                if let Some(i) = doc.selected_index() {
+                    let e = &doc.entities[i];
+                    menu.push(MenuItem {
+                        label: format!("Use on {}", e.name()),
+                        shortcut: "",
+                        action: Some(Action::Intent(Intent::SetMaterial {
+                            id: e.id,
+                            path: Some(item.path.clone()),
+                        })),
+                        enabled: editing && e.data.mesh_visual.is_some(),
+                    });
+                }
+            }
             AssetKind::Script => {
                 menu.push(item_menu("Edit Script", open_intent(&item.path, false)));
                 if let Some(i) = doc.selected_index() {
@@ -655,7 +683,7 @@ impl Ui {
                     open_intent(&item.path, false),
                 ));
             }
-            AssetKind::Folder | AssetKind::Other => {}
+            AssetKind::Folder | AssetKind::Image | AssetKind::Other => {}
         }
         if !menu.is_empty() {
             menu.push(MenuItem::separator());
@@ -885,6 +913,12 @@ impl Ui {
                 enabled: true,
             },
             MenuItem {
+                label: "New Material…".into(),
+                shortcut: "",
+                action: Some(Action::Ui(UiAction::Dialog(DialogKind::NewMaterial))),
+                enabled: true,
+            },
+            MenuItem {
                 label: "New Folder".into(),
                 shortcut: "",
                 action: Some(Action::Intent(Intent::NewFolder(
@@ -1016,8 +1050,31 @@ pub fn draw_tree_icon(canvas: &mut Canvas, kind: AssetKind, cx: f32, cy: f32) {
         AssetKind::Model => draw_model_icon(canvas, cx, cy, color::accent_soft()),
         AssetKind::Audio => draw_sound_icon(canvas, cx, cy, color::accent_soft()),
         AssetKind::Font => draw_font_icon(canvas, cx, cy, color::accent_soft()),
+        AssetKind::Material => draw_material_icon(canvas, cx, cy),
+        AssetKind::Image => {
+            let c = color::accent_soft();
+            canvas.stroke_rounded(cx - 6.5, cy - 5.0, 13.0, 10.0, 1.5, c, 1.2);
+            canvas.fill_polygon(
+                &[
+                    (cx - 4.5, cy + 3.5),
+                    (cx - 1.0, cy - 1.0),
+                    (cx + 1.5, cy + 1.5),
+                    (cx + 3.0, cy),
+                    (cx + 5.0, cy + 3.5),
+                ],
+                c,
+            );
+            canvas.fill_circle(cx + 3.0, cy - 2.2, 1.2, c);
+        }
         AssetKind::Other => super::draw_small_file_icon(canvas, cx, cy, false),
     }
+}
+
+/// A shaded ball: the material file icon.
+pub fn draw_material_icon(canvas: &mut Canvas, cx: f32, cy: f32) {
+    canvas.fill_circle(cx, cy, 6.0, color::accent_soft());
+    canvas.fill_circle(cx + 1.2, cy + 1.2, 4.6, color::text_dim());
+    canvas.fill_circle(cx - 2.0, cy - 2.0, 1.8, color::text());
 }
 
 /// A serif "A": the font file icon.
@@ -1115,6 +1172,20 @@ mod tests {
             Some(Intent::OpenScript(p)) if p == Path::new("ui/hud.ui.ron")
         ));
         assert_eq!(asset_kind(Path::new("gui.ron"), false), AssetKind::Scene);
+        // So is a material, which opens in the material editor.
+        assert_eq!(
+            asset_kind(Path::new("materials/Brick.MAT.RON"), false),
+            AssetKind::Material
+        );
+        assert!(matches!(
+            open_intent(Path::new("materials/brick.mat.ron"), false),
+            Some(Intent::OpenScript(_))
+        ));
+        assert_eq!(
+            asset_kind(Path::new("textures/brick.JPG"), false),
+            AssetKind::Image
+        );
+        assert!(open_intent(Path::new("textures/brick.png"), false).is_none());
         assert!(matches!(
             open_intent(Path::new("x.py"), false),
             Some(Intent::OpenScript(_))

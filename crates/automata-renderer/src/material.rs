@@ -33,6 +33,13 @@ impl Material {
     pub fn params(&self) -> &MaterialParams {
         &self.inner.params
     }
+
+    /// Whether `other` is the same GPU material (not just an equal one),
+    /// as entities sharing a material file get.
+    #[must_use]
+    pub fn shares_with(&self, other: &Material) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
 }
 
 /// The surface parameters of a [`Material`], in glTF's metallic-roughness
@@ -61,6 +68,12 @@ pub struct MaterialParams {
     /// Whether objects block that light (on presets that shadow point
     /// lights).
     pub glow_shadows: bool,
+    /// How many times the textures repeat across the mesh's UVs, in U and
+    /// V (2 tiles a texture twice each way). Every map uses it.
+    pub uv_scale: [f32; 2],
+    /// Shifts the textures across the UVs (in texture widths), applied
+    /// after `uv_scale`.
+    pub uv_offset: [f32; 2],
 }
 
 impl Default for MaterialParams {
@@ -73,6 +86,8 @@ impl Default for MaterialParams {
             normal_scale: 1.0,
             glow_light: 1.0,
             glow_shadows: true,
+            uv_scale: [1.0; 2],
+            uv_offset: [0.0; 2],
         }
     }
 }
@@ -118,6 +133,8 @@ pub(crate) struct MaterialUniform {
     /// Roughness, metallic, normal scale, and which maps are bound
     /// (`MAP_*` bits, as a float).
     pub params: [f32; 4],
+    /// The texture coordinates' scale (xy) and offset (zw).
+    pub uv: [f32; 4],
 }
 
 /// `MaterialUniform::params.w` bits (mesh.wgsl's `MAP_*`).
@@ -140,6 +157,7 @@ impl MaterialUniform {
                     maps as f32
                 },
             ],
+            uv: [p.uv_scale[0], p.uv_scale[1], p.uv_offset[0], p.uv_offset[1]],
         }
     }
 }
@@ -175,7 +193,7 @@ mod tests {
 
     #[test]
     fn the_uniform_matches_the_shader_layout_and_clamps() {
-        assert_eq!(std::mem::size_of::<MaterialUniform>(), 48);
+        assert_eq!(std::mem::size_of::<MaterialUniform>(), 64);
         let u = MaterialUniform::new(
             &MaterialParams {
                 roughness: 0.0,
@@ -192,5 +210,19 @@ mod tests {
         let plain = MaterialUniform::new(&MaterialParams::default(), 0);
         assert!((plain.params[0] - DEFAULT_ROUGHNESS).abs() < f32::EPSILON);
         assert!(plain.params[3].abs() < f32::EPSILON);
+        assert_eq!(
+            plain.uv,
+            [1.0, 1.0, 0.0, 0.0],
+            "textures don't repeat by default"
+        );
+        let tiled = MaterialUniform::new(
+            &MaterialParams {
+                uv_scale: [4.0, 2.0],
+                uv_offset: [0.5, 0.0],
+                ..MaterialParams::default()
+            },
+            0,
+        );
+        assert_eq!(tiled.uv, [4.0, 2.0, 0.5, 0.0]);
     }
 }

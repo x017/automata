@@ -3699,6 +3699,71 @@ mod tests {
     }
 
     #[test]
+    fn offscreen_material_tiling_repeats_its_textures() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping material tiling test");
+            return;
+        };
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        // Two texels, black then white, sampled crisply.
+        let texture =
+            renderer.create_texture_rgba_mipmapped(2, 1, &[0, 0, 0, 255, 255, 255, 255, 255], true);
+        let quad = renderer.create_mesh(&MeshData::quad(2.0));
+        // Black-to-white edges along the middle row, ignoring the red
+        // background around the quad.
+        let mut edges = |uv_scale: [f32; 2]| {
+            let material = renderer.create_pbr_material(
+                &crate::MaterialParams {
+                    uv_scale,
+                    ..crate::MaterialParams::default()
+                },
+                crate::MaterialTextures {
+                    base: Some(texture.clone()),
+                    ..crate::MaterialTextures::default()
+                },
+            );
+            let mut draw = DrawList::new();
+            draw.set_clear_color(Color {
+                r: 1.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            });
+            draw.set_camera_3d(Camera3D::new(
+                glam::Vec3::new(0.0, 0.0, 3.0),
+                glam::Vec3::ZERO,
+            ));
+            draw.mesh(&quad, glam::Mat4::IDENTITY, &material);
+            renderer.render_offscreen(&draw, &target);
+            let pixels = read_pixels(&renderer, &target, size);
+            let (width, row) = (size.0 as usize, size.1 as usize / 2);
+            let mut last = None;
+            let mut edges = 0;
+            for col in 0..width {
+                let px = &pixels[(row * width + col) * 4..][..4];
+                let (red, green) = (px[0], px[1]);
+                let bright = if red > 150 && green < 40 {
+                    continue; // background
+                } else if green > 60 {
+                    true
+                } else if red < 40 && green < 40 {
+                    false
+                } else {
+                    continue; // a blended edge pixel
+                };
+                if last.is_some_and(|l| l != bright) {
+                    edges += 1;
+                }
+                last = Some(bright);
+            }
+            edges
+        };
+        assert_eq!(edges([1.0, 1.0]), 1, "black half, white half");
+        assert_eq!(edges([2.0, 1.0]), 3, "tiled twice across: four stripes");
+    }
+
+    #[test]
     fn offscreen_sprite_draws_textured_quad() {
         let Some(mut renderer) = pollster::block_on(offscreen()) else {
             eprintln!("no GPU adapter; skipping sprite render test");

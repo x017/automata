@@ -342,6 +342,7 @@ impl ComponentKind {
                     color: [0.85, 0.87, 0.92, 1.0],
                     surface: automata_scene::Surface::default(),
                     draw_distance: 0.0,
+                    material: String::new(),
                 });
             }
             Self::Animation => {
@@ -566,6 +567,7 @@ fn test_box(pos: [f32; 3], scale: [f32; 3], color: [f32; 4]) -> EntityData {
             color,
             surface: automata_scene::Surface::default(),
             draw_distance: 0.0,
+            material: String::new(),
         }),
         ..Default::default()
     }
@@ -732,6 +734,7 @@ impl Document {
             color: [0.16, 0.17, 0.20, 1.0],
             surface: automata_scene::Surface::default(),
             draw_distance: 0.0,
+            material: String::new(),
         });
         // A static collider so physics objects land on the ground in play mode.
         doc.entities[ground].data.rigid_body = Some(automata_physics::RigidBody::fixed());
@@ -747,6 +750,7 @@ impl Document {
             color: [0.62, 0.78, 1.0, 1.0],
             surface: automata_scene::Surface::default(),
             draw_distance: 0.0,
+            material: String::new(),
         });
         // Something to play with: a player and a stack of crates.
         let player = doc.create(CreateKind::Player);
@@ -952,6 +956,7 @@ impl Document {
             color: [1.0, 1.0, 1.0, 1.0],
             surface: automata_scene::Surface::default(),
             draw_distance: 0.0,
+            material: String::new(),
         });
         self.touch();
         true
@@ -1102,6 +1107,7 @@ impl Document {
                 color: [1.0; 4],
                 surface: automata_scene::Surface::default(),
                 draw_distance: 0.0,
+                material: String::new(),
             }),
             ..Default::default()
         };
@@ -1132,9 +1138,26 @@ impl Document {
                 color,
                 surface: automata_scene::Surface::default(),
                 draw_distance: 0.0,
+                material: String::new(),
             });
             fit_animation(d);
         })
+    }
+
+    /// Puts the material file `rel` (relative to the scene folder; empty
+    /// clears it) on the entity's Mesh Renderer. False when the entity has
+    /// no Mesh Renderer or already uses it.
+    pub fn set_material(&mut self, id: u64, rel: &str) -> bool {
+        let rel = rel.replace('\\', "/");
+        let has_mesh = self
+            .index_of(id)
+            .is_some_and(|i| self.entities[i].data.mesh_visual.is_some());
+        has_mesh
+            && self.modify(id, false, |d| {
+                if let Some(m) = &mut d.mesh_visual {
+                    m.material.clone_from(&rel);
+                }
+            })
     }
 
     /// Creates an entity at `at` with an Audio Source playing `rel` on start
@@ -1273,6 +1296,7 @@ impl Document {
                     color: [1.0, 1.0, 1.0, 1.0],
                     surface: automata_scene::Surface::default(),
                     draw_distance: 0.0,
+                    material: String::new(),
                 });
             }
             CreateKind::Plane => {
@@ -1286,6 +1310,7 @@ impl Document {
                     color: [0.55, 0.58, 0.64, 1.0],
                     surface: automata_scene::Surface::default(),
                     draw_distance: 0.0,
+                    material: String::new(),
                 });
             }
             CreateKind::Light => {
@@ -1345,6 +1370,7 @@ impl Document {
                     color: [1.0, 0.56, 0.24, 1.0],
                     surface: automata_scene::Surface::default(),
                     draw_distance: 0.0,
+                    material: String::new(),
                 });
                 ComponentKind::Character.add_to(&mut data);
             }
@@ -1600,7 +1626,7 @@ impl Document {
     }
 
     /// After a file or folder moved on disk from `from` to `to`, points
-    /// every script, model and sound reference at the new place (files
+    /// every script, model, material and sound reference at the new place (files
     /// inside a moved folder included). One undo step; returns how many
     /// entities changed.
     pub fn retarget_paths(&mut self, from: &Path, to: &Path) -> usize {
@@ -1632,6 +1658,12 @@ impl Document {
             {
                 if let Some(p) = moved(path) {
                     *path = p;
+                    changed = true;
+                }
+            }
+            if let Some(mesh) = data.mesh_visual.as_mut().filter(|m| !m.material.is_empty()) {
+                if let Some(p) = moved(&mesh.material) {
+                    mesh.material = p;
                     changed = true;
                 }
             }
@@ -1827,6 +1859,50 @@ pub(crate) mod tests {
             doc.entities[i].data.script.as_ref().unwrap().path,
             "scripts/coin.py"
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn materials_go_on_mesh_renderers_and_follow_moves() {
+        let root = std::env::temp_dir().join(format!("oberon-matdoc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("materials")).unwrap();
+        std::fs::write(root.join("materials/brick.mat.ron"), "()").unwrap();
+        let mut doc = Document::new();
+        doc.path = Some(root.join("level.ron"));
+        let cube = doc.create(CreateKind::Cube);
+        let empty = doc.create(CreateKind::Empty);
+        assert!(doc.set_material(cube, "materials/brick.mat.ron"));
+        assert!(
+            !doc.set_material(cube, "materials/brick.mat.ron"),
+            "no change"
+        );
+        assert!(
+            !doc.set_material(empty, "materials/brick.mat.ron"),
+            "no mesh"
+        );
+        let mesh = |doc: &Document| {
+            let i = doc.index_of(cube).unwrap();
+            doc.entities[i].data.mesh_visual.clone().unwrap()
+        };
+        assert_eq!(mesh(&doc).material, "materials/brick.mat.ron");
+        // Changing the shape keeps the material.
+        let i = doc.index_of(cube).unwrap();
+        assert!(crate::fields::set_choice(
+            &mut doc.entities[i].data,
+            crate::fields::Choice::MeshPrimitive,
+            "Sphere"
+        ));
+        assert_eq!(mesh(&doc).material, "materials/brick.mat.ron");
+        // Renaming the folder retargets the scene.
+        std::fs::rename(root.join("materials"), root.join("mats")).unwrap();
+        assert_eq!(
+            doc.retarget_paths(&root.join("materials"), &root.join("mats")),
+            1
+        );
+        assert_eq!(mesh(&doc).material, "mats/brick.mat.ron");
+        assert!(doc.set_material(cube, ""));
+        assert_eq!(mesh(&doc).material, "");
         let _ = std::fs::remove_dir_all(root);
     }
 

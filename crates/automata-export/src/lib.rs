@@ -309,8 +309,8 @@ impl Message {
 }
 
 /// Checks a project before exporting: the start scene loads, every script,
-/// model, sound and font it names exists inside the project (only the
-/// project folder ships), and a start point is set.
+/// model, material, sound and font it names exists inside the project
+/// (only the project folder ships), and a start point is set.
 #[must_use]
 pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
     let mut out = Vec::new();
@@ -349,6 +349,15 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
                             {
                                 let who = entity.name.as_deref().unwrap_or("an entity");
                                 check_model(project, base, who, path, &mut out);
+                            }
+                            if let Some(material) = entity
+                                .mesh_visual
+                                .as_ref()
+                                .map(|m| m.material.trim())
+                                .filter(|m| !m.is_empty())
+                            {
+                                let who = entity.name.as_deref().unwrap_or("an entity");
+                                check_material(project, base, who, material, &mut out);
                             }
                             if let Some(source) = &entity.audio_source {
                                 let who = entity.name.as_deref().unwrap_or("an entity");
@@ -590,6 +599,52 @@ fn check_model(project: &Path, base: &Path, who: &str, rel: &str, out: &mut Vec<
         } else if !canon(&dep).starts_with(&root) {
             out.push(Message::warn(format!(
                 "{who}: model {rel} uses {shown}, outside the project; it won't ship"
+            )));
+        }
+    }
+}
+
+/// Checks a material reference: the file exists inside the project and
+/// reads, and the textures it names exist inside the project too.
+fn check_material(project: &Path, base: &Path, who: &str, rel: &str, out: &mut Vec<Message>) {
+    let file = if Path::new(rel).is_absolute() {
+        PathBuf::from(rel)
+    } else {
+        automata_assets::join_relative(base, rel)
+    };
+    let Ok(text) = std::fs::read_to_string(&file) else {
+        out.push(Message::error(format!("{who}: material {rel} not found")));
+        return;
+    };
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let root = canon(project);
+    if !canon(&file).starts_with(&root) {
+        out.push(Message::error(format!(
+            "{who}: material {rel} is outside the project folder and won't ship"
+        )));
+        return;
+    }
+    if let Err(e) = automata_assets::MaterialFile::parse(&text) {
+        out.push(Message::error(format!(
+            "{who}: material {rel} doesn't read: {e}"
+        )));
+        return;
+    }
+    for dep in automata_assets::material::material_dependencies(&file) {
+        let shown = canon(&dep);
+        let shown = shown
+            .strip_prefix(&root)
+            .unwrap_or(&dep)
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        if !dep.is_file() {
+            out.push(Message::warn(format!(
+                "{who}: material {rel} uses {shown}, which is missing"
+            )));
+        } else if !canon(&dep).starts_with(&root) {
+            out.push(Message::warn(format!(
+                "{who}: material {rel} uses {shown}, outside the project; it won't ship"
             )));
         }
     }
@@ -1307,6 +1362,64 @@ mod tests {
     }
 
     #[test]
+    fn validation_checks_materials_and_their_textures() {
+        use automata_core::scene_file::{EntityData, MeshVisualData, PrimitiveData, SceneFile};
+        let dir = project("materials");
+        std::fs::create_dir_all(dir.join("materials")).unwrap();
+        std::fs::create_dir_all(dir.join("textures")).unwrap();
+        std::fs::write(dir.join("textures/brick.png"), b"not checked here").unwrap();
+        std::fs::write(
+            dir.join("materials/brick.mat.ron"),
+            "(base_map: \"../textures/brick.png\", normal_map: \"../textures/gone.png\")",
+        )
+        .unwrap();
+        std::fs::write(dir.join("materials/typo.mat.ron"), "(colour: (1, 1, 1, 1))").unwrap();
+        let cube = |name: &str, material: &str| EntityData {
+            name: Some(name.into()),
+            mesh_visual: Some(MeshVisualData {
+                primitive: PrimitiveData::Cube { size: 1.0 },
+                color: [1.0; 4],
+                surface: automata_core::scene_file::Surface::default(),
+                draw_distance: 0.0,
+                material: material.into(),
+            }),
+            ..Default::default()
+        };
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                cube("Wall", "materials/brick.mat.ron"),
+                cube("Odd", "materials/typo.mat.ron"),
+                cube("Ghost", "materials/ghost.mat.ron"),
+                cube("Plain", ""),
+            ],
+        };
+        std::fs::write(dir.join("mats.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            name: "Mats".into(),
+            start_scene: Some("mats.ron".into()),
+            ..BuildConfig::default()
+        };
+        let log = validate(&dir, &cfg);
+        let texts: Vec<String> = log
+            .iter()
+            .map(|m| format!("{:?} {}", m.level, m.text))
+            .collect();
+        let has = |s: &str| texts.iter().any(|t| t.contains(s));
+        assert!(has("Warning Wall: material materials/brick.mat.ron uses textures/gone.png, which is missing"), "{texts:#?}");
+        assert!(!has("brick.png"), "a present texture is fine: {texts:#?}");
+        assert!(
+            has("Error Odd: material materials/typo.mat.ron doesn't read"),
+            "{texts:#?}"
+        );
+        assert!(
+            has("Error Ghost: material materials/ghost.mat.ron not found"),
+            "{texts:#?}"
+        );
+        assert!(!has("Plain"), "{texts:#?}");
+    }
+
+    #[test]
     fn validation_checks_models_ship_with_the_game() {
         use automata_core::scene_file::{EntityData, MeshVisualData, PrimitiveData, SceneFile};
         let dir = project("models");
@@ -1328,6 +1441,7 @@ mod tests {
                 color: [1.0; 4],
                 surface: automata_core::scene_file::Surface::default(),
                 draw_distance: 0.0,
+                material: String::new(),
             }),
             ..Default::default()
         };

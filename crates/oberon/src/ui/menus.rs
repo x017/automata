@@ -55,6 +55,13 @@ pub enum DialogKind {
     NewScript,
     /// Create a new UI document (`ui/<name>.ui.ron`).
     NewUiScreen,
+    /// Create a new material file (`materials/<name>.mat.ron`).
+    NewMaterial,
+    /// Pick the material file for an entity's Mesh Renderer.
+    ChooseMaterial(u64),
+    /// Pick the image for a texture slot of the material being edited
+    /// (index into [`automata_assets::MapSlot::ALL`]).
+    ChooseMaterialMap(usize),
     /// Attach a script (existing or new) to an entity.
     AttachScript(u64),
     /// Import a model file (from anywhere) into the scene, or onto an
@@ -314,6 +321,12 @@ impl Ui {
                         "New UI Screen…",
                         "",
                         UiAction::Dialog(DialogKind::NewUiScreen),
+                        true,
+                    ),
+                    MenuItem::ui(
+                        "New Material…",
+                        "",
+                        UiAction::Dialog(DialogKind::NewMaterial),
                         true,
                     ),
                     MenuItem::ui(

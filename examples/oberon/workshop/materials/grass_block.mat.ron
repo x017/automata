@@ -1,0 +1,9 @@
+// A material. Entities that use it share its colour, surface and
+// textures: material: "materials/grass_block.mat.ron" on a Mesh Renderer. Texture paths are
+// relative to this file's folder.
+(
+    color: (1.0, 1.0, 1.0, 1.0),
+    roughness: 0.9,
+    base_map: "../textures/grass_block.png",
+    pixelated: true,
+)

@@ -466,6 +466,14 @@ pub struct MeshVisual {
     /// distance.
     #[serde(default)]
     pub draw_distance: f32,
+    /// A material file (`.mat.ron`, relative to the asset root) to draw
+    /// with instead of `color` and `surface`: its colour, surface and
+    /// texture maps, shared with every entity that names the same file. A
+    /// model draws all its parts with it. Empty: no material. A material
+    /// that fails to load is logged once and the visual's own colour and
+    /// surface are used.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub material: String,
 }
 
 /// How a [`MeshVisual`]'s surface responds to light, on top of its color.
@@ -541,6 +549,7 @@ impl Surface {
             normal_scale: 1.0,
             glow_light: self.glow_light.max(0.0),
             glow_shadows: self.glow_shadows,
+            ..automata_renderer::MaterialParams::default()
         }
     }
 
@@ -564,6 +573,7 @@ impl Surface {
             // the light follows how much of the map is lit.
             glow_light: self.glow_light.max(0.0) * own.emissive_coverage,
             glow_shadows: self.glow_shadows,
+            ..automata_renderer::MaterialParams::default()
         }
     }
 }
@@ -620,6 +630,7 @@ impl MeshVisual {
             model: None,
             surface: Surface::default(),
             draw_distance: 0.0,
+            material: String::new(),
         }
     }
 
@@ -634,6 +645,7 @@ impl MeshVisual {
             model: None,
             surface: Surface::default(),
             draw_distance: 0.0,
+            material: String::new(),
         }
     }
 
@@ -647,6 +659,7 @@ impl MeshVisual {
             model: None,
             surface: Surface::default(),
             draw_distance: 0.0,
+            material: String::new(),
         }
     }
 
@@ -660,6 +673,7 @@ impl MeshVisual {
             model: None,
             surface: Surface::default(),
             draw_distance: 0.0,
+            material: String::new(),
         }
     }
 
@@ -668,6 +682,32 @@ impl MeshVisual {
     pub fn with_surface(mut self, surface: Surface) -> Self {
         self.surface = surface;
         self
+    }
+
+    /// This visual drawn with a material file (see [`Self::material`]);
+    /// an empty path goes back to its own colour and surface.
+    #[must_use]
+    pub fn with_material(mut self, path: &str) -> Self {
+        self.material = path.replace('\\', "/");
+        self
+    }
+
+    /// The material file it draws with, loaded through the shared cache:
+    /// `None` without one, or when it fails to load (logged once per
+    /// file and problem).
+    #[must_use]
+    pub fn load_material(&self) -> Option<Arc<automata_assets::MaterialAsset>> {
+        let path = self.material.trim();
+        if path.is_empty() {
+            return None;
+        }
+        match automata_assets::load_material(path) {
+            Ok(asset) => Some(asset),
+            Err(e) => {
+                warn_once(&e.to_string());
+                None
+            }
+        }
     }
 
     /// This visual with a draw distance (see [`Self::draw_distance`]).
@@ -711,7 +751,21 @@ impl MeshVisual {
             model,
             surface: Surface::default(),
             draw_distance: 0.0,
+            material: String::new(),
         }
+    }
+}
+
+/// Logs a warning the first time it's seen (materials are loaded for
+/// every entity, every rebuild).
+fn warn_once(message: &str) {
+    static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let mut seen = SEEN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !seen.iter().any(|m| m == message) {
+        tracing::warn!("{message}");
+        seen.push(message.to_string());
     }
 }
 
@@ -753,6 +807,8 @@ pub fn materialize_visuals(
             let cloned = MeshVisual::clone(&visual);
             cloned
         };
+        // A material file: one GPU material shared by every user.
+        let shared = visual.load_material().map(|asset| asset.gpu(renderer));
         let component = if let Some(model) = &visual.model {
             let tint = visual.color;
             let mut parts = model
@@ -767,16 +823,16 @@ pub fn materialize_visuals(
                     } else {
                         &gpu.mesh
                     };
-                    (
-                        mesh.clone(),
+                    let material = shared.clone().unwrap_or_else(|| {
                         renderer.create_pbr_material(
                             &params,
                             automata_renderer::MaterialTextures {
                                 base: gpu.texture.clone(),
                                 ..gpu.maps.clone()
                             },
-                        ),
-                    )
+                        )
+                    });
+                    (mesh.clone(), material)
                 });
             let Some((mesh, material)) = parts.next() else {
                 continue;
@@ -812,10 +868,12 @@ pub fn materialize_visuals(
             component
         } else {
             let mesh = renderer.create_mesh(&visual.data);
-            let material = renderer.create_pbr_material(
-                &visual.surface.params(visual.color),
-                automata_renderer::MaterialTextures::default(),
-            );
+            let material = shared.unwrap_or_else(|| {
+                renderer.create_pbr_material(
+                    &visual.surface.params(visual.color),
+                    automata_renderer::MaterialTextures::default(),
+                )
+            });
             let mut component = MeshRenderer::new(mesh, material);
             if visual.draw_distance > 0.0 {
                 component.lods = vec![Some(Arc::new(automata_renderer::MeshLod {
@@ -850,6 +908,54 @@ mod tests {
         scene.despawn(visual).unwrap();
         let pending_after = pending_visuals(scene.world());
         assert_eq!(pending_after, [] as [hecs::Entity; 0]);
+    }
+
+    #[test]
+    fn offscreen_entities_share_a_material_file() {
+        let Ok(renderer) = pollster::block_on(automata_renderer::Renderer::new_offscreen((64, 64)))
+        else {
+            eprintln!("no GPU adapter; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("automata-scene-mat-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("textures")).unwrap();
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([200, 100, 50, 255]))
+            .save(dir.join("textures/brick.png"))
+            .unwrap();
+        let brick = dir.join("brick.mat.ron");
+        automata_assets::MaterialFile {
+            roughness: 0.9,
+            base_map: "textures/brick.png".into(),
+            tiling: [3.0, 1.0],
+            ..automata_assets::MaterialFile::default()
+        }
+        .save(&brick)
+        .unwrap();
+        let brick = brick.to_string_lossy().into_owned();
+        let mut scene = Scene::new();
+        let red = [1.0, 0.0, 0.0, 1.0];
+        let a = scene.spawn((MeshVisual::cube(1.0, red).with_material(&brick),));
+        let b = scene.spawn((MeshVisual::sphere(1.0, red).with_material(&brick),));
+        let own = scene.spawn((MeshVisual::cube(1.0, red),));
+        let broken = scene.spawn((MeshVisual::cube(1.0, red).with_material("nope.mat.ron"),));
+        assert_eq!(materialize_visuals(scene.world_mut(), &renderer), 4);
+        let material = |e| {
+            scene
+                .world()
+                .get::<&MeshRenderer>(e)
+                .unwrap()
+                .material
+                .clone()
+        };
+        assert!(material(a).shares_with(&material(b)), "one GPU material");
+        let p = *material(a).params();
+        assert!((p.roughness - 0.9).abs() < 1e-6);
+        assert_eq!(p.uv_scale, [3.0, 1.0]);
+        assert_eq!(p.color, [1.0; 4], "the material replaces the colour");
+        assert!(!material(own).shares_with(&material(a)));
+        assert_eq!(material(own).params().color, red);
+        // A material that doesn't load falls back to the visual's own.
+        assert_eq!(material(broken).params().color, red);
     }
 
     #[test]

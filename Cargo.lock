@@ -285,6 +285,8 @@ dependencies = [
  "automata-renderer",
  "glam 0.33.12",
  "hecs",
+ "image",
+ "pollster",
  "serde",
  "tracing",
 ]

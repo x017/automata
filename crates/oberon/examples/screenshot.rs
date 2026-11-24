@@ -179,6 +179,29 @@ fn main() {
                 ui.set_ui_preview(1);
             }
         }
+        "material" => {
+            // The material editor on the Material Workshop's copper (or
+            // `OBERON_MATERIAL=<file>`), with its live GPU preview.
+            let name = std::env::var("OBERON_MATERIAL").unwrap_or_else(|_| "copper.mat.ron".into());
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/oberon/workshop/materials")
+                .join(name);
+            ui.open_code(&path, None);
+            ui.code.focused = true;
+            if let Ok(shape) = std::env::var("OBERON_SHAPE") {
+                if let Some(s) = oberon::ui::MaterialShape::ALL
+                    .into_iter()
+                    .find(|s| s.label().eq_ignore_ascii_case(&shape))
+                {
+                    ui.set_material_shape(s);
+                }
+            }
+            let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+            if let Some((p, shape, pw, ph)) = ui.material_preview_request(canvas.scale()) {
+                let img = viewport.render_material(gpu.as_mut(), &p, shape, pw, ph);
+                ui.set_material_preview_image(img);
+            }
+        }
         "code-tabs" | "code-switcher" => {
             // Many tabs (the strip scrolls), multi-caret editing, and the
             // Ctrl+Tab switcher.

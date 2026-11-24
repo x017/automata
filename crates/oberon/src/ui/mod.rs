@@ -34,6 +34,7 @@ mod code_view;
 pub mod dialogs;
 pub mod file_browser;
 pub mod graphics;
+pub mod material_editor;
 pub mod menus;
 pub mod palette;
 pub mod picker;
@@ -44,6 +45,7 @@ pub mod ui_editor;
 
 use dialogs::Dialog;
 pub use graphics::{FrameStats, RightTab};
+pub use material_editor::MaterialShape;
 use menus::MENUBAR_H;
 pub use menus::{DialogKind, Panel};
 use picker::ColorPicker;
@@ -443,6 +445,17 @@ pub enum Intent {
         /// The model file.
         path: PathBuf,
     },
+    /// Put a material file on an entity's Mesh Renderer (`None` clears
+    /// it).
+    SetMaterial {
+        /// Entity id.
+        id: u64,
+        /// The `.mat.ron` file.
+        path: Option<PathBuf>,
+    },
+    /// Create a material file (if missing) and open it in the material
+    /// editor.
+    NewMaterial(PathBuf),
     /// Refit an entity's box collider to its mesh.
     FitCollider(u64),
     /// Save a model file's import settings (scale, rotation, pivot) to its
@@ -550,6 +563,7 @@ impl Intent {
                 | Self::OpenScriptAt { .. }
                 | Self::NewScript(_)
                 | Self::NewUiScreen(_)
+                | Self::NewMaterial(_)
                 | Self::NewFolder(_)
                 | Self::DuplicateFile(_)
                 | Self::DeleteFile(_)
@@ -658,6 +672,8 @@ enum EditTarget {
     FileRename,
     /// A UI editor property.
     UiProp(ui_editor::UiProp),
+    /// A material editor property.
+    MatProp(material_editor::MatProp),
 }
 
 #[derive(Debug, Clone)]
@@ -855,6 +871,7 @@ pub struct Ui {
     code_requests: Vec<crate::code::CodeEvent>,
     /// The UI editor (for `.ui.ron` tabs).
     uied: ui_editor::UiEditor,
+    mated: material_editor::MaterialEditor,
     /// Drag-selecting text (`true` = whole lines from the gutter).
     code_drag: Option<bool>,
     /// The completion popup's rectangle this frame.
@@ -950,6 +967,7 @@ impl Ui {
             code: crate::code::CodeEditor::new(),
             code_requests: Vec::new(),
             uied: ui_editor::UiEditor::default(),
+            mated: material_editor::MaterialEditor::default(),
             code_drag: None,
             code_popup: None,
             code_clicks: None,
@@ -1173,6 +1191,10 @@ impl Ui {
             EditTarget::FileRename => self.commit_file_rename(&edit.buffer),
             EditTarget::UiProp(prop) => {
                 self.commit_ui_prop(prop, &edit.buffer);
+                None
+            }
+            EditTarget::MatProp(prop) => {
+                self.commit_material_prop(prop, &edit.buffer);
                 None
             }
             EditTarget::Setting(which) => self.commit_setting(which, &edit.buffer),
@@ -1446,10 +1468,47 @@ impl Ui {
                 return FileDrop::Entity(doc.entities[i].id, lay.inspector);
             }
         }
+        if self.panels.show_hierarchy && lay.hierarchy.contains(x, y) {
+            if let Some((id, row)) = self.hierarchy_row_at(doc, lay.hierarchy, x, y) {
+                return FileDrop::Entity(id, row);
+            }
+        }
         if self.code.active.is_none() && lay.viewport.contains(x, y) {
             return FileDrop::Scene(lay.viewport);
         }
         FileDrop::Nothing
+    }
+
+    /// The Hierarchy row under `(x, y)`: its entity and rectangle (the
+    /// same layout [`Self::hierarchy`] draws).
+    fn hierarchy_row_at(&self, doc: &Document, rect: Rect, x: f32, y: f32) -> Option<(u64, Rect)> {
+        let top = rect.y + layout::TITLEBAR_H;
+        if y < top || !rect.contains(x, y) {
+            return None;
+        }
+        let first = top + 4.0 - self.hierarchy_scroll;
+        let i = ((y - first) / layout::ROW_H).floor();
+        if i < 0.0 {
+            return None;
+        }
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let e = doc.entities.get(i as usize)?;
+        let row = Rect::new(
+            rect.x + 4.0,
+            first + i * layout::ROW_H,
+            rect.w - 9.0,
+            layout::ROW_H,
+        );
+        Some((e.id, row))
+    }
+
+    /// The object with a Mesh Renderer under `(x, y)` in the scene view.
+    fn mesh_under(&self, doc: &Document, view: Rect, x: f32, y: f32) -> Option<u64> {
+        let proj = view::Projector::new(&self.camera, view);
+        view::pick(doc, &proj, x, y).filter(|&id| {
+            doc.index_of(id)
+                .is_some_and(|i| doc.entities[i].data.mesh_visual.is_some())
+        })
     }
 
     /// Drives a file dragged out of the Files panel (or over the window from
@@ -1476,11 +1535,15 @@ impl Ui {
         let folder = self.project_drop_dir();
         let target = match (self.file_drop_target(doc, lay, x, y), kind) {
             _ if folder.is_some() => FileDrop::Nothing,
+            // A material goes on the object under the pointer.
+            (FileDrop::Scene(r), AssetKind::Material) => self
+                .mesh_under(doc, r, x, y)
+                .map_or(FileDrop::Nothing, |id| FileDrop::Entity(id, r)),
             (
                 t @ (FileDrop::Scene(_) | FileDrop::Entity(..)),
                 AssetKind::Model | AssetKind::Audio,
             )
-            | (t @ FileDrop::Entity(..), AssetKind::Script)
+            | (t @ FileDrop::Entity(..), AssetKind::Material | AssetKind::Script)
             | (t @ FileDrop::Scene(_), AssetKind::Prefab) => t,
             _ => FileDrop::Nothing,
         };
@@ -1515,6 +1578,10 @@ impl Ui {
                 (FileDrop::Entity(id, _), AssetKind::Script) => {
                     Some(Intent::AttachScript { id, path })
                 }
+                (FileDrop::Entity(id, _), AssetKind::Material) => Some(Intent::SetMaterial {
+                    id,
+                    path: Some(path),
+                }),
                 (FileDrop::Entity(id, _), _) => Some(Intent::SetModel { id, path }),
                 (FileDrop::Nothing, _) => None,
             };
@@ -1548,7 +1615,13 @@ impl Ui {
                     AssetKind::Script => format!("Attach to {who}"),
                     _ => format!("Use on {who}"),
                 };
-                draw_drop_zone(canvas, *r, &what);
+                if r.h < 60.0 {
+                    // A Hierarchy row: outline it; the label rides along.
+                    canvas.stroke_rounded(r.x, r.y, r.w, r.h, 3.0, color::accent(), 1.5);
+                    label = what;
+                } else {
+                    draw_drop_zone(canvas, *r, &what);
+                }
             }
             FileDrop::Nothing => {
                 if let Some(dir) = &folder {
@@ -2267,6 +2340,27 @@ impl Ui {
                 y = self.choice_row(canvas, x, y, w, e, "Primitive", Choice::MeshPrimitive);
                 y = self.model_rows(canvas, doc, x, y, w, e);
                 y = self.float_row(canvas, x, y, w, e, "Size", Field::MeshSize);
+                let material = d
+                    .mesh_visual
+                    .as_ref()
+                    .map(|m| m.material.trim().to_string())
+                    .unwrap_or_default();
+                y = self.material_row(canvas, doc, x, y, w, id, &material);
+                if !material.is_empty() {
+                    // The material owns colour and surface.
+                    if self.row_visible(Rect::new(x, y, w, 16.0)) {
+                        canvas.text(
+                            x + layout::LABEL_W,
+                            y,
+                            layout::SMALL_SIZE,
+                            "Colour and surface come from the material",
+                            color::text_faint(),
+                        );
+                    }
+                    y += 22.0;
+                }
+            }
+            if open && material_free(d) {
                 let is_model = matches!(
                     d.mesh_visual.as_ref().map(|m| &m.primitive),
                     Some(automata_core::PrimitiveData::Model { .. })
@@ -5249,6 +5343,14 @@ enum FileDrop {
     Nothing,
 }
 
+/// Whether an entity's Mesh Renderer has its own colour and surface (no
+/// material file overrides them).
+fn material_free(d: &EntityData) -> bool {
+    d.mesh_visual
+        .as_ref()
+        .is_some_and(|m| m.material.trim().is_empty())
+}
+
 /// An accent outline around a drop target with a label at its top.
 fn draw_drop_zone(canvas: &mut Canvas, r: Rect, label: &str) {
     canvas.stroke_rounded(
@@ -5724,6 +5826,59 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn dragging_a_material_onto_an_object_puts_it_on() {
+        let root = std::env::temp_dir().join(format!("oberon-ui-matdrag-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mat = root.join("brick.mat.ron");
+        automata_assets::MaterialFile::default().save(&mat).unwrap();
+        let mut c = canvas();
+        let mut doc = Document::starter();
+        doc.select(None);
+        let mut ui = Ui::new();
+        ui.project_root = root.clone();
+        let files = lay().files;
+        let row = (files.x + 60.0, files.y + layout::TITLEBAR_H + 4.0 + 11.0);
+        let cube = doc.entities.iter().find(|e| e.name() == "Cube").unwrap().id;
+        let set = |out: &[Intent], id: u64| {
+            out.contains(&Intent::SetMaterial {
+                id,
+                path: Some(mat.clone()),
+            })
+        };
+        // Onto the object in the scene view.
+        let t = doc.entities[doc.index_of(cube).unwrap()]
+            .data
+            .transform
+            .unwrap();
+        let proj = view::Projector::new(&ui.camera, lay().viewport);
+        let on_cube = proj.project(Vec3::from(t.position)).unwrap();
+        let out = drag(&mut ui, &mut c, &doc, row, on_cube);
+        assert!(set(&out, cube), "{out:?}");
+        // Onto empty sky: nothing.
+        let sky = (lay().viewport.x + 30.0, lay().viewport.y + 30.0);
+        let out = drag(&mut ui, &mut c, &doc, row, sky);
+        assert!(
+            !out.iter().any(|i| matches!(i, Intent::SetMaterial { .. })),
+            "{out:?}"
+        );
+        // Onto its Hierarchy row.
+        let i = doc.index_of(cube).unwrap();
+        let h = lay().hierarchy;
+        let at = (
+            h.x + 60.0,
+            h.y + layout::TITLEBAR_H + 4.0 + (i as f32 + 0.5) * layout::ROW_H,
+        );
+        let out = drag(&mut ui, &mut c, &doc, row, at);
+        assert!(set(&out, cube), "{out:?}");
+        // Onto the Inspector, for the selected object.
+        doc.select(Some(cube));
+        let out = drag(&mut ui, &mut c, &doc, row, center_of(lay().inspector));
+        assert!(set(&out, cube), "{out:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Clicks down the Inspector at `x`, scrolling, until `found` says
     /// yes. Every click starts from a fresh `make()` (a stray click on a
     /// header would fold the section away), so the Ui that found it is
@@ -6086,6 +6241,8 @@ mod tests {
         ui.project_root = root.clone();
         ui.frame(&mut c, &doc, Pointer::default(), None);
         // Sweep the Inspector's right edge and middle: the quick buttons.
+        // A click that opens a dialog (the Material row's chooser) would
+        // swallow the rest, so close it each time.
         let insp = lay().inspector;
         let mut saved = Vec::new();
         for x in [insp.x + insp.w - 30.0, insp.x + insp.w * 0.62] {
@@ -6096,6 +6253,7 @@ mod tests {
                         saved.push(settings);
                     }
                 }
+                ui.dialog = None;
             }
         }
         let turned = ImportSettings {

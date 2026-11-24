@@ -166,7 +166,7 @@ jobs:
         run: |
           set -o pipefail
           {
-            pytest examples/oberon/coin_run/tests examples/oberon/fps/tests examples/oberon/lagoon/tests examples/oberon/night_lights/tests examples/oberon/campfire/tests examples/oberon/robot_plaza/tests examples/oberon/ponytail_park/tests examples/oberon/joint_yard/tests examples/oberon/pause_menu/tests examples/oberon/shape_signal/tests examples/python/zero_to_hero examples/python/tests
+            pytest examples/oberon/coin_run/tests examples/oberon/fps/tests examples/oberon/lagoon/tests examples/oberon/night_lights/tests examples/oberon/campfire/tests examples/oberon/robot_plaza/tests examples/oberon/ponytail_park/tests examples/oberon/joint_yard/tests examples/oberon/pause_menu/tests examples/oberon/shape_signal/tests examples/oberon/workshop/tests examples/python/zero_to_hero examples/python/tests
             python examples/oberon/coin_run/main.py --headless
             python examples/oberon/fps/main.py --headless
             python examples/oberon/lagoon/main.py --headless

@@ -40,6 +40,7 @@ this and `oberon run`, `test`, `export` and `doctor`.
 | [Graphics](graphics.md) | The Graphics panel: quality, sun, environment, fog, test scenes |
 | [The code editor](code-editor.md) | Writing scripts inside Oberon: completion, language servers, find/replace |
 | [The UI editor](ui-editor.md) | Game menus and HUDs as `ui/*.ui.ron` documents: canvas, widget tree, themes |
+| [Materials](materials.md) | Shared `.mat.ron` looks with textures: the material editor, its live preview, dragging materials onto objects |
 | [Models](models.md) | Importing glTF and OBJ models, the Assets tab, import settings (scale, rotation, pivot), fitted colliders |
 | [Audio](audio.md) | Sound files, Audio Sources, previews, playing sounds from scripts |
 | [Prefabs & attributes](prefabs-and-attributes.md) | Reusable objects and custom per-entity data |

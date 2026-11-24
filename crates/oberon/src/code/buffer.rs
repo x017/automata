@@ -297,6 +297,12 @@ impl Buffer {
         }
     }
 
+    /// How many undo steps there are.
+    #[must_use]
+    pub fn undo_depth(&self) -> usize {
+        self.undo.len()
+    }
+
     /// Undoes the last edit. Returns false if there was none.
     pub fn undo(&mut self) -> bool {
         let Some(snap) = self.undo.pop() else {

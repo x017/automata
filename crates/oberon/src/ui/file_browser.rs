@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::dialogs::Dialog;
+use super::material_editor::MATERIALS_DIR;
 use super::menus::DialogKind;
 use super::project_panel::{asset_kind, draw_tree_icon, unique_child, AssetKind};
 use super::settings::{SettingText, SettingsPage};
@@ -138,6 +139,9 @@ impl FileDialog {
             DialogKind::OpenScript => "Open Script",
             DialogKind::NewScript => "New Script",
             DialogKind::NewUiScreen => "New UI Screen",
+            DialogKind::NewMaterial => "New Material",
+            DialogKind::ChooseMaterial(_) => "Choose Material",
+            DialogKind::ChooseMaterialMap(_) => "Choose Texture",
             DialogKind::AttachScript(_) => "Attach Script — pick one or name a new .py",
             DialogKind::ImportModel(None) => "Import Model",
             DialogKind::ImportModel(Some(_)) => "Choose Model",
@@ -160,6 +164,8 @@ impl FileDialog {
             DialogKind::ImportSound(_) => "ogg",
             DialogKind::ImportFont => "ttf",
             DialogKind::NewUiScreen => "ui.ron",
+            DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => "mat.ron",
+            DialogKind::ChooseMaterialMap(_) => "png",
             DialogKind::BuildOutput | DialogKind::PythonInterpreter => "",
             _ => "ron",
         }
@@ -172,6 +178,8 @@ impl FileDialog {
             DialogKind::ImportSound(_) => ".ogg .wav .mp3 .flac",
             DialogKind::ImportFont => ".ttf .otf",
             DialogKind::NewUiScreen => ".ui.ron",
+            DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => ".mat.ron",
+            DialogKind::ChooseMaterialMap(_) => ".png .jpg",
             DialogKind::SavePrefab(_) | DialogKind::InstantiatePrefab => ".prefab",
             DialogKind::OpenScript | DialogKind::NewScript | DialogKind::AttachScript(_) => ".py",
             DialogKind::BuildOutput => "folders",
@@ -191,6 +199,12 @@ impl FileDialog {
             DialogKind::BuildOutput => false,
             DialogKind::PythonInterpreter => true,
             DialogKind::NewUiScreen => crate::uidoc::is_ui_doc_path(Path::new(name)),
+            DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => {
+                automata_assets::is_material_path(Path::new(name))
+            }
+            DialogKind::ChooseMaterialMap(_) => {
+                automata_assets::material::is_image_path(Path::new(name))
+            }
             _ => {
                 let lower = name.to_ascii_lowercase();
                 Path::new(name)
@@ -198,6 +212,7 @@ impl FileDialog {
                     .is_some_and(|x| x.eq_ignore_ascii_case(self.extension()))
                     && !lower.ends_with(".import.ron")
                     && !lower.ends_with(".ui.ron")
+                    && !lower.ends_with(".mat.ron")
                     && lower != "build.ron"
             }
         }
@@ -210,6 +225,7 @@ impl FileDialog {
                 | DialogKind::SavePrefab(_)
                 | DialogKind::NewScript
                 | DialogKind::NewUiScreen
+                | DialogKind::NewMaterial
         )
     }
 
@@ -228,6 +244,8 @@ impl FileDialog {
                 | DialogKind::ImportFont
                 | DialogKind::BuildScene
                 | DialogKind::PythonInterpreter
+                | DialogKind::ChooseMaterial(_)
+                | DialogKind::ChooseMaterialMap(_)
         )
     }
 
@@ -241,7 +259,8 @@ impl FileDialog {
         match self.kind {
             DialogKind::OpenScene | DialogKind::OpenScript => "Open",
             DialogKind::InstantiatePrefab => "Instantiate",
-            DialogKind::NewScript | DialogKind::NewUiScreen => "Create",
+            DialogKind::NewScript | DialogKind::NewUiScreen | DialogKind::NewMaterial => "Create",
+            DialogKind::ChooseMaterial(_) | DialogKind::ChooseMaterialMap(_) => "Use",
             DialogKind::AttachScript(_) => "Attach",
             DialogKind::ImportModel(None)
             | DialogKind::ImportSound(None)
@@ -263,6 +282,7 @@ impl FileDialog {
             DialogKind::ImportModel(_) => "model",
             DialogKind::ImportSound(_) => "sound",
             DialogKind::ImportFont => "font",
+            DialogKind::ChooseMaterialMap(_) => "image",
             _ => self.extension(),
         }
     }
@@ -605,6 +625,25 @@ impl Ui {
             DialogKind::ImportModel(_) => Some(crate::models::MODELS_DIR),
             DialogKind::ImportSound(_) => Some(crate::sounds::SOUNDS_DIR),
             DialogKind::ImportFont => Some(crate::fonts::FONTS_DIR),
+            DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => {
+                let dir = root.join(MATERIALS_DIR);
+                if kind == DialogKind::NewMaterial {
+                    let _ = std::fs::create_dir_all(&dir);
+                }
+                Some(MATERIALS_DIR)
+            }
+            DialogKind::ChooseMaterialMap(_) => {
+                // Next to the material, or a `textures/` folder beside it.
+                if let Some(dir) = self.material_editor_path().and_then(|p| {
+                    let folder = p.parent()?.to_path_buf();
+                    [folder.join("../textures"), folder.join("textures"), folder]
+                        .into_iter()
+                        .find(|d| d.is_dir())
+                }) {
+                    return dir;
+                }
+                Some("textures")
+            }
             DialogKind::NewUiScreen => {
                 // Scripts find documents under `ui/`: start there.
                 let dir = root.join("ui");
@@ -664,6 +703,28 @@ impl Ui {
                     "hud.ui.ron"
                 };
                 (unique_child(&dir, base), None)
+            }
+            DialogKind::NewMaterial => {
+                let dir = self.start_dir_for(kind);
+                (unique_child(&dir, "material.mat.ron"), None)
+            }
+            DialogKind::ChooseMaterial(id) => {
+                let current = entity(id)
+                    .and_then(|e| e.data.mesh_visual.as_ref())
+                    .filter(|m| !m.material.is_empty())
+                    .map(|m| base.join(&m.material));
+                (String::new(), current)
+            }
+            DialogKind::ChooseMaterialMap(slot) => {
+                let current = self.material_editor_path().and_then(|mat| {
+                    let file = self.material_editor_file()?;
+                    let rel = file
+                        .map(automata_assets::MapSlot::ALL[slot])
+                        .trim()
+                        .to_string();
+                    (!rel.is_empty()).then(|| automata_assets::material::map_path(&mat, &rel))
+                });
+                (String::new(), current)
             }
             DialogKind::OpenScript => (
                 String::new(),
@@ -1132,6 +1193,7 @@ impl Ui {
             && fd.overwrite.as_ref() != Some(&path)
             && fd.kind != DialogKind::NewScript
             && fd.kind != DialogKind::NewUiScreen
+            && fd.kind != DialogKind::NewMaterial
         {
             let msg = format!(
                 "{} already exists. Press {} again to replace it.",
@@ -1204,6 +1266,16 @@ impl Ui {
             DialogKind::OpenScript => Intent::OpenScript(path),
             DialogKind::NewScript => Intent::NewScript(path),
             DialogKind::NewUiScreen => Intent::NewUiScreen(path),
+            DialogKind::NewMaterial => Intent::NewMaterial(path),
+            DialogKind::ChooseMaterial(id) => Intent::SetMaterial {
+                id,
+                path: Some(path),
+            },
+            DialogKind::ChooseMaterialMap(slot) => {
+                self.close_file_dialog();
+                self.set_material_map(slot, Some(&path));
+                return None;
+            }
             DialogKind::AttachScript(id) => Intent::AttachScript { id, path },
             DialogKind::ImportModel(None) => Intent::AddModel { path, at: None },
             DialogKind::ImportModel(Some(id)) => Intent::SetModel { id, path },

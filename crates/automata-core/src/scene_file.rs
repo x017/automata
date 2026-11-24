@@ -237,6 +237,11 @@ pub struct MeshVisualData {
     /// default, omitted from the file) draws it at any distance.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub draw_distance: f32,
+    /// A material file (`.mat.ron`, relative to the scene's folder) that
+    /// replaces `color` and `surface` (and a model's own materials). Empty
+    /// (the default, omitted from the file): none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub material: String,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde's signature
@@ -291,6 +296,7 @@ impl From<&MeshVisual> for MeshVisualData {
             color: visual.color,
             surface: visual.surface,
             draw_distance: visual.draw_distance,
+            material: visual.material.clone(),
         }
     }
 }
@@ -306,6 +312,7 @@ impl From<&MeshVisualData> for MeshVisual {
         }
         .with_surface(data.surface)
         .with_draw_distance(data.draw_distance)
+        .with_material(&data.material)
     }
 }
 
@@ -612,6 +619,7 @@ mod tests {
                     color: [1.0; 4],
                     surface,
                     draw_distance: 0.0,
+                    material: String::new(),
                 }),
                 ..Default::default()
             }],
@@ -651,6 +659,40 @@ mod tests {
     }
 
     #[test]
+    fn materials_round_trip_and_stay_out_of_plain_files() {
+        let cube = |material: &str| SceneFile {
+            version: SCENE_FILE_VERSION,
+            entities: vec![EntityData {
+                mesh_visual: Some(MeshVisualData {
+                    primitive: PrimitiveData::Cube { size: 1.0 },
+                    color: [1.0; 4],
+                    surface: Surface::default(),
+                    draw_distance: 0.0,
+                    material: material.into(),
+                }),
+                ..Default::default()
+            }],
+        };
+        let plain = cube("").to_ron().unwrap();
+        assert!(!plain.contains("material"), "{plain}");
+        let file = cube("materials/brick.mat.ron");
+        let text = file.to_ron().unwrap();
+        assert!(
+            text.contains(r#"material: "materials/brick.mat.ron""#),
+            "{text}"
+        );
+        assert_eq!(SceneFile::from_ron(&text).unwrap(), file);
+        // Through the world and back: the visual keeps it.
+        let mut world = SceneWorld::new();
+        file.apply_to_world(&mut world);
+        let mut q = world.query::<&automata_scene::MeshVisual>();
+        let visual = q.iter().next().unwrap();
+        assert_eq!(visual.material, "materials/brick.mat.ron");
+        drop(q);
+        assert_eq!(SceneFile::from_world(&world), file);
+    }
+
+    #[test]
     fn draw_distances_round_trip_and_default_to_unlimited() {
         let file = SceneFile {
             version: SCENE_FILE_VERSION,
@@ -660,6 +702,7 @@ mod tests {
                     color: [1.0; 4],
                     surface: Surface::default(),
                     draw_distance: 80.0,
+                    material: String::new(),
                 }),
                 ..Default::default()
             }],
@@ -702,6 +745,7 @@ mod tests {
                 color: [0.5, 1.0, 1.0, 1.0],
                 surface: Surface::default(),
                 draw_distance: 0.0,
+                material: String::new(),
             }),
             collider_3d: Some(
                 automata_physics::Collider3D::cuboid(1.0, 1.0, 0.02).offset([0.5, 0.5, 0.0]),

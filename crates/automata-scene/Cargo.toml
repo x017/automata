@@ -18,3 +18,7 @@ glam.workspace = true
 hecs.workspace = true
 serde.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+image.workspace = true
+pollster.workspace = true
