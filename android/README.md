@@ -1,13 +1,17 @@
 # AUTOMATA on Android
 
 Work in progress: roadmap item E1. This folder builds an APK of a Python
-game with [python-for-android] (p4a), using its SDL3 launcher. Today the APK
-is a spike that proves the engine runs on Android:
-- it draws through SDL's window,
-- it takes touches,
-- it survives being sent to the background.
+game with [python-for-android] (p4a), using its SDL3 launcher. It builds
+two kinds of APK:
+- **an exported game**, as `automata-export stage` writes it. CI builds
+  *Coin Run* this way and plays it on an emulator. Its scenes and scripts
+  run unchanged, and its saves and settings go to the app's own storage;
+- **a spike** (`app/`) that tests the platform layer: drawing through SDL's
+  window, touches, going to the background and coming back.
 
-`automata-export build --target android` comes later and will use this.
+Coin Run has no touch controls yet: on an emulator or a phone with a
+keyboard it plays as on desktop. Touch controls are next, then
+`automata-export build --target android`, which will use this.
 
 | Path | What it is |
 | --- | --- |
@@ -16,14 +20,19 @@ is a spike that proves the engine runs on Android:
 | `pyproject.toml` | maturin settings for that build (placed at the root of a staged copy of the repo) |
 | `build_apk.sh` | Stages the repo and runs `p4a apk` |
 | `java/` | `AutomataActivity`, the launcher's activity with two small changes (below) |
+| `player/main.py` | The entry point for an exported game: runs the staged folder with `automata.player` |
 | `app/main.py` | The spike game: a spinning cube, finger markers, Back to quit |
-| `ci/smoke_test.sh` | The emulator test CI runs on the APK |
+| `ci/smoke_test.sh` | The emulator test for the spike |
+| `ci/coin_run_test.sh` | The emulator test for Coin Run |
+| `ci/lib.sh` | What both tests share: waiting on logcat, crash checks, screenshots |
 | `ci/report.py` | Posts a log or a screenshot as a check run on the commit |
 
 ## How it fits together
 
 1. p4a's SDL3 launcher starts CPython on SDL's main thread and runs the
-   game's `main.py`.
+   app's `main.py`. For an exported game that's `player/main.py`, which runs
+   the game folder (`game/` beside it) through `automata.player`, just as
+   the desktop launcher does. `game.json` names the start scene or script.
 2. `import automata` loads `engine/`, which does three things:
    - sends the engine's logs to logcat (tag `SDL/APP`);
    - installs its SDL driver with `automata_core::platform::install_driver`;
@@ -40,7 +49,12 @@ is a spike that proves the engine runs on Android:
    Coming back attaches the new surface. GPU resources (meshes, textures,
    pipelines) are kept, and the time spent away doesn't count as a frame.
 
-Scripts don't change. The same `main.py` runs on desktop with winit.
+Scripts don't change. The same game runs on desktop with winit.
+
+Saves and settings (`ctx.save`, `ctx.settings`) go to the app's private
+storage. `automata.user_data_dir` uses p4a's `ANDROID_PRIVATE` there. They
+are written in the frame they change, because Android can kill an app in
+the background without warning.
 
 ## Android and SDL details that matter
 
@@ -49,9 +63,15 @@ Things the emulator taught us, each handled in `java/` or
 - **Re-creation.** Android can destroy and re-create the activity in the
   same process, for example on a configuration change the manifest doesn't
   list. By default SDL treats that as fatal and quits silently
-  (`System.exit(0)`, logged as "activity finished"). `AutomataActivity`
-  sets `SDL_ANDROID_ALLOW_RECREATE_ACTIVITY` before SDL's `onCreate`, and
-  logs which configuration changes caused a re-creation.
+  (`System.exit(0)`, logged as "activity finished"). It happens even at
+  launch: the activity can be re-created while it turns to landscape,
+  before SDL has started. `AutomataActivity` allows re-creation with
+  `nativeSetenv` as soon as SDL's library is loaded; an environment
+  variable alone would only count once SDL had read it. It also logs which
+  configuration changes caused a re-creation.
+- **Orientation.** The driver holds the screen to the shape of the game's
+  window (landscape for 1280×720) with `SDL_ORIENTATIONS`, unless the app
+  sets that hint itself.
 - **Lifecycle events.** Once SDL has queued the background events, it
   normally blocks every event pump until the app returns, so the queued
   copies arrive late. SDL's docs say to handle them in an event watch. The
@@ -83,10 +103,21 @@ You need:
 - NDK r28c (`ANDROID_NDK_HOME`).
 
 ```sh
+# An exported game: stage what a build ships, then package it.
+automata-export init my_game --scene level.ron   # once: writes build.ron
+automata-export stage my_game --out /tmp/my_game_staged
+AUTOMATA_PACKAGE=org.example.mygame AUTOMATA_NAME="My Game" \
+  android/build_apk.sh /tmp/my_game_staged arm64-v8a   # for phones
+
 android/build_apk.sh                 # the spike, x86_64 (emulators)
-android/build_apk.sh mygame arm64-v8a  # a folder with main.py, for phones
-adb install -r dist/*.apk
+adb install -r dist/org.automata.spike-x86_64.apk
 ```
+
+`build_apk.sh` takes a staged game (a folder with `game.json`) or any
+folder with a `main.py`, which runs as is. The APK lands in `dist/`, named
+after its package. Set `AUTOMATA_VERSION` to give it a version. Scripts
+ship as source (`--no-byte-compile-python`), because the engine loads
+behaviour scripts from their `.py` files.
 
 The first build compiles CPython, SDL3 and the engine, which takes a while.
 Later builds reuse p4a's cache.
@@ -102,18 +133,28 @@ incomplete Vulkan.
 The `Android` workflow runs three jobs:
 1. **check:** `engine/` compiles for `aarch64-linux-android` and passes
    clippy with no warnings.
-2. **APK:** builds the spike for x86_64.
-3. **emulator smoke test:** runs the spike on an API 34 emulator and checks
-   that:
+2. **APK:** builds the spike for x86_64, then *Coin Run*: a copy gets a
+   `build.ron` from `automata-export init`, `automata-export stage` copies
+   what a build ships, and `build_apk.sh` packages it. The second build
+   reuses the first one's Python and engine.
+3. **emulator smoke test:** runs both on an API 34 emulator. For the spike
+   it checks that:
    - it starts and draws (`1-running.png`);
    - a tap reaches the game as a touch;
    - Home pauses it (`2-background.png`);
    - returning resumes drawing on a new surface (`3-resumed.png`);
    - Back quits.
 
+   For Coin Run it checks that:
+   - the level loads and its scripts run (`coin-1-start.png`);
+   - keys reach the scripts: F2 changes the graphics preset
+     (`coin-2-playing.png`);
+   - the setting lands in `settings.json` in the app's storage;
+   - after Android kills the app, the next start remembers it.
+
    The screenshots and the logcat are uploaded as the `android-smoke`
    artifact. They're also posted on the commit as check runs:
-   - `android: logcat`;
+   - `android: logcat` and `android: coin run logcat`;
    - `android: screenshot …`;
    - `android: stacks`: every thread's stack, saved when a wait times out;
    - `android: clippy log` and `android: APK build log`.

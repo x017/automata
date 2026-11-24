@@ -115,6 +115,18 @@ Other Android work:
    ([Emulator screenshots](docs/assets/ui/e1_android_emulator.jpg): running,
    then after Home and back.)
 2. **Python on device:** run Coin Run on a device or emulator.
+   *Done:* CI builds Coin Run as an exported game and plays it on the
+   emulator. `automata-export stage` writes the game folder a build ships;
+   the APK's `android/player/main.py` runs it with `automata.player`, as the
+   desktop launcher does. The test checks that:
+   - the level loads and its scripts run;
+   - keys reach them;
+   - its settings land in the app's storage and survive Android killing
+     the app.
+
+   Scripts ship as `.py`. The window holds landscape, and activity
+   re-creation at launch is allowed early enough.
+   ([Screenshots](docs/assets/ui/e1_coin_run_android.jpg).)
 3. **Touch:** `ctx.input.touches` (*done in E1a*: fingers with stable
    numbers, start points and phases; the left mouse button is finger 0 on
    desktop and in Oberon), the virtual joystick and buttons, and control

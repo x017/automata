@@ -2,7 +2,8 @@
 
 An export turns your project into a game other people can run. They don't
 need Oberon, Rust or Python installed. AUTOMATA exports to **Windows**
-and **Linux** (64-bit). Android is planned.
+and **Linux** (64-bit). Android is coming: *Coin Run* already runs on an
+Android emulator in CI.
 
 Each export is a folder you can zip and share. You can also turn on
 **Archive** to get a ready-made `.zip` (Windows) or `.tar.gz` (Linux).
@@ -111,6 +112,7 @@ cargo build --release -p automata-export
 automata-export templates download             # once per engine version
 automata-export init my_game --scene level.ron # writes build.ron
 automata-export check my_game                  # validate without building
+automata-export stage my_game --out staged/    # just the game folder
 automata-export build my_game --target all     # or linux / windows
 ```
 
@@ -124,6 +126,11 @@ automata-export init my_game --main main.py
 The exported game runs `main.py` exactly like `python main.py` would,
 with the game folder as the working directory. Load files with paths
 relative to that folder.
+
+`stage` writes only the game folder a build would ship: your files minus
+the ones left out, plus `game.json`. It doesn't need a template. Use it to
+look at what gets shipped, or to package the game yourself. The Android
+build in the repository uses it (Android export is still in progress).
 
 ## Running an exported game
 

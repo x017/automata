@@ -998,8 +998,13 @@ and its own input types. The game-facing API stays the same everywhere.
   python-for-android, then runs it on an API 34 emulator. The test checks
   that it draws, takes a tap, survives Home and coming back on a new
   surface, and quits on Back (see `android/README.md`).
-- ⬜ Coin Run on the emulator; virtual joystick and buttons; `build.ron`
-  touch controls; `--target android` with debug signing; size.
+- ✅ **Coin Run on the emulator:** `automata-export stage` writes the
+  folder an export ships, and `android/build_apk.sh` packages it with an
+  entry point that runs it through `automata.player`, like the desktop
+  launcher. In CI, Coin Run loads, its scripts take keys, and its settings
+  survive Android killing the app (saves go to the app's private storage).
+- ⬜ Virtual joystick and buttons; `build.ron` touch controls;
+  `--target android` with debug signing; size.
 
 ### E2. macOS export ⬜ M
 - A macOS template build in CI (Apple Silicon and Intel) and an `.app`

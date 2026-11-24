@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Exporting your game · AUTOMATA docs</title>
-<meta name="description" content="An export turns your project into a game other people can run. They don&#x27;t need Oberon, Rust or Python installed. AUTOMATA exports to Windows and Linux (64-bit). Android is planned.">
+<meta name="description" content="An export turns your project into a game other people can run. They don&#x27;t need Oberon, Rust or Python installed. AUTOMATA exports to Windows and Linux (64-bit). Android is coming: Coin Run already…">
 <meta name="theme-color" content="#000000">
 <link rel="stylesheet" href="../_static/docs.css">
 <script>window.DOCS_ROOT = "../";</script>
@@ -35,7 +35,8 @@
 <h1>Exporting your game</h1>
 <p>An export turns your project into a game other people can run. They don't
 need Oberon, Rust or Python installed. AUTOMATA exports to <strong>Windows</strong>
-and <strong>Linux</strong> (64-bit). Android is planned.</p>
+and <strong>Linux</strong> (64-bit). Android is coming: <em>Coin Run</em> already runs on an
+Android emulator in CI.</p>
 <p>Each export is a folder you can zip and share. You can also turn on
 <strong>Archive</strong> to get a ready-made <code>.zip</code> (Windows) or <code>.tar.gz</code> (Linux).</p>
 <div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>build/
@@ -105,6 +106,7 @@ code-first games that don't use Oberon:</p>
 automata-export templates download             # once per engine version
 automata-export init my_game --scene level.ron # writes build.ron
 automata-export check my_game                  # validate without building
+automata-export stage my_game --out staged/    # just the game folder
 automata-export build my_game --target all     # or linux / windows</code></pre></div>
 <p>A code-first game, written in Python with <code>at.Game</code> and no scene file,
 starts from a script instead of a scene:</p>
@@ -112,6 +114,10 @@ starts from a script instead of a scene:</p>
 <p>The exported game runs <code>main.py</code> exactly like <code>python main.py</code> would,
 with the game folder as the working directory. Load files with paths
 relative to that folder.</p>
+<p><code>stage</code> writes only the game folder a build would ship: your files minus
+the ones left out, plus <code>game.json</code>. It doesn't need a template. Use it to
+look at what gets shipped, or to package the game yourself. The Android
+build in the repository uses it (Android export is still in progress).</p>
 <h2 id="running-an-exported-game">Running an exported game<a class="anchor" href="#running-an-exported-game" aria-label="Link to this section">#</a></h2>
 <p>Players start the executable. It also accepts two flags, which help with
 smoke tests in CI:</p>

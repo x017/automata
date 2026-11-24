@@ -51,7 +51,7 @@ if [ -z "$settings" ]; then
   exit 1
 fi
 echo "settings: $settings"
-in_app cat "$settings" | tee "$out/settings.json"
+in_app cat "'$settings'" | tee "$out/settings.json"
 if ! grep -q "\"graphics\": *\"$first\"" "$out/settings.json"; then
   echo "::error::$settings doesn't hold graphics=$first: $(tr '\n' ' ' < "$out/settings.json" | cut -c1-400)"
   exit 1
