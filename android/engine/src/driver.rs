@@ -10,6 +10,7 @@
 //!    (Android destroys it) and stop running frames; on return, attach the
 //!    new one. Textures, meshes and the scene all stay in GPU memory.
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use automata_core::platform::{FrameStep, Host};
@@ -29,6 +30,14 @@ use crate::keys;
 const TOUCH_MOUSE_ID: u32 = u32::MAX;
 /// SDL's id for touches it made up from the mouse.
 const MOUSE_TOUCH_ID: u64 = u64::MAX;
+
+/// Lifecycle changes the event watch saw and the loop hasn't handled yet
+/// ([`WENT_BACKGROUND`] | [`WENT_FOREGROUND`]).
+static LIFECYCLE: AtomicU8 = AtomicU8::new(0);
+/// The app went to the background.
+const WENT_BACKGROUND: u8 = 1;
+/// The app came back to the foreground.
+const WENT_FOREGROUND: u8 = 2;
 
 /// How long the loop sleeps at a time while frames are paused.
 const PAUSED_WAIT: Duration = Duration::from_millis(250);
@@ -63,6 +72,26 @@ pub(crate) fn run(host: &mut dyn Host) -> Result<()> {
     }
     let window = builder.build().map_err(platform)?;
     let mut events = sdl.event_pump().map_err(platform)?;
+    // SDL's docs ask for the lifecycle events to be handled in a watch,
+    // which runs the moment SDL raises them, as the queued copies can
+    // arrive late (only on return, when SDL blocks while paused). The
+    // watch notes them; the loop acts on them.
+    let _lifecycle_watch = sdl
+        .event()
+        .map_err(platform)?
+        .add_event_watch(|event: Event| {
+            let change = match event {
+                Event::AppWillEnterBackground { .. } | Event::AppDidEnterBackground { .. } => {
+                    WENT_BACKGROUND
+                }
+                Event::AppDidEnterForeground { .. } => WENT_FOREGROUND,
+                _ => return,
+            };
+            let before = LIFECYCLE.fetch_or(change, Ordering::SeqCst);
+            if before & change == 0 {
+                info!(change, "lifecycle event (watch)");
+            }
+        });
 
     let mut driver = SdlDriver {
         host,
@@ -98,6 +127,13 @@ pub(crate) fn run(host: &mut dyn Host) -> Result<()> {
             if driver.handle(event)? == Flow::Quit {
                 return Ok(());
             }
+        }
+        let changes = LIFECYCLE.swap(0, Ordering::SeqCst);
+        if changes & WENT_BACKGROUND != 0 {
+            driver.enter_background();
+        }
+        if changes & WENT_FOREGROUND != 0 {
+            driver.enter_foreground()?;
         }
         if !driver.active() || driver.deadline.is_some_and(|d| Instant::now() < d) {
             continue;
@@ -165,26 +201,38 @@ impl SdlDriver<'_> {
         }
     }
 
+    /// Stops frames and lets go of the surface (Android destroys it).
+    fn enter_background(&mut self) {
+        if !self.foreground {
+            return;
+        }
+        info!("entering the background: pausing");
+        self.foreground = false;
+        self.detach();
+        // Releases that happen while away never arrive.
+        self.host.input(&InputEvent::FocusLost);
+    }
+
+    /// Takes the new surface and runs frames again.
+    fn enter_foreground(&mut self) -> Result<()> {
+        if self.foreground {
+            return Ok(());
+        }
+        info!("back in the foreground: resuming");
+        self.foreground = true;
+        self.focused = true;
+        self.deadline = None;
+        self.attach()
+    }
+
     /// Handles one SDL event.
     fn handle(&mut self, event: Event) -> Result<Flow> {
         match event {
             Event::Quit { .. } | Event::AppTerminating { .. } => return Ok(Flow::Quit),
             Event::AppWillEnterBackground { .. } | Event::AppDidEnterBackground { .. } => {
-                if self.foreground {
-                    info!("entering the background: pausing");
-                }
-                self.foreground = false;
-                self.detach();
-                // Releases that happen while away never arrive.
-                self.host.input(&InputEvent::FocusLost);
+                self.enter_background();
             }
-            Event::AppDidEnterForeground { .. } => {
-                info!("back in the foreground: resuming");
-                self.foreground = true;
-                self.focused = true;
-                self.deadline = None;
-                self.attach()?;
-            }
+            Event::AppDidEnterForeground { .. } => self.enter_foreground()?,
             Event::Window { win_event, .. } => return self.window_event(win_event),
             event => {
                 if let Some(input) = self.input_event(&event) {
