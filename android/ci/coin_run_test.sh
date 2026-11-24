@@ -43,16 +43,19 @@ fail_on_crash
 
 # ctx.settings is written in the frame it changes.
 sleep 1
-settings=$(adb shell run-as "$pkg" find files -name settings.json | tr -d '\r' | head -1)
+in_app() { adb shell run-as "$pkg" "$@" 2>&1 | tr -d '\r' || true; }
+in_app find files -maxdepth 2 -not -path "files/app/*" > "$out/files.txt"
+settings=$(in_app find files -name settings.json | grep "settings.json$" | head -1 || true)
 if [ -z "$settings" ]; then
-  echo "::error::no settings.json in the app's storage"
-  adb shell run-as "$pkg" ls -R files | head -40 || true
+  echo "::error::no settings.json in the app's storage: $(grep -v "^$" "$out/files.txt" | head -30 | tr '\n' ' ' | cut -c1-900)"
   exit 1
 fi
 echo "settings: $settings"
-adb shell run-as "$pkg" cat "$settings" | tee "$out/settings.json"
-grep -q "\"graphics\": *\"$first\"" "$out/settings.json" ||
-  { echo "::error::settings.json doesn't hold graphics=$first"; exit 1; }
+in_app cat "$settings" | tee "$out/settings.json"
+if ! grep -q "\"graphics\": *\"$first\"" "$out/settings.json"; then
+  echo "::error::$settings doesn't hold graphics=$first: $(tr '\n' ' ' < "$out/settings.json" | cut -c1-400)"
+  exit 1
+fi
 
 # Android kills apps in the background without warning; the next start
 # must find the setting.
