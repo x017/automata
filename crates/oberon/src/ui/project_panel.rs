@@ -220,13 +220,18 @@ fn list(dir: &Path) -> Vec<Item> {
     items
 }
 
-/// Same file, comparing canonical paths when both exist.
+/// Same file, comparing canonical paths when both exist. Paths with
+/// different file names (ignoring case) are never the same file, so the (slow, on some
+/// systems) canonicalisation only runs for likely matches: the Files tree
+/// calls this for every visible row, every frame.
 fn same_file(a: &Path, b: &Path) -> bool {
+    let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().to_lowercase());
     a == b
-        || matches!(
-            (std::fs::canonicalize(a), std::fs::canonicalize(b)),
-            (Ok(x), Ok(y)) if x == y
-        )
+        || (name(a) == name(b)
+            && matches!(
+                (std::fs::canonicalize(a), std::fs::canonicalize(b)),
+                (Ok(x), Ok(y)) if x == y
+            ))
 }
 
 impl ProjectState {
@@ -1146,6 +1151,20 @@ pub fn draw_model_icon(canvas: &mut Canvas, cx: f32, cy: f32, c: tiny_skia::Colo
 mod tests {
     use super::*;
     use crate::ui::Pointer;
+
+    #[test]
+    fn same_file_follows_relative_paths_and_skips_other_names() {
+        let dir = std::env::temp_dir().join(format!("oberon-same-file-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("level.ron"), "()").unwrap();
+        let direct = dir.join("level.ron");
+        let roundabout = dir.join("sub").join("..").join("level.ron");
+        assert!(same_file(&direct, &direct));
+        assert!(same_file(&direct, &roundabout), "one file, two spellings");
+        assert!(!same_file(&direct, &dir.join("sub")));
+        assert!(!same_file(&direct, &dir.join("missing.ron")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn assets_open_with_the_right_action() {

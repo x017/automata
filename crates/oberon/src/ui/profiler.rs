@@ -52,7 +52,27 @@ pub struct Profiler {
     samples: VecDeque<FrameSample>,
     /// Stop recording (the graph holds still for a closer look).
     pub paused: bool,
+    /// Finer timings inside a frame (panels, editor work), by name.
+    sections: Vec<Section>,
 }
+
+/// One named slice of a frame, averaged as frames go by.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Section {
+    /// What it times, as the Profiler lists it.
+    pub name: &'static str,
+    /// The latest frame's time (ms); 0 when it didn't run that frame.
+    pub last: f32,
+    /// A running average (ms) over roughly the last second.
+    pub avg: f32,
+    /// The worst frame (ms), slowly forgotten.
+    pub max: f32,
+    /// Time added this frame so far.
+    pending: f32,
+}
+
+/// How fast section averages follow (per frame): about a second's worth.
+const SECTION_SMOOTHING: f32 = 0.05;
 
 /// Current, average and worst of one series.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -97,6 +117,86 @@ impl Profiler {
     /// Forgets the history.
     pub fn clear(&mut self) {
         self.samples.clear();
+        self.sections.clear();
+    }
+
+    /// Adds `ms` to this frame's time for `name` (a section may run more
+    /// than once a frame). [`end_frame`](Self::end_frame) files it.
+    pub fn add(&mut self, name: &'static str, ms: f32) {
+        if self.paused {
+            return;
+        }
+        match self.sections.iter_mut().find(|s| s.name == name) {
+            Some(s) => s.pending += ms,
+            None => self.sections.push(Section {
+                name,
+                last: 0.0,
+                avg: 0.0,
+                max: 0.0,
+                pending: ms,
+            }),
+        }
+    }
+
+    /// Adds the time since `start` to `name` (see [`add`](Self::add)).
+    pub fn since(&mut self, name: &'static str, start: std::time::Instant) {
+        self.add(name, start.elapsed().as_secs_f32() * 1000.0);
+    }
+
+    /// Files this frame's section times into their averages.
+    pub fn end_frame(&mut self) {
+        if self.paused {
+            return;
+        }
+        for s in &mut self.sections {
+            s.last = std::mem::take(&mut s.pending);
+            s.avg += (s.last - s.avg) * SECTION_SMOOTHING;
+            s.max = (s.max * (1.0 - SECTION_SMOOTHING * 0.2)).max(s.last);
+        }
+    }
+
+    /// The sections, busiest (by average) first.
+    #[must_use]
+    pub fn sections(&self) -> Vec<Section> {
+        let mut out = self.sections.clone();
+        out.sort_by(|a, b| b.avg.total_cmp(&a.avg));
+        out
+    }
+
+    /// A plain-text summary to paste into a bug report: the frame parts
+    /// and every section, with now / average / worst in milliseconds.
+    #[must_use]
+    pub fn report(&self) -> String {
+        use std::fmt::Write as _;
+        let mut out = String::from("Oberon profiler (ms: now / avg / max)\n");
+        let line = |out: &mut String, name: &str, s: Summary| {
+            let _ = writeln!(
+                out,
+                "{name:<34} {:>8.2} {:>8.2} {:>8.2}",
+                s.last, s.avg, s.max
+            );
+        };
+        for (i, name) in PART_NAMES.iter().enumerate() {
+            line(&mut out, name, self.summary(|s| s.parts()[i]));
+        }
+        let frame = self.summary(|s| s.total);
+        line(&mut out, "Frame", frame);
+        if frame.avg > 0.0 {
+            let _ = writeln!(out, "{:.0} fps", 1000.0 / frame.avg);
+        }
+        out.push_str("-- inside the frame --\n");
+        for s in self.sections() {
+            line(
+                &mut out,
+                s.name,
+                Summary {
+                    last: s.last,
+                    avg: s.avg,
+                    max: s.max,
+                },
+            );
+        }
+        out
     }
 
     /// Summary of one series (`pick` reads it from a sample).
@@ -161,6 +261,66 @@ impl Ui {
         if self.button(canvas, pause, label, style) {
             self.profiler.paused = !self.profiler.paused;
         }
+        let copy = Rect::new(pause.x - 64.0, y, 60.0, h);
+        self.tip(copy, "Copy the timings as text (for a bug report)");
+        if self.button(canvas, copy, "Copy", ButtonStyle::Ghost) {
+            let report = self.profiler.report();
+            self.code.clipboard.set(&report);
+            self.log(super::LogLevel::Info, "Copied the Profiler's timings");
+        }
+    }
+
+    /// The Profiler's middle column: the busiest slices of the frame
+    /// (panels, editor work, presenting), by average time. Returns its
+    /// width (0 when there's no room).
+    fn profiler_sections(&mut self, canvas: &mut Canvas, rect: Rect, x: f32) -> f32 {
+        const W: f32 = 290.0;
+        if rect.w < 900.0 {
+            return 0.0;
+        }
+        let pad = layout::PAD;
+        let row_h = layout::ROW_H.min((rect.h - 2.0 * pad) / 6.0).max(14.0);
+        let mut y = rect.y + pad;
+        let cols = [x + W - 116.0, x + W - 60.0];
+        canvas.text(
+            x,
+            y,
+            layout::SMALL_SIZE,
+            "Inside the frame",
+            color::text_faint(),
+        );
+        for (cx, head) in cols.iter().zip(["avg", "max"]) {
+            canvas.text(*cx, y, layout::SMALL_SIZE, head, color::text_faint());
+        }
+        y += row_h;
+        let sections = self.profiler.sections();
+        if sections.is_empty() {
+            canvas.text(x, y, layout::SMALL_SIZE, "—", color::text_faint());
+        }
+        for s in sections {
+            if y + row_h > rect.y + rect.h {
+                break;
+            }
+            canvas.text_clipped(
+                x,
+                y,
+                layout::SMALL_SIZE,
+                s.name,
+                color::text_dim(),
+                cols[0] - x - 6.0,
+            );
+            for (cx, v) in cols.iter().zip([s.avg, s.max]) {
+                canvas.text(
+                    *cx,
+                    y,
+                    layout::SMALL_SIZE,
+                    &format!("{v:.2}"),
+                    color::text_dim(),
+                );
+            }
+            y += row_h;
+        }
+        W + pad
     }
 
     /// The Profiler tab: a legend with figures on the left, the stacked
@@ -221,6 +381,9 @@ impl Ui {
                 color::text_faint(),
             );
         }
+
+        let middle = self.profiler_sections(canvas, rect, rect.x + legend_w + pad);
+        let legend_w = legend_w + middle;
 
         // --- Graph ---
         let g = Rect::new(
@@ -356,6 +519,36 @@ mod tests {
         assert!((p.summary(|s| s.total).last - last).abs() < 1e-3);
         p.clear();
         assert!(p.is_empty());
+    }
+
+    #[test]
+    fn sections_average_per_frame_and_report_busiest_first() {
+        let mut p = Profiler::default();
+        assert_eq!(p.sections(), Vec::<Section>::new());
+        for _ in 0..200 {
+            p.add("UI: inspector", 1.0);
+            p.add("UI: inspector", 1.0); // twice in a frame adds up
+            p.add("Scene render", 8.0);
+            p.end_frame();
+        }
+        let s = p.sections();
+        assert_eq!(s[0].name, "Scene render", "busiest first");
+        assert!((s[0].avg - 8.0).abs() < 0.01);
+        assert!((s[1].last - 2.0).abs() < 1e-4);
+        assert!((s[1].avg - 2.0).abs() < 0.01);
+        // A frame without the section counts as zero.
+        p.end_frame();
+        assert!(p.sections().iter().all(|s| s.last == 0.0));
+        let report = p.report();
+        assert!(report.contains("Scene render"));
+        assert!(report.contains("Editor UI"));
+        // Paused: nothing moves.
+        p.paused = true;
+        p.add("Scene render", 500.0);
+        p.end_frame();
+        assert!(p.sections()[0].max < 9.0);
+        p.clear();
+        assert_eq!(p.sections(), Vec::<Section>::new());
     }
 
     #[test]

@@ -2433,9 +2433,16 @@ impl EditorApp {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
+        let t = Instant::now();
         self.tick_scripts(dt);
+        self.ui.profiler.since("Scripts: talking to Python", t);
+        let t = Instant::now();
         self.poll_build();
+        self.ui.profiler.since("Build: checking the job", t);
+        let t = Instant::now();
         self.watch_models();
+        self.ui.profiler.since("Assets: watching files", t);
+        let t = Instant::now();
         let mut physics_ms = 0.0;
         let ms = dt * 1000.0;
         let prev = self.ui.stats.frame_ms;
@@ -2458,6 +2465,7 @@ impl EditorApp {
                 r.set_vsync(self.ui.prefs.vsync);
             }
         }
+        self.ui.profiler.since("Graphics settings", t);
         if let Some(play) = &mut self.play {
             // With a scene camera, movement is relative to it and scripts
             // drive the view; otherwise the editor camera follows the player.
@@ -2528,8 +2536,10 @@ impl EditorApp {
             let cam = ui.camera;
             // The material editor's preview (its own little world).
             if let Some((path, shape, pw, ph)) = ui.material_preview_request(s) {
+                let t = Instant::now();
                 let img = viewport.render_material(renderer.as_mut(), &path, shape, pw, ph);
                 ui.set_material_preview_image(img);
+                ui.profiler.since("Material preview", t);
             }
             match play {
                 // A script tab covers the scene view: skip the 3D render.
@@ -2618,13 +2628,19 @@ impl EditorApp {
         self.input.scroll = 0.0;
 
         // Intents take effect next frame (this one is already drawn).
+        let t = Instant::now();
         for intent in intents {
             self.apply(intent);
         }
+        self.ui.profiler.since("Edits: applying", t);
+        let t = Instant::now();
         self.handle_code_requests();
+        self.ui.profiler.since("Code: language server", t);
+        let t = Instant::now();
         if self.ui.take_prefs_dirty() {
             self.save_prefs();
         }
+        self.ui.profiler.since("Preferences: saving", t);
 
         let draw_ms = draw_start.elapsed().as_secs_f32() * 1000.0;
         let present = Instant::now();
@@ -2634,6 +2650,10 @@ impl EditorApp {
             renderer.present_composited(canvas.pixels(), canvas.size(), scene);
         }
         let present_ms = present.elapsed().as_secs_f32() * 1000.0;
+        self.ui
+            .profiler
+            .add("Present (includes waiting for the display)", present_ms);
+        self.ui.profiler.add("Scene render", scene_ms);
         self.ui.profiler.record(crate::ui::profiler::FrameSample {
             scripts: if self.play.is_some() {
                 self.last_script_ms
@@ -2645,8 +2665,11 @@ impl EditorApp {
             ui: (draw_ms - scene_ms).max(0.0),
             total: ms.min(1000.0),
         });
+        let t = Instant::now();
         self.update_window_chrome(&window);
         self.autosave();
+        self.ui.profiler.since("Window title, autosave", t);
+        self.ui.profiler.end_frame();
     }
 
     /// This frame's pointer in logical pixels.

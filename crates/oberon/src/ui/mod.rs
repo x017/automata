@@ -15,6 +15,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use automata_core::{AttributeValue, EntityData, TransformData};
 use glam::Vec3;
@@ -1540,39 +1541,55 @@ impl Ui {
             }
         }
 
+        let t = Instant::now();
         self.code.settings.clone_from(&self.prefs.editor);
         self.refresh_strings(canvas, doc);
         if self.code.active.is_some() {
             self.code.scene_names = scene_names(doc);
             self.code.scene_names.strings = self.string_keys();
         }
+        self.profiler.since("UI: string tables, completions", t);
         self.update_scrub();
         self.update_attr_scrub();
         self.update_splitters(&lay, w, h);
 
+        let t = Instant::now();
         canvas.clear(color::background());
+        self.profiler.since("UI: clear", t);
         // Scene view first: its overlays may spill outside its rect and are
         // covered by the panels drawn after it.
+        let t = Instant::now();
         if self.code.active.is_some() {
             self.code_view(canvas, lay.viewport);
+            self.profiler.since("UI: script / document editor", t);
         } else {
             self.scene_view(canvas, doc, lay.viewport, viewport);
+            self.profiler.since("UI: scene view overlays", t);
         }
         if let Some(r) = self.doc_tabs_rect(lay.viewport) {
             self.doc_tabs(canvas, r);
         }
+        let t = Instant::now();
         if self.panels.show_bottom {
             self.bottom_dock(canvas, doc, lay.console);
         }
+        self.profiler.since("UI: bottom dock", t);
+        let t = Instant::now();
         if self.panels.show_hierarchy {
             self.hierarchy(canvas, doc, lay.hierarchy);
         }
+        self.profiler.since("UI: hierarchy", t);
+        let t = Instant::now();
         if self.panels.show_files {
             self.files_panel(canvas, doc, lay.files);
         }
+        self.profiler.since("UI: files", t);
+        let t = Instant::now();
         if self.panels.show_inspector {
             self.inspector(canvas, doc, lay.inspector);
         }
+        self.profiler.since("UI: inspector", t);
+        let t = Instant::now();
         self.status_bar(canvas, doc, lay.status);
         self.clip = (0.0, h);
         self.draw_splitters(canvas, &lay);
@@ -1586,6 +1603,7 @@ impl Ui {
         self.draw_tooltip(canvas, w, h);
         self.last_viewport = lay.viewport;
         self.update_file_drag(canvas, doc, &lay);
+        self.profiler.since("UI: menus, bars, popups", t);
 
         std::mem::take(&mut self.out)
     }

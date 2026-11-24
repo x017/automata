@@ -78,8 +78,8 @@ the last 240 frames:
 |---|---|
 | **Scripts** | Time your Python behaviour scripts took in their last frame (measured by the script runner; Play mode only). |
 | **Physics** | Stepping physics, character movement and animation (Play mode only). |
-| **Render** | Drawing the scene, the camera and material previews, and presenting the frame. |
-| **Editor UI** | Drawing Oberon's own panels. |
+| **Render** | Drawing the scene and the camera preview, and presenting the frame. Presenting waits for the display when V-Sync is on, so this bar is tall even when the scene is cheap. |
+| **Editor UI** | Drawing Oberon's own panels, the material preview, and applying edits. |
 | **Frame** | The whole frame, start to start. This includes waiting for the display, so with V-Sync it sits at the refresh interval. |
 
 The table shows each series' latest, average and worst value in
@@ -87,6 +87,14 @@ milliseconds. The graph stacks the four parts for each frame, with a faint
 mark at the whole frame's length, against 16.7 ms (60 fps) and 33.3 ms
 (30 fps) guide lines. Hover a bar to read that frame's figures. **Pause**
 holds the graph still; **Clear** starts it over.
+
+The **Inside the frame** column (on wide windows) splits the frame into
+finer slices, busiest first, with average and worst times: each editor
+panel (Inspector, Hierarchy, Files, bottom dock, scene view overlays,
+script editor), the scene render, presenting, the script runner, asset
+watching, the language server and saving preferences. **Copy** puts every
+figure, including the slices that don't fit, on the clipboard as plain
+text, ready to paste into a bug report about a slow editor.
 
 A tall Scripts bar points at an expensive `update`. A tall Physics bar
 points at too many bodies or colliders. A Render bar that grows with the
