@@ -8,6 +8,9 @@ project's scenes, scripts, and assets.
 ``oop_platformer.py``) or a ``start_scene`` (an Oberon project, run with its
 behaviour scripts through ``automata.run_scene``).
 
+``touch_controls`` (from ``build.ron``) sets up the on-screen thumbsticks
+and buttons of a scene game (``ctx.input.touch_controls``).
+
 Saves and settings (``ctx.save``, ``ctx.settings``) go to a folder named
 after the game in the player's user-data folder (see
 ``automata.script_api.user_data_dir``; ``$AUTOMATA_SAVE_DIR`` overrides it).
@@ -88,7 +91,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     from .script_api import user_data_dir
 
     save_dir = user_data_dir(manifest.get("name") or os.path.basename(folder))
-    frames = at.run_scene(scene, max_frames=opts["frames"], save_dir=save_dir, **game_options)
+    frames = at.run_scene(scene, max_frames=opts["frames"], save_dir=save_dir,
+                          touch_controls=manifest.get("touch_controls"), **game_options)
     if opts["headless"]:
         print(f"ran {frames} frames of {manifest['start_scene']}")
     return 0

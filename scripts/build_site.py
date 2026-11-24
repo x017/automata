@@ -79,6 +79,7 @@ NAV: list[tuple[str, list[tuple[str, str]]]] = [
         ("wiki/guides/grass-and-foliage.md", "Grass & foliage"),
         ("wiki/guides/cameras.md", "Cameras"),
         ("wiki/guides/input.md", "Input"),
+        ("wiki/guides/touch-controls.md", "Touch controls"),
         ("wiki/guides/physics.md", "Physics"),
         ("wiki/guides/events-and-resources.md", "Events & resources"),
         ("wiki/guides/oop-style.md", "OOP style"),

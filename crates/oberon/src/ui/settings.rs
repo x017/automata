@@ -671,6 +671,20 @@ impl Ui {
             self.save_build_settings();
         }
         *y += ROW;
+        let touch = cfg.touch_controls.is_some();
+        if self.setting_toggle(
+            canvas,
+            body,
+            *y,
+            "Touch controls",
+            "An on-screen stick (WASD) and Jump button (Space) on phones. Change their keys in build.ron.",
+            touch,
+        ) {
+            self.build_settings().touch_controls =
+                (!touch).then(crate::build::starter_touch_controls);
+            self.save_build_settings();
+        }
+        *y += ROW;
 
         // Templates.
         canvas.text(

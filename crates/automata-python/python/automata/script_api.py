@@ -900,6 +900,386 @@ class Touch:
         return f"Touch(finger={self.finger}, position=({x:g}, {y:g}){state})"
 
 
+#: How far a thumbstick is pushed (0 to 1) before it holds its key.
+STICK_PRESS = 0.4
+#: Pushes shorter than this (a fraction of the stick's reach) count as none.
+STICK_DEAD_ZONE = 0.12
+
+
+def _on_touch_screen():
+    """Whether touch controls show by default: on Android, or when
+    ``$AUTOMATA_TOUCH_CONTROLS`` says so (``1``: show, ``0``: hide)."""
+    env = os.environ.get("AUTOMATA_TOUCH_CONTROLS", "").strip().lower()
+    if env in ("1", "true", "on", "yes"):
+        return True
+    if env in ("0", "false", "off", "no"):
+        return False
+    return sys.platform == "android" or "ANDROID_PRIVATE" in os.environ
+
+
+def _side(value, what):
+    side = str(getattr(value, "value", value)).strip().lower()
+    if side not in ("left", "right"):
+        raise ValueError(f'{what} is "left" or "right", not {value!r}')
+    return side
+
+
+class _TouchStick:
+    __slots__ = ("side", "keys", "finger", "origin", "vector", "rest", "radius")
+
+    def __init__(self, side, keys):
+        self.side = side
+        self.keys = keys
+        self.finger = None
+        self.origin = (0.0, 0.0)
+        self.vector = (0.0, 0.0)  # +y is up
+        self.rest = (0.0, 0.0)
+        self.radius = 1.0
+
+    def strengths(self):
+        """How hard each key is held, by name (0 to 1)."""
+        x, y = self.vector
+        if len(self.keys) == 2:
+            left, right = self.keys
+            return ((left, max(0.0, -x)), (right, max(0.0, x)))
+        up, left, down, right = self.keys
+        return ((up, max(0.0, y)), (left, max(0.0, -x)), (down, max(0.0, -y)),
+                (right, max(0.0, x)))
+
+
+class _TouchButton:
+    __slots__ = ("key", "label", "fingers", "center", "radius")
+
+    def __init__(self, key, label):
+        self.key = key
+        self.label = label
+        self.fingers = set()
+        self.center = (0.0, 0.0)
+        self.radius = 1.0
+
+
+class TouchControls:
+    """``ctx.input.touch_controls``: thumbsticks and buttons on the screen
+    that hold keys, so a keyboard game plays on a phone unchanged.
+
+    A game's ``build.ron`` sets them up (``touch_controls``), or a script
+    does with :meth:`set`::
+
+        ctx.input.touch_controls.set(
+            sticks=[{"side": "left", "keys": ["forward", "left", "back", "right"]}],
+            buttons=[{"key": "jump", "label": "Jump"}],
+        )
+
+    A stick holds its keys (up, left, down, right; or just left, right) as
+    it's pushed, and appears where the thumb lands on its half of the
+    screen. ``ctx.input.axis`` reads how far it's pushed, so walking speeds
+    up smoothly. A button holds its key while a finger is on it. Keys may
+    be key names (``"space"``) or actions (``"jump"``); an action also
+    holds the keys bound to it. ``look`` makes
+    dragging on the free part of one side move ``ctx.input.mouse_delta``,
+    for mouse look.
+
+    They show on touch screens (Android) by default; ``show="always"``
+    shows them everywhere, where the mouse works them as a finger, and
+    ``"never"`` waits for a script to set :attr:`visible`. Fingers on them
+    aren't in ``ctx.input.touches`` and don't press the left mouse button.
+    """
+
+    def __init__(self, input_):
+        self._input = input_
+        self._sticks = []
+        self._buttons = []
+        self._look = None
+        self._show = "auto"
+        self._visible = None  # a script's choice
+        self._size = (1280.0, 720.0)
+        self._held = {}  # name -> strength (0..1), this frame
+        self._now = set()  # names pressed (held hard enough) this frame
+        self._prev = set()
+        self._look_fingers = {}  # finger -> last position
+        self._look_delta = (0.0, 0.0)
+        self._left = False  # the primary finger is on a control
+        self._owned = set()  # fingers on a control this frame
+
+    def set(self, sticks=(), buttons=(), look=None, show=None) -> None:
+        """Replaces the controls. ``sticks`` are ``{"side": "left",
+        "keys": ["w", "a", "s", "d"]}`` (up, left, down, right; or two
+        keys, left and right), one per side at most. ``buttons`` are
+        ``{"key": "space", "label": "Jump"}`` (up to six, placed around the
+        bottom-right corner, the first in the corner). ``look`` is a side,
+        or None. ``show`` is ``"auto"`` (touch screens), ``"always"`` or
+        ``"never"``."""
+        parsed = []
+        for stick in sticks or ():
+            side = _side(stick.get("side", "left"), "a stick's side")
+            keys = [str(k) for k in stick.get("keys", ())]
+            if len(keys) not in (2, 4) or not all(k.strip() for k in keys):
+                raise ValueError(f"a stick has four keys (up, left, down, right) or two "
+                                 f"(left, right), not {keys!r}")
+            if any(s.side == side for s in parsed):
+                raise ValueError(f"there's already a stick on the {side}")
+            parsed.append(_TouchStick(side, keys))
+        made = []
+        for button in buttons or ():
+            key = str(button.get("key", "")).strip()
+            if not key:
+                raise ValueError(f"a button needs a key, like {{'key': 'space'}}: {button!r}")
+            label = button.get("label")
+            made.append(_TouchButton(key, str(label) if label else key))
+        if len(made) > 6:
+            raise ValueError(f"up to 6 touch buttons fit, not {len(made)}")
+        side = None if look is None or look is False else _side(look, "look")
+        if side is not None and any(s.side == side for s in parsed):
+            raise ValueError(f"look and a stick can't share the {side} side")
+        mode = "auto" if show is None else str(show).strip().lower()
+        if mode not in ("auto", "always", "never"):
+            raise ValueError(f'show is "auto", "always" or "never", not {show!r}')
+        self._release()
+        self._sticks, self._buttons, self._look, self._show = parsed, made, side, mode
+
+    @property
+    def configured(self) -> bool:
+        """Whether there are any controls to show."""
+        return bool(self._sticks or self._buttons or self._look)
+
+    @property
+    def visible(self) -> bool:
+        """Whether they're on the screen and working. Set it to show or
+        hide them (a settings screen's "Touch controls" switch)."""
+        if not self.configured:
+            return False
+        if self._visible is not None:
+            return self._visible
+        return self._show == "always" or (self._show == "auto" and _on_touch_screen())
+
+    @visible.setter
+    def visible(self, value: bool) -> None:
+        self._visible = bool(value)
+        if not self._visible:
+            self._release()
+
+    def stick(self, side: str = "left") -> tuple[float, float]:
+        """How far the stick on ``side`` is pushed: (x, y) from -1 to 1, +y
+        up (away from the player), (0, 0) when no thumb is on it."""
+        side = _side(side, "side")
+        for s in self._sticks:
+            if s.side == side:
+                return s.vector
+        return (0.0, 0.0)
+
+    def __repr__(self):
+        return (f"TouchControls(sticks={len(self._sticks)}, buttons={len(self._buttons)}, "
+                f"look={self._look!r}, visible={self.visible})")
+
+    # --- frames -----------------------------------------------------------
+
+    def _release(self):
+        self._owned = set()
+        for s in self._sticks:
+            s.finger, s.vector = None, (0.0, 0.0)
+        for b in self._buttons:
+            b.fingers.clear()
+        self._look_fingers = {}
+        self._held = {}
+        self._now = set()
+        self._left = False
+
+    def _layout(self, size):
+        w, h = float(size[0]), float(size[1])
+        self._size = (w, h)
+        m = min(w, h)
+        margin, stick_r, button_r = 0.05 * m, 0.15 * m, 0.085 * m
+        cluster = 0.0
+        if self._buttons:
+            first = self._buttons[0]
+            first.radius = button_r * 1.2
+            corner = (w - margin - first.radius, h - margin - first.radius)
+            first.center = corner
+            others = self._buttons[1:]
+            gap = 0.035 * m
+            dist = first.radius + button_r + gap
+            if len(others) > 1:
+                step = math.pi / 2 / (len(others) - 1)
+                dist = max(dist, (2 * button_r + gap) / (2 * math.sin(step / 2)))
+            for i, b in enumerate(others):
+                angle = math.pi - (i * math.pi / 2 / max(1, len(others) - 1))
+                b.radius = button_r
+                b.center = (corner[0] + dist * math.cos(angle),
+                            corner[1] - dist * math.sin(angle))
+            cluster = (dist + button_r if others else 0.0) + first.radius + margin
+        for s in self._sticks:
+            s.radius = stick_r
+            y = h - margin - stick_r
+            if s.side == "left":
+                s.rest = (margin + stick_r, y)
+            else:
+                s.rest = (w - max(margin, cluster) - stick_r, y)
+
+    def _button_at(self, x, y):
+        best, best_d = None, None
+        for b in self._buttons:
+            d = math.hypot(x - b.center[0], y - b.center[1])
+            if d <= b.radius * 1.15 and (best_d is None or d < best_d):
+                best, best_d = b, d
+        return best
+
+    def _claim(self, finger, x, y):
+        """Gives a finger that just landed to the control under it."""
+        button = self._button_at(x, y)
+        if button is not None:
+            button.fingers.add(finger)
+            return True
+        w, h = self._size
+        side = "left" if x < w / 2 else "right"
+        if y > h * 0.3:
+            for s in self._sticks:
+                if s.side == side and s.finger is None:
+                    r = s.radius
+                    # The base stays on the screen however close to an edge
+                    # the thumb lands.
+                    s.finger = finger
+                    s.origin = (min(max(x, r), w - r), min(max(y, r), h - r))
+                    return True
+        if self._look == side and y > h * 0.15:
+            self._look_fingers[finger] = (x, y)
+            return True
+        return False
+
+    def _update(self, touches, size, ui_has_left):
+        """Reads this frame's fingers (``KeySource.touches`` tuples) and
+        decides which keys the controls hold."""
+        self._prev = self._now
+        self._look_delta = (0.0, 0.0)
+        if not self.visible:
+            if self._held or self._left:
+                self._release()
+            self._now = set()
+            return
+        self._layout(size)
+        owned = set()
+        tapped = set()  # buttons a finger landed on and left this frame
+        dx = dy = 0.0
+        for finger, x, y, _sx, _sy, started, ended, primary in touches:
+            if started and not (primary and ui_has_left):
+                for s in self._sticks:
+                    if s.finger == finger:
+                        s.finger = None  # a new touch reusing the number
+                for b in self._buttons:
+                    b.fingers.discard(finger)
+                self._look_fingers.pop(finger, None)
+                self._claim(finger, x, y)
+            mine = False
+            for s in self._sticks:
+                if s.finger == finger:
+                    mine = True
+                    if ended:
+                        s.finger, s.vector = None, (0.0, 0.0)
+                    else:
+                        ox, oy = s.origin
+                        vx, vy = (x - ox) / s.radius, (oy - y) / s.radius
+                        length = math.hypot(vx, vy)
+                        if length < STICK_DEAD_ZONE:
+                            vx = vy = 0.0
+                        elif length > 1.0:
+                            vx, vy = vx / length, vy / length
+                        s.vector = (vx, vy)
+            for b in self._buttons:
+                if finger in b.fingers:
+                    mine = True
+                    if ended:
+                        b.fingers.discard(finger)
+                        if started:
+                            tapped.add(id(b))
+            if finger in self._look_fingers:
+                mine = True
+                lx, ly = self._look_fingers[finger]
+                dx, dy = dx + x - lx, dy + y - ly
+                if ended:
+                    del self._look_fingers[finger]
+                else:
+                    self._look_fingers[finger] = (x, y)
+            if mine:
+                owned.add(finger)
+                if primary:
+                    self._left = not ended
+            elif primary:
+                self._left = False
+        # Fingers that vanished without an end (focus lost) let go.
+        present = {t[0] for t in touches}
+        for s in self._sticks:
+            if s.finger is not None and s.finger not in present:
+                s.finger, s.vector = None, (0.0, 0.0)
+        for b in self._buttons:
+            b.fingers &= present
+        if not present:
+            self._left = False
+        self._owned = owned
+        self._look_delta = (dx, dy)
+        held = {}
+        for s in self._sticks:
+            for name, strength in s.strengths():
+                if strength > 0.0:
+                    held[name] = max(held.get(name, 0.0), strength)
+        for b in self._buttons:
+            if b.fingers or id(b) in tapped:
+                held[b.key] = 1.0
+        # Each name also under the key names it stands for: "shift" is
+        # either Shift, and an action holds the keys bound to it, as if the
+        # player pressed them.
+        self._held = {}
+        settings = self._input._settings if self._input is not None else None
+        for name, strength in held.items():
+            names = [name, *keys_for(name)]
+            if settings is not None and settings.is_action(name):
+                for k in settings.keys(name):
+                    names.extend(keys_for(k))
+            for n in names:
+                self._held[n] = max(self._held.get(n, 0.0), strength)
+        self._now = {n for n, v in self._held.items() if v >= STICK_PRESS}
+
+    def _owns(self, finger):
+        return finger in self._owned
+
+    @property
+    def _live(self):
+        return bool(self._now or self._prev or self._held)
+
+    def _down(self, name):
+        return name in self._now
+
+    def _pressed(self, name):
+        return name in self._now and name not in self._prev
+
+    def _released(self, name):
+        return name in self._prev and name not in self._now
+
+    def _draw(self, hud):
+        """Draws the controls over everything else this frame."""
+        if not self.visible:
+            return
+        white = (1.0, 1.0, 1.0)
+        for s in self._sticks:
+            active = s.finger is not None
+            ox, oy = s.origin if active else s.rest
+            r = s.radius
+            base = 2 * r
+            hud.image("builtin:circle", ox, oy, (base, base), (*white, 0.14 if active else 0.08))
+            hud.image("builtin:ring", ox, oy, (base, base), (*white, 0.45 if active else 0.25))
+            vx, vy = s.vector
+            knob = 0.9 * r
+            hud.image("builtin:circle", ox + vx * r * 0.6, oy - vy * r * 0.6, (knob, knob),
+                      (*white, 0.55 if active else 0.3))
+        for b in self._buttons:
+            down = bool(b.fingers)
+            x, y = b.center
+            d = 2 * b.radius
+            hud.image("builtin:circle", x, y, (d, d), (*white, 0.4 if down else 0.15))
+            hud.image("builtin:ring", x, y, (d, d), (*white, 0.7 if down else 0.4))
+            size = min(0.5 * b.radius, 1.5 * b.radius / max(1.0, _text_ems(b.label)))
+            hud.text(b.label, x, y, size, (*white, 0.95 if down else 0.8), "center",
+                     shadow=True)
+
+
 class Input:
     """``ctx.input``: keys, mouse buttons, touches, mouse movement and capture."""
 
@@ -908,14 +1288,43 @@ class Input:
         self._lock_request = None
         self._settings: Settings | None = None  # ctx.settings, for action names
         self._ui: Ui | None = None  # ctx.ui, which keeps clicks on widgets
+        #: On-screen thumbsticks and buttons (see :class:`TouchControls`).
+        self.touch_controls = TouchControls(self)
 
     def _game(self, on_button):
         """``on_button`` minus the buttons ``ctx.ui`` took (pressed on a
-        widget or panel, until released)."""
+        widget or panel, until released) and the left button while the
+        first finger is on a touch control."""
         ui = self._ui
-        if ui is None or not ui._captured:
+        captured = ui._captured if ui is not None else ()
+        touch = self.touch_controls._left
+        if not captured and not touch:
             return on_button
-        return lambda b: b not in ui._captured and on_button(b)
+        return lambda b: (b not in captured and not (touch and b == "left")
+                          and on_button(b))
+
+    def _begin_touch(self):
+        """Lets the touch controls take this frame's fingers (after
+        ``ctx.ui`` has taken its own)."""
+        fn = getattr(self._src, "touches", None)
+        raw = list(fn()) if fn is not None else []
+        ui = self._ui
+        self.touch_controls._update(raw, ui._hud.size if ui is not None else (1280, 720),
+                                    ui is not None and "left" in ui._captured)
+
+    def _strength(self, name):
+        """How hard the touch controls hold ``name`` (a key or an action),
+        0 to 1."""
+        held = self.touch_controls._held
+        if not held:
+            return 0.0
+        best = max((held.get(n, 0.0) for n in keys_for(name)), default=0.0)
+        best = max(best, held.get(name, 0.0))
+        settings = self._settings
+        if settings is not None and isinstance(name, str) and settings.is_action(name):
+            for k in settings.keys(name):
+                best = max(best, max((held.get(n, 0.0) for n in keys_for(k)), default=0.0))
+        return best
 
     def _keys(self, on_key):
         """``on_key`` minus the keys ``ctx.ui`` used to navigate (until
@@ -925,9 +1334,15 @@ class Input:
             return on_key
         return lambda k: k not in ui._taken and on_key(k)
 
-    def _any(self, key, on_key, on_button):
+    def _any(self, key, on_key, on_button, on_touch=None):
         on_button = self._game(on_button)
         on_key = self._keys(on_key)
+        if on_touch is not None and self.touch_controls._live:
+            if on_touch(str(getattr(key, "value", key)).lower()):
+                return True
+            keys, buttons = on_key, on_button
+            on_key = lambda k: keys(k) or on_touch(k)  # noqa: E731
+            on_button = lambda b: buttons(b) or on_touch("mouse_" + b)  # noqa: E731
         settings = self._settings
         if settings is not None and isinstance(key, str) and settings.is_action(key):
             for k in settings.keys(key):
@@ -943,18 +1358,29 @@ class Input:
     def pressed(self, key: str) -> bool:
         """The key is held down. Takes a key name (``"space"``) or an
         action bound with ``ctx.settings.bind`` (``"jump"``)."""
-        return self._any(key, self._src.key_down, self._src.button_down)
+        t = self.touch_controls
+        return self._any(key, self._src.key_down, self._src.button_down, t._down)
 
     def just_pressed(self, key: str) -> bool:
         """The key (or action) went down this frame."""
-        return self._any(key, self._src.key_pressed, self._src.button_pressed)
+        t = self.touch_controls
+        return self._any(key, self._src.key_pressed, self._src.button_pressed, t._pressed)
 
     def just_released(self, key: str) -> bool:
         """The key (or action) came up this frame."""
-        return self._any(key, self._src.key_released, self._src.button_released)
+        t = self.touch_controls
+        return self._any(key, self._src.key_released, self._src.button_released, t._released)
 
     def axis(self, negative: str, positive: str) -> float:
-        """-1, 0, or 1 from two keys (or actions)."""
+        """-1, 0, or 1 from two keys (or actions). A touch thumbstick
+        holding them gives how far it's pushed, in between."""
+        if self.touch_controls._held:
+            analog = self._strength(positive) - self._strength(negative)
+            if analog:
+                down = self._src.key_down
+                keys = (float(self._any(positive, down, self._src.button_down))
+                        - float(self._any(negative, down, self._src.button_down)))
+                return max(-1.0, min(1.0, keys + analog))
         return float(self.pressed(positive)) - float(self.pressed(negative))
 
     def any_just_pressed(self) -> str | None:
@@ -973,14 +1399,21 @@ class Input:
         """The mouse button is held. A press that began on ``ctx.ui``
         (a button, slider, panel…) belongs to the UI: it reads False
         here until it's released, so clicking a button doesn't also fire."""
-        return self._game(self._src.button_down)(str(button).lower())
+        b = str(button).lower()
+        return (self._game(self._src.button_down)(b)
+                or self.touch_controls._down("mouse_" + b))
 
     def mouse_just_pressed(self, button: str = "left") -> bool:
-        """The button went down this frame (not on ``ctx.ui``)."""
-        return self._game(self._src.button_pressed)(str(button).lower())
+        """The button went down this frame (not on ``ctx.ui``). A touch
+        button holding ``"mouse_left"`` presses it too."""
+        b = str(button).lower()
+        return (self._game(self._src.button_pressed)(b)
+                or self.touch_controls._pressed("mouse_" + b))
 
     def mouse_just_released(self, button: str = "left") -> bool:
-        return self._game(self._src.button_released)(str(button).lower())
+        b = str(button).lower()
+        return (self._game(self._src.button_released)(b)
+                or self.touch_controls._released("mouse_" + b))
 
     @property
     def mouse_position(self) -> tuple[float, float] | None:
@@ -999,14 +1432,16 @@ class Input:
         that lifted this frame (``just_ended``). On a computer the held
         left mouse button is finger 0, so touch controls work with a
         mouse too. A finger that landed on ``ctx.ui`` belongs to the UI
-        and isn't listed, like a click on a button."""
+        and isn't listed, like a click on a button. Nor are fingers on the
+        touch controls (``touch_controls``)."""
         fn = getattr(self._src, "touches", None)
         raw = fn() if fn is not None else ()
         ui = self._ui
         taken = ui is not None and "left" in ui._captured
+        controls = self.touch_controls
         return [Touch(f, (x, y), (sx, sy), started, ended, primary)
                 for f, x, y, sx, sy, started, ended, primary in raw
-                if not (primary and taken)]
+                if not (primary and taken) and not controls._owns(f)]
 
     @property
     def mouse_over_ui(self) -> bool:
@@ -1016,9 +1451,11 @@ class Input:
 
     @property
     def mouse_delta(self) -> tuple[float, float]:
-        """Mouse movement since last frame (dx, dy) in pixels; +y is down."""
+        """Mouse movement since last frame (dx, dy) in pixels; +y is down.
+        Dragging on the touch controls' ``look`` side adds to it."""
         dx, dy = self._src.mouse_delta()
-        return (float(dx), float(dy))
+        lx, ly = self.touch_controls._look_delta
+        return (float(dx) + lx, float(dy) + ly)
 
     def lock_mouse(self, locked: bool = True) -> None:
         """Hides and captures the cursor for mouse look (False frees it).
@@ -5418,7 +5855,8 @@ class ScriptHost:
     """
 
     def __init__(self, backend, input_source=None, on_error="raise", hot_reload=False,
-                 module_prefix="automata_script_", internal_files=(), save_dir=None):
+                 module_prefix="automata_script_", internal_files=(), save_dir=None,
+                 touch_controls=None):
         self.backend = backend
         #: Where ``ctx.save`` and ``ctx.settings`` live (None: in memory).
         self.save_dir = None if save_dir is None else os.path.abspath(save_dir)
@@ -5433,6 +5871,10 @@ class ScriptHost:
         self.scripts = {}
         self.started = set()
         self.ctx = Context(self, input_source if input_source is not None else KeySource())
+        if touch_controls:
+            # A game's build.ron settings (game.json): "sticks", "buttons",
+            # "look", "show".
+            self.ctx.input.touch_controls.set(**touch_controls)
         self._last_check = 0.0
         self._subs = []
         self._timers = []  # Timers and Tweens, oldest first
@@ -5447,6 +5889,7 @@ class ScriptHost:
         if screen:
             self.ctx.hud.size = (int(screen[0]), int(screen[1]))
         self.ctx.ui._begin()
+        self.ctx.input._begin_touch()
         self._sync(records)
         if self.hot_reload and (elapsed - self._last_check > 0.4 or elapsed < self._last_check):
             self._last_check = elapsed
@@ -5747,6 +6190,7 @@ class ScriptHost:
         self._persist()
         self.ctx.ui._draw_documents()
         self.ctx.ui._layer_items(self.ctx.hud._items)
+        self.ctx.input.touch_controls._draw(self.ctx.hud)
         out = FrameOutput(writes, self.ctx.audio._queue, self.ctx.hud._items,
                           self.ctx.input._lock_request, self.ctx.settings._take_apply())
         self.ctx.audio._queue = []

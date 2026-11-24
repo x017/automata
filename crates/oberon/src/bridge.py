@@ -464,6 +464,13 @@ class Runner:
             save_dir=os.environ.get("AUTOMATA_SAVE_DIR")
             or os.path.join(os.path.dirname(os.path.abspath(__file__)), "save"),
         )
+        # build.ron's touch controls, which Oberon passes in.
+        touch = os.environ.get("OBERON_TOUCH_CONTROLS")
+        if touch:
+            try:
+                self.host.ctx.input.touch_controls.set(**json.loads(touch))
+            except (ValueError, TypeError) as exc:
+                self.backend.log("warn", f"build.ron touch_controls: {exc}")
 
     @property
     def ctx(self):

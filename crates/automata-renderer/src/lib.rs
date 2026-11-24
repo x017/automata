@@ -52,7 +52,7 @@ pub use particles::{
     MAX_PARTICLES_PER_FRAME,
 };
 pub use quality::GraphicsQuality;
-pub use renderer::Renderer;
+pub use renderer::{Renderer, BUILTIN_IMAGE_PREFIX};
 pub use text::{Faces, FontId, TextAlign, TextAtlas, TextStyle};
 pub use texture::Texture;
 pub use water::{RippleMap, Water, WaterSurface, RIPPLE_FIELD_SIZE};

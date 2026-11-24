@@ -6,7 +6,10 @@
 # 2. keys reach the scripts: F2 cycles the graphics preset (2-playing.png);
 # 3. the setting lands in the app's private storage;
 # 4. after Android kills the app, the next start remembers it: F2 goes
-#    on from the saved preset.
+#    on from the saved preset;
+# 5. the touch controls show by themselves on Android, and the left stick
+#    walks the player forward into the coin ahead (3-stick.png);
+# 6. the Jump button lights up while it's held (4-jump.png).
 #
 #   android/ci/coin_run_test.sh APK [OUT_DIR]
 set -euo pipefail
@@ -77,5 +80,55 @@ if [ "$second" != "${expected:-}" ]; then
   echo "::error::after the restart F2 chose $second, expected ${expected:-?} (the setting wasn't kept)"
   exit 1
 fi
+fail_on_crash
+
+# --- touch controls ---------------------------------------------------
+log | grep -q "Left stick to move" ||
+  { echo "::error::the touch controls didn't show (no touch hint at start)"; exit 1; }
+echo "ok: touch controls shown"
+
+# Where things are: the display (landscape) and the game's surface, which
+# sits below the status bar.
+read -r W H < <(adb shell wm size | tr -d '\r' | sed -n 's/.*: \([0-9]*\)x\([0-9]*\).*/\1 \2/p' | tail -1 |
+  awk '{ if ($1 > $2) print $1, $2; else print $2, $1 }')
+read -r w h < <(log | sed -n 's/.*surface configured.* width=\([0-9]*\) height=\([0-9]*\).*/\1 \2/p' | tail -1)
+oy=$((H - h))
+echo "display ${W}x${H}, surface ${w}x${h}, top ${oy}"
+# Positions as touch_controls lays them out (fractions of the shorter side).
+read -r sx sy push jx jy jr < <(awk -v w="$w" -v h="$h" -v oy="$oy" 'BEGIN {
+  m = (w < h) ? w : h; r = 0.085 * m * 1.2; margin = 0.05 * m
+  printf "%d %d %d %d %d %d\n", 0.2 * w, 0.75 * h + oy, 0.15 * m * 1.3, \
+    w - margin - r, h - margin - r + oy, r }')
+
+# The intro flies the camera for about 6 seconds; walk once it's behind
+# the player, looking at coin 5 straight ahead.
+sleep 8
+adb shell input motionevent DOWN "$sx" "$sy"
+for step in 1 2 3 4; do
+  adb shell input motionevent MOVE "$sx" $((sy - push * step / 4))
+done
+sleep 0.5
+shot coin-3-stick
+sleep 2
+adb shell input motionevent UP "$sx" $((sy - push))
+wait_for "Score: 1" 15 "Collect [0-9]+ coins"
+echo "ok: the stick walked the player into a coin"
+
+# Jump: the button is drawn brighter while it's held.
+sleep 2
+shot coin-4-before
+adb shell input motionevent DOWN "$jx" "$jy"
+sleep 0.4
+shot coin-4-jump
+adb shell input motionevent UP "$jx" "$jy"
+box="$((2 * jr))x$((2 * jr))+$((jx - jr))+$((jy - jr))"
+before=$(convert "$out/coin-4-before.png" -crop "$box" -colorspace gray -format "%[fx:mean]" info:)
+held=$(convert "$out/coin-4-jump.png" -crop "$box" -colorspace gray -format "%[fx:mean]" info:)
+echo "Jump button brightness: $before, held $held"
+if ! awk -v a="$before" -v b="$held" 'BEGIN { exit !(b > a + 0.015) }'; then
+  echo "::error::the Jump button didn't light up when held ($before -> $held)"
+  exit 1
+fi
+rm -f "$out/coin-4-before.png"
 fail_on_crash
 echo "coin run test passed"

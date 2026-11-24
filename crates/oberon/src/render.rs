@@ -342,6 +342,9 @@ impl ViewportRenderer {
             let texture = match &item.kind {
                 HudKind::Rect => renderer.white_texture(),
                 HudKind::Text { .. } => return None,
+                HudKind::Image(rel) if rel.starts_with(automata_renderer::BUILTIN_IMAGE_PREFIX) => {
+                    renderer.builtin_image(rel)?
+                }
                 HudKind::Image(rel) => {
                     let path = scene_path(root, rel);
                     self.hud_textures

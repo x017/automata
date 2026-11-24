@@ -127,12 +127,13 @@ for `entity` and `ctx`.
 | `ctx.input.pressed("w")` | Key held down |
 | `ctx.input.just_pressed("space")` | Pressed this frame |
 | `ctx.input.just_released("e")` | Released this frame |
-| `ctx.input.axis("a", "d")` | −1, 0, or 1 from two keys |
+| `ctx.input.axis("a", "d")` | −1, 0, or 1 from two keys; in between when a touch stick holds them |
 | `ctx.input.pressed("jump")` | All of the above also take an action bound with `ctx.settings.bind` ([Settings](#player-settings)) |
 | `ctx.input.any_just_pressed()` | The key that went down this frame (`"k"`, `"mouse_left"`), or `None`. Use it for "press a key" screens |
 | `ctx.input.mouse_delta` | `(dx, dy)` mouse movement in pixels since last frame; +y is down |
 | `ctx.input.mouse_pressed("left")` | Mouse button held (`"left"`, `"right"`, `"middle"`); also `mouse_just_pressed` and `mouse_just_released` |
 | `ctx.input.lock_mouse(True)` | Hide and capture the cursor for mouse look. `False` frees it, and Stop always frees it |
+| `ctx.input.touch_controls` | On-screen sticks and buttons that hold keys on phones ([Touch controls](../guides/touch-controls.md)) |
 | `ctx.input.mouse_locked` | Whether the cursor is captured |
 | `ctx.input.mouse_position` | `(x, y)` cursor position in screen pixels from the top-left (like `ctx.hud`), or `None` when the cursor is outside the game view or captured |
 | `ctx.input.mouse_over_ui` | Whether the cursor is over [`ctx.ui`](#game-ui) |
@@ -145,7 +146,7 @@ for `entity` and `ctx`.
 | `ctx.particles.burst("sparks", position, direction=None, count=None, **fields)` | A one-off particle effect at a point or an entity that cleans up after itself: `"fire"`, `"smoke"`, `"sparks"`, `"dust"`, `"splash"`, `"magic"` or `"motes"`, with any field changed (`color=(0.3, 1, 0.4, 1)`). `direction` aims it, for example along a hit's `normal`. `count` is how many particles. See [Particles](../guides/rendering-and-lights.md#particles) |
 | `ctx.particles.emit(entity, count)` | Extra particles from the entity's own Particle Emitter |
 | `ctx.audio.play("sounds/hit.ogg", volume=1, pitch=1, position=None)` | Play a sound once. With a `position` (a point or an entity) it fades with distance |
-| `ctx.hud.image("sprites/crosshair.png", x, y, size=None, color=(1,1,1,1))` | Draw an image this frame, centred on `(x, y)` in screen pixels |
+| `ctx.hud.image("sprites/crosshair.png", x, y, size=None, color=(1,1,1,1))` | Draw an image this frame, centred on `(x, y)` in screen pixels. `"builtin:circle"` and `"builtin:ring"` are a white disc and ring to tint with `color` |
 | `ctx.hud.rect(x, y, width, height, color)` | Draw a filled rectangle this frame, centred on `(x, y)` |
 | `ctx.hud.text("100%", x, y, size=24, color=(1,1,1,1), align="left", shadow=None, outline=None, font=None)` | Draw text this frame, in the built-in font or a [font file](#fonts) (see below) |
 | `ctx.hud.size`, `ctx.hud.center` | The game view's size in pixels, and its centre |

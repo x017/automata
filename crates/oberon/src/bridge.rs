@@ -41,6 +41,10 @@ pub const SCRIPT_API: &str = include_str!("../../automata-python/python/automata
 /// The file name [`SCRIPT_API`] is written under, next to the runner.
 pub const SCRIPT_API_FILE: &str = "_automata_script_api.py";
 
+/// The environment variable that hands Play the project's touch controls
+/// (`build.ron`'s `touch_controls` as JSON; empty for none).
+pub const TOUCH_CONTROLS_ENV: &str = "OBERON_TOUCH_CONTROLS";
+
 /// The default interpreter when the preferences don't name one.
 #[must_use]
 pub fn default_python() -> &'static str {
@@ -425,12 +429,21 @@ impl ScriptBridge {
                 std::fs::write(&path, text)?;
             }
         }
+        // The project's touch controls (build.ron), so Play shows them as
+        // the game would; the runtime folder is the project's `.oberon/`.
+        let touch = runtime_dir
+            .parent()
+            .and_then(|project| automata_export::BuildConfig::load(project).ok())
+            .and_then(|cfg| cfg.touch_controls)
+            .map(|t| t.to_json())
+            .unwrap_or_default();
         let mut child = Command::new(python)
             .arg("-u")
             .arg(&runner)
             .current_dir(cwd)
             .env("PYTHONDONTWRITEBYTECODE", "1")
             .env("PYTHONIOENCODING", "utf-8")
+            .env(TOUCH_CONTROLS_ENV, touch)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

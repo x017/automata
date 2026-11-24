@@ -637,11 +637,11 @@ the number of frames run.
 |---|---|
 | `time` | `delta`, `elapsed`, `frame` (from 1) |
 | `scene` | Script entities: `["Name"]`, `find`, `by_id`, `in`, iteration |
-| `input` | Keys with the aliases `"shift"`, `"ctrl"`, `"alt"` (either side) and `"left"`/`"right"`/`"up"`/`"down"`, or actions bound with `settings.bind`; `axis(neg, pos)`; `any_just_pressed()` (the new key's name, for rebinding); mouse buttons, `mouse_delta`, `lock_mouse`; `touches` (fingers, or the left mouse button as finger 0) |
+| `input` | Keys with the aliases `"shift"`, `"ctrl"`, `"alt"` (either side) and `"left"`/`"right"`/`"up"`/`"down"`, or actions bound with `settings.bind`; `axis(neg, pos)`; `any_just_pressed()` (the new key's name, for rebinding); mouse buttons, `mouse_delta`, `lock_mouse`; `touches` (fingers, or the left mouse button as finger 0); `touch_controls` (on-screen sticks and buttons: `set(sticks, buttons, look, show)`, `visible`, `stick(side)`, `configured`; see [Touch controls](guides/touch-controls.md)) |
 | `physics` | `grounded`, `raycast`, `water_height(x, z)`; the rest of the engine's physics, which also accepts script entities |
 | `water` | `height(x, z)` (same as `physics.water_height`), `splash(position_or_entity, strength=1.0)`: rings and foam at that point (strength 0–10; 1 is about a crate dropped from a couple of metres) |
 | `particles` | `burst(effect, position_or_entity, direction=None, count=None, **fields)`: a one-off effect (a preset name or `at.ParticleEmitter`, with fields changed) that cleans up after itself; `emit(entity, count)`: extra particles from the entity's own emitter |
-| `audio`, `hud` | One-shot sounds; HUD images, rectangles and text (`hud.text(text, x, y, size=24, color, align, shadow, outline)`) |
+| `audio`, `hud` | One-shot sounds; HUD images (`"builtin:circle"` and `"builtin:ring"` are built in), rectangles and text (`hud.text(text, x, y, size=24, color, align, shadow, outline)`) |
 | `camera` | The first `Camera3D` in the scene as a `ScriptCamera` |
 | `events`, `resources`, `screen`, `raw`, `quit()` | Engine extras (`run_scene` only). `screen.measure_text(text, size)` gives text's pixel size |
 | `subscribe(pattern, fn)` | Calls `fn(msg)` for each message on a matching channel: an exact name, or `*` and `?` wildcards. Animation events arrive as `"<entity>:animation:<event>"`. `msg` has `channel`, `data`, `ctx`, and for animation events `entity`, `event` and `clip`. Subscribing the same function again does nothing; the subscription ends with the subscribing entity. Returns a `Subscription` (`cancel()`) |

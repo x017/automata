@@ -13,6 +13,23 @@ use std::time::Instant;
 
 pub use automata_export::{BuildConfig, Level, Target};
 
+/// The touch controls Build Settings turns on: a stick holding WASD and a
+/// Jump button holding Space, the keys most templates use.
+#[must_use]
+pub fn starter_touch_controls() -> automata_export::TouchControls {
+    automata_export::TouchControls {
+        sticks: vec![automata_export::TouchStick {
+            side: automata_export::TouchSide::Left,
+            keys: ["w", "a", "s", "d"].map(String::from).to_vec(),
+        }],
+        buttons: vec![automata_export::TouchButton {
+            key: "space".into(),
+            label: "Jump".into(),
+        }],
+        ..automata_export::TouchControls::default()
+    }
+}
+
 /// Something a running job reports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BuildEvent {

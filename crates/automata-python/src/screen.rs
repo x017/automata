@@ -113,6 +113,9 @@ impl PyScreen {
     /// A path from a script, relative to the scene folder.
     fn resolve(&self, path: &str) -> PathBuf {
         let rel = Path::new(path);
+        if path.starts_with(automata_renderer::BUILTIN_IMAGE_PREFIX) {
+            return rel.to_path_buf();
+        }
         match &self.root {
             Some(root) if rel.is_relative() => path
                 .replace('\\', "/")
@@ -329,6 +332,16 @@ impl HudTextures {
         self.loaded
             .entry(path.to_path_buf())
             .or_insert_with(|| {
+                if let Some(name) = path
+                    .to_str()
+                    .filter(|p| p.starts_with(automata_renderer::BUILTIN_IMAGE_PREFIX))
+                {
+                    let image = renderer.builtin_image(name);
+                    if image.is_none() {
+                        tracing::warn!("HUD image {name}: no such built-in image (circle, ring)");
+                    }
+                    return image;
+                }
                 let bytes = std::fs::read(path)
                     .map_err(|e| tracing::warn!("HUD image {}: {e}", path.display()))
                     .ok()?;

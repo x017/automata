@@ -45,6 +45,7 @@ the result in your file manager.
 | Output folder | Where builds go, relative to the project (`build`) |
 | Platforms | What **Build** / Ctrl+Shift+B exports. **Build ▸ Build for Linux / Windows** exports just one. |
 | Archive | Also write a `.zip` / `.tar.gz` of each build |
+| Touch controls | An on-screen stick and buttons that hold the game's keys on touch screens. Turning it on writes a stick for WASD and a Jump button for Space; change them in `build.ron` ([Touch controls](../guides/touch-controls.md)) |
 
 Settings are saved to `build.ron` in the project folder, so commit it with
 your project. Each build leaves out `.oberon/`, `__pycache__/`, version

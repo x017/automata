@@ -9,9 +9,10 @@ two kinds of APK:
 - **a spike** (`app/`) that tests the platform layer: drawing through SDL's
   window, touches, going to the background and coming back.
 
-Coin Run has no touch controls yet: on an emulator or a phone with a
-keyboard it plays as on desktop. Touch controls are next, then
-`automata-export build --target android`, which will use this.
+Coin Run plays with on-screen controls: a stick to walk, a stick to turn
+the camera, and a Jump button (`ctx.input.touch_controls`, which shows
+them on touch screens; see the wiki's Touch controls guide). Next is
+`automata-export build --target android`, which will use this folder.
 
 | Path | What it is |
 | --- | --- |
@@ -150,7 +151,15 @@ The `Android` workflow runs three jobs:
    - keys reach the scripts: F2 changes the graphics preset
      (`coin-2-playing.png`);
    - the setting lands in `settings.json` in the app's storage;
-   - after Android kills the app, the next start remembers it.
+   - after Android kills the app, the next start remembers it;
+   - the touch controls show by themselves;
+   - holding the left stick forward walks the player into the coin ahead
+     (`coin-3-stick.png`; `Score: 1` in the log);
+   - the Jump button lights up while it's held (`coin-4-jump.png`,
+     measured in the screenshot).
+
+   The touches are injected with `adb shell input motionevent`, placed
+   where `touch_controls` lays the controls out on the game's surface.
 
    The screenshots and the logcat are uploaded as the `android-smoke`
    artifact. They're also posted on the commit as check runs:

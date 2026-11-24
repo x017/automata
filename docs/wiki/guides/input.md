@@ -88,6 +88,10 @@ it), so menus and click-to-play games work on a phone unchanged. On a
 computer the held left mouse button is listed as finger 0, so touch
 controls can be built and tried with a mouse.
 
+To play a keyboard game on a phone without writing touch code, give it
+on-screen sticks and buttons that hold its keys:
+[Touch controls](touch-controls.md).
+
 Keys, buttons and touches are the engine's own types: each platform's
 window layer (winit on desktop; SDL for the coming Android build) translates its events into
 them, so the same script reads the same names everywhere.
@@ -112,5 +116,6 @@ triggers, `LEFT_THUMB`/`RIGHT_THUMB` (stick clicks), d-pad. Axes:
 ## See also
 
 - [The Game Loop](game-loop.md) — where the snapshot comes from
+- [Touch controls](touch-controls.md) — on-screen sticks and buttons
 - [Cookbook](../cookbook.md#input) — double-tap dash, input buffering
 - [API Reference](../api-reference.md#input)

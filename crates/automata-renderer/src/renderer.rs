@@ -115,6 +115,9 @@ pub struct Renderer {
     shadow_pipeline: pipeline::PipelinePair,
     sprite_batch: SpriteBatch,
     white_texture: Texture,
+    /// The built-in HUD shapes (`builtin:circle`, `builtin:ring`).
+    circle_texture: Texture,
+    ring_texture: Texture,
     /// 1×1 linear textures standing in for missing material maps: a flat
     /// normal and white (roughness × 1, metallic × 1).
     flat_normal_texture: Texture,
@@ -267,6 +270,18 @@ impl Renderer {
         };
         let flat_normal_texture = linear_1x1([128, 128, 255, 255]);
         let linear_white_texture = linear_1x1([255; 4]);
+        let shape = |ring: bool| {
+            Texture::from_rgba_mipmapped(
+                device,
+                ctx.queue(),
+                BUILTIN_SHAPE_SIZE,
+                BUILTIN_SHAPE_SIZE,
+                &disc_rgba(BUILTIN_SHAPE_SIZE, ring),
+                false,
+            )
+        };
+        let circle_texture = shape(false);
+        let ring_texture = shape(true);
         let material_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("material maps"),
             address_mode_u: wgpu::AddressMode::Repeat,
@@ -306,6 +321,8 @@ impl Renderer {
             shadow_pipeline,
             sprite_batch,
             white_texture,
+            circle_texture,
+            ring_texture,
             flat_normal_texture,
             linear_white_texture,
             material_sampler,
@@ -455,6 +472,19 @@ impl Renderer {
     #[must_use]
     pub fn white_texture(&self) -> Texture {
         self.white_texture.clone()
+    }
+
+    /// A built-in image for a HUD path such as `builtin:circle`: `circle`
+    /// (a filled disc) or `ring` (its outline, a twentieth of the width
+    /// thick), white with smooth edges, to tint with a sprite's colour.
+    /// `None` when `path` isn't `builtin:` and one of those names.
+    #[must_use]
+    pub fn builtin_image(&self, path: &str) -> Option<Texture> {
+        match path.strip_prefix(BUILTIN_IMAGE_PREFIX)? {
+            "circle" => Some(self.circle_texture.clone()),
+            "ring" => Some(self.ring_texture.clone()),
+            _ => None,
+        }
     }
 
     /// Uploads CPU mesh data to the GPU.
@@ -3362,8 +3392,52 @@ fn read_texture_rgba_into(
     }
 }
 
+/// HUD image paths starting with this are built-in images
+/// ([`Renderer::builtin_image`]), not files.
+pub const BUILTIN_IMAGE_PREFIX: &str = "builtin:";
+
+/// The built-in shapes' size in pixels (mipmapped, so they stay smooth
+/// when drawn smaller).
+const BUILTIN_SHAPE_SIZE: u32 = 256;
+
+/// A white disc (or ring) filling a `size`×`size` image, its edge
+/// antialiased over about a pixel.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // alpha is 0..=255
+fn disc_rgba(size: u32, ring: bool) -> Vec<u8> {
+    let half = size as f32 / 2.0;
+    let radius = half - 1.0;
+    let thickness = size as f32 / 20.0;
+    let mut out = Vec::with_capacity((size * size * 4) as usize);
+    for y in 0..size {
+        for x in 0..size {
+            let dx = x as f32 + 0.5 - half;
+            let dy = y as f32 + 0.5 - half;
+            let d = dx.hypot(dy);
+            let mut alpha = (radius - d + 0.5).clamp(0.0, 1.0);
+            if ring {
+                alpha *= (d - (radius - thickness) + 0.5).clamp(0.0, 1.0);
+            }
+            out.extend_from_slice(&[255, 255, 255, (alpha * 255.0).round() as u8]);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn builtin_shapes_are_discs_and_rings() {
+        let alpha = |rgba: &[u8], x: u32, y: u32| rgba[((y * 64 + x) * 4 + 3) as usize];
+        let disc = disc_rgba(64, false);
+        let ring = disc_rgba(64, true);
+        assert_eq!(disc.len(), 64 * 64 * 4);
+        assert_eq!(alpha(&disc, 32, 32), 255);
+        assert_eq!(alpha(&disc, 0, 0), 0);
+        assert_eq!(alpha(&ring, 32, 32), 0);
+        assert_eq!(alpha(&ring, 32, 2), 255);
+        assert!(disc.chunks(4).all(|p| p[..3] == [255, 255, 255]));
+    }
+
     use super::*;
     use crate::camera::Camera3D;
     use crate::draw::Sprite;
@@ -3855,6 +3929,55 @@ mod tests {
         assert!(
             center[0] > 200 && center[1] < 60,
             "expected red sprite at center, got {center:?}"
+        );
+    }
+
+    #[test]
+    fn offscreen_builtin_circle_and_ring_draw_round_and_tinted() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping built-in shape test");
+            return;
+        };
+        assert!(renderer.builtin_image("builtin:square").is_none());
+        assert!(
+            renderer.builtin_image("circle").is_none(),
+            "needs the prefix"
+        );
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        // A green disc filling the view, a red ring inside it.
+        let circle = renderer.builtin_image("builtin:circle").unwrap();
+        let ring = renderer.builtin_image("builtin:ring").unwrap();
+        draw.sprite(
+            Sprite::new(circle)
+                .position(glam::Vec2::new(32.0, 32.0))
+                .size(glam::Vec2::new(64.0, 64.0))
+                .color([0.0, 1.0, 0.0, 1.0]),
+        );
+        draw.sprite(
+            Sprite::new(ring)
+                .position(glam::Vec2::new(32.0, 32.0))
+                .size(glam::Vec2::new(40.0, 40.0))
+                .color([1.0, 0.0, 0.0, 1.0]),
+        );
+        renderer.render_offscreen(&draw, &target);
+        let pixels = read_pixels(&renderer, &target, size);
+        let [r, g, _] = pixel_at(&pixels, size, 32, 32);
+        assert!(
+            g > 200 && r < 40,
+            "the disc's middle, inside the ring: {r} {g}"
+        );
+        let [r, g, _] = pixel_at(&pixels, size, 32, 13);
+        assert!(
+            r > 200 && g < 128,
+            "on the ring (2 px thick, so blended): {r} {g}"
+        );
+        let [r, g, b] = pixel_at(&pixels, size, 1, 1);
+        assert!(
+            r + g + b < 30,
+            "outside the disc, a corner stays clear: {r} {g} {b}"
         );
     }
 

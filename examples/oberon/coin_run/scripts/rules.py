@@ -5,6 +5,10 @@ The best score and the coins found over every run live in ``ctx.save``, so
 they're still there next time (in Oberon: ``.oberon/save``; in an exported
 game: the player's user-data folder). F2 cycles the graphics preset, which
 ``ctx.settings`` remembers too.
+
+On a touch screen (a phone) the controls are on the screen: a stick for the
+player's actions (player.py), a stick that turns the camera (Q / E) and a
+Jump button. They show only there; on a computer the keyboard plays.
 """
 
 PRESETS = ["low", "medium", "high", "ultra", "beautiful"]
@@ -14,9 +18,24 @@ def coins(ctx):
     return [e for e in ctx.scene if e.name.startswith("Coin")]
 
 
+TOUCH_CONTROLS = {
+    "sticks": [
+        {"side": "left", "keys": ["forward", "left", "back", "right"]},
+        {"side": "right", "keys": ["q", "e"]},
+    ],
+    "buttons": [{"key": "jump", "label": "Jump"}],
+}
+
+
 def start(entity, ctx):
     entity.state["score"] = 0
-    print(f"Collect {len(coins(ctx))} coins! WASD to move, Space to jump, Q/E to turn.")
+    touch = ctx.input.touch_controls
+    touch.set(**TOUCH_CONTROLS)
+    if touch.visible:
+        how = "Left stick to move, Jump to jump, right stick to turn."
+    else:
+        how = "WASD to move, Space to jump, Q/E to turn."
+    print(f"Collect {len(coins(ctx))} coins! {how}")
     if "best" in ctx.save:
         print(f"Welcome back! Best run: {ctx.save['best']}, "
               f"coins found so far: {ctx.save.get('coins_ever', 0)}.")

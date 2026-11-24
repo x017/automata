@@ -167,6 +167,178 @@ pub struct BuildConfig {
     /// means a folder). Build output, `.oberon/`, caches and VCS folders are
     /// always left out.
     pub exclude: Vec<String>,
+    /// On-screen thumbsticks and buttons for touch screens (Android), which
+    /// hold the game's keys. `None`: no touch controls.
+    pub touch_controls: Option<TouchControls>,
+}
+
+/// On-screen controls for touch screens (`build.ron`'s `touch_controls`),
+/// read by `ctx.input.touch_controls` in the game.
+///
+/// ```ron
+/// touch_controls: Some((
+///     sticks: [(side: Left, keys: ["forward", "left", "back", "right"])],
+///     buttons: [(key: "jump", label: "Jump")],
+/// )),
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TouchControls {
+    /// Thumbsticks, one per side at most. Each appears where the thumb
+    /// lands on its half of the screen and holds its keys as it's pushed.
+    pub sticks: Vec<TouchStick>,
+    /// Buttons around the bottom-right corner (the first in the corner),
+    /// up to six. Each holds its key while a finger is on it.
+    pub buttons: Vec<TouchButton>,
+    /// Dragging on the free part of this side moves `ctx.input.mouse_delta`
+    /// (mouse look). Not a side with a stick.
+    pub look: Option<TouchSide>,
+    /// When they're on the screen.
+    pub show: TouchShow,
+}
+
+/// A touch thumbstick.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TouchStick {
+    /// Which half of the screen it lives on.
+    pub side: TouchSide,
+    /// The keys or actions it holds: four (up, left, down, right) or two
+    /// (left, right).
+    pub keys: Vec<String>,
+}
+
+/// A touch button.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TouchButton {
+    /// The key or action it holds.
+    pub key: String,
+    /// The text on it (empty: the key).
+    #[serde(default)]
+    pub label: String,
+}
+
+/// A half of the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TouchSide {
+    /// The left half.
+    Left,
+    /// The right half.
+    Right,
+}
+
+impl TouchSide {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+}
+
+/// When touch controls are shown.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TouchShow {
+    /// On touch screens (Android).
+    #[default]
+    Auto,
+    /// Everywhere; on a computer the mouse works them.
+    Always,
+    /// Only when a script turns them on (`touch_controls.visible`).
+    Never,
+}
+
+impl TouchControls {
+    /// What's wrong with these settings, as `build.ron` problems.
+    #[must_use]
+    pub fn problems(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (i, stick) in self.sticks.iter().enumerate() {
+            let n = stick.keys.len();
+            if n != 2 && n != 4 {
+                out.push(format!(
+                    "touch_controls: the {} stick has {n} keys; it needs four (up, left, down, right) or two (left, right)",
+                    stick.side.name()
+                ));
+            }
+            if stick.keys.iter().any(|k| k.trim().is_empty()) {
+                out.push(format!(
+                    "touch_controls: the {} stick has an empty key",
+                    stick.side.name()
+                ));
+            }
+            if self.sticks[..i].iter().any(|s| s.side == stick.side) {
+                out.push(format!(
+                    "touch_controls: two sticks on the {} side",
+                    stick.side.name()
+                ));
+            }
+        }
+        if self.buttons.len() > 6 {
+            out.push(format!(
+                "touch_controls: {} buttons; up to 6 fit",
+                self.buttons.len()
+            ));
+        }
+        if self.buttons.iter().any(|b| b.key.trim().is_empty()) {
+            out.push("touch_controls: a button has no key".into());
+        }
+        if let Some(side) = self.look {
+            if self.sticks.iter().any(|s| s.side == side) {
+                out.push(format!(
+                    "touch_controls: look and a stick can't share the {} side",
+                    side.name()
+                ));
+            }
+        }
+        out
+    }
+
+    /// The settings as `game.json` holds them (what
+    /// `ctx.input.touch_controls.set` takes).
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        let keys = |keys: &[String]| {
+            keys.iter()
+                .map(|k| json_string(k))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let sticks = self
+            .sticks
+            .iter()
+            .map(|s| {
+                format!(
+                    "{{\"side\": \"{}\", \"keys\": [{}]}}",
+                    s.side.name(),
+                    keys(&s.keys)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let buttons = self
+            .buttons
+            .iter()
+            .map(|b| {
+                format!(
+                    "{{\"key\": {}, \"label\": {}}}",
+                    json_string(&b.key),
+                    json_string(&b.label)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let look = self
+            .look
+            .map_or_else(|| "null".to_string(), |s| format!("\"{}\"", s.name()));
+        let show = match self.show {
+            TouchShow::Auto => "auto",
+            TouchShow::Always => "always",
+            TouchShow::Never => "never",
+        };
+        format!(
+            "{{\"sticks\": [{sticks}], \"buttons\": [{buttons}], \"look\": {look}, \"show\": \"{show}\"}}"
+        )
+    }
 }
 
 impl Default for BuildConfig {
@@ -181,6 +353,7 @@ impl Default for BuildConfig {
             output: "build".into(),
             archive: true,
             exclude: vec!["tests/".into()],
+            touch_controls: None,
         }
     }
 }
@@ -398,6 +571,14 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
     check_strings(project, &base, &Skip::new(cfg), &mut out);
     if cfg.targets.is_empty() {
         out.push(Message::error("No target platforms selected."));
+    }
+    if let Some(touch) = &cfg.touch_controls {
+        out.extend(touch.problems().into_iter().map(Message::error));
+        if cfg.main_script.is_some() {
+            out.push(Message::warn(
+                "touch_controls work in scene games; a main script sets up its own (ctx.input.touch_controls).",
+            ));
+        }
     }
     out
 }
@@ -1302,14 +1483,19 @@ fn json_string(s: &str) -> String {
 
 fn write_manifest(path: &Path, cfg: &BuildConfig) -> std::io::Result<()> {
     let opt = |v: &Option<String>| v.as_deref().map_or_else(|| "null".to_string(), json_string);
+    let touch = cfg
+        .touch_controls
+        .as_ref()
+        .map_or_else(|| "null".to_string(), TouchControls::to_json);
     let text = format!(
-        "{{\n  \"name\": {},\n  \"version\": {},\n  \"start_scene\": {},\n  \"main\": {},\n  \"resolution\": [{}, {}],\n  \"engine\": {}\n}}\n",
+        "{{\n  \"name\": {},\n  \"version\": {},\n  \"start_scene\": {},\n  \"main\": {},\n  \"resolution\": [{}, {}],\n  \"touch_controls\": {},\n  \"engine\": {}\n}}\n",
         json_string(&cfg.name),
         json_string(&cfg.version),
         opt(&cfg.start_scene),
         opt(&cfg.main_script),
         cfg.resolution.0,
         cfg.resolution.1,
+        touch,
         json_string(VERSION),
     );
     std::fs::write(path, text)
@@ -1391,6 +1577,87 @@ mod tests {
             std::fs::write(dir.join("runtime/bin/python3"), b"py").unwrap();
         }
         dir
+    }
+
+    #[test]
+    fn touch_controls_come_from_build_ron_and_go_to_game_json() {
+        let cfg: BuildConfig = ron::from_str(
+            r#"(name: "Pad", start_scene: Some("level.ron"), touch_controls: Some((
+                sticks: [(side: Left, keys: ["forward", "left", "back", "right"])],
+                buttons: [(key: "jump", label: "Jump \"high\""), (key: "e")],
+                look: Some(Right),
+            )))"#,
+        )
+        .unwrap();
+        let touch = cfg.touch_controls.as_ref().unwrap();
+        assert_eq!(touch.show, TouchShow::Auto);
+        assert_eq!(touch.buttons[1].label, "");
+        assert_eq!(touch.problems(), Vec::<String>::new());
+        assert_eq!(
+            touch.to_json(),
+            r#"{"sticks": [{"side": "left", "keys": ["forward", "left", "back", "right"]}], "buttons": [{"key": "jump", "label": "Jump \"high\""}, {"key": "e", "label": ""}], "look": "right", "show": "auto"}"#
+        );
+        // It survives a save and load, and plain configs leave it out.
+        let text = ron::ser::to_string(&cfg).unwrap();
+        assert_eq!(ron::from_str::<BuildConfig>(&text).unwrap(), cfg);
+        assert_eq!(BuildConfig::default().touch_controls, None);
+
+        let dir = project("touch");
+        let out = std::env::temp_dir().join(format!("automata-touch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        let mut cfg = cfg;
+        cfg.start_scene = Some("level.ron".into());
+        stage_game(&dir, &cfg, &out, &mut |_| {}).unwrap();
+        let manifest = std::fs::read_to_string(out.join("game.json")).unwrap();
+        assert!(manifest.contains(r#""touch_controls": {"sticks": [{"side": "left""#));
+        cfg.touch_controls = None;
+        stage_game(&dir, &cfg, &out, &mut |_| {}).unwrap();
+        let manifest = std::fs::read_to_string(out.join("game.json")).unwrap();
+        assert!(manifest.contains(r#""touch_controls": null"#));
+        let _ = std::fs::remove_dir_all(&out);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bad_touch_controls_are_export_errors() {
+        let stick = |side, keys: &[&str]| TouchStick {
+            side,
+            keys: keys.iter().map(|k| (*k).to_string()).collect(),
+        };
+        let touch = TouchControls {
+            sticks: vec![
+                stick(TouchSide::Left, &["w", "a", "s"]),
+                stick(TouchSide::Left, &["a", ""]),
+                stick(TouchSide::Right, &["q", "e"]),
+            ],
+            buttons: (0..7)
+                .map(|i| TouchButton {
+                    key: if i == 0 { " ".into() } else { i.to_string() },
+                    label: String::new(),
+                })
+                .collect(),
+            look: Some(TouchSide::Right),
+            show: TouchShow::Always,
+        };
+        let problems = touch.problems().join("\n");
+        for expected in [
+            "the left stick has 3 keys",
+            "the left stick has an empty key",
+            "two sticks on the left side",
+            "7 buttons; up to 6 fit",
+            "a button has no key",
+            "look and a stick can't share the right side",
+        ] {
+            assert!(problems.contains(expected), "{expected}\n{problems}");
+        }
+        let dir = project("touch-bad");
+        let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
+        cfg.touch_controls = Some(touch);
+        let errors = validate(&dir, &cfg);
+        assert!(errors
+            .iter()
+            .any(|m| m.level == Level::Error && m.text.contains("up to 6 fit")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

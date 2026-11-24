@@ -176,6 +176,13 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: ImageMagick
+        # The tests measure screenshots, and the report shrinks them.
+        run: |
+          command -v convert > /dev/null || {
+            sudo apt-get update -q && sudo apt-get install -y -q imagemagick > /dev/null
+          }
+
       - name: Run on the emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:

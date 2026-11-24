@@ -131,6 +131,25 @@ Other Android work:
    numbers, start points and phases; the left mouse button is finger 0 on
    desktop and in Oberon), the virtual joystick and buttons, and control
    settings in `build.ron`.
+   *Done:* `ctx.input.touch_controls` (in the shared script API, so the
+   engine and Oberon's Play both have it):
+   - **Sticks:** up to one per half of the screen. A stick appears where
+     the thumb lands and holds four keys (or two). `axis()` reads how far
+     it's pushed, so existing games get analog walking.
+   - **Buttons:** up to six, around the bottom-right corner.
+   - **`look`:** dragging on one side adds to `mouse_delta` (FPS-style
+     mouse look).
+
+   Keys can be key names or actions, and an action also holds its bound
+   keys. Controls show on touch screens (`show: Auto`), or `Always`, or
+   when a script sets `visible`. Fingers on a control leave `touches` and
+   the left mouse button alone. Games set them up in `build.ron` (Build
+   Settings → Touch controls, written to `game.json`) or with
+   `touch_controls.set(...)`, as Coin Run does. The controls are drawn
+   with the new built-in HUD images `builtin:circle` and `builtin:ring`.
+   In the emulator test, Coin Run's stick walks the player into a coin and
+   the Jump button lights up.
+   ([Screenshots](docs/assets/ui/e1_touch_controls_android.jpg).)
 4. **Template + export:** `--target android` in `automata-export` and
    Oberon, with debug signing.
 5. **Size and polish:** trim the standard library (target: well under
@@ -140,7 +159,8 @@ Other Android work:
 
 - APK size budget, and which standard library modules to drop.
 - Signing: bundle a tool or implement APK signing (v2) in Rust.
-- How the FPS-style mouse look maps to touch (drag-to-look area?).
+- ~~How the FPS-style mouse look maps to touch (drag-to-look area?).~~
+  Answered: `touch_controls`' `look` side.
 
 ### Web, next: a note for later
 

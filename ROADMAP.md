@@ -1003,8 +1003,17 @@ and its own input types. The game-facing API stays the same everywhere.
   entry point that runs it through `automata.player`, like the desktop
   launcher. In CI, Coin Run loads, its scripts take keys, and its settings
   survive Android killing the app (saves go to the app's private storage).
-- ⬜ Virtual joystick and buttons; `build.ron` touch controls;
-  `--target android` with debug signing; size.
+- ✅ **Touch controls:** `ctx.input.touch_controls` puts thumbsticks
+  (which appear under the thumb and give `axis()` analog values), up to six
+  buttons, and a `look` drag area (`mouse_delta`) on the screen. They hold
+  key names or actions; an action also holds its keys. They show on touch
+  screens, or `Always` (the mouse works them). They're set up in
+  `build.ron` (Build Settings → Touch controls; `game.json` hands them to
+  the player and Oberon's Play) or from a script. There are built-in HUD
+  images `builtin:circle`/`builtin:ring`. Coin Run has a move stick, a turn
+  stick and Jump. On the emulator its stick walks into a coin and Jump
+  lights up.
+- ⬜ `--target android` with debug signing; size.
 
 ### E2. macOS export ⬜ M
 - A macOS template build in CI (Apple Silicon and Intel) and an `.app`

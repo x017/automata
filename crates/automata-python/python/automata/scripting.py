@@ -418,10 +418,11 @@ class SceneScripts:
     only while it runs.
     """
 
-    def __init__(self, base_dir: str, save_dir: Optional[str] = None) -> None:
+    def __init__(self, base_dir: str, save_dir: Optional[str] = None,
+                 touch_controls: Optional[dict] = None) -> None:
         self.backend = _EngineBackend(base_dir)
         self.host = api.ScriptHost(self.backend, self.backend.keys, on_error="raise",
-                                   save_dir=save_dir)
+                                   save_dir=save_dir, touch_controls=touch_controls)
 
     def tick(self, ctx: Any) -> None:
         """Runs every script for this frame and queues what they changed."""
@@ -502,6 +503,7 @@ def run_scene(
     max_frames: Optional[int] = None,
     update: Optional[Callable[[Any], None]] = None,
     save_dir: "str | bool | None" = None,
+    touch_controls: Optional[dict] = None,
     **game_options: Any,
 ) -> int:
     """Loads an Oberon scene file and runs it with its behaviour scripts.
@@ -519,6 +521,10 @@ def run_scene(
     there, `True` for `.oberon/save` even when headless, or `False` to keep
     nothing. Exported games use the player's user-data
     folder.
+
+    `touch_controls` sets up the on-screen thumbsticks and buttons, as a
+    dict of `ctx.input.touch_controls.set`'s arguments (`sticks`,
+    `buttons`, `look`, `show`); exported games pass their `build.ron`'s.
     """
     scene = _core.Scene.load(path)
 
@@ -532,7 +538,8 @@ def run_scene(
         save_dir = not game_options.get("headless")
     if save_dir is True:
         save_dir = api.dev_save_dir(base)
-    scripts = SceneScripts(base, save_dir=save_dir if isinstance(save_dir, str) else None)
+    scripts = SceneScripts(base, save_dir=save_dir if isinstance(save_dir, str) else None,
+                           touch_controls=touch_controls)
     stats = _FrameStats.from_env()
 
     def tick(ctx: Any) -> None:
