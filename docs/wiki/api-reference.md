@@ -493,7 +493,13 @@ ctx.input.cursor        # (x, y) | None
 ctx.input.scroll        # (dx, dy)
 ctx.input.modifiers     # .shift .ctrl .alt .super_key
 ctx.input.gamepads      # Gamepads (below)
+ctx.input.touches       # [Touch]: fingers, oldest first (below)
 ```
+
+`Touch`: `finger` (0 for the first; kept while down), `position`, `start`
+(pixels), `moved`, `just_started`, `just_ended`, `primary` (the finger
+driving the left mouse button). Without a touch screen the held left mouse
+button is finger 0.
 
 `Gamepads`: `ids()`, `get(id)`, `primary()`, `any_connected()`,
 `pressed(id, button)`, `pressed_any(button)`, `axis(id, axis)`,
@@ -631,7 +637,7 @@ the number of frames run.
 |---|---|
 | `time` | `delta`, `elapsed`, `frame` (from 1) |
 | `scene` | Script entities: `["Name"]`, `find`, `by_id`, `in`, iteration |
-| `input` | Keys with the aliases `"shift"`, `"ctrl"`, `"alt"` (either side) and `"left"`/`"right"`/`"up"`/`"down"`, or actions bound with `settings.bind`; `axis(neg, pos)`; `any_just_pressed()` (the new key's name, for rebinding); mouse buttons, `mouse_delta`, `lock_mouse` |
+| `input` | Keys with the aliases `"shift"`, `"ctrl"`, `"alt"` (either side) and `"left"`/`"right"`/`"up"`/`"down"`, or actions bound with `settings.bind`; `axis(neg, pos)`; `any_just_pressed()` (the new key's name, for rebinding); mouse buttons, `mouse_delta`, `lock_mouse`; `touches` (fingers, or the left mouse button as finger 0) |
 | `physics` | `grounded`, `raycast`, `water_height(x, z)`; the rest of the engine's physics, which also accepts script entities |
 | `water` | `height(x, z)` (same as `physics.water_height`), `splash(position_or_entity, strength=1.0)`: rings and foam at that point (strength 0–10; 1 is about a crate dropped from a couple of metres) |
 | `particles` | `burst(effect, position_or_entity, direction=None, count=None, **fields)`: a one-off effect (a preset name or `at.ParticleEmitter`, with fields changed) that cleans up after itself; `emit(entity, count)`: extra particles from the entity's own emitter |

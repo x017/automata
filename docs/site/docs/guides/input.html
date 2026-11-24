@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guide: Input · AUTOMATA docs</title>
-<meta name="description" content="Keyboard, mouse, and gamepads — polled raw for toys, bound to named actions for games.">
+<meta name="description" content="Keyboard, mouse, touch screens and gamepads — polled raw for toys, bound to named actions for games.">
 <meta name="theme-color" content="#000000">
 <link rel="stylesheet" href="../_static/docs.css">
 <script>window.DOCS_ROOT = "../";</script>
@@ -33,8 +33,8 @@
   <main id="content" class="article">
     <article class="prose">
 <h1>Guide: Input</h1>
-<p>Keyboard, mouse, and gamepads — polled raw for toys, bound to named actions
-for games.</p>
+<p>Keyboard, mouse, touch screens and gamepads — polled raw for toys, bound to
+named actions for games.</p>
 <h2 id="the-snapshot">The snapshot<a class="anchor" href="#the-snapshot" aria-label="Link to this section">#</a></h2>
 <p><code>ctx.input</code> is the device state at the start of the frame:</p>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.input.pressed(at.Key.SPACE)          <span class="tok-c"># held right now</span>
@@ -74,6 +74,24 @@ with the frame snapshot.</li><li><strong>Remapping is game code</strong> — <co
 is ordinary game code.</li></ol>
 <h3 id="binding-kinds">Binding kinds<a class="anchor" href="#binding-kinds" aria-label="Link to this section">#</a></h3>
 <div class="table"><table><thead><tr><th>Constructor</th><th>Triggers on</th></tr></thead><tbody><tr><td><code>Binding.key(key)</code></td><td>keyboard key</td></tr><tr><td><code>Binding.mouse(button)</code></td><td>mouse button</td></tr><tr><td><code>Binding.gamepad_button(button)</code></td><td>any connected pad's button</td></tr><tr><td><code>Binding.gamepad_axis_positive(axis)</code> / <code>..._negative(axis)</code></td><td>analog axis past ±0.5 (triggers-as-buttons)</td></tr><tr><td><code>AxisBinding.key_pair(neg, pos)</code></td><td>two keys → −1/0/+1</td></tr><tr><td><code>AxisBinding.button_pair(neg, pos)</code></td><td>two bindings → −1/0/+1</td></tr><tr><td><code>AxisBinding.gamepad_axis(axis, scale=1.0)</code></td><td>analog value × scale (<code>-1.0</code> inverts)</td></tr></tbody></table></div>
+<h2 id="touch">Touch<a class="anchor" href="#touch" aria-label="Link to this section">#</a></h2>
+<p><code>ctx.input.touches</code> lists the fingers on a touch screen, oldest first. Each
+<code>Touch</code> has a <code>finger</code> number (0 for the first; it keeps its number while
+it's down, and a new finger takes the lowest free one), its <code>position</code> and
+<code>start</code> in pixels, <code>moved</code> (from the start), and <code>just_started</code> /
+<code>just_ended</code> for the frame it lands and lifts:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">for</span> touch <span class="tok-k">in</span> ctx.input.touches:
+    <span class="tok-k">if</span> touch.just_ended <span class="tok-k">and</span> <span class="tok-b">abs</span>(touch.moved[<span class="tok-n">0</span>]) &gt; <span class="tok-n">80</span>:
+        swipe(<span class="tok-n">1</span> <span class="tok-k">if</span> touch.moved[<span class="tok-n">0</span>] &gt; <span class="tok-n">0</span> <span class="tok-k">else</span> -<span class="tok-n">1</span>)
+    <span class="tok-k">elif</span> touch.just_ended:
+        tap(touch.position)</code></pre></div>
+<p>The first finger down is also the left mouse button (<code>primary</code> is True on
+it), so menus and click-to-play games work on a phone unchanged. On a
+computer the held left mouse button is listed as finger 0, so touch
+controls can be built and tried with a mouse.</p>
+<p>Keys, buttons and touches are the engine's own types: each platform's
+window layer (winit on desktop; SDL for the coming Android build) translates its events into
+them, so the same script reads the same names everywhere.</p>
 <h2 id="gamepads">Gamepads<a class="anchor" href="#gamepads" aria-label="Link to this section">#</a></h2>
 <div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>pads = ctx.input.gamepads
 <span class="tok-k">if</span> pads.any_connected():
@@ -92,7 +110,7 @@ triggers, <code>LEFT_THUMB</code>/<code>RIGHT_THUMB</code> (stick clicks), d-pad
     <footer class="pager"><a class="prev" href="cameras.html"><small>Previous</small>Cameras</a><a class="next" href="physics.html"><small>Next</small>Physics</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/input.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#the-snapshot">The snapshot</a></li><li class="l2"><a href="#action-maps-the-layer-youll-actually-use">Action maps: the layer you'll actually use</a></li><li class="l3"><a href="#binding-kinds">Binding kinds</a></li><li class="l2"><a href="#gamepads">Gamepads</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#the-snapshot">The snapshot</a></li><li class="l2"><a href="#action-maps-the-layer-youll-actually-use">Action maps: the layer you'll actually use</a></li><li class="l3"><a href="#binding-kinds">Binding kinds</a></li><li class="l2"><a href="#touch">Touch</a></li><li class="l2"><a href="#gamepads">Gamepads</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

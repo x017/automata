@@ -2,8 +2,7 @@
 
 use std::collections::HashSet;
 
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent};
-use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+use crate::keys::{ElementState, InputEvent, KeyCode, ModifiersState, MouseButton, TouchPhase};
 
 /// A snapshot of keyboard and mouse input for the current frame.
 ///
@@ -19,7 +18,9 @@ use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 ///
 /// Touch screens drive the mouse: the first finger down is the left button,
 /// held where it touches, so menus and click-to-act games work on phones
-/// and tablets unchanged. Other fingers are ignored until it lifts.
+/// and tablets unchanged. Every finger is also listed in
+/// [`touches`](InputState::touches); without a touch screen the left mouse
+/// button stands in as finger 0, so touch controls can be tried on desktop.
 #[derive(Debug, Default)]
 pub struct InputState {
     pressed_keys: HashSet<KeyCode>,
@@ -34,6 +35,36 @@ pub struct InputState {
     modifiers: ModifiersState,
     /// The finger acting as the left button, if one is down.
     touch: Option<u64>,
+    /// Fingers down this frame, and those that lifted this frame.
+    touches: Vec<Touch>,
+}
+
+/// One finger on the screen (see [`InputState::touches`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Touch {
+    /// A small number for the finger, stable while it's down: the lowest
+    /// not in use when it landed (0 for the first finger).
+    pub finger: u32,
+    /// Where it is, in physical pixels like the cursor.
+    pub position: (f64, f64),
+    /// Where it landed.
+    pub start: (f64, f64),
+    /// It landed this frame.
+    pub just_started: bool,
+    /// It lifted (or was cancelled) this frame; it's gone next frame.
+    pub ended: bool,
+    /// It's the finger driving the left mouse button (or the mouse itself).
+    pub primary: bool,
+    /// The platform's id for the finger; `None` for the mouse stand-in.
+    source: Option<u64>,
+}
+
+impl Touch {
+    /// Whether this is the left mouse button standing in for a finger.
+    #[must_use]
+    pub fn is_mouse(&self) -> bool {
+        self.source.is_none()
+    }
 }
 
 impl InputState {
@@ -47,43 +78,30 @@ impl InputState {
     // Event ingestion (used by the window runtime)
     // ------------------------------------------------------------------
 
-    /// Feeds a winit window event into the state.
-    ///
-    /// Events that carry no input information (resize, redraw, focus, ...)
-    /// are ignored. Keyboard events without a physical key code (IME input,
-    /// dead keys) are ignored as well.
-    pub fn handle_window_event(&mut self, event: &WindowEvent) {
-        match event {
-            WindowEvent::KeyboardInput { event, .. } => {
-                if let PhysicalKey::Code(code) = event.physical_key {
-                    self.handle_key(code, event.state);
-                }
-            }
-            WindowEvent::MouseInput { state, button, .. } => {
-                self.handle_mouse_button(*button, *state);
-            }
-            WindowEvent::CursorMoved { position, .. } => {
-                self.handle_cursor_moved(position.x, position.y);
-            }
-            WindowEvent::MouseWheel { delta, .. } => {
-                let (x, y) = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => (f64::from(*x), f64::from(*y)),
-                    MouseScrollDelta::PixelDelta(pos) => (pos.x, pos.y),
-                };
-                self.handle_scroll(x, y);
-            }
-            WindowEvent::ModifiersChanged(modifiers) => {
-                self.handle_modifiers(modifiers.state());
-            }
-            WindowEvent::Touch(Touch {
-                phase,
-                location,
-                id,
-                ..
-            }) => {
-                self.handle_touch(*id, *phase, location.x, location.y);
-            }
-            _ => {}
+    /// Feeds one input event from the platform driver into the state.
+    pub fn handle_event(&mut self, event: &InputEvent) {
+        match *event {
+            InputEvent::Key { key, state } => self.handle_key(key, state),
+            InputEvent::MouseButton { button, state } => self.handle_mouse_button(button, state),
+            InputEvent::CursorMoved { x, y } => self.handle_cursor_moved(x, y),
+            InputEvent::Scroll { x, y } => self.handle_scroll(x, y),
+            InputEvent::MouseMotion { dx, dy } => self.handle_mouse_motion(dx, dy),
+            InputEvent::Touch { id, phase, x, y } => self.handle_touch(id, phase, x, y),
+            InputEvent::Modifiers(state) => self.handle_modifiers(state),
+            InputEvent::FocusLost => self.release_all(),
+        }
+    }
+
+    /// Lets go of every held key and button (reported as just released),
+    /// as when the window loses focus and their releases would be missed.
+    pub fn release_all(&mut self) {
+        self.just_released_keys.extend(self.pressed_keys.drain());
+        self.just_released_buttons
+            .extend(self.pressed_buttons.drain());
+        self.modifiers = ModifiersState::empty();
+        self.touch = None;
+        for t in &mut self.touches {
+            t.ended = true;
         }
     }
 
@@ -103,8 +121,49 @@ impl InputState {
         }
     }
 
-    /// Records a mouse button press or release.
+    /// Records a mouse button press or release. With no finger down, the
+    /// left button also acts as finger 0 in [`touches`](Self::touches).
     pub fn handle_mouse_button(&mut self, button: MouseButton, state: ElementState) {
+        self.set_button(button, state);
+        if button != MouseButton::Left {
+            return;
+        }
+        let mouse = self.touches.iter().position(|t| t.is_mouse() && !t.ended);
+        match (state, mouse) {
+            (ElementState::Pressed, None) if !self.touches.iter().any(|t| !t.is_mouse()) => {
+                let at = self.cursor_position.unwrap_or_default();
+                self.add_touch(None, at, true);
+            }
+            (ElementState::Released, Some(i)) => self.touches[i].ended = true,
+            _ => {}
+        }
+    }
+
+    /// Lists a new finger in the lowest free slot.
+    fn add_touch(&mut self, source: Option<u64>, at: (f64, f64), primary: bool) {
+        // One of 0..=len is always free.
+        let finger = (0..=u32::try_from(self.touches.len()).unwrap_or(u32::MAX))
+            .find(|f| !self.touches.iter().any(|t| t.finger == *f))
+            .unwrap_or_default();
+        self.touches.push(Touch {
+            finger,
+            position: at,
+            start: at,
+            just_started: true,
+            ended: false,
+            primary,
+            source,
+        });
+    }
+
+    /// The live (not lifted) touch from `source`.
+    fn live_touch(&mut self, source: Option<u64>) -> Option<&mut Touch> {
+        self.touches
+            .iter_mut()
+            .find(|t| t.source == source && !t.ended)
+    }
+
+    fn set_button(&mut self, button: MouseButton, state: ElementState) {
         match state {
             ElementState::Pressed => {
                 if self.pressed_buttons.insert(button) {
@@ -123,17 +182,21 @@ impl InputState {
     /// window's top-left corner.
     pub fn handle_cursor_moved(&mut self, x: f64, y: f64) {
         self.cursor_position = Some((x, y));
+        if let Some(t) = self.live_touch(None) {
+            t.position = (x, y);
+        }
     }
 
     /// Records a touch, in physical pixels like the cursor. The first
     /// finger down presses the left button and moves the cursor until it
     /// lifts; fingers that land while it's down are ignored.
     pub fn handle_touch(&mut self, id: u64, phase: TouchPhase, x: f64, y: f64) {
+        self.track_touch(id, phase, (x, y));
         match phase {
             TouchPhase::Started if self.touch.is_none() => {
                 self.touch = Some(id);
                 self.cursor_position = Some((x, y));
-                self.handle_mouse_button(MouseButton::Left, ElementState::Pressed);
+                self.set_button(MouseButton::Left, ElementState::Pressed);
             }
             TouchPhase::Moved if self.touch == Some(id) => {
                 self.cursor_position = Some((x, y));
@@ -141,9 +204,36 @@ impl InputState {
             TouchPhase::Ended | TouchPhase::Cancelled if self.touch == Some(id) => {
                 self.touch = None;
                 self.cursor_position = Some((x, y));
-                self.handle_mouse_button(MouseButton::Left, ElementState::Released);
+                self.set_button(MouseButton::Left, ElementState::Released);
             }
             _ => {}
+        }
+    }
+
+    /// Keeps [`touches`](Self::touches) up to date for one touch event.
+    fn track_touch(&mut self, id: u64, phase: TouchPhase, at: (f64, f64)) {
+        match phase {
+            TouchPhase::Started => {
+                if self.live_touch(Some(id)).is_none() {
+                    // A real finger replaces the mouse stand-in.
+                    for t in &mut self.touches {
+                        t.ended |= t.is_mouse();
+                    }
+                    let primary = self.touch.is_none();
+                    self.add_touch(Some(id), at, primary);
+                }
+            }
+            TouchPhase::Moved => {
+                if let Some(t) = self.live_touch(Some(id)) {
+                    t.position = at;
+                }
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                if let Some(t) = self.live_touch(Some(id)) {
+                    t.position = at;
+                    t.ended = true;
+                }
+            }
         }
     }
 
@@ -154,7 +244,7 @@ impl InputState {
         self.scroll_delta.1 += y;
     }
 
-    /// Accumulates raw mouse movement (winit's `DeviceEvent::MouseMotion`).
+    /// Accumulates raw mouse movement.
     /// Unlike the cursor position it keeps reporting at the screen edge and
     /// while the cursor is locked, which is what mouse-look needs.
     pub fn handle_mouse_motion(&mut self, dx: f64, dy: f64) {
@@ -175,6 +265,10 @@ impl InputState {
         self.just_released_buttons.clear();
         self.scroll_delta = (0.0, 0.0);
         self.mouse_delta = (0.0, 0.0);
+        self.touches.retain(|t| !t.ended);
+        for t in &mut self.touches {
+            t.just_started = false;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -241,11 +335,122 @@ impl InputState {
     pub fn modifiers(&self) -> ModifiersState {
         self.modifiers
     }
+
+    /// The fingers on the screen this frame, plus those that lifted this
+    /// frame (`ended`), in the order they landed. Without a touch screen
+    /// the held left mouse button is listed as finger 0.
+    #[must_use]
+    pub fn touches(&self) -> &[Touch] {
+        &self.touches
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fingers(input: &InputState) -> Vec<(u32, bool, bool, bool)> {
+        input
+            .touches()
+            .iter()
+            .map(|t| (t.finger, t.just_started, t.ended, t.primary))
+            .collect()
+    }
+
+    #[test]
+    fn every_finger_is_listed_with_its_own_slot() {
+        let mut input = InputState::new();
+        input.handle_touch(70, TouchPhase::Started, 10.0, 10.0);
+        input.handle_touch(71, TouchPhase::Started, 50.0, 60.0);
+        assert_eq!(
+            fingers(&input),
+            [(0, true, false, true), (1, true, false, false)]
+        );
+        input.end_frame();
+        input.handle_touch(71, TouchPhase::Moved, 55.0, 66.0);
+        input.handle_touch(70, TouchPhase::Ended, 12.0, 11.0);
+        let t = input.touches()[1];
+        assert_eq!((t.position, t.start), ((55.0, 66.0), (50.0, 60.0)));
+        assert_eq!(
+            fingers(&input),
+            [(0, false, true, true), (1, false, false, false)]
+        );
+        input.end_frame();
+        // Slot 0 is free again; finger 1 keeps its number.
+        input.handle_touch(72, TouchPhase::Started, 1.0, 1.0);
+        assert_eq!(
+            fingers(&input),
+            [(1, false, false, false), (0, true, false, true)]
+        );
+        assert!(!input.touches()[0].is_mouse());
+        input.handle_touch(71, TouchPhase::Cancelled, 0.0, 0.0);
+        input.end_frame();
+        assert_eq!(fingers(&input), [(0, false, false, true)]);
+    }
+
+    #[test]
+    fn the_left_mouse_button_stands_in_for_a_finger() {
+        let mut input = InputState::new();
+        input.handle_cursor_moved(30.0, 40.0);
+        input.handle_mouse_button(MouseButton::Right, ElementState::Pressed);
+        assert_eq!(input.touches(), []);
+        input.handle_mouse_button(MouseButton::Left, ElementState::Pressed);
+        assert_eq!(fingers(&input), [(0, true, false, true)]);
+        assert!(input.touches()[0].is_mouse());
+        input.end_frame();
+        input.handle_cursor_moved(35.0, 41.0);
+        assert_eq!(input.touches()[0].position, (35.0, 41.0));
+        assert_eq!(input.touches()[0].start, (30.0, 40.0));
+        input.handle_mouse_button(MouseButton::Left, ElementState::Released);
+        assert_eq!(fingers(&input), [(0, false, true, true)]);
+        input.end_frame();
+        assert_eq!(input.touches(), []);
+        // A finger's emulated left button doesn't add a mouse finger.
+        input.handle_touch(9, TouchPhase::Started, 5.0, 5.0);
+        assert_eq!(input.touches().len(), 1);
+        assert!(!input.touches()[0].is_mouse());
+    }
+
+    #[test]
+    fn driver_events_feed_the_state_and_losing_focus_lets_go() {
+        let mut input = InputState::new();
+        for e in [
+            InputEvent::Key {
+                key: KeyCode::KeyW,
+                state: ElementState::Pressed,
+            },
+            InputEvent::MouseButton {
+                button: MouseButton::Right,
+                state: ElementState::Pressed,
+            },
+            InputEvent::CursorMoved { x: 10.0, y: 20.0 },
+            InputEvent::Scroll { x: 0.0, y: 1.0 },
+            InputEvent::MouseMotion { dx: 3.0, dy: -1.0 },
+            InputEvent::Modifiers(ModifiersState::ALT),
+        ] {
+            input.handle_event(&e);
+        }
+        assert!(input.pressed(KeyCode::KeyW) && input.button_pressed(MouseButton::Right));
+        assert_eq!(input.cursor_position(), Some((10.0, 20.0)));
+        assert_eq!(input.scroll_delta(), (0.0, 1.0));
+        assert_eq!(input.mouse_delta(), (3.0, -1.0));
+        assert!(input.modifiers().alt_key());
+        input.end_frame();
+        input.handle_event(&InputEvent::FocusLost);
+        assert!(!input.pressed(KeyCode::KeyW) && input.just_released(KeyCode::KeyW));
+        assert!(input.button_just_released(MouseButton::Right));
+        assert!(!input.modifiers().alt_key());
+        input.handle_event(&InputEvent::Touch {
+            id: 4,
+            phase: TouchPhase::Started,
+            x: 1.0,
+            y: 2.0,
+        });
+        assert!(
+            input.button_pressed(MouseButton::Left),
+            "a finger is the left button"
+        );
+    }
 
     #[test]
     fn key_press_is_pressed_and_just_pressed() {

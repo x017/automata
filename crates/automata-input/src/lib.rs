@@ -13,25 +13,26 @@
 //! Gamepad and action events flow onto the engine's event stream as
 //! [`GamepadEvent`]s; keyboard/mouse stay poll-based (`pressed`/`just_pressed`).
 //!
-//! The keyboard/mouse key types are currently re-exports of `winit`'s
-//! well-established W3C-based enums; call sites should always refer to them
-//! through this crate.
+//! The keyboard, mouse and touch types ([`KeyCode`], [`InputEvent`] …) are
+//! the engine's own, so the same game code runs on every platform driver:
+//! winit on desktop, SDL for the coming Android build. Drivers translate their events into
+//! [`InputEvent`]s for [`InputState::handle_event`].
 
 mod gamepad;
+mod keys;
 mod mapping;
 mod state;
 
 pub use gamepad::{GamepadAxis, GamepadButton, GamepadEvent, GamepadId, Gamepads};
 pub use mapping::{ActionMap, AxisBinding, Binding};
-pub use state::InputState;
+pub use state::{InputState, Touch};
 
-pub use winit::event::{ElementState, MouseButton};
-pub use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+pub use keys::{ElementState, InputEvent, KeyCode, ModifiersState, MouseButton, TouchPhase};
 
 /// Everything you need for input: `use automata_input::prelude::*`.
 pub mod prelude {
     pub use crate::gamepad::{GamepadAxis, GamepadButton, GamepadEvent, GamepadId, Gamepads};
     pub use crate::mapping::{ActionMap, AxisBinding, Binding};
     pub use crate::state::InputState;
-    pub use crate::{ElementState, KeyCode, ModifiersState, MouseButton, PhysicalKey};
+    pub use crate::{ElementState, InputEvent, KeyCode, ModifiersState, MouseButton, TouchPhase};
 }

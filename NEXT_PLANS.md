@@ -13,7 +13,7 @@ of those phases point to.
 
 ---
 
-## 1. Android export 🟢 decided (not started)
+## 1. Android export 🔨 in progress
 
 ### Decisions
 
@@ -97,9 +97,17 @@ Other Android work:
 1. **Spike:** a p4a build (SDL3 launcher, engine recipe) that renders a
    scene on the emulator through the SDL3 driver, including pause/resume.
    Our own input types land first, so both drivers share them.
+   *Engine side done (E1a):* `automata-input` no longer depends on winit;
+   it has its own `KeyCode` (105 keys, with their script names), mouse
+   buttons, modifiers, `TouchPhase` and an `InputEvent` that drivers feed
+   to `InputState::handle_event`. The winit translation lives in
+   `automata-core/src/winit_input.rs`. The SDL3 driver and the p4a build
+   are next, in CI. ([Diagram](docs/assets/ui/e1a_input_types.jpg).)
 2. **Python on device:** run Coin Run on a device or emulator.
-3. **Touch:** `ctx.input.touches`, the virtual joystick and buttons, and
-   control settings in `build.ron`.
+3. **Touch:** `ctx.input.touches` (*done in E1a*: fingers with stable
+   numbers, start points and phases; the left mouse button is finger 0 on
+   desktop and in Oberon), the virtual joystick and buttons, and control
+   settings in `build.ron`.
 4. **Template + export:** `--target android` in `automata-export` and
    Oberon, with debug signing.
 5. **Size and polish:** trim the standard library (target: well under

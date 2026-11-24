@@ -87,6 +87,7 @@ __all__ = [
     "Hit",
     "Hud",
     "Input",
+    "Touch",
     "ComponentRef",
     "FieldRef",
     "KeySource",
@@ -816,6 +817,7 @@ class KeySource:
         self.locked = False
         self.pos = None
         self.raw = None
+        self._finger = None  # the left button as finger 0: [x, y, start_x, start_y]
 
     def update(self, keys, buttons=(), delta=(0.0, 0.0), locked=False, pos=None):
         self.prev, self.down = self.down, set(keys)
@@ -823,6 +825,19 @@ class KeySource:
         self.delta = (float(delta[0]), float(delta[1]))
         self.locked = bool(locked)
         self.pos = None if pos is None else (float(pos[0]), float(pos[1]))
+        if self.button_pressed("left"):
+            x, y = self.pos or (0.0, 0.0)
+            self._finger = [x, y, x, y]
+        elif self._finger is not None and self.pos is not None:
+            self._finger[0:2] = self.pos
+
+    def touches(self):
+        """The left mouse button as finger 0 (there's no touch screen)."""
+        held, released = self.button_down("left"), self.button_released("left")
+        if self._finger is None or not (held or released):
+            return []
+        x, y, sx, sy = self._finger
+        return [(0, x, y, sx, sy, self.button_pressed("left"), released, True)]
 
     def key_down(self, k):
         return k in self.down
@@ -852,8 +867,41 @@ class KeySource:
         return self.pos
 
 
+class Touch:
+    """A finger on the screen, from ``ctx.input.touches``.
+
+    ``finger`` is a small number that stays the same while it's down (0
+    for the first finger; the lowest free number for the next).
+    ``position`` and ``start`` (where it landed) are screen pixels, like
+    ``ctx.input.mouse_position``. ``just_started`` is True on the frame it
+    lands and ``just_ended`` on the frame it lifts (its last frame in the
+    list). ``primary`` marks the finger that also works as the left mouse
+    button: the first one down."""
+
+    __slots__ = ("finger", "position", "start", "just_started", "just_ended", "primary")
+
+    def __init__(self, finger, position, start, just_started=False, just_ended=False,
+                 primary=False):
+        self.finger = int(finger)
+        self.position = (float(position[0]), float(position[1]))
+        self.start = (float(start[0]), float(start[1]))
+        self.just_started = bool(just_started)
+        self.just_ended = bool(just_ended)
+        self.primary = bool(primary)
+
+    @property
+    def moved(self) -> tuple[float, float]:
+        """How far it has moved since it landed (dx, dy); +y is down."""
+        return (self.position[0] - self.start[0], self.position[1] - self.start[1])
+
+    def __repr__(self):
+        x, y = self.position
+        state = " started" if self.just_started else " ended" if self.just_ended else ""
+        return f"Touch(finger={self.finger}, position=({x:g}, {y:g}){state})"
+
+
 class Input:
-    """``ctx.input``: keys, mouse buttons, mouse movement and capture."""
+    """``ctx.input``: keys, mouse buttons, touches, mouse movement and capture."""
 
     def __init__(self, source):
         self._src = source
@@ -944,6 +992,21 @@ class Input:
         if pos is None:
             return None
         return (float(pos[0]), float(pos[1]))
+
+    @property
+    def touches(self) -> list[Touch]:
+        """The fingers on the screen, in the order they landed, plus any
+        that lifted this frame (``just_ended``). On a computer the held
+        left mouse button is finger 0, so touch controls work with a
+        mouse too. A finger that landed on ``ctx.ui`` belongs to the UI
+        and isn't listed, like a click on a button."""
+        fn = getattr(self._src, "touches", None)
+        raw = fn() if fn is not None else ()
+        ui = self._ui
+        taken = ui is not None and "left" in ui._captured
+        return [Touch(f, (x, y), (sx, sy), started, ended, primary)
+                for f, x, y, sx, sy, started, ended, primary in raw
+                if not (primary and taken)]
 
     @property
     def mouse_over_ui(self) -> bool:
@@ -4051,8 +4114,16 @@ _KEYBOARD = (
     + tuple("0123456789")
     + ("space", "enter", "escape", "tab", "backspace",
        "arrow_left", "arrow_right", "arrow_up", "arrow_down",
-       "shift_left", "shift_right", "ctrl_left", "ctrl_right", "alt_left", "alt_right")
+       "shift_left", "shift_right", "ctrl_left", "ctrl_right", "alt_left", "alt_right",
+       "super_left", "super_right")
     + tuple(f"f{i}" for i in range(1, 13))
+    + ("home", "end", "page_up", "page_down", "insert", "delete",
+       "caps_lock", "num_lock", "scroll_lock",
+       "minus", "equal", "comma", "period", "slash", "backslash", "semicolon", "quote",
+       "backquote", "bracket_left", "bracket_right")
+    + tuple(f"numpad_{i}" for i in range(10))
+    + ("numpad_add", "numpad_subtract", "numpad_multiply", "numpad_divide", "numpad_decimal",
+       "numpad_enter", "print_screen", "pause", "context_menu", "back_button")
 )
 #: Gamepad buttons as key names, on any connected pad. ``"pad_up"`` …
 #: ``"pad_right"`` are the d-pad or the left stick pushed past halfway;

@@ -86,6 +86,65 @@ pub struct PyInput {
     /// Gamepad state and events.
     #[pyo3(get)]
     pub gamepads: PyGamepads,
+    /// Fingers on the screen this frame, plus those that lifted this frame,
+    /// in the order they landed. Without a touch screen the held left mouse
+    /// button is finger 0.
+    #[pyo3(get)]
+    pub touches: Vec<PyTouch>,
+}
+
+/// One finger on the screen, from `ctx.input.touches`.
+///
+/// Three flags for one moment of a finger's life read best as flags.
+#[allow(clippy::struct_excessive_bools)]
+#[pyclass(name = "Touch", module = "automata._core", frozen)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PyTouch {
+    /// A small number that stays the same while the finger is down: 0 for
+    /// the first, the lowest free number for the next.
+    #[pyo3(get)]
+    pub finger: u32,
+    /// Where it is, in pixels from the window's top-left (like `cursor`).
+    #[pyo3(get)]
+    pub position: (f64, f64),
+    /// Where it landed.
+    #[pyo3(get)]
+    pub start: (f64, f64),
+    /// It landed this frame.
+    #[pyo3(get)]
+    pub just_started: bool,
+    /// It lifted this frame (its last frame in the list).
+    #[pyo3(get)]
+    pub just_ended: bool,
+    /// It's the finger that also works as the left mouse button.
+    #[pyo3(get)]
+    pub primary: bool,
+}
+
+#[pymethods]
+impl PyTouch {
+    /// How far it has moved since it landed, `(dx, dy)`; `+y` is down.
+    #[getter]
+    fn moved(&self) -> (f64, f64) {
+        (
+            self.position.0 - self.start.0,
+            self.position.1 - self.start.1,
+        )
+    }
+
+    fn __repr__(&self) -> String {
+        let state = if self.just_started {
+            " started"
+        } else if self.just_ended {
+            " ended"
+        } else {
+            ""
+        };
+        format!(
+            "Touch(finger={}, position=({}, {}){state})",
+            self.finger, self.position.0, self.position.1
+        )
+    }
 }
 
 impl PyInput {
@@ -107,6 +166,18 @@ impl PyInput {
                 super_key: modifiers.super_key(),
             },
             gamepads: PyGamepads::snapshot(gamepads, gamepad_events),
+            touches: input
+                .touches()
+                .iter()
+                .map(|t| PyTouch {
+                    finger: t.finger,
+                    position: t.position,
+                    start: t.start,
+                    just_started: t.just_started,
+                    just_ended: t.ended,
+                    primary: t.primary,
+                })
+                .collect(),
             ..Self::default()
         };
         for (name, code) in keys::all_keys() {

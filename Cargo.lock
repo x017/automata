@@ -221,7 +221,6 @@ name = "automata-input"
 version = "0.1.0"
 dependencies = [
  "gilrs",
- "winit",
 ]
 
 [[package]]

@@ -112,6 +112,29 @@ class Key(str, Enum):
     BACKQUOTE = "backquote"
     BRACKET_LEFT = "bracket_left"
     BRACKET_RIGHT = "bracket_right"
+    # Numpad.
+    NUMPAD_0 = "numpad_0"
+    NUMPAD_1 = "numpad_1"
+    NUMPAD_2 = "numpad_2"
+    NUMPAD_3 = "numpad_3"
+    NUMPAD_4 = "numpad_4"
+    NUMPAD_5 = "numpad_5"
+    NUMPAD_6 = "numpad_6"
+    NUMPAD_7 = "numpad_7"
+    NUMPAD_8 = "numpad_8"
+    NUMPAD_9 = "numpad_9"
+    NUMPAD_ADD = "numpad_add"
+    NUMPAD_SUBTRACT = "numpad_subtract"
+    NUMPAD_MULTIPLY = "numpad_multiply"
+    NUMPAD_DIVIDE = "numpad_divide"
+    NUMPAD_DECIMAL = "numpad_decimal"
+    NUMPAD_ENTER = "numpad_enter"
+    # System.
+    PRINT_SCREEN = "print_screen"
+    PAUSE = "pause"
+    CONTEXT_MENU = "context_menu"
+    #: Android's Back button.
+    BACK_BUTTON = "back_button"
 
 
 class MouseButton(str, Enum):

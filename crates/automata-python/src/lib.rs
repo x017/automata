@@ -60,6 +60,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<context::FrameTime>()?;
     m.add_class::<context::PyInput>()?;
     m.add_class::<context::PyModifiers>()?;
+    m.add_class::<context::PyTouch>()?;
     m.add_class::<context::PyResources>()?;
     m.add_class::<events::PyEvents>()?;
     m.add_class::<audio::PyAudio>()?;

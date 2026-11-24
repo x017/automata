@@ -807,6 +807,19 @@ class Modifiers:
     alt: bool
     super_key: bool
 
+class Touch:
+    """One finger on the screen, from ``Input.touches``. Without a touch
+    screen the held left mouse button is finger 0."""
+
+    finger: int
+    position: tuple[float, float]
+    start: tuple[float, float]
+    just_started: bool
+    just_ended: bool
+    primary: bool
+    @property
+    def moved(self) -> tuple[float, float]: ...
+
 class Input:
     """Keyboard, mouse, and gamepad state at the start of the frame."""
 
@@ -815,6 +828,7 @@ class Input:
     mouse_delta: tuple[float, float]
     modifiers: Modifiers
     gamepads: Gamepads
+    touches: list[Touch]
     def pressed(self, key: str) -> bool: ...
     def just_pressed(self, key: str) -> bool: ...
     def just_released(self, key: str) -> bool: ...

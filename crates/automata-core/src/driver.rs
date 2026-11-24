@@ -313,10 +313,17 @@ impl<F: FnMut(&mut AppContext<'_>)> ApplicationHandler for WinitDriver<'_, F> {
                     if let Some(window) = &self.window {
                         lock_cursor(window, false);
                     }
+                    // Releases that happen elsewhere never arrive.
+                    self.input
+                        .handle_event(&automata_input::InputEvent::FocusLost);
                 }
                 self.apply_cursor_lock();
             }
-            event => self.input.handle_window_event(&event),
+            event => {
+                if let Some(input) = crate::winit_input::input_event(&event) {
+                    self.input.handle_event(&input);
+                }
+            }
         }
     }
 

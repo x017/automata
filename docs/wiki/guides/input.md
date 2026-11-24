@@ -1,7 +1,7 @@
 # Guide: Input
 
-Keyboard, mouse, and gamepads — polled raw for toys, bound to named actions
-for games.
+Keyboard, mouse, touch screens and gamepads — polled raw for toys, bound to
+named actions for games.
 
 ## The snapshot
 
@@ -66,6 +66,31 @@ Rules that matter:
 | `AxisBinding.key_pair(neg, pos)` | two keys → −1/0/+1 |
 | `AxisBinding.button_pair(neg, pos)` | two bindings → −1/0/+1 |
 | `AxisBinding.gamepad_axis(axis, scale=1.0)` | analog value × scale (`-1.0` inverts) |
+
+## Touch
+
+`ctx.input.touches` lists the fingers on a touch screen, oldest first. Each
+`Touch` has a `finger` number (0 for the first; it keeps its number while
+it's down, and a new finger takes the lowest free one), its `position` and
+`start` in pixels, `moved` (from the start), and `just_started` /
+`just_ended` for the frame it lands and lifts:
+
+```python
+for touch in ctx.input.touches:
+    if touch.just_ended and abs(touch.moved[0]) > 80:
+        swipe(1 if touch.moved[0] > 0 else -1)
+    elif touch.just_ended:
+        tap(touch.position)
+```
+
+The first finger down is also the left mouse button (`primary` is True on
+it), so menus and click-to-play games work on a phone unchanged. On a
+computer the held left mouse button is listed as finger 0, so touch
+controls can be built and tried with a mouse.
+
+Keys, buttons and touches are the engine's own types: each platform's
+window layer (winit on desktop; SDL for the coming Android build) translates its events into
+them, so the same script reads the same names everywhere.
 
 ## Gamepads
 

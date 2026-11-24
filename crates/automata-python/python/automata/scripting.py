@@ -153,6 +153,10 @@ class _EngineKeys:
             return None
         return self.raw.cursor
 
+    def touches(self) -> Any:
+        return [(t.finger, *t.position, *t.start, t.just_started, t.just_ended, t.primary)
+                for t in self.raw.touches]
+
 
 class _ViewRecord:
     """One entity's start-of-frame values, read lazily from its view."""

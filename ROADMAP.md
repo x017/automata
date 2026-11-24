@@ -973,12 +973,25 @@ Done:
 
 ## Track E: Platforms
 
-### E1. Android export ⬜ L
-The phases in [`NEXT_PLANS.md` #1](NEXT_PLANS.md#1-android-export--decided-not-started)
+### E1. Android export 🔨 L
+The phases in [`NEXT_PLANS.md` #1](NEXT_PLANS.md#1-android-export--in-progress)
 (CPython on device, a template like Windows/Linux, emulator CI). The
 template is built in CI with python-for-android's **SDL3 launcher**. The
 engine gets an internal SDL3 driver for Android next to winit on desktop,
 and its own input types. The game-facing API stays the same everywhere.
+- ✅ **E1a, the engine's own input types:** `automata-input` has no winit
+  dependency; keys (105, named in one table shared by both script runners,
+  `at.Key` and Oberon's Play), mouse buttons, modifiers and touch phases
+  are its own, fed by an `InputEvent` from each driver. Losing focus lets
+  go of held keys. New keys: numpad, punctuation, navigation, locks and
+  Android's `"back_button"`.
+- ✅ **`ctx.input.touches`:** every finger, with a stable number, start
+  point, `moved` and `just_started`/`just_ended`; the first finger is
+  still the left mouse button. On desktop and in Oberon the left mouse
+  button is finger 0. `at.Touch` in the engine API.
+- ⬜ The SDL3 driver and a p4a build that renders on an emulator (CI).
+- ⬜ Coin Run on the emulator; virtual joystick and buttons; `build.ron`
+  touch controls; `--target android` with debug signing; size.
 
 ### E2. macOS export ⬜ M
 - A macOS template build in CI (Apple Silicon and Intel) and an `.app`
@@ -1062,7 +1075,7 @@ per effort. Reorder any time by telling me.
 | 36 | D6 Editor workflow | M | ✅ |
 | 37 | D4 UI editor | L | ✅ |
 | 38 | D7 Localization | S | ✅ |
-| 39 | E1 Android export | L | ⬜ |
+| 39 | E1 Android export | L | 🔨 |
 | 40 | E2 macOS export | M | ⬜ |
 | 41 | E3 Web export | L | ⬜ |
 | 42 | E4 Steam integration | M | ⬜ |

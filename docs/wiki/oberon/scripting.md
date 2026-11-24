@@ -136,6 +136,7 @@ for `entity` and `ctx`.
 | `ctx.input.mouse_locked` | Whether the cursor is captured |
 | `ctx.input.mouse_position` | `(x, y)` cursor position in screen pixels from the top-left (like `ctx.hud`), or `None` when the cursor is outside the game view or captured |
 | `ctx.input.mouse_over_ui` | Whether the cursor is over [`ctx.ui`](#game-ui) |
+| `ctx.input.touches` | The fingers on a touch screen, in the order they landed, as `Touch`es with `finger` (0 for the first, and it keeps its number while it's down), `position` and `start` in screen pixels, `moved`, `just_started`, `just_ended` (its last frame in the list) and `primary` (the finger that also works as the left mouse button). On a computer the held left mouse button is finger 0, so touch controls can be tried with a mouse. A finger that lands on `ctx.ui` belongs to the UI and isn't listed |
 | `ctx.physics.grounded(entity)` | Same as `entity.grounded` |
 | `ctx.physics.raycast(origin, direction, max_distance=100, ignore=None)` | The first collider along a ray, or `None`. Returns a `Hit` with `.entity`, `.point`, `.normal` and `.distance`. `ignore` skips one entity, usually the caster. Sensors are skipped |
 | `ctx.physics.water_height(x, z)` | Height of the water surface at a world point, waves included, or `None` where there's no water |
@@ -231,7 +232,17 @@ ctx.ui.theme.font = PIXEL   # every widget's text from now on
 `"arrow_right"`, `"arrow_up"` and `"arrow_down"` (or just `"left"`,
 `"right"`, `"up"`, `"down"`), and `"shift"` / `"ctrl"` / `"alt"`. The last
 three match either side of the keyboard; use `"shift_left"` or
-`"shift_right"` (and likewise for ctrl and alt) to require one side.
+`"shift_right"` (and likewise for ctrl, alt and `"super_left"` /
+`"super_right"`) to require one side. Also: `"f1"`–`"f12"`, `"home"`,
+`"end"`, `"page_up"`, `"page_down"`, `"insert"`, `"delete"`, punctuation by
+name (`"minus"`, `"equal"`, `"comma"`, `"period"`, `"slash"`,
+`"backslash"`, `"semicolon"`, `"quote"`, `"backquote"`, `"bracket_left"`,
+`"bracket_right"`), the numpad (`"numpad_0"`–`"numpad_9"`, `"numpad_add"`,
+`"numpad_subtract"`, `"numpad_multiply"`, `"numpad_divide"`,
+`"numpad_decimal"`, `"numpad_enter"`), the locks (`"caps_lock"`,
+`"num_lock"`, `"scroll_lock"`), `"print_screen"`, `"pause"`,
+`"context_menu"`, and `"back_button"`: Android's Back. `at.Key` has them
+all.
 
 **Gamepad buttons** are key names too, on any connected pad: `"pad_south"`,
 `"pad_east"`, `"pad_west"` and `"pad_north"` (A, B, X and Y on an Xbox pad),

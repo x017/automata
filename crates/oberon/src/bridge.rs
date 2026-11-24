@@ -1200,76 +1200,11 @@ pub fn held_pad_keys(pads: &automata_input::Gamepads) -> Vec<&'static str> {
 }
 
 /// The Python key name (`"a"`, `"space"`, `"arrow_left"` …) of a physical
-/// key — the same names the `automata` runtime uses.
+/// key: the engine's own table (`automata_input::KeyCode::name`), so Play
+/// knows the same keys as `run_scene` and exported games.
 #[must_use]
 pub fn key_name(code: winit::keyboard::KeyCode) -> Option<&'static str> {
-    use winit::keyboard::KeyCode as K;
-    Some(match code {
-        K::KeyA => "a",
-        K::KeyB => "b",
-        K::KeyC => "c",
-        K::KeyD => "d",
-        K::KeyE => "e",
-        K::KeyF => "f",
-        K::KeyG => "g",
-        K::KeyH => "h",
-        K::KeyI => "i",
-        K::KeyJ => "j",
-        K::KeyK => "k",
-        K::KeyL => "l",
-        K::KeyM => "m",
-        K::KeyN => "n",
-        K::KeyO => "o",
-        K::KeyP => "p",
-        K::KeyQ => "q",
-        K::KeyR => "r",
-        K::KeyS => "s",
-        K::KeyT => "t",
-        K::KeyU => "u",
-        K::KeyV => "v",
-        K::KeyW => "w",
-        K::KeyX => "x",
-        K::KeyY => "y",
-        K::KeyZ => "z",
-        K::Digit0 => "0",
-        K::Digit1 => "1",
-        K::Digit2 => "2",
-        K::Digit3 => "3",
-        K::Digit4 => "4",
-        K::Digit5 => "5",
-        K::Digit6 => "6",
-        K::Digit7 => "7",
-        K::Digit8 => "8",
-        K::Digit9 => "9",
-        K::ArrowLeft => "arrow_left",
-        K::ArrowRight => "arrow_right",
-        K::ArrowUp => "arrow_up",
-        K::ArrowDown => "arrow_down",
-        K::Space => "space",
-        K::Enter => "enter",
-        K::Escape => "escape",
-        K::Tab => "tab",
-        K::Backspace => "backspace",
-        K::ShiftLeft => "shift_left",
-        K::ShiftRight => "shift_right",
-        K::ControlLeft => "ctrl_left",
-        K::ControlRight => "ctrl_right",
-        K::AltLeft => "alt_left",
-        K::AltRight => "alt_right",
-        K::F1 => "f1",
-        K::F2 => "f2",
-        K::F3 => "f3",
-        K::F4 => "f4",
-        K::F5 => "f5",
-        K::F6 => "f6",
-        K::F7 => "f7",
-        K::F8 => "f8",
-        K::F9 => "f9",
-        K::F10 => "f10",
-        K::F11 => "f11",
-        K::F12 => "f12",
-        _ => return None,
-    })
+    automata_core::winit_input::key_code(code).map(automata_input::KeyCode::name)
 }
 
 #[cfg(test)]

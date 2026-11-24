@@ -20,6 +20,7 @@ pub mod scene_file;
 pub mod strings;
 pub mod time;
 pub mod window;
+pub mod winit_input;
 
 pub use app::{AppContext, AppState, Application, SharedAudio, WorldState};
 pub use audio_source::{AudioCommand, AudioSource, AudioSourcePlayer};
