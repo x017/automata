@@ -395,6 +395,7 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
         _ => project.to_path_buf(),
     };
     check_fonts(project, &base, &Skip::new(cfg), &mut out);
+    check_strings(project, &base, &Skip::new(cfg), &mut out);
     if cfg.targets.is_empty() {
         out.push(Message::error("No target platforms selected."));
     }
@@ -406,43 +407,103 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
 /// that ships. (A game with a missing font still runs, drawing with the
 /// built-in one, which is easy to miss.)
 fn check_fonts(project: &Path, base: &Path, skip: &Skip, out: &mut Vec<Message>) {
-    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    let root = canon(project);
     let mut seen = std::collections::HashSet::new();
     for (script, line, font) in font_literals(project, skip) {
-        if !seen.insert(font.clone()) {
-            continue;
+        if seen.insert(font.clone()) {
+            check_font(project, base, skip, &format!("{script}:{line}"), &font, out);
         }
-        let who = format!("{script}:{line}");
-        let file = if Path::new(&font).is_absolute() {
-            PathBuf::from(&font)
-        } else {
-            automata_assets::join_relative(base, &font)
-        };
-        if !file.is_file() {
-            out.push(Message::error(format!(
-                "{who}: font {font} not found (fonts are named relative to the scene's \
-                 folder, e.g. fonts/Pixel.ttf)"
-            )));
-            continue;
-        }
-        let shipped = canon(&file)
-            .strip_prefix(&root)
+    }
+}
+
+/// Checks one font a game names (`who` says where): it must be a font file
+/// inside the project that ships.
+fn check_font(
+    project: &Path,
+    base: &Path,
+    skip: &Skip,
+    who: &str,
+    font: &str,
+    out: &mut Vec<Message>,
+) {
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let file = if Path::new(font).is_absolute() {
+        PathBuf::from(font)
+    } else {
+        automata_assets::join_relative(base, font)
+    };
+    if !file.is_file() {
+        out.push(Message::error(format!(
+            "{who}: font {font} not found (fonts are named relative to the scene's \
+             folder, e.g. fonts/Pixel.ttf)"
+        )));
+        return;
+    }
+    let shipped = canon(&file)
+        .strip_prefix(canon(project))
+        .ok()
+        .map(archive::slash_path);
+    match shipped {
+        None => out.push(Message::error(format!(
+            "{who}: font {font} is outside the project folder and won't ship \
+             (drop it into the editor to import it into fonts/)"
+        ))),
+        Some(rel) if skip.excluded(&rel) => out.push(Message::error(format!(
+            "{who}: font {font} is excluded from the build (build.ron: exclude)"
+        ))),
+        Some(_) if !is_font_file(&file) => out.push(Message::error(format!(
+            "{who}: {font} isn't a TrueType or OpenType font"
+        ))),
+        Some(_) => {}
+    }
+}
+
+/// Checks the string tables (`lang/*.csv`): they ship, their language
+/// fonts are fonts that ship, and mistakes in them are warned about, with
+/// the keys a language lacks (those show in the first language).
+fn check_strings(project: &Path, base: &Path, skip: &Skip, out: &mut Vec<Message>) {
+    let table = automata_core::StringTable::load(base);
+    if table.files.is_empty() {
+        return;
+    }
+    for file in &table.files {
+        let rel = std::fs::canonicalize(base.join(file))
             .ok()
-            .map(archive::slash_path);
-        match shipped {
-            None => out.push(Message::error(format!(
-                "{who}: font {font} is outside the project folder and won't ship \
-                 (drop it into the editor to import it into fonts/)"
-            ))),
-            Some(rel) if skip.excluded(&rel) => out.push(Message::error(format!(
-                "{who}: font {font} is excluded from the build (build.ron: exclude)"
-            ))),
-            Some(_) if !is_font_file(&file) => out.push(Message::error(format!(
-                "{who}: {font} isn't a TrueType or OpenType font"
-            ))),
-            Some(_) => {}
+            .and_then(|p| {
+                let root = std::fs::canonicalize(project).ok()?;
+                p.strip_prefix(root).ok().map(archive::slash_path)
+            })
+            .unwrap_or_else(|| file.clone());
+        if skip.excluded(&rel) {
+            out.push(Message::error(format!(
+                "{file} is excluded from the build (build.ron: exclude), so ctx.tr would \
+                 show keys instead of text"
+            )));
         }
+    }
+    for problem in &table.problems {
+        out.push(Message::warn(problem.clone()));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for (i, font) in table.fonts.iter().enumerate() {
+        if !font.is_empty() && seen.insert(font.clone()) {
+            let who = format!("lang/*.csv @font ({})", table.languages[i]);
+            check_font(project, base, skip, &who, font, out);
+        }
+    }
+    for (language, keys) in table.untranslated() {
+        let shown: Vec<&str> = keys.iter().take(4).map(String::as_str).collect();
+        let more = if keys.len() > shown.len() {
+            ", …"
+        } else {
+            ""
+        };
+        out.push(Message::warn(format!(
+            "lang/*.csv: {} key{} without {language} text ({}{more}); they show in {}",
+            keys.len(),
+            if keys.len() == 1 { "" } else { "s" },
+            shown.join(", "),
+            table.languages[0]
+        )));
     }
 }
 
@@ -1709,6 +1770,74 @@ mod tests {
             fonts[3]
         );
         let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn validation_checks_string_tables() {
+        let dir = project("strings");
+        std::fs::create_dir_all(dir.join("fonts")).unwrap();
+        std::fs::write(
+            dir.join("fonts/JP.otf"),
+            [&b"OTTO"[..], &[0u8; 60]].concat(),
+        )
+        .unwrap();
+        let scene = automata_core::scene_file::SceneFile {
+            version: 1,
+            entities: vec![],
+        };
+        std::fs::write(dir.join("s.ron"), scene.to_ron().unwrap()).unwrap();
+        std::fs::create_dir_all(dir.join("lang")).unwrap();
+        std::fs::write(
+            dir.join("lang/strings.csv"),
+            "key,en,ja,ko\n@font,,fonts/JP.otf,fonts/KO.otf\n\
+             menu.play,Play,プレイ,\nmenu.quit,Quit,,\nmenu.play,Again,,\n",
+        )
+        .unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("s.ron".into()),
+            ..BuildConfig::default()
+        };
+        let texts = |cfg: &BuildConfig| -> Vec<(Level, String)> {
+            validate(&dir, cfg)
+                .into_iter()
+                .filter(|m| m.text.contains("lang/"))
+                .map(|m| (m.level, m.text))
+                .collect()
+        };
+        let found = texts(&cfg);
+        assert_eq!(found.len(), 4, "{found:#?}");
+        assert_eq!(
+            found[0],
+            (
+                Level::Warning,
+                "lang/strings.csv:5: menu.play is already in lang/strings.csv:3; keeping that one"
+                    .into()
+            )
+        );
+        assert_eq!(found[1].0, Level::Error);
+        assert!(
+            found[1]
+                .1
+                .starts_with("lang/*.csv @font (ko): font fonts/KO.otf not found"),
+            "{}",
+            found[1].1
+        );
+        assert_eq!(
+            found[2],
+            (
+                Level::Warning,
+                "lang/*.csv: 1 key without ja text (menu.quit); they show in en".into()
+            )
+        );
+        assert!(found[3].1.starts_with("lang/*.csv: 2 keys without ko text"));
+        // Excluding the tables is an error: the game would show keys.
+        let excluded = BuildConfig {
+            exclude: vec!["lang/".into()],
+            ..cfg
+        };
+        assert!(texts(&excluded)
+            .iter()
+            .any(|(l, t)| *l == Level::Error && t.contains("lang/strings.csv is excluded")));
     }
 
     #[test]

@@ -17,6 +17,7 @@ pub mod error;
 pub mod logging;
 pub mod prefab;
 pub mod scene_file;
+pub mod strings;
 pub mod time;
 pub mod window;
 
@@ -29,6 +30,7 @@ pub use scene_file::{
     AttributeValue, Attributes, EntityData, MeshVisualData, PrimitiveData, SceneFile,
     SceneFileError, Script, TransformData, SCENE_FILE_VERSION,
 };
+pub use strings::StringTable;
 pub use time::Time;
 pub use window::{WindowConfig, WindowMode};
 

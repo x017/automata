@@ -67,12 +67,12 @@
                         (
                             kind: Button,
                             name: "again",
-                            text: "Play again",
+                            text: "results.again",
                         ),
                         (
                             kind: Button,
                             name: "title",
-                            text: "Title",
+                            text: "results.title",
                         ),
                     ],
                 ),

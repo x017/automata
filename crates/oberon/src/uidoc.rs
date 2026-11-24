@@ -854,13 +854,68 @@ impl Lay {
     }
 }
 
+/// About how wide `line` draws, in multiples of the text size, as the
+/// script API estimates it: full-width characters (Chinese, Japanese,
+/// Korean, full-width forms) take 1, everything else 0.55.
+#[must_use]
+pub fn text_ems(line: &str) -> f32 {
+    line.chars()
+        .map(|c| if is_wide(c) { 1.0 } else { 0.55 })
+        .sum()
+}
+
+/// Whether `c` is East Asian wide or full-width (Unicode's `W` / `F`), for
+/// the scripts and blocks that matter here.
+fn is_wide(c: char) -> bool {
+    matches!(u32::from(c),
+        0x1100..=0x115F
+        | 0x2E80..=0x303E
+        | 0x3041..=0x33FF
+        | 0x3400..=0x4DBF
+        | 0x4E00..=0x9FFF
+        | 0xA000..=0xA4CF
+        | 0xAC00..=0xD7A3
+        | 0xF900..=0xFAFF
+        | 0xFE30..=0xFE4F
+        | 0xFF00..=0xFF60
+        | 0xFFE0..=0xFFE6
+        | 0x1F300..=0x1F64F
+        | 0x1F900..=0x1F9FF
+        | 0x20000..=0x3FFFD)
+}
+
+/// Replaces every text and title that's a key of `table` with its text in
+/// `language`, as the game shows the document (`ctx.tr`). Returns how many
+/// were replaced.
+pub fn translate(doc: &mut UiDoc, table: &automata_core::StringTable, language: &str) -> usize {
+    fn walk(
+        nodes: &mut [UiNode],
+        table: &automata_core::StringTable,
+        language: &str,
+        n: &mut usize,
+    ) {
+        for node in nodes {
+            for field in [&mut node.text, &mut node.title] {
+                if let Some(t) = table.get(field, language) {
+                    *field = t.to_string();
+                    *n += 1;
+                }
+            }
+            walk(&mut node.children, table, language, n);
+        }
+    }
+    let mut n = 0;
+    walk(&mut doc.nodes, table, language, &mut n);
+    n
+}
+
 /// A label's estimated width (the script API can't measure text on every
 /// runner, so neither do we).
 #[allow(clippy::cast_precision_loss)]
 fn estimate(text: &str, size: f32) -> (f32, f32) {
     let lines: Vec<&str> = text.split('\n').collect();
-    let longest = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-    (longest as f32 * size * 0.55, size * lines.len() as f32)
+    let longest = lines.iter().map(|l| text_ems(l)).fold(0.0, f32::max);
+    (longest * size, size * lines.len() as f32)
 }
 
 /// A widget's own size outside a layout, or what it asks a layout for:
@@ -875,7 +930,7 @@ fn wants(node: &UiNode, text_size: f32) -> (Option<f32>, Option<f32>, f32, f32) 
         }
         NodeKind::Toggle => {
             let bx = size * 1.2;
-            let est = bx + size * 0.5 + node.text.chars().count() as f32 * size * 0.55;
+            let est = bx + size * 0.5 + text_ems(&node.text) * size;
             (None, None, est, bx)
         }
         NodeKind::Button => (node.width, node.height, 160.0, 44.0),
@@ -1073,6 +1128,38 @@ pub fn progress_text(text: &str, value: f32, max: f32) -> String {
 mod tests {
     use super::*;
     use std::fmt::Write as _;
+
+    #[test]
+    fn full_width_text_is_estimated_twice_as_wide() {
+        // The same numbers as script_api._text_ems.
+        assert!((text_ems("Play") - 2.2).abs() < 1e-5);
+        assert!((text_ems("プレイ") - 3.0).abs() < 1e-5);
+        assert!((text_ems("コイン: 3") - 4.65).abs() < 1e-5);
+        assert!((text_ems("한국어") - 3.0).abs() < 1e-5);
+        assert!((text_ems("Привет") - 3.3).abs() < 1e-5);
+    }
+
+    #[test]
+    fn keys_in_a_document_show_in_the_chosen_language() {
+        let mut table = automata_core::StringTable::default();
+        table.add_file(
+            "lang/strings.csv",
+            "key,en,ja\nmenu.play,Play,プレイ\nmenu.title,Options,設定\n",
+        );
+        let mut doc = UiDoc::template_menu();
+        doc.nodes[0].title = "menu.title".into();
+        doc.nodes[0].children[1].text = "menu.play".into();
+        let mut ja = doc.clone();
+        assert_eq!(translate(&mut ja, &table, "ja"), 2);
+        assert_eq!(ja.nodes[0].title, "設定");
+        assert_eq!(ja.nodes[0].children[1].text, "プレイ");
+        // Text that isn't a key stays as written.
+        assert_eq!(ja.nodes[0].children[0].text, "MENU");
+        assert_eq!(ja.nodes[0].children[2].text, "Quit");
+        let mut en = doc;
+        translate(&mut en, &table, "en");
+        assert_eq!(en.nodes[0].children[1].text, "Play");
+    }
 
     #[test]
     fn documents_round_trip_and_leave_defaults_out() {

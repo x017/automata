@@ -47,6 +47,18 @@ impl Canvas {
         }
     }
 
+    /// Extra fonts for characters the interface fonts lack (see
+    /// [`TextRenderer::set_fallbacks`]).
+    pub fn set_fallback_fonts(&mut self, fonts: Vec<ab_glyph::FontArc>) {
+        self.text.set_fallbacks(fonts);
+    }
+
+    /// How many extra fallback fonts are set.
+    #[must_use]
+    pub fn fallback_font_count(&self) -> usize {
+        self.text.fallback_count()
+    }
+
     /// Sets the face for following text calls; returns the previous one.
     pub fn set_face(&mut self, face: Face) -> Face {
         std::mem::replace(&mut self.face, face)

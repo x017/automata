@@ -1188,6 +1188,7 @@ class Screen:
         shadow: Optional[tuple[float, float, float, float]] = None,
         outline: Optional[tuple[float, float, float, float]] = None,
         font: Optional[str] = None,
+        fallback: Optional[str] = None,
     ) -> None: ...
     def measure_text(
         self, text: str, size: float = 24.0, font: Optional[str] = None

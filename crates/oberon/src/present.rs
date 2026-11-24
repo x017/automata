@@ -2547,6 +2547,12 @@ impl EditorApp {
                         for e in viewport.take_hud_font_errors() {
                             ui.log(LogLevel::Warn, format!("{e}; using the built-in font"));
                         }
+                        for c in viewport.take_hud_missing_chars() {
+                            ui.log(
+                                LogLevel::Warn,
+                                automata_renderer::text::missing_glyph_message(c),
+                            );
+                        }
                         ui.frame_composited(canvas, &session.doc, pointer, (vw, vh))
                     }
                     None => {

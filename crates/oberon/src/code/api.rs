@@ -44,6 +44,8 @@ pub enum Ty {
     Screens,
     /// `ctx.ui.screen(name)`: a screen, and its UI document's widgets.
     UiScreen,
+    /// `ctx.tr`: text from the string tables (`lang/*.csv`).
+    Strings,
 }
 
 /// What a string argument names.
@@ -52,6 +54,8 @@ enum ArgKind {
     Key,
     EntityName,
     Attribute,
+    /// A string-table key (`ctx.tr("menu.play")`).
+    StringKey,
 }
 
 /// One member of an API type.
@@ -145,8 +149,17 @@ const CONTEXT: &[Member] = &[
     prop(
         "settings",
         "Settings",
-        "The player's settings, kept between runs: volume, graphics, ui_scale, bind(action, *keys).",
+        "The player's settings, kept between runs: volume, graphics, ui_scale, language, bind(action, *keys).",
         None,
+    ),
+    with_arg(
+        meth(
+            "tr",
+            "(key, language=None, **values) -> str",
+            "Text in the player's language from lang/*.csv: ctx.tr(\"hud.coins\", count=3). Also languages, name(), font().",
+            Some(Ty::Strings),
+        ),
+        ArgKind::StringKey,
     ),
     meth(
         "log",
@@ -251,6 +264,43 @@ const INPUT: &[Member] = &[
         "mouse_locked",
         "bool",
         "Whether the cursor is captured.",
+        None,
+    ),
+];
+
+const STRINGS: &[Member] = &[
+    prop(
+        "language",
+        "str",
+        "The language texts come in (ctx.settings.language).",
+        None,
+    ),
+    prop(
+        "languages",
+        "tuple[str, ...]",
+        "The tables' language codes in column order; the first is the default.",
+        None,
+    ),
+    meth(
+        "name",
+        "(language=None) -> str",
+        "A language's name for a picker (the @name row), else its code.",
+        None,
+    ),
+    meth(
+        "font",
+        "(language=None) -> str | None",
+        "A language's font (the @font row): draws characters other fonts lack.",
+        None,
+    ),
+    with_arg(
+        meth("has", "(key) -> bool", "Whether a table has the key.", None),
+        ArgKind::StringKey,
+    ),
+    meth(
+        "keys",
+        "(prefix=\"\") -> list[str]",
+        "Every key (starting with prefix), sorted.",
         None,
     ),
 ];
@@ -856,6 +906,7 @@ impl Ty {
             Self::UiTheme => UI_THEME,
             Self::Screens => SCREENS,
             Self::UiScreen => UI_SCREEN,
+            Self::Strings => STRINGS,
         }
     }
 
@@ -878,6 +929,7 @@ impl Ty {
             Self::UiTheme => "UiTheme",
             Self::Screens => "Screens",
             Self::UiScreen => "UiScreen",
+            Self::Strings => "Strings",
         }
     }
 
@@ -900,6 +952,7 @@ impl Ty {
             Self::UiTheme => "The colours, text size and font ctx.ui draws with.",
             Self::Screens => "Which game UI screens are shown, newest on top.",
             Self::UiScreen => "A game UI screen and the widgets of its UI document, by name.",
+            Self::Strings => "Text in the player's language from the string tables (lang/*.csv).",
         }
     }
 
@@ -933,6 +986,8 @@ pub struct SceneNames {
     pub entities: Vec<String>,
     /// Custom attribute names (all entities).
     pub attributes: Vec<String>,
+    /// String-table keys (`lang/*.csv`) and their first language's text.
+    pub strings: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -958,21 +1013,34 @@ pub fn complete(buf: &Buffer, pos: Pos, names: &SceneNames) -> Option<Vec<Comple
     if let Some(quote_at) = quote {
         let head = before[..quote_at].trim_end();
         let kind = string_arg_kind(buf, pos.line, head)?;
-        let list: Vec<String> = match kind {
-            ArgKind::Key => KEY_NAMES.iter().map(|k| (*k).to_string()).collect(),
-            ArgKind::EntityName => names.entities.clone(),
-            ArgKind::Attribute => names.attributes.clone(),
+        let plain = |list: &[String], detail: &str| -> Vec<(String, String)> {
+            list.iter()
+                .map(|n| (n.clone(), detail.to_string()))
+                .collect()
         };
-        let (kind_char, detail) = match kind {
-            ArgKind::Key => (super::CompletionKind::Key, "key"),
-            ArgKind::EntityName => (super::CompletionKind::Entity, "entity"),
-            ArgKind::Attribute => (super::CompletionKind::Property, "attribute"),
+        let (list, kind_char) = match kind {
+            ArgKind::Key => (
+                KEY_NAMES
+                    .iter()
+                    .map(|k| ((*k).to_string(), "key".to_string()))
+                    .collect(),
+                super::CompletionKind::Key,
+            ),
+            ArgKind::EntityName => (
+                plain(&names.entities, "entity"),
+                super::CompletionKind::Entity,
+            ),
+            ArgKind::Attribute => (
+                plain(&names.attributes, "attribute"),
+                super::CompletionKind::Property,
+            ),
+            ArgKind::StringKey => (names.strings.clone(), super::CompletionKind::Text),
         };
         return Some(
             list.into_iter()
-                .map(|n| CompletionItem {
+                .map(|(n, detail)| CompletionItem {
                     label: n.clone(),
-                    detail: detail.to_string(),
+                    detail,
                     insert: n,
                     kind: kind_char,
                 })
@@ -1321,6 +1389,7 @@ mod tests {
         let names = SceneNames {
             entities: vec!["Player".into(), "Crate 1".into()],
             attributes: vec!["health".into()],
+            strings: vec![("menu.play".into(), "Play".into())],
         };
         let (b, p) = at(SCRIPT, 7, "; ctx.input.pressed(\"sp");
         assert!(labels(&complete(&b, p, &names).unwrap()).contains(&"space"));
@@ -1337,6 +1406,13 @@ mod tests {
         assert_eq!(labels(&complete(&b, p, &names).unwrap()), vec!["health"]);
         let (b, p) = at(SCRIPT, 7, "; print(\"he");
         assert!(complete(&b, p, &names).is_none());
+        // String-table keys, with their text as the detail.
+        let (b, p) = at(SCRIPT, 7, "; ctx.tr(\"me");
+        let items = complete(&b, p, &names).unwrap();
+        assert_eq!(labels(&items), vec!["menu.play"]);
+        assert_eq!(items[0].detail, "Play");
+        let (b, p) = at(SCRIPT, 7, "; ctx.tr.");
+        assert!(labels(&complete(&b, p, &names).unwrap()).contains(&"languages"));
     }
 
     #[test]

@@ -50,7 +50,7 @@
                     children: [
                         (
                             kind: Label,
-                            text: "TIME",
+                            text: "hud.time",
                             size: Some(14.0),
                             font: "fonts/PressStart2P-Regular.ttf",
                         ),
@@ -74,7 +74,7 @@
                 (
                     kind: Progress,
                     name: "lives",
-                    text: "{value} / {max} lives",
+                    text: "hud.lives",
                     height: Some(24.0),
                     color: Some((0.95, 0.35, 0.4, 1.0)),
                     value: 3.0,
@@ -104,24 +104,24 @@
                 (
                     kind: Button,
                     name: "pick_1",
-                    text: "1  Cube",
+                    text: "hud.pick_1",
                 ),
                 (
                     kind: Button,
                     name: "pick_2",
-                    text: "2  Tower",
+                    text: "hud.pick_2",
                 ),
                 (
                     kind: Button,
                     name: "pick_3",
-                    text: "3  Slab",
+                    text: "hud.pick_3",
                 ),
             ],
         ),
         (
             kind: Label,
             name: "keys",
-            text: "Pick the shape that lifts: click its button or press 1, 2 or 3",
+            text: "hud.keys",
             anchor: "bottom",
             y: 112.0,
             size: Some(16.0),

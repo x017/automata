@@ -33,14 +33,21 @@ class Backend(api.Backend):
     def base_dir(self):
         return GAME
 
+    def language(self):
+        return self.system
+
+    system = "en-GB"  # the computer's language: the game starts in it
+
 
 class Play:
     """The scene's scripted entities, stepped one 60 Hz frame at a time."""
 
-    def __init__(self, screen=(1280, 720)):
+    def __init__(self, screen=(1280, 720), system="en-GB", save_dir=None):
         self.screen = screen
         self.keys = api.KeySource()
-        self.host = api.ScriptHost(Backend(), self.keys)
+        backend = Backend()
+        backend.system = system
+        self.host = api.ScriptHost(backend, self.keys, save_dir=save_dir)
         game = os.path.join(GAME, "scripts", "game.py")
         shape = os.path.join(GAME, "scripts", "shape.py")
         self.records = [{"id": 1, "name": "Game", "script": game, "attrs": {"seed": 7}}]
@@ -126,8 +133,8 @@ def test_saved_level_matches_the_build_script():
 def test_the_documents_have_the_widgets_the_script_uses(play):
     """Renaming one in the UI editor would break the game: keep them."""
     ui = play.ui
-    assert ui.screen("title").widgets == ["best", "hints", "play", "title", "volume",
-                                          "volume_text"]
+    assert ui.screen("title").widgets == ["best", "hints", "language", "play", "title",
+                                          "volume", "volume_text"]
     assert ui.screen("hud").widgets == ["clock", "keys", "lives", "pick_1", "pick_2", "pick_3",
                                         "picks", "score", "streak", "time", "verdict"]
     assert ui.screen("results").widgets == ["again", "best", "detail", "final", "heading",
@@ -235,3 +242,130 @@ def test_the_best_score_is_kept_in_settings(play):
     play.step()
     assert "TIME!" in play.texts() and f"Best {score}" in play.texts()
     assert play.host.ctx.settings.get("best") == score
+
+
+# -- languages --------------------------------------------------------------------
+
+STRINGS = os.path.join(GAME, "lang", "strings.csv")
+
+
+def _keys_used():
+    """Every key the documents and the script name."""
+    used = set()
+    for name in os.listdir(os.path.join(GAME, "ui")):
+        with open(os.path.join(GAME, "ui", name), encoding="utf-8") as f:
+            used |= set(re.findall(r'text: "([a-z]+\.[a-z_0-9]+)"', f.read()))
+    with open(os.path.join(GAME, "scripts", "game.py"), encoding="utf-8") as f:
+        used |= set(re.findall(r'"((?:title|hud|results)\.[a-z_0-9]+)"', f.read()))
+    return used
+
+
+def test_every_key_is_in_the_table_in_every_language(play):
+    tr = play.host.ctx.tr
+    assert tr.languages == ("en", "es", "ja")
+    assert [tr.name(code) for code in tr.languages] == ["English", "Español", "日本語"]
+    used = _keys_used()
+    assert {"title.play", "hud.keys", "results.again", "hud.score", "hud.slow"} <= used
+    assert sorted(used - set(tr.keys())) == [], "keys the table lacks"
+    assert sorted(set(tr.keys()) - used) == [], "rows nothing uses"
+    for key in tr.keys():
+        for code in tr.languages:
+            assert tr(key, language=code, score=1, count=2, seconds=3, name="x", value=1,
+                      max=3, right=1, missed=0), f"{key} has no {code} text"
+
+
+def _font_characters(path):
+    """The code points a TrueType font maps (its cmap's format 4 and 12
+    subtables), with the standard library only."""
+    import struct  # noqa: PLC0415 - only this helper needs it
+
+    with open(path, "rb") as f:
+        data = f.read()
+    tables = {data[12 + 16 * i:16 + 16 * i]: struct.unpack_from(">I", data, 20 + 16 * i)[0]
+              for i in range(struct.unpack_from(">H", data, 4)[0])}
+    cmap = tables[b"cmap"]
+    found = set()
+    for i in range(struct.unpack_from(">H", data, cmap + 2)[0]):
+        offset = cmap + struct.unpack_from(">I", data, cmap + 8 + 8 * i)[0]
+        kind = struct.unpack_from(">H", data, offset)[0]
+        if kind == 4:
+            n = struct.unpack_from(">H", data, offset + 6)[0] // 2
+            ends = struct.unpack_from(f">{n}H", data, offset + 14)
+            starts = struct.unpack_from(f">{n}H", data, offset + 16 + 2 * n)
+            found.update(c for a, b in zip(starts, ends) for c in range(a, b + 1) if c != 0xFFFF)
+        elif kind == 12:
+            for g in range(struct.unpack_from(">I", data, offset + 12)[0]):
+                a, b, _ = struct.unpack_from(">3I", data, offset + 16 + 12 * g)
+                found.update(range(a, b + 1))
+    return found
+
+
+def test_the_japanese_font_has_every_japanese_character(play):
+    tr = play.host.ctx.tr
+    assert tr.font("ja") == "fonts/MPLUSRounded1c-ShapeSignal.ttf"
+    cmap = _font_characters(os.path.join(GAME, tr.font("ja")))
+    assert ord("あ") in cmap and ord("ン") in cmap and ord("A") in cmap
+    assert ord("漢") not in cmap, "only the kanji the table uses"
+    text = "".join(tr(k, language="ja") for k in tr.keys()) + tr.name("ja")
+    assert [c for c in text if c not in "\n" and ord(c) not in cmap] == []
+
+
+def test_it_starts_in_the_computers_language_if_the_game_has_it():
+    p = Play(system="es-MX")
+    p.step()
+    p.step()
+    assert p.host.ctx.settings.language == "es"
+    texts = p.texts()
+    assert "SEÑAL" in texts and "Jugar" in texts and "Récord 0" in texts
+    assert "Idioma: Español" in texts
+    assert Play(system="fr-FR").host.ctx.settings.language == "en", "else the first column"
+
+
+def test_the_language_button_switches_every_screen(play, tmp_path):
+    play.press("Language: English")
+    assert play.host.ctx.settings.language == "es"
+    play.step()
+    assert "Idioma: Español" in play.texts()
+    play.press("Idioma: Español")
+    assert play.host.ctx.settings.language == "ja"
+    play.step()
+    texts = play.texts()
+    assert "シェイプ・シグナル" in texts and "プレイ" in texts and "言語: 日本語" in texts
+    assert "ベスト 0" in texts and "キーのヒントを表示" in texts
+    # Japanese draws with the table's font where the theme's font lacks it.
+    title = next(i for i in play.out.hud if i["k"] == "text" and i["text"] == "シェイプ・シグナル")
+    assert title["font"].endswith("PressStart2P-Regular.ttf")
+    assert title["fallback"] == "fonts/MPLUSRounded1c-ShapeSignal.ttf"
+    play.press("プレイ")
+    play.step()
+    texts = play.texts()
+    assert "スコア 0" in texts and "ライフ 3 / 3" in texts and "45 秒" in texts
+    assert "1  キューブ" in texts and "タイム" in texts
+    lit = play.wait_for_signal()
+    wrong = next(n for n in ("Cube", "Tower", "Slab") if n != lit)
+    play.step(keys=[str([s[0] for s in build_level.SHAPES].index(wrong) + 1)])
+    play.step()
+    play.step()
+    assert "ミス" in play.texts()
+    play.game["left"] = 0.01
+    play.run(3)
+    play.step()
+    texts = play.texts()
+    assert "タイムアップ！" in texts and "せいかい 0・ミス 1" in texts and "もう一度" in texts
+    play.press("タイトル")
+    play.step()
+    play.press("言語: 日本語")
+    assert play.host.ctx.settings.language == "en", "it wraps around"
+
+
+def test_the_chosen_language_is_remembered(tmp_path):
+    p = Play(save_dir=tmp_path)
+    p.step()
+    p.step()
+    p.press("Language: English")
+    p.host.ctx.settings._flush()
+    again = Play(system="en-US", save_dir=tmp_path)
+    again.step()
+    again.step()
+    assert again.host.ctx.settings.language == "es"
+    assert "Jugar" in again.texts()

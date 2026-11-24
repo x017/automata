@@ -58,6 +58,7 @@ after the playhead passes them, just before ``update`` runs, and
 
 from __future__ import annotations
 
+import csv
 import difflib
 import fnmatch
 import importlib.util
@@ -68,6 +69,7 @@ import sys
 import time
 import traceback
 import types
+import unicodedata
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 #: An (x, y, z) triple.
@@ -1218,6 +1220,7 @@ class Hud:
     def __init__(self):
         self._items = []
         self.size = (1280, 720)
+        self._strings = None
 
     @property
     def center(self) -> tuple[float, float]:
@@ -1270,7 +1273,7 @@ class Hud:
         translucent / solid black. ``font`` is a ``.ttf`` or ``.otf`` file
         relative to the scene folder, like ``"fonts/Pixel.ttf"`` (None:
         the built-in font). Characters the font lacks are drawn with the
-        built-in font.
+        language's font (``ctx.tr.font()``), then the built-in font.
         """
         a = str(align).lower()
         if a == "centre":
@@ -1284,6 +1287,11 @@ class Hud:
                 "c": list(_vec(color, 4)), "align": a}
         if font is not None:
             item["font"] = _font_path(font)
+        if self._strings is not None:
+            # The language's font draws what the text's own font lacks.
+            fallback = self._strings.font()
+            if fallback and fallback != item.get("font"):
+                item["fallback"] = fallback
         for key, value, default in (("shadow", shadow, (0.0, 0.0, 0.0, 0.6)),
                                     ("outline", outline, (0.0, 0.0, 0.0, 1.0))):
             if value is True:
@@ -1294,6 +1302,13 @@ class Hud:
 
 
 Color = tuple[float, float, float, float]
+
+
+def _text_ems(line):
+    """About how wide ``line`` draws, in multiples of the text size (the
+    text can't be measured on every runner): full-width characters, such as
+    Japanese and Chinese, take about twice a Latin letter's room."""
+    return sum(1.0 if unicodedata.east_asian_width(c) in "WF" else 0.55 for c in line)
 
 
 def _font_path(font):
@@ -2145,6 +2160,8 @@ class Ui:
         self._input = input
         input._ui = self
         self._settings: Settings | None = None
+        # ctx.tr: document text that's a string-table key is translated.
+        self._strings: Strings | None = None
         #: Colours and text size (see :class:`UiTheme`).
         self.theme = UiTheme()
         #: The screen size the UI is laid out for, like ``(1280, 720)``:
@@ -2551,7 +2568,7 @@ class Ui:
                        "margin": margin if anchor else 0.0, "panel": panel, "id": wid}
             if kind != "stack":
                 options["gap"] = float(node["gap"])
-                options["title"] = node["title"] or None
+                options["title"] = self._doc_text(node["title"]) or None
             if kind == "row":
                 options["columns"] = int(node["columns"]) or None
             with getattr(self, kind)(x, y, w, h, **options):
@@ -2570,6 +2587,8 @@ class Ui:
                 x += bw / 2 if a in ("center", "centre") else bw if a == "right" else 0.0
         enabled = bool(node["enabled"]) and not doc.disabled.get(name, False)
         value = doc.values[key] if key in doc.values else doc.value(node)
+        if kind in ("label", "button"):
+            value = self._doc_text(str(value))
         if kind == "label":
             self.label(str(value), x, y, size=size, color=node["color"], align=node["align"],
                        font=node["font"] or None)
@@ -2577,7 +2596,8 @@ class Ui:
             if self.button(str(value), x, y, w, h, id=wid, enabled=enabled, size=size) and name:
                 doc.clicked.add(name)
         elif kind == "toggle":
-            new = self.toggle(node["text"], bool(value), x, y, id=wid, enabled=enabled, size=size)
+            new = self.toggle(self._doc_text(node["text"]), bool(value), x, y, id=wid,
+                              enabled=enabled, size=size)
             if new != bool(value):
                 doc.values[key] = new
                 if name:
@@ -2593,7 +2613,7 @@ class Ui:
                     doc.changed.add(name)
         elif kind == "progress":
             top_value = float(node["max"])
-            text = _ui_format(node["text"], float(value), top_value) or None
+            text = _ui_format(self._doc_text(node["text"]), float(value), top_value) or None
             self.progress(float(value), x, y, w, h, max=top_value, color=node["color"],
                           text=text)
         elif kind == "image":
@@ -2611,15 +2631,23 @@ class Ui:
         kind, w, h = node["kind"], node["width"], node["height"]
         size = self._size(node["size"])
         if kind == "label":
-            text = str(doc.value(node))
+            text = self._doc_text(str(doc.value(node)))
             lines = text.split("\n")
-            return max(len(line) for line in lines) * size * 0.55, size * len(lines)
+            return max(_text_ems(line) for line in lines) * size, size * len(lines)
         if kind == "toggle":
             box = size * 1.2
-            return box + size * 0.5 + len(str(node["text"])) * size * 0.55, box
+            return box + size * 0.5 + _text_ems(self._doc_text(node["text"])) * size, box
         dw, dh = {"button": (160.0, 44.0), "slider": (200.0, 24.0), "progress": (200.0, 18.0),
                   "image": (64.0, 64.0)}.get(kind, (0.0, 0.0))
         return (float(dw if w is None else w), float(dh if h is None else h))
+
+    def _doc_text(self, text):
+        """A document's text in the player's language when it's a key of
+        the string tables (``menu.play``), else as written."""
+        strings = self._strings
+        if text and strings is not None and strings.has(text):
+            return strings(text)
+        return text
 
     def space(self, width: float | None = None, height: float | None = None) -> None:
         """Empty room in a layout: ``height`` in a column, ``width`` in a
@@ -2892,7 +2920,7 @@ class Ui:
         lines = text.split("\n")
         if x is None or y is None:
             # The text can't be measured on every runner; estimate its width.
-            est = max(len(line) for line in lines) * size * 0.55
+            est = max(_text_ems(line) for line in lines) * size
             x0, y, w, _ = self._place("label", x, y, None, None, est, size * len(lines))
             a = str(align).lower()
             x = x0 + (w / 2 if a in ("center", "centre") else w if a == "right" else 0.0)
@@ -2953,7 +2981,7 @@ class Ui:
         size = self._size(size)
         box = size * 1.2
         # The text can't be measured on every runner; estimate its width.
-        est = box + size * 0.5 + len(str(text)) * size * 0.55
+        est = box + size * 0.5 + _text_ems(str(text)) * size
         x, y, w, h = self._place("toggle", x, y, None, None, est, box)
         hot, held, clicked, focused = self._press(self._id("toggle", text, id), (x, y, w, box),
                                                   bool(enabled))
@@ -4361,12 +4389,337 @@ class SaveData:
         return f"SaveData(slot={self._slot!r}, {dict(self._load())!r})"
 
 
+STRINGS_DIR = "lang"
+"""The folder string tables live in, relative to the scene's folder."""
+
+
+def _norm_language(code):
+    """A language code made comparable: ``pt_BR`` and ``pt-br`` match."""
+    return str(code).strip().lower().replace("_", "-")
+
+
+def _system_language():
+    """The player's language from the system (``"en-US"``), or None."""
+    for var in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+        value = os.environ.get(var, "").split(":")[0].split(".")[0].split("@")[0].strip()
+        if value and value not in ("C", "POSIX"):
+            return value.replace("_", "-")
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            buf = ctypes.create_unicode_buffer(85)
+            if ctypes.windll.kernel32.GetUserDefaultLocaleName(buf, 85):  # type: ignore[attr-defined]
+                return buf.value
+        except Exception:  # noqa: BLE001 - any failure: no system language
+            pass
+    try:
+        import locale
+
+        code = locale.getlocale()[0]
+    except Exception:  # noqa: BLE001
+        code = None
+    if code and "_" in code and len(code.split("_")[0]) <= 3:
+        return code.replace("_", "-")
+    return None
+
+
+class _Fill(dict):
+    """``str.format_map`` values that leave unknown ``{names}`` in place."""
+
+    def __init__(self, values):
+        super().__init__(values)
+        self.unknown = []
+
+    def __missing__(self, name):
+        self.unknown.append(name)
+        return "{" + name + "}"
+
+
+class Strings:
+    """``ctx.tr``: text in the player's language, from the project's string
+    tables (``lang/*.csv``)::
+
+        ctx.ui.button(ctx.tr("menu.play"), x, y)
+        ctx.hud.text(ctx.tr("hud.coins", count=coins), 24, 24)
+
+    A table's first row names the languages (``key,en,es,ja``); each other
+    row is a key and its text in each language. ``{name}`` in a text is
+    filled from the keyword arguments. A missing key gives the key itself
+    (with a warning), and an empty cell gives the first language's text.
+
+    The language is ``ctx.settings.language``. ``languages``, ``name()``
+    and ``font()`` describe the tables' languages, for a language picker.
+    """
+
+    def __init__(self, host, settings):
+        self._host = host
+        self._settings = settings
+        self._loaded = False
+        self._checked = 0.0
+        self._stamp = None
+        self._languages = []
+        self._names = []
+        self._fonts = []
+        self._entries = {}
+        self._warned = set()
+
+    # -- reading the tables --
+
+    def _dir(self):
+        return os.path.join(self._host.backend.base_dir(), STRINGS_DIR)
+
+    def _files(self):
+        try:
+            names = os.listdir(self._dir())
+        except OSError:
+            return []
+        return sorted(n for n in names if n.lower().endswith(".csv")
+                      and os.path.isfile(os.path.join(self._dir(), n)))
+
+    def _signature(self):
+        out = []
+        for name in self._files():
+            try:
+                st = os.stat(os.path.join(self._dir(), name))
+            except OSError:
+                continue
+            out.append((name, st.st_mtime_ns, st.st_size))
+        return tuple(out)
+
+    def _load(self):
+        if not self._loaded:
+            self._loaded = True
+            self._checked = time.monotonic()
+            self._read()
+        elif getattr(self._host, "hot_reload", False) and time.monotonic() - self._checked > 0.5:
+            self._checked = time.monotonic()
+            if self._signature() != self._stamp:
+                self._read()
+                self._host.backend.log("info", "Reloaded the string tables (lang/*.csv)")
+        return self
+
+    def _read(self):
+        self._stamp = self._signature()
+        self._languages, self._names, self._fonts, self._entries = [], [], [], {}
+        self._warned = set()
+        for name in self._files():
+            label = f"{STRINGS_DIR}/{name}"
+            try:
+                with open(os.path.join(self._dir(), name), encoding="utf-8-sig", newline="") as f:
+                    text = f.read()
+            except (OSError, UnicodeDecodeError) as exc:
+                self._host.backend.log("warn", f"{label}: {exc}")
+                continue
+            for problem in self._add_file(label, text):
+                self._host.backend.log("warn", problem)
+
+    def _add_file(self, label, text):
+        """Merges one CSV file; returns its problems (with lines)."""
+        problems = []
+        reader = csv.reader(text.splitlines(keepends=True))
+        rows = []
+        line = 1
+        try:
+            for cells in reader:
+                rows.append((line, cells))
+                line = reader.line_num + 1
+        except csv.Error as exc:
+            problems.append(f"{label}:{line}: {exc}")
+        rows = [(n, c) for n, c in rows
+                if any(x.strip() for x in c) and not c[0].lstrip().startswith("#")]
+        if not rows:
+            return [f"{label}: empty"]
+        header = rows[0][1]
+        columns = []
+        for i, cell in enumerate(header[1:], start=2):
+            code = cell.strip()
+            if not code:
+                columns.append(None)
+                continue
+            at = self._index_exact(code)
+            if at is not None:
+                if at in columns:
+                    problems.append(f"{label}:1: column {i} repeats language {code}; ignoring it")
+                    columns.append(None)
+                    continue
+            else:
+                self._languages.append(code)
+                self._names.append("")
+                self._fonts.append("")
+                for entry in self._entries.values():
+                    entry[1].append(None)
+                at = len(self._languages) - 1
+            columns.append(at)
+        if all(c is None for c in columns):
+            return problems + [f"{label}:1: the first row should name the languages: key,en,es,…"]
+        for n, cells in rows[1:]:
+            key = cells[0].strip()
+            source = f"{label}:{n}"
+            if len(cells) > len(header) and any(cells[len(header):]):
+                problems.append(f'{source}: more cells than languages (a comma inside text '
+                                f'needs "quotes")')
+            if not key:
+                problems.append(f"{source}: text without a key in the first column")
+                continue
+            texts = [None] * len(self._languages)
+            for col, cell in enumerate(cells[1:]):
+                lang = columns[col] if col < len(columns) else None
+                if lang is not None and cell:
+                    texts[lang] = cell.replace("\\n", "\n")
+            if key in ("@name", "@font"):
+                target = self._names if key == "@name" else self._fonts
+                for i, t in enumerate(texts):
+                    if t is not None:
+                        target[i] = t.strip()
+            elif key.startswith("@"):
+                problems.append(f"{source}: unknown row {key} (the special rows are @name and "
+                                "@font)")
+            elif key in self._entries:
+                problems.append(f"{source}: {key} is already in {self._entries[key][0]}; "
+                                "keeping that one")
+            else:
+                self._entries[key] = (source, texts)
+        return problems
+
+    def _index_exact(self, code):
+        want = _norm_language(code)
+        for i, lang in enumerate(self._languages):
+            if _norm_language(lang) == want:
+                return i
+        return None
+
+    def _index(self, language):
+        """The column of ``language`` (``pt-BR`` also finds ``pt``)."""
+        if not language:
+            return None
+        at = self._index_exact(language)
+        if at is not None:
+            return at
+        base = _norm_language(language).split("-")[0]
+        codes = [_norm_language(lang) for lang in self._languages]
+        for i, c in enumerate(codes):
+            if c == base:
+                return i
+        for i, c in enumerate(codes):
+            if c.split("-")[0] == base:
+                return i
+        return None
+
+    def _resolve(self, saved):
+        """The language to use: the player's choice, else the system's,
+        else the tables' first."""
+        self._load()
+        if not self._languages:
+            return saved or self._system() or "en"
+        for want in (saved, self._system()):
+            i = self._index(want)
+            if i is not None:
+                return self._languages[i]
+        return self._languages[0]
+
+    def _system(self):
+        backend = self._host.backend
+        return backend.language() if hasattr(backend, "language") else _system_language()
+
+    def _warn_once(self, tag, message):
+        if tag not in self._warned:
+            self._warned.add(tag)
+            self._host.backend.log("warn", message)
+
+    # -- the API --
+
+    def __call__(self, key: str, /, language: str | None = None, **values: Any) -> str:
+        """``key``'s text in the player's language (or ``language``), with
+        ``{name}`` filled from ``values``: ``ctx.tr("hud.coins", count=3)``."""
+        if not isinstance(key, str):
+            raise TypeError(f"ctx.tr takes a key like 'menu.play', not {key!r}")
+        self._load()
+        lang = self.language if language is None else str(language)
+        entry = self._entries.get(key)
+        if entry is None:
+            if not self._entries:
+                self._warn_once(("none",), f"ctx.tr({key!r}): there are no string tables yet "
+                                f"({STRINGS_DIR}/*.csv)")
+            else:
+                self._warn_once(("key", key), f"ctx.tr: there's no key {key!r} in "
+                                f"{STRINGS_DIR}/*.csv{_did_you_mean(key, self._entries)}")
+            text = key
+        else:
+            source, texts = entry
+            i = self._index(lang)
+            text = texts[i] if i is not None else None
+            if text is None:
+                text = next((t for t in texts[:1] if t is not None), None)
+                if i is not None and i > 0:
+                    self._warn_once(("gap", key, i),
+                                    f"{source}: {key} has no {self._languages[i]} text; using "
+                                    f"{self._languages[0]}")
+                if text is None:
+                    text = key
+        if values:
+            fill = _Fill(values)
+            try:
+                text = text.format_map(fill)
+            except (ValueError, IndexError, KeyError, AttributeError, TypeError) as exc:
+                self._warn_once(("fmt", key, lang), f"ctx.tr({key!r}): can't fill in "
+                                f"{text!r} ({exc})")
+                return text
+            for name in fill.unknown:
+                self._warn_once(("arg", key, name), f"ctx.tr({key!r}): the text has {{{name}}} "
+                                f"but no {name}= was given")
+        return text
+
+    @property
+    def language(self) -> str:
+        """The language texts come in (``ctx.settings.language``)."""
+        return self._settings.language
+
+    @property
+    def languages(self) -> tuple[str, ...]:
+        """The tables' language codes, in column order (the first is the
+        default): ``("en", "es", "ja")``."""
+        return tuple(self._load()._languages)
+
+    def name(self, language: str | None = None) -> str:
+        """The language's name for a picker (the ``@name`` row:
+        ``"Español"``), else its code. None: the current language."""
+        self._load()
+        lang = self.language if language is None else str(language)
+        i = self._index(lang)
+        return (self._names[i] if i is not None else "") or lang
+
+    def font(self, language: str | None = None) -> str | None:
+        """The language's font (the ``@font`` row), relative to the scene
+        folder: it draws the characters other fonts lack. None: the
+        current language."""
+        self._load()
+        i = self._index(self.language if language is None else str(language))
+        return (self._fonts[i] if i is not None else "") or None
+
+    def has(self, key: str) -> bool:
+        """Whether a table has ``key``."""
+        return key in self._load()._entries
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._load()._entries
+
+    def keys(self, prefix: str = "") -> list[str]:
+        """Every key (starting with ``prefix``), sorted."""
+        return sorted(k for k in self._load()._entries if k.startswith(prefix))
+
+    def __repr__(self):
+        return (f"Strings(language={self.language!r}, languages={self.languages!r}, "
+                f"keys={len(self._entries)})")
+
+
 class Settings:
     """``ctx.settings``: the player's settings, kept between runs and
     shared by every save slot.
 
     - ``volume`` (0 to 1) sets the master volume.
     - ``graphics`` (``"low"`` … ``"beautiful"``) sets the graphics preset.
+    - ``language`` (``"en"``, ``"ja"``…) picks the text ``ctx.tr`` gives.
     - Key bindings: ``bind("jump", "space")`` gives an action its default
       keys, ``rebind("jump", "k")`` changes them for good, and
       ``ctx.input.pressed("jump")`` checks them.
@@ -4382,6 +4735,8 @@ class Settings:
         self._volume = None
         self._ui_scale = None
         self._graphics = None
+        self._language = None
+        self._strings = None
         self._rebound = {}
         self._values = {}
         self._defaults = {}
@@ -4402,6 +4757,9 @@ class Settings:
             u = raw.get("ui_scale")
             if isinstance(u, (int, float)) and not isinstance(u, bool) and math.isfinite(u):
                 self._ui_scale = min(max(float(u), 0.5), 3.0)
+            lang = raw.get("language")
+            if isinstance(lang, str) and lang.strip():
+                self._language = lang.strip()
             g = raw.get("graphics")
             if g in GRAPHICS_PRESETS:
                 self._graphics = g
@@ -4426,6 +4784,8 @@ class Settings:
             data["ui_scale"] = self._ui_scale
         if self._graphics is not None:
             data["graphics"] = self._graphics
+        if self._language is not None:
+            data["language"] = self._language
         self._store.write("settings.json", data)
         self._dirty = False
 
@@ -4491,6 +4851,38 @@ class Settings:
             return
         self._graphics = q
         self._apply["graphics"] = q
+        self._dirty = True
+
+    @property
+    def language(self) -> str:
+        """The language ``ctx.tr`` gives text in: a code from the string
+        tables' first row (``"en"``, ``"es"``, ``"ja"``). Until the player
+        picks one it's the system's language if the tables have it, else
+        their first language."""
+        saved = self._load()._language
+        if self._strings is None:
+            return saved or "en"
+        return self._strings._resolve(saved)
+
+    @language.setter
+    def language(self, code: str) -> None:
+        if not isinstance(code, str):
+            raise TypeError(f"ctx.settings.language takes a language code like 'en' or "
+                            f"'pt-BR', not {type(code).__name__}")
+        code = code.strip()
+        strings = self._strings
+        langs = strings.languages if strings is not None else ()
+        if langs:
+            i = strings._index(code)
+            if i is None:
+                raise ValueError(f"there's no language {code!r} in {STRINGS_DIR}/*.csv"
+                                 f"{_did_you_mean(code, langs)} (languages: {', '.join(langs)})")
+            code = langs[i]
+        elif not code:
+            raise ValueError("a language is a code like 'en' or 'pt-BR'")
+        if self._load()._language == code:
+            return
+        self._language = code
         self._dirty = True
 
     # --- key bindings -----------------------------------------------------
@@ -4593,6 +4985,7 @@ class Settings:
             self._apply["graphics"] = self._initial_graphics
         self._volume, self._graphics, self._rebound, self._values = None, None, {}, {}
         self._ui_scale = None
+        self._language = None
         self._dirty = True
 
     @property
@@ -4602,7 +4995,7 @@ class Settings:
 
     def __repr__(self):
         return (f"Settings(volume={self.volume:g}, ui_scale={self.ui_scale:g}, "
-                f"graphics={self.graphics!r}, "
+                f"graphics={self.graphics!r}, language={self.language!r}, "
                 f"keys={self.bindings()!r}, values={self._values!r})")
 
 
@@ -4627,8 +5020,13 @@ class Context:
         self.save = SaveData(store)
         #: The player's settings (see :class:`Settings`).
         self.settings = Settings(store, host.backend.graphics)
+        #: Text in the player's language from ``lang/*.csv`` (see :class:`Strings`).
+        self.tr = Strings(host, self.settings)
+        self.settings._strings = self.tr
+        self.hud._strings = self.tr
         self.input._settings = self.settings
         self.ui._settings = self.settings
+        self.ui._strings = self.tr
 
     @property
     def camera(self) -> Camera | None:
@@ -4848,6 +5246,11 @@ class Backend:
         relative to it. The default is the working folder, which is the
         scene's in Oberon."""
         return os.getcwd()
+
+    def language(self):
+        """The player's system language (``"en-US"``), or None: what
+        ``ctx.settings.language`` starts as when the tables have it."""
+        return _system_language()
 
     def raycast(self, origin, direction, max_distance, ignore_id):
         """``(entity id, point, normal, distance)`` or None. ``direction``

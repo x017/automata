@@ -162,6 +162,7 @@ for `entity` and `ctx`.
 | `ctx.ease("out_back", t)` | `t` (0 to 1) through an easing curve |
 | `ctx.save["coins"] = 12` | Values that last between runs, in save slots ([Save games](#save-games)) |
 | `ctx.settings.volume`, `.graphics`, `.bind("jump", "space")` | The player's settings, remembered automatically ([Settings](#player-settings)) |
+| `ctx.tr("menu.play")`, `ctx.tr("hud.coins", count=3)` | Text in the player's language from `lang/*.csv` ([Languages](#languages)) |
 | `ctx.log(...)`, `ctx.warn(...)` | Write to the Console. `print()` works too |
 
 HUD shapes last one frame, so draw them in `update` every frame you want
@@ -206,7 +207,11 @@ ctx.ui.theme.font = PIXEL   # every widget's text from now on
   path to write in scripts is put on the clipboard. Double-click a font
   in the Assets tab to copy its path again.
 - **Missing characters** (accents, symbols a pixel font lacks) are drawn
-  with the built-in font, so text never shows empty boxes.
+  with the built-in font, so text never shows empty boxes. For scripts the
+  built-in font lacks too (Japanese, Chinese, Korean, Greek, Arabic…),
+  give the language a font in its string table and it's used next
+  ([Languages](#languages)). A character no font has is reported once in
+  the Console.
 - **Mistakes:** `font=` must be a string ending in `.ttf` or `.otf`
   (otherwise `TypeError` or `ValueError`). A file that's missing or isn't a
   font is reported once in the Console, and the text is drawn in the
@@ -723,6 +728,7 @@ game starts:
 | `ctx.settings.volume = 0.5` | Master volume, 0 to 1 (1 by default) |
 | `ctx.settings.graphics = "low"` | Graphics preset: `"low"`, `"medium"`, `"high"`, `"ultra"` or `"beautiful"`. Until the player picks one, it reads as the preset the game is running at |
 | `ctx.settings.ui_scale = 1.25` | How big `ctx.ui` draws, 0.5 to 3 (1 by default). See [scaling](#scaling-to-any-screen) |
+| `ctx.settings.language = "ja"` | The language `ctx.tr` gives text in. Until the player picks one, it's the computer's language if the string tables have it, else their first. See [Languages](#languages) |
 | `ctx.settings["sensitivity"] = 0.4` | Any other setting, with the same JSON rules as `ctx.save` |
 | `ctx.settings.reset()` | Everything back to the game's defaults |
 
@@ -768,6 +774,111 @@ def update(entity, ctx):
 A misspelt key (`"spce"`) raises an error that suggests the right one. An
 action name that was never bound is treated as a key name, so
 `ctx.input.pressed("space")` keeps working.
+
+## Languages
+
+![Shape Signal's title in Japanese: シェイプ・シグナル in amber over the tagline, プレイ, 音量, キーのヒントを表示 and the 言語: 日本語 button](../../assets/ui/shape_signal_ja.jpg)
+
+Put the words your game shows in **string tables**: CSV files in a `lang/`
+folder next to the scene. The first column is a key, and each other
+column is a language:
+
+```text
+key,en,es,ja
+@name,English,Español,日本語
+@font,,,fonts/MPLUSRounded1c-Medium.ttf
+# menus
+menu.play,Play,Jugar,プレイ
+hud.coins,Coins: {count},Monedas: {count},コイン: {count}
+"menu.quit","Quit, now",Salir,終了
+```
+
+Then ask for text by key:
+
+```python
+ctx.ui.button(ctx.tr("menu.play"), x, y)              # "Play", "Jugar", "プレイ"
+ctx.hud.text(ctx.tr("hud.coins", count=coins), 16, 16)
+```
+
+**The file.** Save it as UTF-8 from any spreadsheet app or text editor.
+- The header names the languages with codes like `en`, `es`, `pt-BR` or
+  `zh-Hans`. The first one is the default.
+- `@name` gives each language's name in itself, for a language menu.
+- `@font` gives a language a font for the characters other fonts lack.
+- Rows starting with `#`, and blank rows, are skipped. A cell with a comma
+  or a line break goes in "double quotes", and `\n` also makes a line
+  break.
+- Every `lang/*.csv` file is read, in name order, so you can split a big
+  game into `menus.csv`, `dialogue.csv` and so on. They needn't have the
+  same columns.
+
+**`ctx.tr(key, language=None, **values)`** gives the key's text in the
+player's language. `{name}` placeholders are filled from the keyword
+arguments, with Python's format rules (`{score:,}`, `{time:.1f}`).
+Nothing in a table stops the game:
+
+| What went wrong | What you see |
+|---|---|
+| The language's cell is empty | The first language's text, and a Console warning naming the file and line (`lang/strings.csv:5: hud.coins has no ja text; using en`) |
+| The key isn't in any table | The key itself, and a warning that suggests a close one |
+| A placeholder wasn't given | It's left as written (`Coins: {count}`), with a warning |
+| A duplicate key, an odd `@` row, too many cells | A warning with the file and line; the first entry wins |
+
+Each warning shows once. `ctx.tr` also has:
+
+| | |
+|---|---|
+| `ctx.tr.languages` | The language codes, in column order: `("en", "es", "ja")` |
+| `ctx.tr.language` | The language text comes in now (the same as `ctx.settings.language`) |
+| `ctx.tr.name("es")` | `"Español"` (from `@name`; the code when there's none). No argument: the current language |
+| `ctx.tr.font("ja")` | The language's `@font`, or `None` |
+| `ctx.tr.has("menu.play")`, `"menu.play" in ctx.tr` | Whether a table has the key |
+| `ctx.tr.keys("menu.")` | The keys, sorted, optionally only those starting with a prefix |
+
+**Choosing the language.** `ctx.settings.language` starts as the
+computer's language when a table has it. `es-MX` finds `es`, and `pt`
+finds `pt-BR`. Otherwise it's the first column. Setting it switches every
+text at once and is saved with the other settings. A language the tables
+don't have raises `ValueError`, listing the ones they do. A language
+button can step through them:
+
+```python
+if ctx.ui.button(ctx.tr("menu.language", name=ctx.tr.name()), x, y):
+    langs = ctx.tr.languages
+    ctx.settings.language = langs[(langs.index(ctx.tr.language) + 1) % len(langs)]
+```
+
+**UI documents** translate themselves. When a label's, button's, toggle's
+or progress bar's text, or a panel's title, is a key of the tables, the
+player sees that key's text. Write `menu.play` as the Play button's text
+in the [UI editor](ui-editor.md); `screen.get()` still gives the key.
+Text a script sets with `screen.set()` is translated the same way, so
+`set("verdict", "hud.miss")` works, and so does
+`set("score", ctx.tr("hud.score", score=s))`.
+
+**Fonts per language.** Text in a language with an `@font` is drawn with
+your font first and the language's font for the characters your font
+lacks. The pixel title above is Press Start 2P in English and Spanish, and
+its kana come from M+ Rounded in Japanese. Fonts for Chinese, Japanese and
+Korean are large (3–20 MB). For a game with a fixed script, a subset
+with only the characters you use keeps it small; Shape Signal's is 113 KB.
+fontTools' `pyftsubset` makes one:
+
+```console
+pyftsubset MPLUSRounded1c-Medium.ttf --text-file=lang/strings.csv --output-file=fonts/JP.ttf
+```
+
+Full-width characters count as twice as wide when layouts estimate text
+size, so Japanese labels get the room they need.
+
+**In Oberon**, edited tables reload while the game plays, and `ctx.tr("`
+completes keys with their text in the first language. The UI editor's
+**Text** menu shows a document in any language, or as keys.
+
+**Export** ships `lang/`. It warns about mistakes in the tables and lists
+the keys each language lacks. It stops with an error if a language's
+`@font` is missing, isn't a font, or won't ship, or if `lang/` is excluded
+from the build.
 
 ## Hot reload
 

@@ -42,7 +42,7 @@ open as tabs next to your scripts, in the editor instead of as text.
 
 | Part | What it does |
 |---|---|
-| **Toolbar** | **+ Add** a widget, **Duplicate**, **Delete**, move **Up** / **Down** among its siblings, the **Preview** screen size, and **Edit as Text** |
+| **Toolbar** | **+ Add** a widget, **Duplicate**, **Delete**, move **Up** / **Down** among its siblings, the **Preview** screen size, the **Text** language (when the project has string tables), and **Edit as Text** |
 | **Widgets** (left) | The tree: **Screen** (the document itself), then every node. Click one to select it. Hidden ones are dimmed |
 | **Canvas** (middle) | The screen as the game draws it, on the preview size: themes, anchors and scaling included. Click a widget to select it. Drag a top-level one to move it |
 | **Properties** (right) | The selected node's properties, or the screen's and its theme's when **Screen** is selected. Click a field, type, and press Enter (or click away). Under them is the line a script uses to reach the widget, like `ctx.ui.screen("title").clicked("play")` |
@@ -58,6 +58,15 @@ a fresh one (`score_2`), since scripts need names to be unique.
 **design size** (1280×720 unless you change it) is what it's laid out for.
 Like [`ctx.ui.design_size`](scripting.md#scaling-to-any-screen), it scales
 to fit any window.
+
+**Text** appears when the project has [string tables](scripting.md#languages)
+(`lang/*.csv`). Text that's a key of the tables, like `title.play`, is
+shown on the canvas in the language you pick, or as the keys themselves.
+That way you can check that a long German or a Japanese label still fits.
+The document keeps the key, so the game shows it in the player's language.
+Each language's `@font` draws on the canvas too.
+
+![The UI editor showing Shape Signal's title in Japanese, with "Text 日本語" chosen in the toolbar and title.play in the Play button's Text property](../../assets/ui/ui_editor_ja.jpg)
 
 ### Keys
 

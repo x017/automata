@@ -451,11 +451,12 @@ Placing UI phases 2–5 after animation is a proposal, since you chose
 the full UI system after picking this order. Swap them if menus and buttons
 matter sooner.
 
-Beyond this list, work follows ROADMAP's order table. Latest: **D6
-editor workflow** ✅: linked prefab instances with per-instance overrides,
-Apply / Revert and variants; multi-select editing; snapping and Duplicate
-Along a Line; and a Profiler tab (demo: `examples/oberon/lamplight_lane`).
-Next: D7 localization.
+Beyond this list, work follows ROADMAP's order table. Latest: **D7
+localization** ✅: `lang/*.csv` string tables read with `ctx.tr`, a saved
+`ctx.settings.language` that starts as the computer's, UI documents that
+translate their keys, and a per-language fallback font (demo: Shape Signal
+in English, Spanish and Japanese). Before it, D6 editor workflow ✅.
+Next: E1 Android export.
 
 ## Process note
 

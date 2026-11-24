@@ -214,6 +214,9 @@ pub enum HudKind {
         /// A `.ttf` / `.otf` file relative to the scene folder (`None`:
         /// the built-in font).
         font: Option<String>,
+        /// A font for characters `font` lacks, tried before the built-in
+        /// one: the language's (`@font` in `lang/*.csv`).
+        fallback: Option<String>,
     },
 }
 
@@ -1066,6 +1069,7 @@ fn parse_hud(v: &Json) -> Option<HudItem> {
             shadow: v.get("shadow").and_then(Json::as_floats::<4>),
             outline: v.get("outline").and_then(Json::as_floats::<4>),
             font: v.get("font").and_then(Json::as_str).map(str::to_string),
+            fallback: v.get("fallback").and_then(Json::as_str).map(str::to_string),
         },
         _ => return None,
     };
@@ -1512,7 +1516,7 @@ mod tests {
     #[test]
     fn hud_text_crosses_the_bridge() {
         let msg = parse_msg(
-            r#"{"op":"frame","frame":1,"writes":[],"hud":[{"k":"text","text":"100%","x":10,"y":20,"size":26,"c":[1,1,1,1],"align":"center","shadow":[0,0,0,0.6]},{"k":"text","text":"x","x":0,"y":0,"size":12,"c":[1,0,0,1],"align":"sideways","font":"fonts/Pixel.ttf"}]}"#,
+            r#"{"op":"frame","frame":1,"writes":[],"hud":[{"k":"text","text":"100%","x":10,"y":20,"size":26,"c":[1,1,1,1],"align":"center","shadow":[0,0,0,0.6]},{"k":"text","text":"x","x":0,"y":0,"size":12,"c":[1,0,0,1],"align":"sideways","font":"fonts/Pixel.ttf","fallback":"fonts/JP.otf"}]}"#,
         );
         let Some(BridgeMsg::Frame(FrameReply { hud, .. })) = msg else {
             panic!("frame expected: {msg:?}");
@@ -1526,6 +1530,7 @@ mod tests {
                 shadow: Some([0.0, 0.0, 0.0, 0.6]),
                 outline: None,
                 font: None,
+                fallback: None,
             }
         );
         assert_eq!((hud[0].x, hud[0].y), (10.0, 20.0));
@@ -1540,7 +1545,8 @@ mod tests {
             "unknown alignments fall back to left"
         );
         assert!(
-            matches!(&hud[1].kind, HudKind::Text { font: Some(f), .. } if f == "fonts/Pixel.ttf"),
+            matches!(&hud[1].kind, HudKind::Text { font: Some(f), fallback: Some(b), .. }
+                if f == "fonts/Pixel.ttf" && b == "fonts/JP.otf"),
             "{:?}",
             hud[1].kind
         );

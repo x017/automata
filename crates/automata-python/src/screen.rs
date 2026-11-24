@@ -11,7 +11,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use automata_renderer::{FontId, Renderer, Sprite, TextAlign, TextAtlas, TextStyle, Texture};
+use automata_renderer::{
+    Faces, FontId, Renderer, Sprite, TextAlign, TextAtlas, TextStyle, Texture,
+};
 use glam::Vec2;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -53,6 +55,9 @@ pub enum HudItem {
         style: TextStyle,
         /// A `.ttf` / `.otf` file, or `None` for the built-in font.
         font: Option<PathBuf>,
+        /// A font for characters `font` lacks, tried before the built-in
+        /// one (the language's font).
+        fallback: Option<PathBuf>,
     },
 }
 
@@ -230,9 +235,10 @@ impl PyScreen {
     /// vertically on `y`. `shadow` and `outline` are colours, or `None`
     /// for no effect. `font` is a `.ttf` / `.otf` file relative to the
     /// scene folder (`None`: the built-in font); characters it lacks are
-    /// drawn with the built-in font, and a file that won't load is logged
-    /// once and drawn with the built-in font.
-    #[pyo3(signature = (text, x, y, size=24.0, color=(1.0, 1.0, 1.0, 1.0), align="left", shadow=None, outline=None, font=None))]
+    /// drawn with `fallback` (another font file, such as the language's)
+    /// and then the built-in font. A file that won't load is logged once
+    /// and drawn with the built-in font.
+    #[pyo3(signature = (text, x, y, size=24.0, color=(1.0, 1.0, 1.0, 1.0), align="left", shadow=None, outline=None, font=None, fallback=None))]
     #[allow(clippy::too_many_arguments)]
     fn text(
         &self,
@@ -245,6 +251,7 @@ impl PyScreen {
         shadow: Option<(f32, f32, f32, f32)>,
         outline: Option<(f32, f32, f32, f32)>,
         font: Option<&str>,
+        fallback: Option<&str>,
     ) -> PyResult<()> {
         let align = TextAlign::parse(align).ok_or_else(|| {
             PyValueError::new_err(format!(
@@ -255,6 +262,7 @@ impl PyScreen {
             return Err(PyValueError::new_err("text size must be a positive number"));
         }
         let font = self.font_path(font)?;
+        let fallback = self.font_path(fallback)?;
         self.queue.borrow_mut().items.push(HudItem::Text {
             text: text.to_string(),
             anchor: (x, y),
@@ -265,8 +273,10 @@ impl PyScreen {
                 shadow: shadow.map(color4),
                 outline: outline.map(color4),
                 font: FontId::BUILTIN,
+                fallback: None,
             },
             font,
+            fallback,
         });
         Ok(())
     }
@@ -335,14 +345,23 @@ impl HudTextures {
         // Each text item's font, loading new font files.
         let mut fonts = Vec::new();
         for item in items {
-            if let HudItem::Text { font, .. } = item {
+            if let HudItem::Text { font, fallback, .. } = item {
                 let atlas = self.text.get_or_insert_with(TextAtlas::new);
-                fonts.push(font.as_deref().map_or(FontId::BUILTIN, |f| atlas.font(f)));
+                fonts.push(Faces {
+                    font: font.as_deref().map_or(FontId::BUILTIN, |f| atlas.font(f)),
+                    fallback: fallback.as_deref().map(|f| atlas.font(f)),
+                });
             }
         }
         if let Some(atlas) = &mut self.text {
             for e in atlas.take_font_errors() {
                 tracing::warn!("HUD text: {e}; using the built-in font");
+            }
+            for c in atlas.take_missing_chars() {
+                tracing::warn!(
+                    "HUD text: {}",
+                    automata_renderer::text::missing_glyph_message(c)
+                );
             }
             let texts = items
                 .iter()
@@ -366,9 +385,13 @@ impl HudTextures {
                     style,
                     ..
                 } => {
-                    let font = fonts.next().unwrap_or_default();
+                    let faces = fonts.next().unwrap_or_default();
                     if let Some(atlas) = &self.text {
-                        let style = TextStyle { font, ..*style };
+                        let style = TextStyle {
+                            font: faces.font,
+                            fallback: faces.fallback,
+                            ..*style
+                        };
                         out.extend(atlas.sprites(text, anchor.0, anchor.1, &style));
                     }
                 }

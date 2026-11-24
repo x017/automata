@@ -966,6 +966,8 @@ pub struct Ui {
     collapsed: HashSet<&'static str>,
     inspector_scroll: f32,
     hierarchy_scroll: f32,
+    /// The project's string tables (`lang/*.csv`).
+    pub strings: ProjectStrings,
     hover_axis: Option<usize>,
     cursor: CursorHint,
     /// The raw pointer this frame.
@@ -1076,6 +1078,7 @@ impl Ui {
             collapsed: HashSet::new(),
             inspector_scroll: 0.0,
             hierarchy_scroll: 0.0,
+            strings: ProjectStrings::default(),
             hover_axis: None,
             cursor: CursorHint::Default,
             raw: Pointer::default(),
@@ -1538,8 +1541,10 @@ impl Ui {
         }
 
         self.code.settings.clone_from(&self.prefs.editor);
+        self.refresh_strings(canvas, doc);
         if self.code.active.is_some() {
             self.code.scene_names = scene_names(doc);
+            self.code.scene_names.strings = self.string_keys();
         }
         self.update_scrub();
         self.update_attr_scrub();
@@ -5577,6 +5582,69 @@ fn factor(s: &[char], pos: &mut usize) -> Option<f64> {
 }
 
 /// Entity and custom-attribute names in `doc` (for script completion).
+/// The project's string tables (`lang/*.csv`), re-read at most once a
+/// second, and the language fonts they name.
+#[derive(Debug, Default)]
+pub struct ProjectStrings {
+    checked: Option<std::time::Instant>,
+    base: std::path::PathBuf,
+    /// Every table, merged.
+    pub table: automata_core::StringTable,
+    /// The `@font` files given to the canvas as fallbacks.
+    fonts: Vec<std::path::PathBuf>,
+}
+
+impl Ui {
+    /// Re-reads the string tables when a second has passed (or the scene
+    /// folder changed), and hands their language fonts to the canvas so
+    /// the editor can show every language's text.
+    fn refresh_strings(&mut self, canvas: &mut Canvas, doc: &Document) {
+        let base = doc.base_dir();
+        let s = &mut self.strings;
+        if s.base == base
+            && s.checked
+                .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1))
+        {
+            return;
+        }
+        s.checked = Some(std::time::Instant::now());
+        s.table = automata_core::StringTable::load(&base);
+        s.base = base;
+        let mut fonts: Vec<std::path::PathBuf> = Vec::new();
+        for f in s.table.fonts.iter().filter(|f| !f.is_empty()) {
+            let path = automata_assets::join_relative(&s.base, f);
+            if !fonts.contains(&path) {
+                fonts.push(path);
+            }
+        }
+        if fonts != s.fonts {
+            let loaded = fonts
+                .iter()
+                .filter_map(|p| automata_renderer::text::load_font_file(p).ok())
+                .collect();
+            canvas.set_fallback_fonts(loaded);
+            s.fonts = fonts;
+        }
+    }
+
+    /// The string-table keys with their first language's text, for
+    /// `ctx.tr("…")` completion.
+    fn string_keys(&self) -> Vec<(String, String)> {
+        let table = &self.strings.table;
+        let first = table.languages.first().map_or("", String::as_str);
+        table
+            .entries
+            .keys()
+            .map(|k| {
+                (
+                    k.clone(),
+                    table.get(k, first).unwrap_or_default().to_string(),
+                )
+            })
+            .collect()
+    }
+}
+
 fn scene_names(doc: &Document) -> crate::code::api::SceneNames {
     let mut names = crate::code::api::SceneNames::default();
     for e in &doc.entities {

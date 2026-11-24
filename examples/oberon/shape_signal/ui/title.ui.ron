@@ -27,7 +27,7 @@
                 (
                     kind: Label,
                     name: "title",
-                    text: "SHAPE SIGNAL",
+                    text: "title.name",
                     size: Some(28.0),
                     color: Some((1.0, 0.72, 0.25, 1.0)),
                     align: "center",
@@ -35,7 +35,7 @@
                 ),
                 (
                     kind: Label,
-                    text: "One shape lifts. Pick it before it drops:\nclick its button or press 1, 2 or 3.",
+                    text: "title.tagline",
                     size: Some(16.0),
                     color: Some((0.72, 0.76, 0.84, 1.0)),
                     align: "center",
@@ -47,7 +47,7 @@
                 (
                     kind: Button,
                     name: "play",
-                    text: "Play",
+                    text: "title.play",
                     height: Some(54.0),
                 ),
                 (
@@ -56,7 +56,7 @@
                     children: [
                         (
                             kind: Label,
-                            text: "Volume",
+                            text: "title.volume",
                         ),
                         (
                             kind: Label,
@@ -76,8 +76,14 @@
                 (
                     kind: Toggle,
                     name: "hints",
-                    text: "Key hints on the HUD",
+                    text: "title.hints",
                     value: 1.0,
+                ),
+                (
+                    kind: Button,
+                    name: "language",
+                    text: "Language",
+                    height: Some(40.0),
                 ),
                 (
                     kind: Space,

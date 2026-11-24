@@ -10,6 +10,16 @@ their widgets by the names given in the editor::
 
 Open ``ui/hud.ui.ron`` in Oberon to move things around, restyle them or
 change their text; as long as the names stay, this script keeps working.
+
+Every word the player reads is in ``lang/strings.csv``, in English, Spanish
+and Japanese. The documents' fixed text is a key of that table
+(``title.play``), so it shows in the player's language by itself; the text
+this script fills in comes from ``ctx.tr``::
+
+    hud.set("score", ctx.tr("hud.score", score=120))   # "SCORE 120", "スコア 120"
+
+The title's Language button steps through the table's languages and
+``ctx.settings.language`` remembers the choice.
 """
 
 import math
@@ -54,8 +64,9 @@ def show_title(entity, ctx):
     s = entity.state
     s["mode"], s["lit"] = "title", None
     title = ctx.ui.screen("title")
-    title.set("best", f"Best {s['best']}")
+    title.set("best", ctx.tr("title.best", score=s["best"]))
     title.set("volume_text", f"{round(ctx.settings.volume * 100)}%")
+    title.set("language", ctx.tr("title.language", name=ctx.tr.name()))
     ctx.ui.screen("hud").visible = False
     ctx.ui.screens.clear()
     ctx.ui.screens.show("title")
@@ -68,8 +79,19 @@ def title_screen(entity, ctx):
         title.set("volume_text", f"{round(ctx.settings.volume * 100)}%")
     if title.changed("hints"):
         ctx.settings["hints"] = title.get("hints")
+    if title.clicked("language"):
+        next_language(entity, ctx)
     if title.clicked("play"):
         new_round(entity, ctx)
+
+
+def next_language(entity, ctx):
+    """The table's next language (``ctx.settings`` saves it)."""
+    languages = ctx.tr.languages
+    if languages:
+        i = languages.index(ctx.settings.language) if ctx.settings.language in languages else -1
+        ctx.settings.language = languages[(i + 1) % len(languages)]
+    show_title(entity, ctx)
 
 
 def new_round(entity, ctx):
@@ -90,10 +112,10 @@ def finish(entity, ctx):
         s["best"] = s["score"]
         ctx.settings["best"] = s["score"]
     results = ctx.ui.screen("results")
-    results.set("heading", "TIME!" if s["lives"] > 0 else "OUT!")
-    results.set("final", f"SCORE {s['score']}")
-    results.set("detail", f"{s['right']} right, {s['missed']} missed")
-    results.set("best", f"Best {s['best']}")
+    results.set("heading", ctx.tr("results.time" if s["lives"] > 0 else "results.out"))
+    results.set("final", ctx.tr("hud.score", score=s["score"]))
+    results.set("detail", ctx.tr("results.detail", right=s["right"], missed=s["missed"]))
+    results.set("best", ctx.tr("title.best", score=s["best"]))
     ctx.ui.screens.show("results")
 
 
@@ -136,14 +158,14 @@ def play(entity, ctx):
             s["streak"] = 0
             s["missed"] += 1
             s["lives"] -= 1
-            say(s, hud, "MISS" if pick is not None else "TOO SLOW")
+            say(s, hud, ctx.tr("hud.miss" if pick is not None else "hud.slow"))
             s["lit"], s["wait"] = None, PAUSE
     if s["verdict_for"] <= 0:
         hud.set("verdict", "")
-    hud.set("score", f"SCORE {s['score']}")
-    hud.set("streak", f"Streak x{s['streak']}" if s["streak"] > 1 else "")
+    hud.set("score", ctx.tr("hud.score", score=s["score"]))
+    hud.set("streak", ctx.tr("hud.streak", count=s["streak"]) if s["streak"] > 1 else "")
     hud.set("time", max(s["left"], 0.0))
-    hud.set("clock", f"{math.ceil(max(s['left'], 0.0))} s")
+    hud.set("clock", ctx.tr("hud.clock", seconds=math.ceil(max(s["left"], 0.0))))
     hud.set("lives", s["lives"])
     if s["left"] <= 0 or s["lives"] <= 0:
         finish(entity, ctx)

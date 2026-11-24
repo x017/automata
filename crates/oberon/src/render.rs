@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use automata_renderer::{
-    DrawList, FontId, RenderTarget, Renderer, Sprite, TextAtlas, TextStyle, Texture,
+    DrawList, Faces, FontId, RenderTarget, Renderer, Sprite, TextAtlas, TextStyle, Texture,
 };
 use automata_scene::{Scene, SceneWorld};
 use glam::Vec2;
@@ -50,6 +50,8 @@ pub struct ViewportRenderer {
     hud_text: Option<TextAtlas>,
     /// Font files that wouldn't load, for the Console (each once).
     hud_font_errors: Vec<String>,
+    /// Characters no HUD font could draw, not yet reported.
+    hud_missing: Vec<char>,
     /// The edit-time world's entities, in document order.
     entities: Vec<automata_scene::Entity>,
     /// The entity the Inspector's animation preview last posed.
@@ -215,6 +217,7 @@ impl ViewportRenderer {
             hud_textures: HashMap::new(),
             hud_text: None,
             hud_font_errors: Vec::new(),
+            hud_missing: Vec::new(),
             entities: Vec::new(),
             previewed: None,
             material: MaterialPreview::default(),
@@ -271,19 +274,24 @@ impl ViewportRenderer {
     /// Turns a script HUD into sprites (screen pixels, top-left origin).
     /// Image paths are relative to `root`, the scene folder.
     fn hud_sprites(&mut self, renderer: &Renderer, root: &Path, items: &[HudItem]) -> Vec<Sprite> {
-        // Each text item's font (font files load the first time).
+        // Each text item's fonts (font files load the first time).
         let mut fonts = Vec::new();
         for item in items {
-            if let HudKind::Text { font, .. } = &item.kind {
+            if let HudKind::Text { font, fallback, .. } = &item.kind {
                 let atlas = self.hud_text.get_or_insert_with(TextAtlas::new);
-                fonts.push(
-                    font.as_deref()
+                fonts.push(Faces {
+                    font: font
+                        .as_deref()
                         .map_or(FontId::BUILTIN, |f| atlas.font(&scene_path(root, f))),
-                );
+                    fallback: fallback
+                        .as_deref()
+                        .map(|f| atlas.font(&scene_path(root, f))),
+                });
             }
         }
         if let Some(atlas) = &mut self.hud_text {
             self.hud_font_errors.extend(atlas.take_font_errors());
+            self.hud_missing.extend(atlas.take_missing_chars());
             if !fonts.is_empty() {
                 let texts = items
                     .iter()
@@ -308,7 +316,7 @@ impl ViewportRenderer {
                 ..
             } = &item.kind
             {
-                let font = fonts.next().unwrap_or_default();
+                let faces = fonts.next().unwrap_or_default();
                 if let Some(atlas) = &self.hud_text {
                     let style = TextStyle {
                         size: *size,
@@ -316,7 +324,8 @@ impl ViewportRenderer {
                         align: *align,
                         shadow: *shadow,
                         outline: *outline,
-                        font,
+                        font: faces.font,
+                        fallback: faces.fallback,
                     };
                     out.extend(atlas.sprites(text, item.x, item.y, &style));
                 }
@@ -366,6 +375,12 @@ impl ViewportRenderer {
     /// once per Play), for the Console.
     pub fn take_hud_font_errors(&mut self) -> Vec<String> {
         std::mem::take(&mut self.hud_font_errors)
+    }
+
+    /// Characters HUD text used that no font had, since the last call
+    /// (each once per Play), for the Console: see [`missing_glyph_message`].
+    pub fn take_hud_missing_chars(&mut self) -> Vec<char> {
+        std::mem::take(&mut self.hud_missing)
     }
 
     /// Meshes drawn by the last scene-view render (0 for the wireframe).

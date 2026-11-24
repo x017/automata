@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
+use ab_glyph::{Font, FontArc, FontRef, PxScale, ScaleFont};
 use tiny_skia::{Color, Pixmap};
 
 /// The code font: Fira Code Regular (SIL OFL, `assets/FiraCode-LICENSE.txt`).
@@ -58,7 +58,9 @@ struct CachedGlyph {
 /// screen of code costs a few memcpy-sized blends per glyph instead of an
 /// outline rasterization each frame.
 pub struct TextRenderer {
-    fonts: [FontRef<'static>; 3],
+    /// The three embedded faces, then any extra fallbacks
+    /// ([`set_fallbacks`](Self::set_fallbacks)).
+    fonts: Vec<FontArc>,
     cache: HashMap<(u8, u16, u32, u8), Option<CachedGlyph>>,
 }
 
@@ -72,22 +74,44 @@ impl TextRenderer {
     /// Loads the embedded fonts. Panics only if a vendored font is corrupt.
     #[must_use]
     pub fn new() -> Self {
-        let load = |b: &'static [u8]| FontRef::try_from_slice(b).expect("embedded font parses");
+        let load = |b: &'static [u8]| {
+            FontArc::new(FontRef::try_from_slice(b).expect("embedded font parses"))
+        };
         Self {
-            fonts: [load(UI_BYTES), load(UI_MEDIUM_BYTES), load(MONO_BYTES)],
+            fonts: vec![load(UI_BYTES), load(UI_MEDIUM_BYTES), load(MONO_BYTES)],
             cache: HashMap::new(),
         }
     }
 
-    /// The face that draws `ch` in `face` (Fira Code when `face` lacks it),
-    /// with its glyph id.
+    /// Extra fonts for characters the embedded ones lack, tried in order
+    /// after Fira Code: the project's language fonts, so Japanese in a
+    /// string table or a UI document shows in the editor too. At most 32.
+    pub fn set_fallbacks(&mut self, fonts: Vec<FontArc>) {
+        self.fonts.truncate(3);
+        self.fonts.extend(fonts.into_iter().take(32));
+        self.cache.clear();
+    }
+
+    /// How many extra fallback fonts are set.
+    #[must_use]
+    pub fn fallback_count(&self) -> usize {
+        self.fonts.len() - 3
+    }
+
+    /// The face that draws `ch` in `face` (Fira Code when `face` lacks it,
+    /// then the extra fallbacks), with its glyph id.
     fn resolve(&self, face: Face, ch: char) -> (usize, ab_glyph::GlyphId) {
         let f = face.index();
         let id = self.fonts[f].glyph_id(ch);
-        if id.0 == 0 && f != 2 {
-            let mono = self.fonts[2].glyph_id(ch);
-            if mono.0 != 0 {
-                return (2, mono);
+        if id.0 == 0 {
+            for (i, font) in self.fonts.iter().enumerate().skip(2) {
+                if i == f {
+                    continue;
+                }
+                let other = font.glyph_id(ch);
+                if other.0 != 0 {
+                    return (i, other);
+                }
             }
         }
         (f, id)

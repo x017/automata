@@ -15,7 +15,7 @@ Open the files in `ui/` in Oberon to see and change the screens:
 
 | Document | Screen | Its widgets |
 |---|---|---|
-| `ui/title.ui.ron` | **title**: modal, pauses the game | `play`, a `volume` slider and its `volume_text`, a `hints` toggle, the `best` score |
+| `ui/title.ui.ron` | **title**: modal, pauses the game | `play`, a `volume` slider and its `volume_text`, a `hints` toggle, the `language` button, the `best` score |
 | `ui/hud.ui.ron` | **hud**: a HUD, under every screen | `score`, `streak`, the `time` bar and its `clock`, the `lives` bar (`"{value} / {max} lives"`), the `picks` row of `pick_1`…`pick_3`, `verdict`, the `keys` hint |
 | `ui/results.ui.ron` | **results**: modal, pauses the game | `heading`, `final`, `detail`, `best`, `again`, `title` |
 
@@ -28,7 +28,7 @@ the documents by name:
 
 ```python
 hud = ctx.ui.screen("hud")
-hud.set("score", f"SCORE {s['score']}")      # a label
+hud.set("score", ctx.tr("hud.score", score=s["score"]))   # a label
 hud.set("lives", s["lives"])                 # a progress bar
 if hud.clicked("pick_1") or ctx.input.just_pressed("1"): ...
 title = ctx.ui.screen("title")
@@ -44,6 +44,28 @@ and the best score are kept in `ctx.settings` between runs.
 `scripts/shape.py` lifts the shape the Game entity's `lit` attribute
 names, and holds still while a pausing screen is up.
 
+## Languages
+
+Every word is in `lang/strings.csv`, in English, Spanish and Japanese. The
+game starts in the computer's language when it has it, and the title's
+**Language** button switches it (`ctx.settings` remembers the choice). The
+documents' fixed text is a key of the table, like `title.play` or
+`hud.keys`, so it shows in the player's language by itself. In the UI
+editor, the **Text** menu previews each language. The script fills in the
+rest with `ctx.tr`:
+
+```python
+results.set("detail", ctx.tr("results.detail", right=s["right"], missed=s["missed"]))
+```
+
+Japanese draws with `fonts/MPLUSRounded1c-ShapeSignal.ttf`, the table's
+`@font` for `ja`. It fills in the characters Press Start 2P and the
+built-in font lack. It's a 113 KB subset of Rounded M+ 1c with kana,
+punctuation and the table's kanji. See
+[Languages](../../../docs/wiki/oberon/scripting.md#languages).
+
+![Shape Signal's title in Japanese](../../../docs/assets/ui/shape_signal_ja.jpg)
+
 ![The title screen: SHAPE SIGNAL in amber pixel letters, Play, a volume slider, a key hints toggle and the best score, over the dark scene](../../../docs/assets/ui/shape_signal_title.jpg)
 
 ```console
@@ -52,4 +74,6 @@ pytest examples/oberon/shape_signal/tests
 ```
 
 The pixel font is Press Start 2P by CodeMan38, under the SIL Open Font
-License (`fonts/PressStart2P-OFL.txt`).
+License (`fonts/PressStart2P-OFL.txt`). The Japanese font is a subset of
+Rounded M+ 1c by Coji Morishita and the M+ Fonts Project, under the same
+licence (`fonts/MPLUSRounded1c-OFL.txt`).

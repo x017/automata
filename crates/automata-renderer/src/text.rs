@@ -80,6 +80,16 @@ pub fn load_font_file(path: &Path) -> Result<FontArc, String> {
     parse_font(bytes).map_err(|e| format!("font {}: {e}", path.display()))
 }
 
+/// The Console message for a character no font could draw.
+#[must_use]
+pub fn missing_glyph_message(c: char) -> String {
+    format!(
+        "no font has \"{c}\" (U+{:04X}); give its language a font with an @font row \
+         in lang/*.csv, or use a font that has it",
+        u32::from(c)
+    )
+}
+
 /// Where the anchor point sits on each line.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TextAlign {
@@ -130,6 +140,42 @@ pub struct TextStyle {
     pub outline: Option<[f32; 4]>,
     /// The font, from [`TextAtlas::font`] (the built-in one by default).
     pub font: FontId,
+    /// A font for the characters `font` lacks, tried before the built-in
+    /// one: the language's font (`@font` in `lang/*.csv`).
+    pub fallback: Option<FontId>,
+}
+
+/// The fonts a string is drawn with: its own, then a fallback for the
+/// characters it lacks, then the built-in font.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Faces {
+    /// The text's own font.
+    pub font: FontId,
+    /// Tried for characters `font` lacks, before the built-in font.
+    pub fallback: Option<FontId>,
+}
+
+impl From<FontId> for Faces {
+    fn from(font: FontId) -> Self {
+        Self {
+            font,
+            fallback: None,
+        }
+    }
+}
+
+impl Faces {
+    /// The fonts to try, in order, each once: `font`, `fallback`, the
+    /// built-in font.
+    fn chain(self) -> Vec<FontId> {
+        let mut out = vec![self.font];
+        for f in [self.fallback, Some(FontId::BUILTIN)].into_iter().flatten() {
+            if !out.contains(&f) {
+                out.push(f);
+            }
+        }
+        out
+    }
 }
 
 impl Default for TextStyle {
@@ -141,11 +187,21 @@ impl Default for TextStyle {
             shadow: None,
             outline: None,
             font: FontId::BUILTIN,
+            fallback: None,
         }
     }
 }
 
 impl TextStyle {
+    /// The fonts to draw with.
+    #[must_use]
+    pub fn faces(&self) -> Faces {
+        Faces {
+            font: self.font,
+            fallback: self.fallback,
+        }
+    }
+
     /// The size, clamped to [`SIZE_RANGE`] (non-finite sizes become 24).
     #[must_use]
     pub fn clamped_size(&self) -> f32 {
@@ -171,8 +227,9 @@ pub struct PlacedGlyph {
     pub id: GlyphId,
     /// Origin, relative to the anchor point.
     pub origin: Vec2,
-    /// The glyph comes from the fallback font (the main one lacks it).
-    pub fallback: bool,
+    /// Which font it comes from: 0 is the main font, `n` the `n`th
+    /// fallback (the main one lacks it).
+    pub source: u8,
 }
 
 /// A laid-out string.
@@ -184,6 +241,9 @@ pub struct TextLayout {
     pub width: f32,
     /// Height of all lines together.
     pub height: f32,
+    /// Characters no font had (each once, in order); they draw as the main
+    /// font's "missing" box.
+    pub missing: Vec<char>,
 }
 
 /// The built-in font.
@@ -203,21 +263,26 @@ pub fn builtin_font() -> FontRef<'static> {
 /// are snapped to whole pixels so glyphs draw crisply at 1:1.
 #[must_use]
 pub fn layout(font: &impl Font, text: &str, size: f32, align: TextAlign) -> TextLayout {
-    layout_with::<_, FontRef<'static>>(font, None, text, size, align)
+    layout_with::<_, FontRef<'static>>(font, &[], text, size, align)
 }
 
-/// [`layout`], drawing characters `font` lacks from `fallback` (sized to
-/// the same pixel height; lines keep `font`'s metrics).
+/// [`layout`], drawing characters `font` lacks from the first of
+/// `fallbacks` that has them (sized to the same pixel height; lines keep
+/// `font`'s metrics).
 #[must_use]
 pub fn layout_with<F: Font, G: Font>(
     font: &F,
-    fallback: Option<&G>,
+    fallbacks: &[&G],
     text: &str,
     size: f32,
     align: TextAlign,
 ) -> TextLayout {
     let scaled = font.as_scaled(PxScale::from(size));
-    let backup = fallback.map(|f| f.as_scaled(PxScale::from(size)));
+    let backups: Vec<_> = fallbacks
+        .iter()
+        .map(|f| f.as_scaled(PxScale::from(size)))
+        .collect();
+    let mut missing = Vec::new();
     let line_height = scaled.height() + scaled.line_gap();
     let lines: Vec<&str> = text.split('\n').collect();
     #[allow(clippy::cast_precision_loss)]
@@ -227,36 +292,44 @@ pub fn layout_with<F: Font, G: Font>(
     let mut widest = 0.0_f32;
     for (row, line) in lines.iter().enumerate() {
         let mut pen = 0.0_f32;
-        let mut prev: Option<(GlyphId, bool)> = None;
+        let mut prev: Option<(GlyphId, u8)> = None;
         let start = glyphs.len();
         for c in line.chars() {
             let mut id = font.glyph_id(c);
-            let mut from_backup = false;
+            let mut source = 0_u8;
             if id.0 == 0 {
-                if let Some(b) = &backup {
+                for (i, b) in backups.iter().enumerate() {
                     let other = b.glyph_id(c);
                     if other.0 != 0 {
-                        (id, from_backup) = (other, true);
+                        id = other;
+                        source = u8::try_from(i + 1).unwrap_or(u8::MAX);
+                        break;
                     }
                 }
+                if id.0 == 0 && !c.is_whitespace() && !c.is_control() && !missing.contains(&c) {
+                    missing.push(c);
+                }
             }
-            match (prev, &backup) {
-                (Some((p, false)), _) if !from_backup => pen += scaled.kern(p, id),
-                (Some((p, true)), Some(b)) if from_backup => pen += b.kern(p, id),
-                _ => {}
+            if let Some((p, from)) = prev {
+                if from == source {
+                    pen += match source {
+                        0 => scaled.kern(p, id),
+                        n => backups[usize::from(n) - 1].kern(p, id),
+                    };
+                }
             }
             if !c.is_whitespace() {
                 glyphs.push(PlacedGlyph {
                     id,
                     origin: Vec2::new(pen, 0.0),
-                    fallback: from_backup,
+                    source,
                 });
             }
-            pen += match &backup {
-                Some(b) if from_backup => b.h_advance(id),
-                _ => scaled.h_advance(id),
+            pen += match source {
+                0 => scaled.h_advance(id),
+                n => backups[usize::from(n) - 1].h_advance(id),
             };
-            prev = Some((id, from_backup));
+            prev = Some((id, source));
         }
         widest = widest.max(pen);
         let shift = match align {
@@ -274,6 +347,7 @@ pub fn layout_with<F: Font, G: Font>(
         glyphs,
         width: widest,
         height,
+        missing,
     }
 }
 
@@ -288,7 +362,8 @@ pub fn measure(text: &str, size: f32) -> (f32, f32) {
 /// font for characters it lacks), as [`TextAtlas::sprites`] draws it.
 #[must_use]
 pub fn measure_font(font: &FontArc, text: &str, size: f32) -> (f32, f32) {
-    let l = layout_with(font, Some(&builtin_font()), text, size, TextAlign::Left);
+    let builtin = FontArc::new(builtin_font());
+    let l = layout_with(font, &[&builtin], text, size, TextAlign::Left);
     (l.width, l.height)
 }
 
@@ -314,6 +389,10 @@ pub struct TextAtlas {
     files: HashMap<PathBuf, Result<FontId, String>>,
     /// Load failures not yet handed out by [`TextAtlas::take_font_errors`].
     new_errors: Vec<String>,
+    /// Characters no font had, ever (each reported once).
+    missing_seen: std::collections::HashSet<char>,
+    /// Those not yet handed out by [`TextAtlas::take_missing_chars`].
+    new_missing: Vec<char>,
     pixels: Vec<u8>,
     /// `None` for glyphs with nothing to draw.
     glyphs: HashMap<GlyphKey, Option<AtlasGlyph>>,
@@ -352,6 +431,8 @@ impl TextAtlas {
             fonts: vec![FontArc::new(builtin_font())],
             files: HashMap::new(),
             new_errors: Vec::new(),
+            missing_seen: std::collections::HashSet::new(),
+            new_missing: Vec::new(),
             pixels: vec![0; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize],
             glyphs: HashMap::new(),
             cursor: (PAD, PAD),
@@ -400,6 +481,12 @@ impl TextAtlas {
         std::mem::take(&mut self.new_errors)
     }
 
+    /// Characters that no font (the text's, its fallback or the built-in
+    /// one) could draw since the last call, each reported once ever.
+    pub fn take_missing_chars(&mut self) -> Vec<char> {
+        std::mem::take(&mut self.new_missing)
+    }
+
     /// Number of fonts, the built-in one included.
     #[must_use]
     pub fn font_count(&self) -> usize {
@@ -410,15 +497,22 @@ impl TextAtlas {
         self.fonts.get(id.index()).unwrap_or(&self.fonts[0])
     }
 
-    /// Lays out `text` in `font`, with the built-in font for characters it
-    /// lacks.
-    fn layout(&self, font: FontId, text: &str, size: f32, align: TextAlign) -> TextLayout {
-        let face = self.face(font);
-        if font == FontId::BUILTIN {
-            layout(face, text, size, align)
-        } else {
-            layout_with(face, Some(&self.fonts[0]), text, size, align)
-        }
+    /// Lays out `text` in `faces`' font, with its fallback and then the
+    /// built-in font for characters it lacks. Returns the fonts a glyph's
+    /// `source` indexes too.
+    fn layout(
+        &self,
+        faces: Faces,
+        text: &str,
+        size: f32,
+        align: TextAlign,
+    ) -> (TextLayout, Vec<FontId>) {
+        let chain = faces.chain();
+        let rest: Vec<&FontArc> = chain[1..].iter().map(|&f| self.face(f)).collect();
+        (
+            layout_with(self.face(chain[0]), &rest, text, size, align),
+            chain,
+        )
     }
 
     fn clear(&mut self) {
@@ -478,26 +572,32 @@ impl TextAtlas {
     /// Makes sure every glyph of these strings (text, size, font) is in
     /// the atlas, and uploads the atlas if it changed. Call once per frame,
     /// before [`sprites`](Self::sprites), with everything you'll draw.
-    pub fn prepare<'a>(
+    ///
+    /// The fonts are a [`FontId`] or [`Faces`] (a font with a fallback).
+    pub fn prepare<'a, F: Into<Faces>>(
         &mut self,
         renderer: &Renderer,
-        texts: impl IntoIterator<Item = (&'a str, f32, FontId)>,
+        texts: impl IntoIterator<Item = (&'a str, f32, F)>,
     ) {
         // Every glyph this frame draws, once each.
         let mut needed: Vec<GlyphKey> = Vec::new();
-        for (text, size, font) in texts {
+        for (text, size, faces) in texts {
             let style = TextStyle {
                 size,
                 ..TextStyle::default()
             };
             let key = size_key(style.clamped_size());
             #[allow(clippy::cast_precision_loss)]
-            let laid = self.layout(font, text, key as f32 / 2.0, TextAlign::Left);
+            let (laid, chain) = self.layout(faces.into(), text, key as f32 / 2.0, TextAlign::Left);
             for g in laid.glyphs {
-                let face = if g.fallback { FontId::BUILTIN } else { font };
-                let entry = (face, g.id, key);
+                let entry = (chain[usize::from(g.source)], g.id, key);
                 if !needed.contains(&entry) {
                     needed.push(entry);
+                }
+            }
+            for c in laid.missing {
+                if self.missing_seen.insert(c) {
+                    self.new_missing.push(c);
                 }
             }
         }
@@ -533,7 +633,7 @@ impl TextAtlas {
         let size = style.clamped_size();
         let key = size_key(size);
         #[allow(clippy::cast_precision_loss)]
-        let laid = self.layout(style.font, text, key as f32 / 2.0, style.align);
+        let (laid, chain) = self.layout(style.faces(), text, key as f32 / 2.0, style.align);
         let anchor = Vec2::new(x.round(), y.round());
         let mut passes: Vec<(Vec2, [f32; 4])> = Vec::new();
         let d = style.effect_offset();
@@ -558,11 +658,7 @@ impl TextAtlas {
         let mut out = Vec::with_capacity(passes.len() * laid.glyphs.len());
         for (shift, color) in passes {
             for g in &laid.glyphs {
-                let face = if g.fallback {
-                    FontId::BUILTIN
-                } else {
-                    style.font
-                };
+                let face = chain[usize::from(g.source)];
                 let Some(Some(a)) = self.glyphs.get(&(face, g.id, key)) else {
                     continue;
                 };
@@ -706,9 +802,11 @@ mod tests {
         assert_eq!(pixel.glyph_id('\u{1e9e}').0, 0);
         assert_ne!(builtin.glyph_id('\u{1e9e}').0, 0);
         let alone = layout(&pixel, "A\u{1e9e}", 16.0, TextAlign::Left);
-        let backed = layout_with(&pixel, Some(&builtin), "A\u{1e9e}", 16.0, TextAlign::Left);
-        assert!(!alone.glyphs[1].fallback);
-        assert!(!backed.glyphs[0].fallback && backed.glyphs[1].fallback);
+        let backed = layout_with(&pixel, &[&builtin], "A\u{1e9e}", 16.0, TextAlign::Left);
+        assert_eq!(alone.glyphs[1].source, 0);
+        assert_eq!(alone.missing, ['\u{1e9e}']);
+        assert_eq!((backed.glyphs[0].source, backed.glyphs[1].source), (0, 1));
+        assert_eq!(backed.missing, Vec::<char>::new());
         assert_eq!(backed.glyphs[1].id, builtin.glyph_id('\u{1e9e}'));
         // Line metrics stay the main font's.
         assert!((alone.height - backed.height).abs() < 1e-3);

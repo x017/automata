@@ -919,9 +919,43 @@ Done:
   single vector components (a position-like field overrides as a whole),
   and the profiler for exported games.
 
-### D7. Localization ⬜ S
+### D7. Localization ✅ S
 - String tables (CSV) with `ctx.tr("menu.play")`, a language setting, and
   fonts falling back per language.
+
+Done:
+- **String tables:** every `lang/*.csv` (UTF-8, BOM allowed) next to the
+  scene: a `key` column and one column per language code, `@name` and
+  `@font` rows, `#` comments, quoted cells and `\n`. Parsed the same way in
+  Rust (`automata_core::StringTable`) and Python. Duplicates, odd rows and
+  extra cells are warned about with file and line.
+- **`ctx.tr(key, language=None, **values)`:** fills `{name}` placeholders;
+  an empty cell gives the first language's text, a missing key gives the
+  key with a did-you-mean, and an unfilled placeholder stays. Each warns
+  once. Also `languages`, `language`, `name()`, `font()`, `has()`/`in`
+  and `keys(prefix)`. Edited tables hot-reload in Play.
+- **`ctx.settings.language`:** starts as the computer's language when a
+  table has it (`es-MX` → `es`, `pt` → `pt-BR`), else the first column.
+  It's saved in `settings.json`; an unknown code raises `ValueError` with
+  the list.
+- **UI documents translate themselves:** label, button, toggle and
+  progress text and panel titles that are table keys show in the player's
+  language. Full-width characters count double in layout estimates (Rust
+  and Python agree).
+- **Fonts per language:** HUD text carries the language's `@font` as a
+  fallback. The renderer tries the text's font, then the fallback, then
+  the built-in font, and reports characters no font has once. This works
+  in Oberon's Play, standalone `run_scene` and exports.
+- **Oberon:** `ctx.tr("` completes keys with their first-language text.
+  The UI editor's **Text** menu previews a document in any language or as
+  keys, and loads the tables' `@font`s into the editor canvas.
+- **Export** warns about table problems and untranslated keys. It errors
+  on a missing or unshippable `@font`, or on excluded tables.
+- **Demo:** Shape Signal in English, Spanish and Japanese, with a
+  Language button on the title and a 113 KB Rounded M+ subset for the
+  kana.
+- Not yet: plural rules (`{count}` picks a form), right-to-left text and
+  shaping (Arabic, Hebrew, Indic), and a table editor inside Oberon.
 
 ---
 
@@ -1015,7 +1049,7 @@ per effort. Reorder any time by telling me.
 | 35 | C6 2D toolkit | L | ⬜ |
 | 36 | D6 Editor workflow | M | ✅ |
 | 37 | D4 UI editor | L | ✅ |
-| 38 | D7 Localization | S | ⬜ |
+| 38 | D7 Localization | S | ✅ |
 | 39 | E1 Android export | L | ⬜ |
 | 40 | E2 macOS export | M | ⬜ |
 | 41 | E3 Web export | L | ⬜ |

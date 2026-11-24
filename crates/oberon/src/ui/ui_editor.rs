@@ -48,6 +48,9 @@ pub struct UiEditor {
     selected_for: Option<PathBuf>,
     /// Index into [`PREVIEWS`].
     pub preview: usize,
+    /// The language the canvas shows string-table keys in (`None`: the
+    /// tables' first language; `Some("")`: the keys themselves).
+    pub language: Option<String>,
     drag: Option<NodeDrag>,
     clipboard: Option<UiNode>,
     tree_scroll: f32,
@@ -140,6 +143,8 @@ pub enum UiDocAction {
     Align(usize),
     /// Preview on `PREVIEWS[i]`.
     Preview(usize),
+    /// Show string-table keys as written (0) or in language `i - 1`.
+    Language(usize),
 }
 
 /// One row of the widget tree.
@@ -462,6 +467,18 @@ impl Ui {
         self.ui_doc_action(UiDocAction::Preview(i));
     }
 
+    /// Shows string-table keys on the canvas in `language` (`""`: the keys
+    /// as written; `None`: the tables' first language).
+    pub fn set_ui_language(&mut self, language: Option<&str>) {
+        self.uied.language = language.map(str::to_string);
+    }
+
+    /// The language the canvas shows keys in (`None`: the keys).
+    #[must_use]
+    pub fn ui_language(&self) -> Option<String> {
+        self.ui_preview_language()
+    }
+
     /// Shows the active UI document as text (`true`) or in the editor.
     pub fn set_ui_source(&mut self, text: bool) {
         let Some(path) = self.code.current().map(|t| t.path.clone()) else {
@@ -547,6 +564,13 @@ impl Ui {
                 });
             }
             UiDocAction::Preview(i) => self.uied.preview = i.min(PREVIEWS.len() - 1),
+            UiDocAction::Language(i) => {
+                self.uied.language = Some(
+                    i.checked_sub(1)
+                        .and_then(|l| self.strings.table.languages.get(l).cloned())
+                        .unwrap_or_default(),
+                );
+            }
         }
     }
 
@@ -944,6 +968,41 @@ impl Ui {
                 .collect();
             self.open_menu(pb.x, pb.y + pb.h + 2.0, items);
         }
+        // The language keys show in, when the project has string tables.
+        let mut left_end = pb.x + pb.w;
+        if !self.strings.table.languages.is_empty() {
+            let shown = self.ui_preview_language();
+            let name = match &shown {
+                Some(l) => self.strings.table.name(l).to_string(),
+                None => "Keys".to_string(),
+            };
+            let label = format!("Text {name}");
+            let lw = canvas.measure_text(layout::FONT_SIZE, &label) + 40.0;
+            let lb = Rect::new(left_end + 6.0, y, lw, h);
+            let clicked = self.button(canvas, lb, &format!("{label}     "), ButtonStyle::Ghost);
+            menu_caret(canvas, lb, color::text_dim());
+            if clicked {
+                let mark = |on: bool| if on { "✓ " } else { "   " };
+                let table = &self.strings.table;
+                let mut items = vec![MenuItem::ui(
+                    format!("{}Keys (as written)", mark(shown.is_none())),
+                    "",
+                    UiAction::UiDoc(UiDocAction::Language(0)),
+                    true,
+                )];
+                for (i, code) in table.languages.iter().enumerate() {
+                    let on = shown.as_deref() == Some(code.as_str());
+                    items.push(MenuItem::ui(
+                        format!("{}{} ({code})", mark(on), table.name(code)),
+                        "",
+                        UiAction::UiDoc(UiDocAction::Language(i + 1)),
+                        true,
+                    ));
+                }
+                self.open_menu(lb.x, lb.y + lb.h + 2.0, items);
+            }
+            left_end = lb.x + lb.w;
+        }
         // Right: how scripts reach it, and the text view.
         let tb = Rect::new(r.x + r.w - 104.0, y, 96.0, h);
         if self.button(canvas, tb, "Edit as Text", ButtonStyle::Ghost) {
@@ -952,7 +1011,7 @@ impl Ui {
         let kind = if doc.hud { "HUD" } else { "screen" };
         let hint = format!("{kind} · ctx.ui.screen(\"{screen}\")");
         let hw = canvas.measure_text(layout::SMALL_SIZE, &hint);
-        if tb.x - hw - 16.0 > pb.x + pb.w {
+        if tb.x - hw - 16.0 > left_end {
             canvas.text(
                 tb.x - hw - 12.0,
                 r.y + (r.h - layout::SMALL_SIZE) / 2.0 - 1.0,
@@ -960,6 +1019,17 @@ impl Ui {
                 &hint,
                 color::text_dim(),
             );
+        }
+    }
+
+    /// The language the canvas shows string-table keys in, or `None` for
+    /// the keys as written (also when the project has no string tables).
+    fn ui_preview_language(&self) -> Option<String> {
+        let languages = &self.strings.table.languages;
+        match self.uied.language.as_deref() {
+            Some("") => None,
+            Some(l) if self.strings.table.language_index(l).is_some() => Some(l.to_string()),
+            _ => languages.first().cloned(),
         }
     }
 
@@ -1000,6 +1070,9 @@ impl Ui {
                     n.y = my;
                 }
             }
+        }
+        if let Some(lang) = self.ui_preview_language() {
+            uidoc::translate(&mut view, &self.strings.table, &lang);
         }
         let placed = uidoc::layout(&view, &frame);
         let theme = view.theme.resolve();
@@ -2101,6 +2174,58 @@ mod tests {
                 ..Pointer::default()
             },
         );
+    }
+
+    #[test]
+    fn the_canvas_shows_string_table_keys_in_a_chosen_language() {
+        let dir = std::env::temp_dir().join(format!("oberon-uied-{}-lang", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("ui").join("hud.ui.ron");
+        let mut hud = UiDoc::template_hud();
+        hud.nodes[0].children[0].text = "hud.score".into();
+        hud.save(&path).unwrap();
+        let mut ui = Ui::new();
+        ui.open_code(&path, None);
+        std::fs::create_dir_all(dir.join("lang")).unwrap();
+        let font = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/oberon/shape_signal/fonts/MPLUSRounded1c-ShapeSignal.ttf");
+        std::fs::create_dir_all(dir.join("fonts")).unwrap();
+        std::fs::copy(font, dir.join("fonts/JP.ttf")).unwrap();
+        std::fs::write(
+            dir.join("lang/strings.csv"),
+            "key,en,ja\n@name,English,日本語\n@font,,fonts/JP.ttf\nhud.score,SCORE,スコア\n",
+        )
+        .unwrap();
+        let mut doc = Document::starter();
+        doc.path = Some(dir.join("level.ron"));
+        let mut canvas = Canvas::new(1600, 950);
+        let _ = ui.frame(&mut canvas, &doc, Pointer::default(), None);
+        assert_eq!(ui.strings.table.languages, ["en", "ja"]);
+        assert_eq!(
+            ui.ui_language().as_deref(),
+            Some("en"),
+            "the first language"
+        );
+        assert_eq!(canvas.fallback_font_count(), 1, "the ja font is loaded");
+
+        // The menu lists the keys and each language; picking one shows it.
+        ui.ui_doc_action(UiDocAction::Language(2));
+        assert_eq!(ui.ui_language().as_deref(), Some("ja"));
+        let mut shown = ui.ui_editor_doc().unwrap().clone();
+        assert_eq!(
+            shown.nodes[0].children[0].text, "hud.score",
+            "the file keeps the key"
+        );
+        uidoc::translate(&mut shown, &ui.strings.table, "ja");
+        assert_eq!(shown.nodes[0].children[0].text, "スコア");
+        assert!(
+            canvas.measure_text(14.0, "スコア") > 30.0,
+            "drawn with the ja font"
+        );
+        ui.ui_doc_action(UiDocAction::Language(0));
+        assert_eq!(ui.ui_language(), None, "the keys as written");
+        let _ = ui.frame(&mut canvas, &doc, Pointer::default(), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
