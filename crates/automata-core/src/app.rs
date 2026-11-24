@@ -599,8 +599,6 @@ impl Application {
     }
 }
 
-// The closures passed to `Application::run` guide lifetime inference for
-// `AppContext<'_>`; clippy's suggested method-path rewrite does not typecheck.
 /// Runs a windowed game with the installed platform driver, or the
 /// built-in winit one on desktop.
 fn run_driver(host: &mut dyn crate::runtime::Host) -> Result<()> {
@@ -619,6 +617,8 @@ fn run_driver(host: &mut dyn crate::runtime::Host) -> Result<()> {
     }
 }
 
+// The closures passed to `Application::run` guide lifetime inference for
+// `AppContext<'_>`; clippy's suggested method-path rewrite does not typecheck.
 #[cfg(test)]
 #[allow(clippy::redundant_closure_for_method_calls)]
 mod tests {

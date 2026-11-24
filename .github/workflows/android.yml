@@ -25,6 +25,12 @@ defaults:
   run:
     shell: bash
 
+# Reports (logs, screenshots) are published as check runs, so they can be
+# read through the API (android/ci/report.py).
+permissions:
+  contents: read
+  checks: write
+
 jobs:
   check:
     # Fast feedback before the long APK build: the Android crate compiles
@@ -45,7 +51,13 @@ jobs:
           VCPKGRS_DISABLE: "1"
         run: |
           cargo clippy --manifest-path android/engine/Cargo.toml \
-            --target aarch64-linux-android --all-targets -- -D warnings
+            --target aarch64-linux-android --all-targets -- -D warnings 2>&1 | tee clippy.log
+      - name: Report clippy
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 android/ci/report.py "android: clippy log" --log clippy.log --lines 300
 
   apk:
     name: APK (x86_64)
@@ -92,7 +104,11 @@ jobs:
 
       - name: Build log (on failure)
         if: failure()
-        run: tail -300 build.log
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          tail -300 build.log
+          python3 android/ci/report.py "android: APK build log" --log build.log --lines 500
 
       - name: APK size
         run: ls -la dist/*.apk && unzip -l dist/*.apk | grep -E "\.so$" | sort -k1 -n -r | head -20
@@ -132,6 +148,20 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
           script: android/ci/smoke_test.sh "$(ls apk/*.apk | head -1)" android-smoke
+
+      - name: Report the smoke test
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 android/ci/report.py "android: logcat" --log android-smoke/logcat.txt \
+            --lines 600 --grep "python|SDL|automata|wgpu|AndroidRuntime|DEBUG|libc"
+          for shot in android-smoke/*.png; do
+            [ -e "$shot" ] || continue
+            name="$(basename "$shot" .png)"
+            convert "$shot" -resize 640x640 -quality 70 "android-smoke/$name-small.jpg"
+            python3 android/ci/report.py "android: screenshot $name" --image "android-smoke/$name-small.jpg"
+          done
 
       - uses: actions/upload-artifact@v4
         if: always()
