@@ -58,6 +58,7 @@ pub use texture::Texture;
 pub use water::{RippleMap, Water, WaterSurface, RIPPLE_FIELD_SIZE};
 
 pub use wgpu::Color;
+pub use wgpu::SurfaceTarget;
 pub use wgpu::Texture as RenderTarget;
 
 /// Maximum number of sprite vertices in one batch (quads × 4).

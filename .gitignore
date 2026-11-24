@@ -21,3 +21,8 @@ crates/automata-python/python/automata/_core*.pyd
 
 # Oberon per-project runtime files (autosave, script bridge)
 .oberon/
+
+# Android (android/README.md): APKs, and the Android crate's lockfile,
+# which CI resolves from crates.io (its `sdl3` dependency isn't vendored).
+/dist
+/android/engine/Cargo.lock

@@ -1,6 +1,6 @@
 //! GPU device, surface, and frame presentation.
 
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::error::{Error, Result};
 
@@ -15,6 +15,9 @@ use crate::error::{Error, Result};
 /// validation failures are reported as errors.
 #[derive(Debug)]
 pub struct RenderContext {
+    /// The instance the surface came from, kept to make a new surface when
+    /// the window comes back (Android destroys it in the background).
+    instance: Option<wgpu::Instance>,
     surface: Option<wgpu::Surface<'static>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -52,7 +55,10 @@ impl RenderContext {
         size: (u32, u32),
         vsync: bool,
     ) -> Result<Self> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        // `WGPU_BACKEND` (e.g. `gl`) can pick the API: handy on Android
+        // emulators, whose Vulkan is often incomplete.
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let surface = instance.create_surface(surface_target.into())?;
 
         let adapter = instance
@@ -73,7 +79,7 @@ impl RenderContext {
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("automata-device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
+                required_limits: window_limits(&adapter),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 memory_hints: wgpu::MemoryHints::default(),
                 trace: wgpu::Trace::Off,
@@ -103,6 +109,7 @@ impl RenderContext {
 
         Ok(Self {
             format: config.format,
+            instance: Some(instance),
             surface: Some(surface),
             device,
             queue,
@@ -148,6 +155,7 @@ impl RenderContext {
 
         let (width, height) = (size.0.max(1), size.1.max(1));
         Ok(Self {
+            instance: None,
             surface: None,
             device,
             queue,
@@ -262,6 +270,48 @@ impl RenderContext {
         }
     }
 
+    /// Drops the window surface, as when the app goes to the background
+    /// and the OS takes the window away. Frames are skipped until
+    /// [`resume`](Self::resume); the device and every GPU resource stay.
+    pub fn suspend(&mut self) {
+        if self.surface.take().is_some() {
+            info!("surface released");
+        }
+    }
+
+    /// Whether there's a surface to present to.
+    #[must_use]
+    pub fn has_surface(&self) -> bool {
+        self.surface.is_some()
+    }
+
+    /// Makes a new surface for a window that came back (or a new window),
+    /// with the same device, format and present mode.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CreateSurface`] when the surface can't be made, and
+    /// [`Error::IncompatibleSurface`] for an offscreen context.
+    pub fn resume(
+        &mut self,
+        surface_target: impl Into<wgpu::SurfaceTarget<'static>>,
+        size: (u32, u32),
+    ) -> Result<()> {
+        let (Some(instance), Some(config)) = (&self.instance, &mut self.config) else {
+            return Err(Error::IncompatibleSurface);
+        };
+        let surface = instance.create_surface(surface_target.into())?;
+        let (width, height) = (size.0.max(1), size.1.max(1));
+        config.width = width;
+        config.height = height;
+        surface.configure(&self.device, config);
+        self.surface = Some(surface);
+        self.size = (width, height);
+        self.needs_reconfigure = false;
+        info!(width, height, "surface recreated");
+        Ok(())
+    }
+
     /// Resizes the surface to match the window.
     ///
     /// Zero-sized windows (e.g. minimized) are ignored: a swapchain cannot
@@ -360,6 +410,19 @@ pub struct GpuSummary {
     pub backend: String,
     /// Whether it renders on the CPU (slow, but works).
     pub software: bool,
+}
+
+/// The device limits a windowed renderer asks for: wgpu's defaults when
+/// the adapter has them, else everything the adapter offers (phones and
+/// OpenGL ES fall short of the defaults somewhere).
+fn window_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+    let supported = adapter.limits();
+    if wgpu::Limits::default().check_limits(&supported) {
+        wgpu::Limits::default()
+    } else {
+        warn!("GPU below wgpu's default limits; using what it supports");
+        supported
+    }
 }
 
 #[cfg(test)]

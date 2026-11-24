@@ -24,12 +24,18 @@ pub enum Error {
     Io(#[from] std::io::Error),
 
     /// The OS event loop failed to start or run.
+    #[cfg(not(target_os = "android"))]
     #[error("event loop error: {0}")]
     EventLoop(#[from] winit::error::EventLoopError),
 
     /// Window creation failed (for example, no display is available).
+    #[cfg(not(target_os = "android"))]
     #[error("window error: {0}")]
     Window(#[from] winit::error::OsError),
+
+    /// A platform driver (SDL on Android) failed: no window, no display.
+    #[error("platform error: {0}")]
+    Platform(String),
 
     /// GPU initialization or presentation failed.
     #[error("renderer error: {0}")]

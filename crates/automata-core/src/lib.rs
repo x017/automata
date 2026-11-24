@@ -12,14 +12,18 @@
 pub mod app;
 pub mod audio_source;
 pub mod config;
+#[cfg(not(target_os = "android"))]
 mod driver;
 pub mod error;
 pub mod logging;
+pub mod platform;
 pub mod prefab;
+mod runtime;
 pub mod scene_file;
 pub mod strings;
 pub mod time;
 pub mod window;
+#[cfg(not(target_os = "android"))]
 pub mod winit_input;
 
 pub use app::{AppContext, AppState, Application, SharedAudio, WorldState};

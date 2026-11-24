@@ -13,7 +13,10 @@ name = "automata_python"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = []
+default = ["module"]
+# The `automata._core` entry point (`PyInit__core`). The Android build wraps
+# this crate in its own module (android/engine) and turns this off.
+module = []
 # Real audio output via cpal. Off by default so headless sandboxes (no ALSA
 # headers) build cleanly; scripts/build.py and CI enable it explicitly.
 audio-cpal = ["automata-core/cpal"]

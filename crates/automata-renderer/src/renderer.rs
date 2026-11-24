@@ -413,6 +413,36 @@ impl Renderer {
         self.ctx.size()
     }
 
+    /// Lets go of the window surface (the app went to the background).
+    /// Frames are skipped until [`resume`](Self::resume); meshes, textures
+    /// and pipelines stay on the GPU.
+    pub fn suspend(&mut self) {
+        self.ctx.suspend();
+    }
+
+    /// Whether there's a window surface to present to.
+    #[must_use]
+    pub fn has_surface(&self) -> bool {
+        self.ctx.has_surface()
+    }
+
+    /// Renders to a new window surface after [`suspend`](Self::suspend),
+    /// keeping every GPU resource.
+    ///
+    /// # Errors
+    ///
+    /// When the surface can't be made.
+    pub fn resume(
+        &mut self,
+        surface_target: impl Into<wgpu::SurfaceTarget<'static>>,
+        size: (u32, u32),
+    ) -> Result<()> {
+        self.ctx.resume(surface_target, size)?;
+        let size = self.ctx.size();
+        self.depth_texture = Some(create_depth_texture(self.ctx.device(), size));
+        Ok(())
+    }
+
     /// Resizes the render surface and depth buffer.
     pub fn resize(&mut self, width: u32, height: u32) {
         self.ctx.resize(width, height);
@@ -3479,6 +3509,48 @@ mod tests {
         let [r, _g, _b, a] = center_pixel(&pixels, size);
         assert!(r > 200, "expected red center, got {pixels:?}");
         assert_eq!(a, 255);
+    }
+
+    /// A window that has no handle (yet): enough to call `resume` with.
+    struct NoWindow;
+
+    impl wgpu::rwh::HasWindowHandle for NoWindow {
+        fn window_handle(
+            &self,
+        ) -> std::result::Result<wgpu::rwh::WindowHandle<'_>, wgpu::rwh::HandleError> {
+            Err(wgpu::rwh::HandleError::Unavailable)
+        }
+    }
+
+    impl wgpu::rwh::HasDisplayHandle for NoWindow {
+        fn display_handle(
+            &self,
+        ) -> std::result::Result<wgpu::rwh::DisplayHandle<'_>, wgpu::rwh::HandleError> {
+            Err(wgpu::rwh::HandleError::Unavailable)
+        }
+    }
+
+    #[test]
+    fn offscreen_renderers_have_no_surface_to_suspend_or_resume() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping suspend test");
+            return;
+        };
+        assert!(!renderer.has_surface());
+        renderer.suspend(); // nothing to let go of
+        let size = renderer.size();
+        assert!(matches!(
+            renderer.resume(NoWindow, (32, 32)),
+            Err(crate::Error::IncompatibleSurface)
+        ));
+        assert_eq!(renderer.size(), size, "a refused resume changes nothing");
+        // It still draws offscreen afterwards.
+        let target = target(renderer.context().device(), size);
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::RED);
+        renderer.render_offscreen(&draw, &target);
+        let [r, ..] = center_pixel(&read_pixels(&renderer, &target, size), size);
+        assert!(r > 200);
     }
 
     #[test]

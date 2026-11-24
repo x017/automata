@@ -23,7 +23,6 @@ use automata_scene::{Events, Resources, Scene};
 use tracing::{debug, info};
 
 use crate::config::EngineConfig;
-use crate::driver;
 use crate::error::{Error, Result};
 use crate::logging;
 use crate::time::Time;
@@ -510,14 +509,17 @@ impl Application {
                 self.run_headless(update);
                 Ok(())
             }
-            WindowMode::Windowed(window_config) => driver::run_windowed(
-                &self.config,
-                &window_config,
-                &mut self.time,
-                &mut self.world,
-                &mut self.quit_requested,
-                update,
-            ),
+            WindowMode::Windowed(window_config) => {
+                let mut runtime = crate::runtime::Runtime::new(
+                    &self.config,
+                    &window_config,
+                    &mut self.time,
+                    &mut self.world,
+                    &mut self.quit_requested,
+                    update,
+                );
+                run_driver(&mut runtime)
+            }
         };
 
         self.state = AppState::Shutdown;
@@ -599,6 +601,24 @@ impl Application {
 
 // The closures passed to `Application::run` guide lifetime inference for
 // `AppContext<'_>`; clippy's suggested method-path rewrite does not typecheck.
+/// Runs a windowed game with the installed platform driver, or the
+/// built-in winit one on desktop.
+fn run_driver(host: &mut dyn crate::runtime::Host) -> Result<()> {
+    if let Some(driver) = crate::platform::installed_driver() {
+        return driver(host);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        crate::driver::run(host)
+    }
+    #[cfg(target_os = "android")]
+    {
+        Err(Error::Platform(
+            "no window driver installed (the Android build installs SDL's)".into(),
+        ))
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::redundant_closure_for_method_calls)]
 mod tests {

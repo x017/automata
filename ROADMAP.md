@@ -989,7 +989,13 @@ and its own input types. The game-facing API stays the same everywhere.
   point, `moved` and `just_started`/`just_ended`; the first finger is
   still the left mouse button. On desktop and in Oberon the left mouse
   button is finger 0. `at.Touch` in the engine API.
-- ⬜ The SDL3 driver and a p4a build that renders on an emulator (CI).
+- 🔨 **The SDL3 driver and a p4a build that renders on an emulator:**
+  windowed games run through a platform `Host` that any driver can
+  drive (winit on desktop; `android/engine`'s SDL3 driver installs itself
+  when `automata` is imported on Android). The renderer can drop and
+  recreate its surface (background/foreground) and keep every GPU
+  resource. The `Android` CI workflow builds the spike APK with
+  python-for-android and runs it on an emulator (see `android/README.md`).
 - ⬜ Coin Run on the emulator; virtual joystick and buttons; `build.ron`
   touch controls; `--target android` with debug signing; size.
 

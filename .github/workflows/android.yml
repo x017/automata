@@ -1,0 +1,140 @@
+name: Android
+
+# Builds the SDL3 spike APK (android/app) with python-for-android and runs
+# it on an emulator: it must draw, take a tap, survive background and
+# foreground, and quit on Back. See android/README.md.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, "arena/**"]
+    paths:
+      - "android/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - ".github/workflows/android.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  # python-for-android `develop`, pinned: the SDL3 bootstrap is new there.
+  P4A_REF: 9562d1b4f306d0af1e76991c711114010dea4152
+  NDK_VERSION: "28.2.13676358" # r28c, as python-for-android recommends
+  ANDROID_API: "35"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    # Fast feedback before the long APK build: the Android crate compiles
+    # for Android and is clippy-clean.
+    name: check (aarch64-linux-android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+          components: clippy, rustfmt
+      - name: fmt
+        run: cargo fmt --manifest-path android/engine/Cargo.toml --check
+      - name: clippy
+        env:
+          PYO3_CROSS_PYTHON_VERSION: "3.14"
+          VCPKGRS_DISABLE: "1"
+        run: |
+          cargo clippy --manifest-path android/engine/Cargo.toml \
+            --target aarch64-linux-android --all-targets -- -D warnings
+
+  apk:
+    name: APK (x86_64)
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift
+          df -h /
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake libtool pkg-config cmake ccache lld \
+            zlib1g-dev libncurses-dev libffi-dev libssl-dev unzip zip patchelf
+          python -m pip install --upgrade pip
+          python -m pip install "cython<3.2" \
+            "python-for-android @ git+https://github.com/kivy/python-for-android@${P4A_REF}"
+
+      - name: Android NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;${NDK_VERSION}" \
+            "platforms;android-${ANDROID_API}" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build the APK
+        # Progress lines only; the full log is printed when the build fails.
+        run: android/build_apk.sh android/app x86_64 2>&1 | tee build.log | sed -n '/INFO\|WARNING\|ERROR/p'
+
+      - name: Build log (on failure)
+        if: failure()
+        run: tail -300 build.log
+
+      - name: APK size
+        run: ls -la dist/*.apk && unzip -l dist/*.apk | grep -E "\.so$" | sort -k1 -n -r | head -20
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: automata-spike-apk
+          path: dist/*.apk
+          if-no-files-found: error
+
+  emulator:
+    name: emulator smoke test
+    needs: apk
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: automata-spike-apk
+          path: apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: android/ci/smoke_test.sh "$(ls apk/*.apk | head -1)" android-smoke
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-smoke
+          path: android-smoke/

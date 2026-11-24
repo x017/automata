@@ -38,9 +38,22 @@ mod serialize;
 use pyo3::prelude::*;
 
 /// The native extension module imported as `automata._core`.
+#[cfg(feature = "module")]
 #[allow(clippy::used_underscore_items)] // the Python module path dictates the name
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    init_module(m)
+}
+
+/// Fills the `automata._core` module with the engine's classes and
+/// functions. The desktop extension's entry point calls it; so does the
+/// Android build's (`android/engine`), after installing SDL's window
+/// driver, with this crate's `module` feature off.
+///
+/// # Errors
+///
+/// When Python can't add a class or function.
+pub fn init_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     m.add("Error", m.py().get_type::<error::AutomataError>())?;
