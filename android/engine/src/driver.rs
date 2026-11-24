@@ -195,82 +195,11 @@ impl SdlDriver<'_> {
     fn input_event(&mut self, event: &Event) -> Option<InputEvent> {
         let (scale_x, scale_y) = self.pixel_scale();
         Some(match *event {
-            Event::FingerDown {
-                touch_id,
-                finger_id,
-                x,
-                y,
-                ..
-            }
-            | Event::FingerMotion {
-                touch_id,
-                finger_id,
-                x,
-                y,
-                ..
-            }
-            | Event::FingerUp {
-                touch_id,
-                finger_id,
-                x,
-                y,
-                ..
-            }
-            | Event::FingerCanceled {
-                touch_id,
-                finger_id,
-                x,
-                y,
-                ..
-            } => {
-                if touch_id == MOUSE_TOUCH_ID {
-                    return None;
-                }
-                let phase = match event {
-                    Event::FingerDown { .. } => TouchPhase::Started,
-                    Event::FingerMotion { .. } => TouchPhase::Moved,
-                    Event::FingerUp { .. } => TouchPhase::Ended,
-                    _ => TouchPhase::Cancelled,
-                };
-                // SDL's touch positions are 0..1 across the window.
-                let (width, height) = self.window.size_in_pixels();
-                InputEvent::Touch {
-                    id: finger_id,
-                    phase,
-                    x: f64::from(x) * f64::from(width),
-                    y: f64::from(y) * f64::from(height),
-                }
-            }
-            Event::KeyDown {
-                scancode,
-                keymod,
-                repeat,
-                ..
-            }
-            | Event::KeyUp {
-                scancode,
-                keymod,
-                repeat,
-                ..
-            } => {
-                let modifiers = keys::modifiers(keymod);
-                if modifiers != self.modifiers {
-                    self.modifiers = modifiers;
-                    self.host.input(&InputEvent::Modifiers(modifiers));
-                }
-                if repeat {
-                    return None;
-                }
-                let state = if matches!(event, Event::KeyDown { .. }) {
-                    ElementState::Pressed
-                } else {
-                    ElementState::Released
-                };
-                InputEvent::Key {
-                    key: keys::key(scancode?)?,
-                    state,
-                }
-            }
+            Event::FingerDown { .. }
+            | Event::FingerMotion { .. }
+            | Event::FingerUp { .. }
+            | Event::FingerCanceled { .. } => return self.touch_event(event),
+            Event::KeyDown { .. } | Event::KeyUp { .. } => return self.key_event(event),
             Event::MouseMotion {
                 which,
                 x,
@@ -320,6 +249,83 @@ impl SdlDriver<'_> {
                 }
             }
             _ => return None,
+        })
+    }
+
+    /// A finger event as an engine touch.
+    fn touch_event(&self, event: &Event) -> Option<InputEvent> {
+        let (phase, touch_id, finger_id, x, y) = match *event {
+            Event::FingerDown {
+                touch_id,
+                finger_id,
+                x,
+                y,
+                ..
+            } => (TouchPhase::Started, touch_id, finger_id, x, y),
+            Event::FingerMotion {
+                touch_id,
+                finger_id,
+                x,
+                y,
+                ..
+            } => (TouchPhase::Moved, touch_id, finger_id, x, y),
+            Event::FingerUp {
+                touch_id,
+                finger_id,
+                x,
+                y,
+                ..
+            } => (TouchPhase::Ended, touch_id, finger_id, x, y),
+            Event::FingerCanceled {
+                touch_id,
+                finger_id,
+                x,
+                y,
+                ..
+            } => (TouchPhase::Cancelled, touch_id, finger_id, x, y),
+            _ => return None,
+        };
+        if touch_id == MOUSE_TOUCH_ID {
+            return None;
+        }
+        // SDL's touch positions are 0..1 across the window.
+        let (width, height) = self.window.size_in_pixels();
+        Some(InputEvent::Touch {
+            id: finger_id,
+            phase,
+            x: f64::from(x) * f64::from(width),
+            y: f64::from(y) * f64::from(height),
+        })
+    }
+
+    /// A key event as an engine key (after sending any modifier change).
+    fn key_event(&mut self, event: &Event) -> Option<InputEvent> {
+        let (scancode, keymod, repeat, state) = match *event {
+            Event::KeyDown {
+                scancode,
+                keymod,
+                repeat,
+                ..
+            } => (scancode, keymod, repeat, ElementState::Pressed),
+            Event::KeyUp {
+                scancode,
+                keymod,
+                repeat,
+                ..
+            } => (scancode, keymod, repeat, ElementState::Released),
+            _ => return None,
+        };
+        let modifiers = keys::modifiers(keymod);
+        if modifiers != self.modifiers {
+            self.modifiers = modifiers;
+            self.host.input(&InputEvent::Modifiers(modifiers));
+        }
+        if repeat {
+            return None;
+        }
+        Some(InputEvent::Key {
+            key: keys::key(scancode?)?,
+            state,
         })
     }
 
