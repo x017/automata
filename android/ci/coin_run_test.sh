@@ -100,25 +100,37 @@ read -r sx sy push jx jy jr < <(awk -v w="$w" -v h="$h" -v oy="$oy" 'BEGIN {
   printf "%d %d %d %d %d %d\n", 0.2 * w, 0.75 * h + oy, 0.15 * m * 1.3, \
     w - margin - r, h - margin - r + oy, r }')
 
+# The emulator draws in software: at the top presets a frame takes long
+# enough that the game slows down (physics catches up at most 4 steps a
+# frame). Walk at "low".
+for _ in 1 2 3 4 5; do
+  [ "$(last_preset)" = low ] && break
+  n=$(log | grep -c "Graphics: " || true)
+  adb shell input keyevent KEYCODE_F2
+  wait_for "Graphics: " 30 "" $((n + 1))
+done
+[ "$(last_preset)" = low ] || { echo "::error::F2 never reached the low preset"; exit 1; }
+echo "ok: graphics low for the walk"
+
 # The intro flies the camera for about 6 seconds; walk once it's behind
-# the player, looking at coin 5 straight ahead.
+# the player, looking at coin 5 straight ahead (7 m away), and hold the
+# stick until the coin is in.
 sleep 8
 adb shell input motionevent DOWN "$sx" "$sy"
 for step in 1 2 3 4; do
   adb shell input motionevent MOVE "$sx" $((sy - push * step / 4))
 done
-sleep 0.5
+sleep 1
 shot coin-3-stick
-sleep 2
+wait_for "Score: 1" 60 "Collect [0-9]+ coins"
 adb shell input motionevent UP "$sx" $((sy - push))
-wait_for "Score: 1" 15 "Collect [0-9]+ coins"
 echo "ok: the stick walked the player into a coin"
 
 # Jump: the button is drawn brighter while it's held.
 sleep 2
 shot coin-4-before
 adb shell input motionevent DOWN "$jx" "$jy"
-sleep 0.4
+sleep 1.5
 shot coin-4-jump
 adb shell input motionevent UP "$jx" "$jy"
 box="$((2 * jr))x$((2 * jr))+$((jx - jr))+$((jy - jr))"
