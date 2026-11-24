@@ -219,9 +219,12 @@ ctx.ui.theme.font = PIXEL   # every widget's text from now on
   font is reported once in the Console, and the text is drawn in the
   built-in font. `measure_text` raises `ValueError` for it instead.
 - **Export** looks through the scripts that ship for strings ending in
-  `.ttf` or `.otf`. It stops with an error if a font is missing, isn't a
-  font, sits outside the project, or is excluded from the build. Paths
-  built at runtime (f-strings) can't be checked. Docstrings and other
+  `.ttf` or `.otf`. It warns if a font is missing, isn't a font, sits
+  outside the project, or is excluded from the build. The build still
+  goes ahead, because that text falls back to the built-in font. A
+  script's font can be named relative to the start scene's folder or any
+  folder the script sits in, so a demo kept in a subfolder (with its own
+  `fonts/`) is fine. Paths built at runtime (f-strings) can't be checked. Docstrings and other
   triple-quoted text, comments, test scripts (`tests/`, `test_*.py`) and
   installed packages are skipped, so a font named only as an example
   doesn't stop the build.

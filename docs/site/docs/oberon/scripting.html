@@ -139,9 +139,12 @@ the Console.</li><li><strong>Mistakes:</strong> <code>font=</code> must be a str
 (otherwise <code>TypeError</code> or <code>ValueError</code>). A file that's missing or isn't a
 font is reported once in the Console, and the text is drawn in the
 built-in font. <code>measure_text</code> raises <code>ValueError</code> for it instead.</li><li><strong>Export</strong> looks through the scripts that ship for strings ending in
-<code>.ttf</code> or <code>.otf</code>. It stops with an error if a font is missing, isn't a
-font, sits outside the project, or is excluded from the build. Paths
-built at runtime (f-strings) can't be checked. Docstrings and other
+<code>.ttf</code> or <code>.otf</code>. It warns if a font is missing, isn't a font, sits
+outside the project, or is excluded from the build. The build still
+goes ahead, because that text falls back to the built-in font. A
+script's font can be named relative to the start scene's folder or any
+folder the script sits in, so a demo kept in a subfolder (with its own
+<code>fonts/</code>) is fine. Paths built at runtime (f-strings) can't be checked. Docstrings and other
 triple-quoted text, comments, test scripts (<code>tests/</code>, <code>test_*.py</code>) and
 installed packages are skipped, so a font named only as an example
 doesn't stop the build.</li><li><strong>Licences:</strong> most free fonts (such as the SIL Open Font License ones on

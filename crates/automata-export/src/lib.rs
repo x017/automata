@@ -590,49 +590,79 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
 fn check_fonts(project: &Path, base: &Path, skip: &Skip, out: &mut Vec<Message>) {
     let mut seen = std::collections::HashSet::new();
     for (script, line, font) in font_literals(project, skip) {
-        if seen.insert(font.clone()) {
-            check_font(project, base, skip, &format!("{script}:{line}"), &font, out);
+        // A script may belong to a scene in a subfolder (another level, or
+        // a demo kept inside the project): its fonts can be named relative
+        // to any folder it sits in, as well as the start scene's.
+        let mut bases = vec![base.to_path_buf()];
+        let script_path = automata_assets::join_relative(project, &script);
+        for dir in script_path.ancestors().skip(1) {
+            if !dir.starts_with(project) {
+                break;
+            }
+            bases.push(dir.to_path_buf());
+        }
+        if seen.insert((font.clone(), bases.clone())) {
+            check_font(
+                project,
+                &bases,
+                skip,
+                &format!("{script}:{line}"),
+                &font,
+                out,
+            );
         }
     }
 }
 
-/// Checks one font a game names (`who` says where): it must be a font file
-/// inside the project that ships.
+/// Checks one font a game names (`who` says where): it should be a font
+/// file inside the project that ships, found relative to one of `bases`
+/// (the first is where the message says it looked).
+///
+/// Problems are warnings, not errors: a font that doesn't load draws its
+/// text in the built-in font, so the game still runs.
 fn check_font(
     project: &Path,
-    base: &Path,
+    bases: &[PathBuf],
     skip: &Skip,
     who: &str,
     font: &str,
     out: &mut Vec<Message>,
 ) {
+    const FALLBACK: &str = "its text will use the built-in font";
     let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    let file = if Path::new(font).is_absolute() {
-        PathBuf::from(font)
+    let candidates: Vec<PathBuf> = if Path::new(font).is_absolute() {
+        vec![PathBuf::from(font)]
     } else {
-        automata_assets::join_relative(base, font)
+        bases
+            .iter()
+            .map(|b| automata_assets::join_relative(b, font))
+            .collect()
     };
-    if !file.is_file() {
-        out.push(Message::error(format!(
-            "{who}: font {font} not found (fonts are named relative to the scene's \
-             folder, e.g. fonts/Pixel.ttf)"
+    let Some(file) = candidates.iter().find(|f| f.is_file()).cloned() else {
+        let looked = candidates
+            .first()
+            .map_or_else(|| font.to_string(), |p| p.display().to_string());
+        out.push(Message::warn(format!(
+            "{who}: font {font} not found (looked for {looked}); {FALLBACK}. Copy the \
+             font file there, or drop it onto the editor to import it into fonts/"
         )));
         return;
-    }
+    };
     let shipped = canon(&file)
         .strip_prefix(canon(project))
         .ok()
         .map(archive::slash_path);
     match shipped {
-        None => out.push(Message::error(format!(
-            "{who}: font {font} is outside the project folder and won't ship \
-             (drop it into the editor to import it into fonts/)"
+        None => out.push(Message::warn(format!(
+            "{who}: font {font} is outside the project folder and won't ship, so \
+             {FALLBACK} (drop it into the editor to import it into fonts/)"
         ))),
-        Some(rel) if skip.excluded(&rel) => out.push(Message::error(format!(
-            "{who}: font {font} is excluded from the build (build.ron: exclude)"
+        Some(rel) if skip.excluded(&rel) => out.push(Message::warn(format!(
+            "{who}: font {font} is excluded from the build (build.ron: exclude), so \
+             {FALLBACK}"
         ))),
-        Some(_) if !is_font_file(&file) => out.push(Message::error(format!(
-            "{who}: {font} isn't a TrueType or OpenType font"
+        Some(_) if !is_font_file(&file) => out.push(Message::warn(format!(
+            "{who}: {font} isn't a TrueType or OpenType font, so {FALLBACK}"
         ))),
         Some(_) => {}
     }
@@ -668,7 +698,7 @@ fn check_strings(project: &Path, base: &Path, skip: &Skip, out: &mut Vec<Message
     for (i, font) in table.fonts.iter().enumerate() {
         if !font.is_empty() && seen.insert(font.clone()) {
             let who = format!("lang/*.csv @font ({})", table.languages[i]);
-            check_font(project, base, skip, &who, font, out);
+            check_font(project, &[base.to_path_buf()], skip, &who, font, out);
         }
     }
     for (language, keys) in table.untranslated() {
@@ -2276,11 +2306,14 @@ mod tests {
             .iter()
             .filter(|m| m.text.contains("font") || m.text.contains("TrueType"))
             .map(|m| {
-                assert_eq!(m.level, Level::Error, "{m:?}");
+                // A font that doesn't load falls back to the built-in one,
+                // so these never stop a build.
+                assert_eq!(m.level, Level::Warning, "{m:?}");
                 m.text.as_str()
             })
             .collect();
         assert_eq!(fonts.len(), 4, "{fonts:#?}");
+        assert!(fonts[0].contains("built-in font"), "{}", fonts[0]);
         assert!(fonts[0].starts_with("scripts/hud.py:5: font fonts/Gone.ttf not found"));
         assert!(fonts[1].starts_with("scripts/hud.py:6: fonts/fake.ttf isn't a TrueType"));
         assert!(fonts[2].contains("tests/Only.ttf is excluded from the build"));
@@ -2290,6 +2323,47 @@ mod tests {
             fonts[3]
         );
         let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn fonts_resolve_from_the_scripts_own_scene_folder() {
+        // A demo (or second level) kept in a subfolder names its fonts
+        // relative to its own scene, like examples/oberon/pause_menu.
+        let dir = project("font-nested");
+        let ttf = |path: &Path| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, [&[0u8, 1, 0, 0][..], &[0u8; 60]].concat()).unwrap();
+        };
+        ttf(&dir.join("pause_menu/fonts/PressStart2P-Regular.ttf"));
+        let scene = automata_core::scene_file::SceneFile {
+            version: 1,
+            entities: vec![],
+        };
+        std::fs::write(dir.join("s.ron"), scene.to_ron().unwrap()).unwrap();
+        std::fs::create_dir_all(dir.join("pause_menu/scripts")).unwrap();
+        std::fs::write(
+            dir.join("pause_menu/scripts/menu.py"),
+            "PIXEL = \"fonts/PressStart2P-Regular.ttf\"\nOTHER = 'fonts/Missing.ttf'\n",
+        )
+        .unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("s.ron".into()),
+            ..BuildConfig::default()
+        };
+        let problems = validate(&dir, &cfg);
+        let fonts: Vec<&Message> = problems
+            .iter()
+            .filter(|m| m.text.contains("font"))
+            .collect();
+        assert_eq!(fonts.len(), 1, "{fonts:#?}");
+        assert!(fonts[0].text.contains("fonts/Missing.ttf not found"));
+        assert_eq!(fonts[0].level, Level::Warning);
+        assert!(
+            !problems
+                .iter()
+                .any(|m| m.level == Level::Error && m.text.contains("font")),
+            "{problems:#?}"
+        );
     }
 
     #[test]
@@ -2334,7 +2408,7 @@ mod tests {
                     .into()
             )
         );
-        assert_eq!(found[1].0, Level::Error);
+        assert_eq!(found[1].0, Level::Warning);
         assert!(
             found[1]
                 .1
