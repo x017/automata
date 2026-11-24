@@ -21,7 +21,7 @@ dump() { log > "$out/logcat.txt" || true; }
 trap dump EXIT
 
 fail_on_crash() {
-  if log | grep -E "FATAL EXCEPTION|Fatal signal|panicked at" > "$out/crash.txt"; then
+  if log | grep -E "FATAL EXCEPTION|Fatal signal|panicked at|Traceback|PanicException" > "$out/crash.txt"; then
     echo "::error::the app crashed"
     cat "$out/crash.txt"
     exit 1
@@ -61,7 +61,11 @@ wait_for "automata-spike frame=120" 120
 sleep 1
 shot 1-running
 
-adb shell input tap 500 400
+# Tap inside the screen whatever its size and rotation (`wm size` gives the
+# unrotated panel; the game turns it to landscape).
+side=$(adb shell wm size | tr -d '\r' |
+  awk -F'[ x]' '/size/ { w = $(NF-1); h = $NF } END { print (w < h ? w : h) }')
+adb shell input tap $((side / 2)) $((side / 2))
 wait_for "automata-spike touch finger=0" 30
 
 adb shell input keyevent KEYCODE_HOME
