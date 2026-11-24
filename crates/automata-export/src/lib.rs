@@ -567,8 +567,8 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
             .map_or_else(|| project.to_path_buf(), Path::to_path_buf),
         _ => project.to_path_buf(),
     };
-    check_fonts(project, &base, &Skip::new(cfg), &mut out);
-    check_strings(project, &base, &Skip::new(cfg), &mut out);
+    check_fonts(project, &base, &Skip::new(project, cfg), &mut out);
+    check_strings(project, &base, &Skip::new(project, cfg), &mut out);
     if cfg.targets.is_empty() {
         out.push(Message::error("No target platforms selected."));
     }
@@ -717,7 +717,8 @@ fn font_literals(project: &Path, skip: &Skip) -> Vec<(String, usize, String)> {
                 Ok(_)
                     if path
                         .extension()
-                        .is_some_and(|e| e.eq_ignore_ascii_case("py")) =>
+                        .is_some_and(|e| e.eq_ignore_ascii_case("py"))
+                        && !is_test_script(&rel) =>
                 {
                     scripts.push((rel, path));
                 }
@@ -731,8 +732,9 @@ fn font_literals(project: &Path, skip: &Skip) -> Vec<(String, usize, String)> {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
+        let mut docstring = None;
         for (i, line) in text.lines().enumerate() {
-            for literal in string_literals(line) {
+            for literal in string_literals(line, &mut docstring) {
                 let font = Path::new(&literal).extension().is_some_and(|e| {
                     e.eq_ignore_ascii_case("ttf") || e.eq_ignore_ascii_case("otf")
                 });
@@ -746,14 +748,44 @@ fn font_literals(project: &Path, skip: &Skip) -> Vec<(String, usize, String)> {
     found
 }
 
+/// Whether a script (`/`-separated, relative to the project) is a test:
+/// in a `tests/` folder or named like pytest's (`test_*.py`, `*_test.py`,
+/// `conftest.py`). Tests don't run in the game, and they name fonts that
+/// don't exist on purpose.
+fn is_test_script(rel: &str) -> bool {
+    let mut parts: Vec<&str> = rel.split('/').collect();
+    let name = parts.pop().unwrap_or_default().to_ascii_lowercase();
+    parts.iter().any(|p| p.eq_ignore_ascii_case("tests"))
+        || name.starts_with("test_")
+        || name.ends_with("_test.py")
+        || name == "conftest.py"
+}
+
 /// The single-line string literals of one line of Python (comments
 /// skipped; escapes kept as written, which is fine for paths).
-fn string_literals(line: &str) -> Vec<String> {
+///
+/// Triple-quoted strings (docstrings, long text) are skipped: they
+/// describe fonts rather than name them. `triple` carries an unclosed one
+/// (its quote character) from line to line.
+fn string_literals(line: &str, triple: &mut Option<char>) -> Vec<String> {
     let mut out = Vec::new();
     let mut chars = line.chars();
+    if let Some(q) = *triple {
+        if !skip_triple(&mut chars, q) {
+            return out;
+        }
+        *triple = None;
+    }
     while let Some(c) = chars.next() {
         match c {
             '#' => break,
+            '"' | '\'' if twice(&chars, c) => {
+                chars.nth(1);
+                if !skip_triple(&mut chars, c) {
+                    *triple = Some(c);
+                    break;
+                }
+            }
             '"' | '\'' => {
                 let mut text = String::new();
                 let mut closed = false;
@@ -778,6 +810,26 @@ fn string_literals(line: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// Whether the next two characters are both `q`.
+fn twice(chars: &std::str::Chars<'_>, q: char) -> bool {
+    let mut ahead = chars.clone();
+    ahead.next() == Some(q) && ahead.next() == Some(q)
+}
+
+/// Moves `chars` past the closing `q` `q` `q` of a triple-quoted string;
+/// false when the line ends first.
+fn skip_triple(chars: &mut std::str::Chars<'_>, q: char) -> bool {
+    while let Some(d) = chars.next() {
+        if d == '\\' {
+            chars.next();
+        } else if d == q && twice(chars, q) {
+            chars.nth(1);
+            return true;
+        }
+    }
+    false
 }
 
 /// Warns about a joint that can't hold anything: no body of its own, or a
@@ -1323,7 +1375,7 @@ pub fn stage_game(
     if failed {
         return Err("the project has errors; fix them and build again".into());
     }
-    let skip = Skip::new(cfg);
+    let skip = Skip::new(project, cfg);
     if project.starts_with(dest) {
         return Err(format!(
             "{} holds the project; stage the game somewhere else",
@@ -1357,7 +1409,7 @@ fn copy_game(project: &Path, cfg: &BuildConfig, dest: &Path) -> Result<usize, St
             .map_err(|e| format!("could not clear {}: {e}", dest.display()))?;
     }
     std::fs::create_dir_all(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
-    let skip = Skip::new(cfg);
+    let skip = Skip::new(project, cfg);
     let n = copy_tree(project, dest, &|rel| !skip.excluded(rel))?;
     write_manifest(&dest.join("game.json"), cfg).map_err(|e| e.to_string())?;
     Ok(n)
@@ -1365,14 +1417,16 @@ fn copy_game(project: &Path, cfg: &BuildConfig, dest: &Path) -> Result<usize, St
 
 /// Paths an export leaves out.
 struct Skip {
+    project: PathBuf,
     output: String,
     extra: Vec<String>,
 }
 
 impl Skip {
-    fn new(cfg: &BuildConfig) -> Self {
+    fn new(project: &Path, cfg: &BuildConfig) -> Self {
         let output = archive::slash_path(Path::new(&cfg.output));
         Self {
+            project: project.to_path_buf(),
             output,
             extra: cfg
                 .exclude
@@ -1398,12 +1452,18 @@ impl Skip {
                     | ".mypy_cache"
                     | ".ruff_cache"
                     | "node_modules"
+                    // Installed packages (automata's own source among
+                    // them), wherever a Python environment lives.
+                    | "site-packages"
+                    | "dist-packages"
             )
         }) || Path::new(rel)
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("pyc"))
             || rel == CONFIG_FILE
-            || rel == ".DS_Store";
+            || rel == ".DS_Store"
+            // A virtual environment under any name (`env/`, `.env-3.12/`…).
+            || self.project.join(rel).join("pyvenv.cfg").is_file();
         let output = !self.output.is_empty()
             && (rel == self.output || rel.starts_with(&format!("{}/", self.output)));
         let extra = self.extra.iter().any(|e| {
@@ -2073,15 +2133,96 @@ mod tests {
 
     #[test]
     fn python_string_literals_are_found_and_comments_skipped() {
+        let one = |line: &str| string_literals(line, &mut None);
         assert_eq!(
-            string_literals(r#"ctx.hud.text("Hi", 1, 2, font='fonts/A.ttf')  # "b.otf""#),
+            one(r#"ctx.hud.text("Hi", 1, 2, font='fonts/A.ttf')  # "b.otf""#),
             vec!["Hi".to_string(), "fonts/A.ttf".to_string()]
         );
         assert_eq!(
-            string_literals(r#"x = "it's" + 'say "hi"'"#),
+            one(r#"x = "it's" + 'say "hi"'"#),
             vec!["it's".to_string(), "say \"hi\"".to_string()]
         );
-        assert_eq!(string_literals("x = 'open"), Vec::<String>::new());
+        assert_eq!(one("x = 'open"), Vec::<String>::new());
+        assert_eq!(one(r#"x = "" + ''"#), vec![String::new(), String::new()]);
+    }
+
+    #[test]
+    fn test_scripts_are_known() {
+        for rel in [
+            "tests/test_x.py",
+            "game/tests/helpers.py",
+            "test_hud.py",
+            "a/hud_test.py",
+            "conftest.py",
+        ] {
+            assert!(is_test_script(rel), "{rel}");
+        }
+        for rel in [
+            "scripts/hud.py",
+            "scripts/latest.py",
+            "contest.py",
+            "testing/x.py",
+        ] {
+            assert!(!is_test_script(rel), "{rel}");
+        }
+    }
+
+    #[test]
+    fn docstrings_are_skipped_when_looking_for_fonts() {
+        let text = r#"def f():
+    """Draws text, like "fonts/Pixel.ttf" or
+    'fonts/Round.otf'."""
+    a = '''one line: "fonts/X.ttf"''' + "fonts/A.ttf"
+    b = """ \""" fonts/Y.ttf """
+    return "fonts/B.ttf"
+"#;
+        let mut triple = None;
+        let found: Vec<String> = text
+            .lines()
+            .flat_map(|line| string_literals(line, &mut triple))
+            .collect();
+        assert_eq!(
+            found,
+            vec!["fonts/A.ttf".to_string(), "fonts/B.ttf".to_string()]
+        );
+        assert_eq!(triple, None);
+    }
+
+    #[test]
+    fn python_environments_neither_ship_nor_are_checked() {
+        let dir = project("pyenv");
+        // automata's own source names fonts in its docstrings and messages:
+        // a venv under any name, or installed packages anywhere, must not
+        // make the project look broken, nor ship with the game.
+        for (folder, venv) in [("env", true), ("python/Lib", false)] {
+            let pkg = dir.join(folder).join("site-packages/automata");
+            std::fs::create_dir_all(&pkg).unwrap();
+            std::fs::write(pkg.join("api.py"), "F = 'fonts/Pixel.ttf'\n").unwrap();
+            if venv {
+                std::fs::write(dir.join(folder).join("pyvenv.cfg"), "home = /usr\n").unwrap();
+                std::fs::write(dir.join(folder).join("tool.py"), "F = 'fonts/T.ttf'\n").unwrap();
+            }
+        }
+        std::fs::create_dir_all(dir.join("scripts/tests")).unwrap();
+        std::fs::write(
+            dir.join("scripts/tests/helpers.py"),
+            "F = 'fonts/Fake.ttf'\n",
+        )
+        .unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("level.ron".into()),
+            ..BuildConfig::default()
+        };
+        let errors: Vec<Message> = validate(&dir, &cfg)
+            .into_iter()
+            .filter(|m| m.level == Level::Error)
+            .collect();
+        assert_eq!(errors, Vec::<Message>::new());
+        let dest = dir.join(&cfg.output).join("game");
+        stage_game(&dir, &cfg, &dest, &mut |_| {}).unwrap();
+        assert!(dest.join("scripts/coin.py").is_file());
+        assert!(!dest.join("env").exists());
+        assert!(!dest.join("python/Lib/site-packages").exists());
     }
 
     #[test]

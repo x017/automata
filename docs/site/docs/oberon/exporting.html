@@ -62,7 +62,8 @@ the result in your file manager.</p>
 <div class="table"><table><thead><tr><th>Setting</th><th>What it does</th></tr></thead><tbody><tr><td>Game name</td><td>Window title, executable name and folder name</td></tr><tr><td>Version</td><td>Used in archive names, e.g. <code>Coin Run-0.1.0-linux-x86_64.zip</code></td></tr><tr><td>Start scene</td><td>The scene the game opens. If empty, the build uses the scene open in Oberon.</td></tr><tr><td>Output folder</td><td>Where builds go, relative to the project (<code>build</code>)</td></tr><tr><td>Platforms</td><td>What <strong>Build</strong> / Ctrl+Shift+B exports. <strong>Build ▸ Build for Linux / Windows</strong> exports just one.</td></tr><tr><td>Archive</td><td>Also write a <code>.zip</code> / <code>.tar.gz</code> of each build</td></tr><tr><td>Touch controls</td><td>An on-screen stick and buttons that hold the game's keys on touch screens. Turning it on writes a stick for WASD and a Jump button for Space; change them in <code>build.ron</code> (<a href="../guides/touch-controls.html">Touch controls</a>)</td></tr></tbody></table></div>
 <p>Settings are saved to <code>build.ron</code> in the project folder, so commit it with
 your project. Each build leaves out <code>.oberon/</code>, <code>__pycache__/</code>, version
-control folders, virtual environments, the output folder and <code>tests/</code>. To
+control folders, virtual environments (under any name) and installed
+packages (<code>site-packages/</code>), the output folder and <code>tests/</code>. To
 leave out more, add paths to <code>exclude</code> in <code>build.ron</code>. A trailing <code>/</code>
 means a folder:</p>
 <div class="codeblock" data-lang="ron"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-t">BuildConfig</span>(

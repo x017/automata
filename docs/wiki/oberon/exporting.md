@@ -49,7 +49,8 @@ the result in your file manager.
 
 Settings are saved to `build.ron` in the project folder, so commit it with
 your project. Each build leaves out `.oberon/`, `__pycache__/`, version
-control folders, virtual environments, the output folder and `tests/`. To
+control folders, virtual environments (under any name) and installed
+packages (`site-packages/`), the output folder and `tests/`. To
 leave out more, add paths to `exclude` in `build.ron`. A trailing `/`
 means a folder:
 

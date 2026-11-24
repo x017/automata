@@ -141,7 +141,10 @@ font is reported once in the Console, and the text is drawn in the
 built-in font. <code>measure_text</code> raises <code>ValueError</code> for it instead.</li><li><strong>Export</strong> looks through the scripts that ship for strings ending in
 <code>.ttf</code> or <code>.otf</code>. It stops with an error if a font is missing, isn't a
 font, sits outside the project, or is excluded from the build. Paths
-built at runtime (f-strings) can't be checked.</li><li><strong>Licences:</strong> most free fonts (such as the SIL Open Font License ones on
+built at runtime (f-strings) can't be checked. Docstrings and other
+triple-quoted text, comments, test scripts (<code>tests/</code>, <code>test_*.py</code>) and
+installed packages are skipped, so a font named only as an example
+doesn't stop the build.</li><li><strong>Licences:</strong> most free fonts (such as the SIL Open Font License ones on
 Google Fonts) may ship inside games. Keep the licence file next to the
 font.</li></ul>
 <p><img src="../../../assets/ui/assets_fonts.jpg" alt="The Assets tab with Fonts chosen: "Aa" previews of Geist Medium and Press Start 2P" loading="lazy" decoding="async"></p>

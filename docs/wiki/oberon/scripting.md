@@ -221,7 +221,10 @@ ctx.ui.theme.font = PIXEL   # every widget's text from now on
 - **Export** looks through the scripts that ship for strings ending in
   `.ttf` or `.otf`. It stops with an error if a font is missing, isn't a
   font, sits outside the project, or is excluded from the build. Paths
-  built at runtime (f-strings) can't be checked.
+  built at runtime (f-strings) can't be checked. Docstrings and other
+  triple-quoted text, comments, test scripts (`tests/`, `test_*.py`) and
+  installed packages are skipped, so a font named only as an example
+  doesn't stop the build.
 - **Licences:** most free fonts (such as the SIL Open Font License ones on
   Google Fonts) may ship inside games. Keep the licence file next to the
   font.
