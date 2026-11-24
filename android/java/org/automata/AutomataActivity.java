@@ -1,44 +1,105 @@
 package org.automata;
 
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import org.kivy.android.PythonActivity;
 
 /**
- * The game's activity: python-for-android's, with two changes.
+ * The game's activity: python-for-android's, changed so the game survives
+ * Android re-creating the activity.
  *
- * Android may re-create the activity before the game starts (a
- * configuration change the manifest doesn't list). SDL treats any
- * re-creation as fatal unless allowed, and quits the app silently. The
- * engine keeps all its state on SDL's thread and gets the new surface
- * through SDL's background/foreground events, so re-creation is allowed.
+ * Android re-creates an activity for configuration changes the manifest
+ * doesn't list: the first rotation to landscape, bold text, a new system
+ * theme after a wallpaper change (resource overlays). SDL handles that by
+ * quitting the game's main() and running it again on the new activity;
+ * python-for-android's main() runs Python once and then ends the process,
+ * so the game would close.
+ *
+ * Instead the game keeps running on SDL's thread through the re-creation,
+ * as if it went to the background and came back: the old activity lets go
+ * without telling SDL to quit, and the new one adopts the running thread
+ * and gives it a new surface (the engine already handles that through
+ * SDL's background/foreground events).
  */
 public class AutomataActivity extends PythonActivity {
     private static final String TAG = "automata";
 
     private static final String ALLOW_RECREATE = "SDL_ANDROID_ALLOW_RECREATE_ACTIVITY";
 
+    /** SDL's thread while a re-created activity takes it over. */
+    private static Thread sKeptThread = null;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // super.onCreate cleared SDL's record of its thread.
+        adoptKeptThread();
         // SDL reads hints from its own copy of the environment, which only
         // nativeSetenv changes, and only once SDL's library is loaded (by
-        // the first onCreate above). Re-creation happens later in the same
-        // process, when the copy has the setting.
+        // the first activity's finishLoad). Re-creation happens later in
+        // the same process, when the copy has the setting, and SDL checks
+        // it in finishLoad.
         try {
             nativeSetenv(ALLOW_RECREATE, "1");
         } catch (UnsatisfiedLinkError e) {
-            Log.w(TAG, "couldn't allow activity re-creation: " + e);
+            Log.w(TAG, "couldn't allow activity re-creation yet: " + e);
+        }
+    }
+
+    @Override
+    protected void finishLoad() {
+        super.finishLoad();
+        // finishLoad cleared SDL's record of its thread again.
+        if (adoptKeptThread()) {
+            sKeptThread = null;
+            Log.i(TAG, "the new activity took over the running game");
+            // main() doesn't start again, so nothing confirms the game is
+            // running and the loading screen (which python-for-android
+            // shows again after finishLoad) would stay. Remove it then.
+            new Handler(Looper.getMainLooper()).post(new Runnable() {
+                @Override
+                public void run() {
+                    appConfirmedActive();
+                    removeLoadingScreen();
+                }
+            });
         }
     }
 
     @Override
     protected void onDestroy() {
         if (isChangingConfigurations()) {
+            Thread game = mSDLThread;
+            boolean running = game != null && game.isAlive() && !mBrokenLibraries;
             Log.i(TAG, "activity re-created for configuration changes 0x"
-                    + Integer.toHexString(getChangingConfigurations()));
+                    + Integer.toHexString(getChangingConfigurations())
+                    + (running ? "; the game keeps running" : ""));
+            if (running) {
+                sKeptThread = game;
+                // SDL's onDestroy would tell the game to quit and free what
+                // its thread waits on. With the libraries marked unusable it
+                // only lets the activity go: the state a new activity is in
+                // anyway until its finishLoad, which clears the mark.
+                mBrokenLibraries = true;
+            }
         }
         super.onDestroy();
+    }
+
+    /** Gives SDL back the thread kept through a re-creation, if any. */
+    private static boolean adoptKeptThread() {
+        Thread kept = sKeptThread;
+        if (kept == null) {
+            return false;
+        }
+        if (!kept.isAlive()) {
+            sKeptThread = null;
+            return false;
+        }
+        mSDLThread = kept;
+        return true;
     }
 }

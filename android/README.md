@@ -70,6 +70,15 @@ Things the emulator taught us, each handled in `java/` or
   `nativeSetenv` as soon as SDL's library is loaded; an environment
   variable alone would only count once SDL had read it. It also logs which
   configuration changes caused a re-creation.
+- **Re-creation while the game runs.** Allowed re-creation means SDL
+  quits the game's `main()` and runs it again on the new activity, but
+  python-for-android's `main()` runs Python once and then ends the process.
+  Bold text, resource overlays (a new system theme after a wallpaper
+  change, or one applied just after boot) and the like would close the
+  game. So `AutomataActivity` keeps the game running instead: the old
+  activity lets go without telling SDL to quit, and the new one adopts
+  SDL's running thread, which sees a background/foreground and a new
+  surface.
 - **Orientation.** The driver holds the screen to the shape of the game's
   window (landscape for 1280×720) with `SDL_ORIENTATIONS`, unless the app
   sets that hint itself.
@@ -144,6 +153,9 @@ The `Android` workflow runs three jobs:
    - a tap reaches the game as a touch;
    - Home pauses it (`2-background.png`);
    - returning resumes drawing on a new surface (`3-resumed.png`);
+   - turning bold text on and off re-creates the activity twice, and the
+     game keeps running in the same process and drawing
+     (`4-recreated.png`);
    - Back quits.
 
    For Coin Run it checks that:
