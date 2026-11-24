@@ -177,6 +177,11 @@ jobs:
           python3 android/ci/report.py "android: logcat" --log android-smoke/logcat.txt \
             --lines 700 --grep "python|SDL|automata|wgpu|AndroidRuntime|DEBUG|ActivityTaskManager|WindowManager|Fatal" \
             --exclude "extracting|pythonutil|AppsFilter|SemanticLocation|nativeloader|CarrierSvc|ImsResolver"
+          if [ -e android-smoke/stacks.txt ]; then
+            python3 android/ci/report.py "android: stacks" --log android-smoke/stacks.txt \
+              --lines 900 --grep "^==|^\"|#[0-9]+ pc|  at |native: |state=|Activity" \
+              --exclude "libart\.so|libbase\.so|libc\.so \(__epoll|/system/framework/"
+          fi
           for shot in android-smoke/*.png; do
             [ -e "$shot" ] || continue
             name="$(basename "$shot" .png)"

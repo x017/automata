@@ -55,6 +55,7 @@ pub(crate) fn run(host: &mut dyn Host) -> Result<()> {
         window,
         attached: false,
         foreground: true,
+        focused: true,
         modifiers: ModifiersState::empty(),
         deadline: None,
     };
@@ -62,9 +63,9 @@ pub(crate) fn run(host: &mut dyn Host) -> Result<()> {
     info!("SDL window ready");
 
     loop {
-        // Sleep until the next frame (or the next event). In the
-        // background, sleep until something happens.
-        let event = if driver.foreground {
+        // Sleep until the next frame (or the next event). When frames
+        // are paused, sleep until something happens.
+        let event = if driver.active() {
             match driver.deadline {
                 Some(deadline) => {
                     let wait = deadline.saturating_duration_since(Instant::now());
@@ -84,7 +85,7 @@ pub(crate) fn run(host: &mut dyn Host) -> Result<()> {
                 return Ok(());
             }
         }
-        if !driver.foreground || driver.deadline.is_some_and(|d| Instant::now() < d) {
+        if !driver.active() || driver.deadline.is_some_and(|d| Instant::now() < d) {
             continue;
         }
         match driver.host.frame() {
@@ -110,14 +111,24 @@ struct SdlDriver<'a> {
     window: Window,
     /// Whether the engine has a surface on the window.
     attached: bool,
-    /// Whether the app is on screen (frames run only then).
+    /// Whether the app is on screen.
     foreground: bool,
+    /// Whether the window has the focus. Losing it pauses frames too:
+    /// Android takes it first when the app is leaving, and presenting to
+    /// a window that's no longer shown can block until the surface dies,
+    /// which would keep SDL from delivering the background events.
+    focused: bool,
     modifiers: ModifiersState,
     /// When the next frame is due (`None`: now).
     deadline: Option<Instant>,
 }
 
 impl SdlDriver<'_> {
+    /// Whether frames run: on screen and focused.
+    fn active(&self) -> bool {
+        self.foreground && self.focused
+    }
+
     /// Gives the window's current native surface to the engine.
     fn attach(&mut self) -> Result<()> {
         if self.attached {
@@ -157,6 +168,7 @@ impl SdlDriver<'_> {
             Event::AppDidEnterForeground { .. } => {
                 info!("back in the foreground: resuming");
                 self.foreground = true;
+                self.focused = true;
                 self.deadline = None;
                 self.attach()?;
             }
@@ -185,7 +197,20 @@ impl SdlDriver<'_> {
                     self.attach()?;
                 }
             }
-            WindowEvent::FocusLost => self.host.input(&InputEvent::FocusLost),
+            WindowEvent::FocusLost => {
+                if self.focused {
+                    info!("focus lost: pausing frames");
+                }
+                self.focused = false;
+                self.host.input(&InputEvent::FocusLost);
+            }
+            WindowEvent::FocusGained => {
+                if !self.focused {
+                    info!("focus back: running frames");
+                }
+                self.focused = true;
+                self.deadline = None;
+            }
             _ => {}
         }
         Ok(Flow::Continue)

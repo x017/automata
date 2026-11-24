@@ -42,8 +42,22 @@ wait_for() {
     sleep 1
   done
   echo "::error::timed out after ${timeout}s waiting for: $pattern"
+  stacks
   log | grep -E "python|SDL|automata" | tail -60 || true
   exit 1
+}
+
+# Every thread's stack (native and Java) and the activity's state, to see
+# where a hung app is stuck.
+stacks() {
+  local pid
+  pid=$(adb shell pidof "$pkg" | tr -d '\r' || true)
+  {
+    echo "== pid ${pid:-none}"
+    [ -n "$pid" ] && adb shell debuggerd -b "$pid" 2>&1
+    echo "== activity"
+    adb shell dumpsys activity activities 2>&1 | grep -E -A3 "$pkg" | head -60
+  } > "$out/stacks.txt" || true
 }
 
 shot() { adb exec-out screencap -p > "$out/$1.png"; }
