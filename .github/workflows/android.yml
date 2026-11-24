@@ -187,6 +187,9 @@ jobs:
               --lines 900 --grep "^==|^\"|#[0-9]+ pc|  at |native: |state=|Activity|debuggerd|denied|rror|ailed" \
               --exclude "libart\.so|libbase\.so|libc\.so \(__epoll|/system/framework/"
           fi
+          command -v convert > /dev/null || {
+            sudo apt-get update -q && sudo apt-get install -y -q imagemagick > /dev/null
+          }
           for shot in android-smoke/*.png; do
             [ -e "$shot" ] || continue
             name="$(basename "$shot" .png)"

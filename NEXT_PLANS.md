@@ -101,8 +101,17 @@ Other Android work:
    it has its own `KeyCode` (105 keys, with their script names), mouse
    buttons, modifiers, `TouchPhase` and an `InputEvent` that drivers feed
    to `InputState::handle_event`. The winit translation lives in
-   `automata-core/src/winit_input.rs`. The SDL3 driver and the p4a build
-   are next, in CI. ([Diagram](docs/assets/ui/e1a_input_types.jpg).)
+   `automata-core/src/winit_input.rs`. ([Diagram](docs/assets/ui/e1a_input_types.jpg).)
+   *Spike done:* the `Android` CI workflow builds the APK with p4a and runs
+   it on an API 34 emulator:
+   - wgpu draws through Vulkan (SwiftShader) on SDL's `ANativeWindow`;
+   - taps arrive as touches;
+   - Home releases the surface and pauses frames;
+   - returning recreates the surface, and frames continue;
+   - Back quits.
+
+   The SDL lessons (activity re-creation, lifecycle events through an event
+   watch, no gamepad backend) are in `android/README.md`.
 2. **Python on device:** run Coin Run on a device or emulator.
 3. **Touch:** `ctx.input.touches` (*done in E1a*: fingers with stable
    numbers, start points and phases; the left mouse button is finger 0 on

@@ -15,8 +15,10 @@ is a spike that proves the engine runs on Android:
 | `recipes/automata/` | The p4a recipe that builds `engine/` with maturin |
 | `pyproject.toml` | maturin settings for that build (placed at the root of a staged copy of the repo) |
 | `build_apk.sh` | Stages the repo and runs `p4a apk` |
+| `java/` | `AutomataActivity`, the launcher's activity with two small changes (below) |
 | `app/main.py` | The spike game: a spinning cube, finger markers, Back to quit |
 | `ci/smoke_test.sh` | The emulator test CI runs on the APK |
+| `ci/report.py` | Posts a log or a screenshot as a check run on the commit |
 
 ## How it fits together
 
@@ -39,6 +41,31 @@ is a spike that proves the engine runs on Android:
    pipelines) are kept, and the time spent away doesn't count as a frame.
 
 Scripts don't change. The same `main.py` runs on desktop with winit.
+
+## Android and SDL details that matter
+
+Things the emulator taught us, each handled in `java/` or
+`engine/src/driver.rs`:
+- **Re-creation.** Android can destroy and re-create the activity in the
+  same process, for example on a configuration change the manifest doesn't
+  list. By default SDL treats that as fatal and quits silently
+  (`System.exit(0)`, logged as "activity finished"). `AutomataActivity`
+  sets `SDL_ANDROID_ALLOW_RECREATE_ACTIVITY` before SDL's `onCreate`, and
+  logs which configuration changes caused a re-creation.
+- **Lifecycle events.** Once SDL has queued the background events, it
+  normally blocks every event pump until the app returns, so the queued
+  copies arrive late. SDL's docs say to handle them in an event watch. The
+  driver does that:
+  - a watch notes background/foreground the moment SDL raises them, and the
+    loop acts on that note;
+  - `SDL_ANDROID_BLOCK_ON_PAUSE=0` is set;
+  - while frames are paused, the loop sleeps in 250 ms slices.
+- **Focus.** Losing window focus pauses frames too. Android takes the focus
+  first when the app is leaving, and also when the notification shade comes
+  down.
+- **Gamepads.** gilrs has no Android backend yet, so the engine uses gilrs'
+  dummy context: no gamepads, no crash. SDL's gamepad support is the
+  likely way to add them later.
 
 `engine/` sits outside the main Cargo workspace on purpose. It needs the
 `sdl3` crate, which links the launcher's `libSDL3.so`. The workspace, its
@@ -85,6 +112,10 @@ The `Android` workflow runs three jobs:
    - Back quits.
 
    The screenshots and the logcat are uploaded as the `android-smoke`
-   artifact.
+   artifact. They're also posted on the commit as check runs:
+   - `android: logcat`;
+   - `android: screenshot …`;
+   - `android: stacks`: every thread's stack, saved when a wait times out;
+   - `android: clippy log` and `android: APK build log`.
 
 [python-for-android]: https://github.com/kivy/python-for-android
