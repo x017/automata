@@ -93,9 +93,25 @@ jobs:
             "python-for-android @ git+https://github.com/kivy/python-for-android@${P4A_REF}"
 
       - name: Android NDK
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;${NDK_VERSION}" \
-            "platforms;android-${ANDROID_API}" > /dev/null
+          echo "installed NDKs: $(ls "$ANDROID_HOME/ndk" 2>/dev/null | tr '\n' ' ')"
+          echo "installed platforms: $(ls "$ANDROID_HOME/platforms" 2>/dev/null | tr '\n' ' ')"
+          wanted=()
+          [ -d "$ANDROID_HOME/ndk/${NDK_VERSION}" ] || wanted+=("ndk;${NDK_VERSION}")
+          [ -d "$ANDROID_HOME/platforms/android-${ANDROID_API}" ] || wanted+=("platforms;android-${ANDROID_API}")
+          if [ ${#wanted[@]} -gt 0 ]; then
+            # `yes` dies of SIGPIPE when sdkmanager is done: not a failure.
+            set +o pipefail
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "${wanted[@]}" > sdk.log 2>&1
+            status=${PIPESTATUS[1]}
+            tail -20 sdk.log
+            if [ "$status" != 0 ]; then
+              python3 android/ci/report.py "android: sdkmanager log" --log sdk.log --lines 200
+              exit 1
+            fi
+          fi
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
 
       - name: Build the APK
@@ -107,8 +123,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          tail -300 build.log
-          python3 android/ci/report.py "android: APK build log" --log build.log --lines 500
+          if [ -f build.log ]; then
+            tail -300 build.log
+            python3 android/ci/report.py "android: APK build log" --log build.log --lines 500
+          fi
 
       - name: APK size
         run: ls -la dist/*.apk && unzip -l dist/*.apk | grep -E "\.so$" | sort -k1 -n -r | head -20
