@@ -185,9 +185,9 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
-          script: |
-            android/ci/smoke_test.sh apk/org.automata.spike-x86_64.apk android-smoke
-            android/ci/coin_run_test.sh apk/org.automata.coinrun-x86_64.apk android-smoke/coin_run
+          # One line: the action runs each line on its own, and both tests
+          # should run even when the first fails.
+          script: s=0; android/ci/smoke_test.sh apk/org.automata.spike-x86_64.apk android-smoke || s=1; android/ci/coin_run_test.sh apk/org.automata.coinrun-x86_64.apk android-smoke/coin_run || s=1; exit $s
 
       - name: Report the smoke test
         if: always()
