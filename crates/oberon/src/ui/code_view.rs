@@ -117,6 +117,11 @@ impl Ui {
     /// Forwards a key to the code editor; false when it isn't used.
     pub fn code_key(&mut self, key: crate::code::Key, mods: crate::code::Mods) -> bool {
         self.code.hover = None;
+        if self.ui_editor_shown() {
+            let handled = self.ui_editor_key(key, mods);
+            self.drain_code_events();
+            return handled;
+        }
         let handled = self.code.key(key, mods);
         self.drain_code_events();
         handled
@@ -139,6 +144,9 @@ impl Ui {
     /// Forwards typed text to the code editor.
     pub fn code_text(&mut self, text: &str) {
         self.code.hover = None;
+        if self.ui_editor_shown() {
+            return;
+        }
         let clean: String = text
             .chars()
             .filter(|c| !c.is_control() || *c == '\t')
@@ -528,6 +536,23 @@ impl Ui {
     /// The code editor for the active script tab.
     #[allow(clippy::too_many_lines)]
     pub(super) fn code_view(&mut self, canvas: &mut Canvas, rect: Rect) {
+        // UI documents open in the UI editor, or as text under a bar that
+        // goes back to it.
+        let mut rect = rect;
+        if let Some(idx) = self.code.active.filter(|&i| {
+            self.code
+                .tabs
+                .get(i)
+                .is_some_and(|t| crate::uidoc::is_ui_doc_path(&t.path))
+        }) {
+            if self.ui_editor_shown() {
+                self.ui_doc_view(canvas, rect, idx);
+                return;
+            }
+            let bar = Rect::new(rect.x, rect.y, rect.w, 30.0);
+            self.ui_source_bar(canvas, bar);
+            rect = Rect::new(rect.x, rect.y + bar.h, rect.w, (rect.h - bar.h).max(0.0));
+        }
         // The editor's own zoom: draw in a space scaled by `k` on top of the
         // interface scale, with the pointer and clip band mapped into it, so
         // layout, hit-testing and clipping all stay consistent.
@@ -1707,7 +1732,7 @@ fn draw_kind_icon(canvas: &mut Canvas, kind: CompletionKind, cx: f32, cy: f32) {
     }
 }
 
-fn wrap(text: &str, width: usize) -> Vec<String> {
+pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
     let mut out = Vec::new();
     for para in text.lines() {
         let mut line = String::new();

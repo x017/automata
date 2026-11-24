@@ -39,6 +39,7 @@ this and `oberon run`, `test`, `export` and `doctor`.
 | [Cameras](cameras.md) | Scene cameras, the preview, Look Through, driving cameras from Python |
 | [Graphics](graphics.md) | The Graphics panel: quality, sun, environment, fog, test scenes |
 | [The code editor](code-editor.md) | Writing scripts inside Oberon: completion, language servers, find/replace |
+| [The UI editor](ui-editor.md) | Game menus and HUDs as `ui/*.ui.ron` documents: canvas, widget tree, themes |
 | [Models](models.md) | Importing glTF and OBJ models, the Assets tab, import settings (scale, rotation, pivot), fitted colliders |
 | [Audio](audio.md) | Sound files, Audio Sources, previews, playing sounds from scripts |
 | [Prefabs & attributes](prefabs-and-attributes.md) | Reusable objects and custom per-entity data |

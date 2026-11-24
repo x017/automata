@@ -137,6 +137,7 @@ impl FileDialog {
             DialogKind::InstantiatePrefab => "Instantiate Prefab",
             DialogKind::OpenScript => "Open Script",
             DialogKind::NewScript => "New Script",
+            DialogKind::NewUiScreen => "New UI Screen",
             DialogKind::AttachScript(_) => "Attach Script — pick one or name a new .py",
             DialogKind::ImportModel(None) => "Import Model",
             DialogKind::ImportModel(Some(_)) => "Choose Model",
@@ -158,6 +159,7 @@ impl FileDialog {
             DialogKind::ImportModel(_) => "glb",
             DialogKind::ImportSound(_) => "ogg",
             DialogKind::ImportFont => "ttf",
+            DialogKind::NewUiScreen => "ui.ron",
             DialogKind::BuildOutput | DialogKind::PythonInterpreter => "",
             _ => "ron",
         }
@@ -169,6 +171,7 @@ impl FileDialog {
             DialogKind::ImportModel(_) => ".glb .gltf .obj",
             DialogKind::ImportSound(_) => ".ogg .wav .mp3 .flac",
             DialogKind::ImportFont => ".ttf .otf",
+            DialogKind::NewUiScreen => ".ui.ron",
             DialogKind::SavePrefab(_) | DialogKind::InstantiatePrefab => ".prefab",
             DialogKind::OpenScript | DialogKind::NewScript | DialogKind::AttachScript(_) => ".py",
             DialogKind::BuildOutput => "folders",
@@ -187,12 +190,14 @@ impl FileDialog {
             DialogKind::ImportFont => crate::fonts::is_font_path(Path::new(name)),
             DialogKind::BuildOutput => false,
             DialogKind::PythonInterpreter => true,
+            DialogKind::NewUiScreen => crate::uidoc::is_ui_doc_path(Path::new(name)),
             _ => {
                 let lower = name.to_ascii_lowercase();
                 Path::new(name)
                     .extension()
                     .is_some_and(|x| x.eq_ignore_ascii_case(self.extension()))
                     && !lower.ends_with(".import.ron")
+                    && !lower.ends_with(".ui.ron")
                     && lower != "build.ron"
             }
         }
@@ -201,7 +206,10 @@ impl FileDialog {
     fn saves(&self) -> bool {
         matches!(
             self.kind,
-            DialogKind::SaveSceneAs | DialogKind::SavePrefab(_) | DialogKind::NewScript
+            DialogKind::SaveSceneAs
+                | DialogKind::SavePrefab(_)
+                | DialogKind::NewScript
+                | DialogKind::NewUiScreen
         )
     }
 
@@ -233,7 +241,7 @@ impl FileDialog {
         match self.kind {
             DialogKind::OpenScene | DialogKind::OpenScript => "Open",
             DialogKind::InstantiatePrefab => "Instantiate",
-            DialogKind::NewScript => "Create",
+            DialogKind::NewScript | DialogKind::NewUiScreen => "Create",
             DialogKind::AttachScript(_) => "Attach",
             DialogKind::ImportModel(None)
             | DialogKind::ImportSound(None)
@@ -597,6 +605,12 @@ impl Ui {
             DialogKind::ImportModel(_) => Some(crate::models::MODELS_DIR),
             DialogKind::ImportSound(_) => Some(crate::sounds::SOUNDS_DIR),
             DialogKind::ImportFont => Some(crate::fonts::FONTS_DIR),
+            DialogKind::NewUiScreen => {
+                // Scripts find documents under `ui/`: start there.
+                let dir = root.join("ui");
+                let _ = std::fs::create_dir_all(&dir);
+                Some("ui")
+            }
             DialogKind::PythonInterpreter => {
                 if Path::new("/usr/bin").is_dir() {
                     return PathBuf::from("/usr/bin");
@@ -642,6 +656,15 @@ impl Ui {
                 unique_child(&self.start_dir_for(kind), "new_script.py"),
                 None,
             ),
+            DialogKind::NewUiScreen => {
+                let dir = self.start_dir_for(kind);
+                let base = if dir.join("hud.ui.ron").exists() {
+                    "menu.ui.ron"
+                } else {
+                    "hud.ui.ron"
+                };
+                (unique_child(&dir, base), None)
+            }
             DialogKind::OpenScript => (
                 String::new(),
                 self.code
@@ -1108,6 +1131,7 @@ impl Ui {
             && path.exists()
             && fd.overwrite.as_ref() != Some(&path)
             && fd.kind != DialogKind::NewScript
+            && fd.kind != DialogKind::NewUiScreen
         {
             let msg = format!(
                 "{} already exists. Press {} again to replace it.",
@@ -1179,6 +1203,7 @@ impl Ui {
             DialogKind::InstantiatePrefab => Intent::InstantiatePrefab(path),
             DialogKind::OpenScript => Intent::OpenScript(path),
             DialogKind::NewScript => Intent::NewScript(path),
+            DialogKind::NewUiScreen => Intent::NewUiScreen(path),
             DialogKind::AttachScript(id) => Intent::AttachScript { id, path },
             DialogKind::ImportModel(None) => Intent::AddModel { path, at: None },
             DialogKind::ImportModel(Some(id)) => Intent::SetModel { id, path },

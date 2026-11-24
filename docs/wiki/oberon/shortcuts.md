@@ -109,6 +109,21 @@ undoes the whole edit.
 | Ctrl+Alt+↑ / Ctrl+Alt+↓ | Add a caret above / below |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut every selection; pasting as many lines as carets puts one line at each |
 
+## UI editor
+
+Click the canvas or the widget tree first.
+
+| Keys | Action |
+|---|---|
+| Delete / Backspace | Delete the selected widget |
+| Ctrl+D | Duplicate it |
+| Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste widgets |
+| ← → ↑ ↓ (Shift: by 10) | Move a top-level widget by its margin |
+| Alt+↑ / Alt+↓ | Move it among its siblings |
+| Tab / Shift+Tab | Select the next / previous widget |
+| Esc | Select the screen |
+| Ctrl+Z / Ctrl+Y / Ctrl+S | Undo / redo / save |
+
 ## Tabs
 
 These work from the Scene tab too. The Scene is always the first tab.

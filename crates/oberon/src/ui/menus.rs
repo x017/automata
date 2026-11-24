@@ -53,6 +53,8 @@ pub enum DialogKind {
     OpenScript,
     /// Create a new Python script file.
     NewScript,
+    /// Create a new UI document (`ui/<name>.ui.ron`).
+    NewUiScreen,
     /// Attach a script (existing or new) to an entity.
     AttachScript(u64),
     /// Import a model file (from anywhere) into the scene, or onto an
@@ -120,6 +122,8 @@ pub enum UiAction {
     PickSound(Option<u64>),
     /// A Files panel command on the selected file.
     File(super::project_panel::FileCommand),
+    /// A UI editor command.
+    UiDoc(super::ui_editor::UiDocAction),
 }
 
 /// Commands from a script tab's context menu (VS Code's set).
@@ -186,7 +190,12 @@ impl MenuItem {
         Self::new(label, shortcut, Action::Intent(i), enabled)
     }
 
-    fn ui(label: impl Into<String>, shortcut: &'static str, a: UiAction, enabled: bool) -> Self {
+    pub(super) fn ui(
+        label: impl Into<String>,
+        shortcut: &'static str,
+        a: UiAction,
+        enabled: bool,
+    ) -> Self {
         Self::new(label, shortcut, Action::Ui(a), enabled)
     }
 
@@ -299,6 +308,12 @@ impl Ui {
                         "New Script…",
                         "",
                         UiAction::Dialog(DialogKind::NewScript),
+                        true,
+                    ),
+                    MenuItem::ui(
+                        "New UI Screen…",
+                        "",
+                        UiAction::Dialog(DialogKind::NewUiScreen),
                         true,
                     ),
                     MenuItem::ui(
@@ -688,6 +703,7 @@ impl Ui {
             }
             UiAction::CopyEntity(id) => self.copy_entity(doc, id),
             UiAction::Gizmo(mode) => self.gizmo = mode,
+            UiAction::UiDoc(a) => self.ui_doc_action(a),
             UiAction::TogglePanel(panel) => {
                 let p = &mut self.panels;
                 match panel {

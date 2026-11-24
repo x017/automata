@@ -263,6 +263,15 @@ engine (wgpu sprites).
    `ctx.ui.screen("hud").set("health", 50)`,
    `ctx.ui.screen("menu").clicked("play")`.
 
+   ✅ **Done** (ROADMAP D4).
+   - `ui/<name>.ui.ron` documents are edited in Oberon on a canvas with a
+     widget tree, properties, preview sizes and per-document themes.
+   - Scripts bind with `ctx.ui.screen(name).set / get / clicked /
+     changed`, in Play, `run_scene` and exports.
+   - `examples/oberon/shape_signal` is the demo.
+   - Not yet: widget-name completions inside `set("…")`, image previews
+     on the canvas (it draws placeholders), and resizing by dragging.
+
 ### Design notes and open questions
 
 - **Immediate-mode API for scripts** (phases 1–4) fits the deferred frame

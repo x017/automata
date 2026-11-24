@@ -40,6 +40,7 @@ pub mod picker;
 pub mod project_panel;
 pub mod settings;
 pub mod springs;
+pub mod ui_editor;
 
 use dialogs::Dialog;
 pub use graphics::{FrameStats, RightTab};
@@ -476,6 +477,8 @@ pub enum Intent {
     OpenScript(PathBuf),
     /// Create a script from the template (if missing) and open it.
     NewScript(PathBuf),
+    /// Create a UI document from a template and open it.
+    NewUiScreen(PathBuf),
     /// Attach a script to an entity (created from the template if missing).
     AttachScript {
         /// Entity id.
@@ -546,6 +549,7 @@ impl Intent {
                 | Self::OpenScript(_)
                 | Self::OpenScriptAt { .. }
                 | Self::NewScript(_)
+                | Self::NewUiScreen(_)
                 | Self::NewFolder(_)
                 | Self::DuplicateFile(_)
                 | Self::DeleteFile(_)
@@ -652,6 +656,8 @@ enum EditTarget {
     AssetQuery,
     /// A Files panel row being renamed in place.
     FileRename,
+    /// A UI editor property.
+    UiProp(ui_editor::UiProp),
 }
 
 #[derive(Debug, Clone)]
@@ -847,6 +853,8 @@ pub struct Ui {
     pub code: crate::code::CodeEditor,
     /// Editor requests waiting for the app (language server, …).
     code_requests: Vec<crate::code::CodeEvent>,
+    /// The UI editor (for `.ui.ron` tabs).
+    uied: ui_editor::UiEditor,
     /// Drag-selecting text (`true` = whole lines from the gutter).
     code_drag: Option<bool>,
     /// The completion popup's rectangle this frame.
@@ -941,6 +949,7 @@ impl Ui {
             prefs_dirty: false,
             code: crate::code::CodeEditor::new(),
             code_requests: Vec::new(),
+            uied: ui_editor::UiEditor::default(),
             code_drag: None,
             code_popup: None,
             code_clicks: None,
@@ -1162,6 +1171,10 @@ impl Ui {
             }
             EditTarget::DialogName => self.submit_dialog(&edit.buffer),
             EditTarget::FileRename => self.commit_file_rename(&edit.buffer),
+            EditTarget::UiProp(prop) => {
+                self.commit_ui_prop(prop, &edit.buffer);
+                None
+            }
             EditTarget::Setting(which) => self.commit_setting(which, &edit.buffer),
             EditTarget::AssetQuery => {
                 self.assets.query = edit.buffer.trim().to_string();

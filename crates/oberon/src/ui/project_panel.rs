@@ -126,6 +126,8 @@ pub enum AssetKind {
     Audio,
     /// A font (`.ttf`, `.otf`) for script text.
     Font,
+    /// A UI document (`.ui.ron`), edited in the UI editor.
+    UiScreen,
     /// Anything else.
     Other,
 }
@@ -143,6 +145,9 @@ pub fn asset_kind(path: &Path, dir: bool) -> AssetKind {
         .is_some_and(|n| n.to_ascii_lowercase().ends_with(".import.ron"))
     {
         return AssetKind::Other;
+    }
+    if crate::uidoc::is_ui_doc_path(path) {
+        return AssetKind::UiScreen;
     }
     match path
         .extension()
@@ -166,7 +171,7 @@ pub fn open_intent(path: &Path, dir: bool) -> Option<Intent> {
     match asset_kind(path, dir) {
         AssetKind::Scene => Some(Intent::Open(path.to_path_buf())),
         AssetKind::Prefab => Some(Intent::InstantiatePrefab(path.to_path_buf())),
-        AssetKind::Script => Some(Intent::OpenScript(path.to_path_buf())),
+        AssetKind::Script | AssetKind::UiScreen => Some(Intent::OpenScript(path.to_path_buf())),
         AssetKind::Model => Some(Intent::AddModel {
             path: path.to_path_buf(),
             at: None,
@@ -585,6 +590,9 @@ impl Ui {
             AssetKind::Prefab => {
                 menu.push(item_menu("Instantiate", open_intent(&item.path, false)));
             }
+            AssetKind::UiScreen => {
+                menu.push(item_menu("Edit UI Screen", open_intent(&item.path, false)));
+            }
             AssetKind::Script => {
                 menu.push(item_menu("Edit Script", open_intent(&item.path, false)));
                 if let Some(i) = doc.selected_index() {
@@ -871,6 +879,12 @@ impl Ui {
                 enabled: true,
             },
             MenuItem {
+                label: "New UI Screen…".into(),
+                shortcut: "",
+                action: Some(Action::Ui(UiAction::Dialog(DialogKind::NewUiScreen))),
+                enabled: true,
+            },
+            MenuItem {
                 label: "New Folder".into(),
                 shortcut: "",
                 action: Some(Action::Intent(Intent::NewFolder(
@@ -982,6 +996,18 @@ pub fn draw_tree_icon(canvas: &mut Canvas, kind: AssetKind, cx: f32, cy: f32) {
             );
             canvas.fill_rounded(cx - 2.0, cy - 2.0, 4.0, 4.0, 1.0, color::accent_soft());
         }
+        AssetKind::UiScreen => {
+            canvas.stroke_rounded(
+                cx - 6.5,
+                cy - 5.0,
+                13.0,
+                10.0,
+                2.0,
+                color::accent_soft(),
+                1.2,
+            );
+            canvas.fill_rounded(cx - 3.5, cy - 0.5, 7.0, 3.0, 1.0, color::accent_soft());
+        }
         AssetKind::Script => {
             canvas.stroke_rounded(cx - 5.0, cy - 6.5, 10.0, 13.0, 2.0, color::axis_y(), 1.2);
             canvas.fill_rect(cx - 2.5, cy - 2.5, 5.0, 1.2, color::axis_y());
@@ -1079,6 +1105,16 @@ mod tests {
             Some(Intent::AddModel { at: None, .. })
         ));
         assert_eq!(asset_kind(Path::new("scripts"), true), AssetKind::Folder);
+        // A UI document is a .ron file but not a scene; it opens in a tab.
+        assert_eq!(
+            asset_kind(Path::new("ui/menus/Pause.UI.RON"), false),
+            AssetKind::UiScreen
+        );
+        assert!(matches!(
+            open_intent(Path::new("ui/hud.ui.ron"), false),
+            Some(Intent::OpenScript(p)) if p == Path::new("ui/hud.ui.ron")
+        ));
+        assert_eq!(asset_kind(Path::new("gui.ron"), false), AssetKind::Scene);
         assert!(matches!(
             open_intent(Path::new("x.py"), false),
             Some(Intent::OpenScript(_))

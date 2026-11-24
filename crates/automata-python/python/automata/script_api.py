@@ -1421,13 +1421,22 @@ class Screens:
         self._ui = ui
         self._stack: list[Screen] = []
 
-    def show(self, name: str, *, modal: bool = True, pause: bool = False,
-             escape: bool = True) -> None:
+    def show(self, name: str, *, modal: bool | None = None, pause: bool | None = None,
+             escape: bool | None = None) -> None:
         """Shows ``name`` on top of the others (moving it up if it's already
         shown). ``pause=True`` sets :attr:`paused` while it's shown, for
-        game scripts to check. ``escape=False``: Escape doesn't close it."""
+        game scripts to check. ``escape=False``: Escape doesn't close it.
+        Options left out come from the screen's ``ui/<name>.ui.ron`` if it
+        has one, else modal, not paused, closed by Escape."""
         if not isinstance(name, str) or not name:
             raise TypeError(f"a screen is a name like 'pause', not {name!r}")
+        doc = self._ui._document(name)
+        if modal is None:
+            modal = doc.modal if doc is not None else True
+        if pause is None:
+            pause = doc.pause if doc is not None else False
+        if escape is None:
+            escape = doc.escape if doc is not None else True
         self._stack = [s for s in self._stack if s.name != name]
         self._stack.append(Screen(name, bool(modal), bool(pause), bool(escape)))
         self._ui._opened(modal)
@@ -1496,15 +1505,27 @@ class Screens:
         return f"Screens({self.names!r})"
 
 
-class _ScreenScope:
-    """What :meth:`Ui.screen` returns: truthy while the screen is shown."""
+class UiScreen:
+    """What :meth:`Ui.screen` returns: truthy while the screen is shown.
 
-    __slots__ = ("_ui", "_shown", "_before")
+    Use it in an ``if`` or a ``with`` to draw a screen yourself. If the
+    screen was made in Oberon's UI editor (``ui/<name>.ui.ron``), it also
+    talks to that document's widgets by their names::
 
-    def __init__(self, ui, shown, before):
+        hud = ctx.ui.screen("hud")
+        hud.set("health", player.health)      # a progress bar's value
+        hud.set("score", f"Score {score}")    # a label's text
+        if ctx.ui.screen("menu").clicked("play"):
+            ctx.ui.screens.hide("menu")
+    """
+
+    __slots__ = ("_ui", "_shown", "_before", "_name")
+
+    def __init__(self, ui, shown, before, name=None):
         self._ui = ui
         self._shown = shown
         self._before = before
+        self._name = name
 
     def __bool__(self):
         return self._shown
@@ -1515,6 +1536,495 @@ class _ScreenScope:
     def __exit__(self, *exc):
         self._ui._screen_ctx = self._before
         return False
+
+    def __repr__(self):
+        return f"UiScreen({self._name!r}, shown={self._shown})"
+
+    @property
+    def name(self) -> str | None:
+        """The screen's name."""
+        return self._name
+
+    @property
+    def document(self) -> UiDocument | None:
+        """Its ``ui/<name>.ui.ron`` from Oberon's UI editor, if there is one."""
+        return None if self._name is None else self._ui._document(self._name)
+
+    def _doc(self):
+        doc = self.document
+        if doc is None:
+            raise LookupError(f"there's no UI document ui/{self._name}.ui.ron to bind to "
+                              f"(make one in Oberon: File ▸ New UI Screen…)")
+        return doc
+
+    def set(self, widget: str, value: Any) -> None:
+        """Sets a widget of the document by its name: a label's or button's
+        text, a toggle's on/off, a slider's or progress bar's value, or an
+        image's path. It stays until set again."""
+        doc = self._doc()
+        node = doc.node(widget)
+        kind = node["kind"]
+        if kind == "toggle":
+            value = bool(value)
+        elif kind in ("slider", "progress"):
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                raise TypeError(f"{widget!r} is a {kind}: set it to a number, not {value!r}") from None
+            if not math.isfinite(value):
+                raise ValueError(f"{widget!r}: {value} isn't a finite number")
+        elif kind in ("column", "row", "stack", "space"):
+            raise TypeError(f"{widget!r} is a {kind}, which has no value; use "
+                            "set_visible() to show or hide it")
+        else:
+            value = str(value)
+        doc.values[widget] = value
+
+    def get(self, widget: str) -> Any:
+        """A widget's value now: what :meth:`set` gave it, what the player
+        changed it to (sliders, toggles), or what the editor gave it."""
+        doc = self._doc()
+        return doc.value(doc.node(widget))
+
+    def clicked(self, widget: str) -> bool:
+        """The button was clicked (or a toggle or slider was used) the
+        last time the screen was drawn."""
+        doc = self._doc()
+        doc.node(widget)
+        return widget in doc.clicked
+
+    def changed(self, widget: str) -> bool:
+        """The player changed this slider or toggle the last time the
+        screen was drawn; :meth:`get` has the new value."""
+        doc = self._doc()
+        doc.node(widget)
+        return widget in doc.changed
+
+    def set_visible(self, widget: str, visible: bool = True) -> None:
+        """Shows or hides one widget (or a whole column, row or stack)."""
+        doc = self._doc()
+        doc.node(widget)
+        doc.hidden[widget] = not visible
+
+    def set_enabled(self, widget: str, enabled: bool = True) -> None:
+        """Enables or disables (dims) a widget."""
+        doc = self._doc()
+        doc.node(widget)
+        doc.disabled[widget] = not enabled
+
+    @property
+    def widgets(self) -> list[str]:
+        """The names of the document's widgets."""
+        return sorted(self._doc().by_name)
+
+    @property
+    def visible(self) -> bool:
+        """Whether the screen shows. For a HUD document, set it False to
+        hide it (True to bring it back); for others it's the same as
+        ``ctx.ui.screens.shown(name)``."""
+        doc = self.document
+        if doc is not None and doc.hud:
+            return doc.visible
+        return self._name is not None and self._ui.screens.shown(self._name)
+
+    @visible.setter
+    def visible(self, on: bool) -> None:
+        doc = self.document
+        if doc is not None and doc.hud:
+            doc.visible = bool(on)
+        elif self._name is not None:
+            if on:
+                self._ui.screens.show(self._name)
+            else:
+                self._ui.screens.hide(self._name)
+
+
+class RonError(ValueError):
+    """A ``.ron`` file that couldn't be read: where, and why."""
+
+
+def _ron_parse(text, where="<ron>"):
+    """Reads RON (Rusty Object Notation) into Python values: structs become
+    dicts, tuples and lists become lists, ``Some(x)`` is ``x``, ``None`` is
+    None, and bare names (enum variants) become strings."""
+    return _Ron(text, where).document()
+
+
+class _Ron:
+    _NUMBER = None
+
+    def __init__(self, text, where):
+        self.s = text
+        self.i = 0
+        self.where = where
+
+    def fail(self, msg):
+        line = self.s.count("\n", 0, self.i) + 1
+        col = self.i - (self.s.rfind("\n", 0, self.i) + 1) + 1
+        raise RonError(f"{self.where}:{line}:{col}: {msg}")
+
+    def skip(self):
+        s, n = self.s, len(self.s)
+        while self.i < n:
+            c = s[self.i]
+            if c in " \t\r\n":
+                self.i += 1
+            elif s.startswith("//", self.i):
+                end = s.find("\n", self.i)
+                self.i = n if end < 0 else end + 1
+            elif s.startswith("/*", self.i):
+                end = s.find("*/", self.i + 2)
+                if end < 0:
+                    self.fail("a /* comment never ends")
+                self.i = end + 2
+            else:
+                break
+
+    def peek(self):
+        self.skip()
+        return self.s[self.i] if self.i < len(self.s) else ""
+
+    def expect(self, c):
+        if self.peek() != c:
+            got = self.s[self.i] if self.i < len(self.s) else "the end"
+            self.fail(f"expected {c!r}, found {got!r}")
+        self.i += 1
+
+    def document(self):
+        self.skip()
+        while self.s.startswith("#!", self.i):  # #![enable(...)] headers
+            end = self.s.find("]", self.i)
+            if end < 0:
+                self.fail("an attribute never ends")
+            self.i = end + 1
+            self.skip()
+        value = self.value()
+        if self.peek():
+            self.fail("unexpected text after the value")
+        return value
+
+    def ident(self):
+        self.skip()
+        start = self.i
+        s = self.s
+        while self.i < len(s) and (s[self.i].isalnum() or s[self.i] == "_"):
+            self.i += 1
+        return s[start:self.i]
+
+    def value(self):
+        c = self.peek()
+        if c == "(":
+            return self.group()
+        if c == "[":
+            self.i += 1
+            out = []
+            while self.peek() != "]":
+                out.append(self.value())
+                if self.peek() == ",":
+                    self.i += 1
+                elif self.peek() != "]":
+                    self.fail("expected ',' or ']' in a list")
+            self.i += 1
+            return out
+        if c == "{":
+            self.i += 1
+            out = {}
+            while self.peek() != "}":
+                key = self.value()
+                self.expect(":")
+                out[key if isinstance(key, (str, int, float, bool)) else str(key)] = self.value()
+                if self.peek() == ",":
+                    self.i += 1
+                elif self.peek() != "}":
+                    self.fail("expected ',' or '}' in a map")
+            self.i += 1
+            return out
+        if c == '"':
+            return self.string()
+        if c == "r" and self.s.startswith(('r"', 'r#'), self.i):
+            return self.raw_string()
+        if c == "'":
+            return self.char()
+        if c and (c.isdigit() or c in "+-."):
+            return self.number()
+        if c and (c.isalpha() or c == "_"):
+            name = self.ident()
+            if name == "true":
+                return True
+            if name == "false":
+                return False
+            if name in ("None",):
+                return None
+            if name in ("inf", "NaN"):
+                return float(name.replace("NaN", "nan"))
+            if self.peek() == "(":
+                inner = self.group()
+                if name == "Some":
+                    return inner[0] if isinstance(inner, list) and len(inner) == 1 else inner
+                if isinstance(inner, list) and len(inner) == 1:
+                    return inner[0]
+                return inner
+            return name
+        if not c:
+            self.fail("the file ends where a value should be")
+        self.fail(f"unexpected {c!r}")
+        return None
+
+    def group(self):
+        """``( ... )``: a struct (``field: value``) or a tuple."""
+        self.expect("(")
+        save = self.i
+        name = self.ident()
+        is_struct = bool(name) and self.peek() == ":" and not self.s.startswith("::", self.i)
+        self.i = save
+        if is_struct:
+            out = {}
+            while self.peek() != ")":
+                key = self.ident()
+                if not key:
+                    self.fail("expected a field name")
+                self.expect(":")
+                out[key] = self.value()
+                if self.peek() == ",":
+                    self.i += 1
+                elif self.peek() != ")":
+                    self.fail("expected ',' or ')' after a field")
+            self.i += 1
+            return out
+        items = []
+        while self.peek() != ")":
+            items.append(self.value())
+            if self.peek() == ",":
+                self.i += 1
+            elif self.peek() != ")":
+                self.fail("expected ',' or ')' in a tuple")
+        self.i += 1
+        return items
+
+    _ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "0": "\0", "\\": "\\", '"': '"', "'": "'"}
+
+    def string(self):
+        self.expect('"')
+        s, out = self.s, []
+        while True:
+            if self.i >= len(s):
+                self.fail("a string never ends")
+            c = s[self.i]
+            self.i += 1
+            if c == '"':
+                return "".join(out)
+            if c != "\\":
+                out.append(c)
+                continue
+            e = s[self.i:self.i + 1]
+            self.i += 1
+            if e in self._ESCAPES:
+                out.append(self._ESCAPES[e])
+            elif e == "u" and s.startswith("{", self.i):
+                end = s.find("}", self.i)
+                out.append(chr(int(s[self.i + 1:end], 16)))
+                self.i = end + 1
+            elif e == "x":
+                out.append(chr(int(s[self.i:self.i + 2], 16)))
+                self.i += 2
+            elif e == "\n":
+                while self.i < len(s) and s[self.i] in " \t\r\n":
+                    self.i += 1
+            else:
+                self.fail(f"unknown escape \\{e}")
+
+    def raw_string(self):
+        self.i += 1
+        hashes = 0
+        while self.s[self.i] == "#":
+            hashes += 1
+            self.i += 1
+        self.expect('"')
+        end = self.s.find('"' + "#" * hashes, self.i)
+        if end < 0:
+            self.fail("a raw string never ends")
+        out = self.s[self.i:end]
+        self.i = end + 1 + hashes
+        return out
+
+    def char(self):
+        self.expect("'")
+        if self.s[self.i] == "\\":
+            self.i += 1
+            c = self._ESCAPES.get(self.s[self.i], self.s[self.i])
+        else:
+            c = self.s[self.i]
+        self.i += 1
+        self.expect("'")
+        return c
+
+    def number(self):
+        s = self.s
+        start = self.i
+        if s[self.i] in "+-":
+            self.i += 1
+        if s.startswith(("inf", "NaN"), self.i):
+            word = s[self.i:self.i + 3]
+            self.i += 3
+            v = float("inf") if word == "inf" else float("nan")
+            return -v if s[start] == "-" else v
+        if s.startswith(("0x", "0b", "0o"), self.i):
+            base = {"x": 16, "b": 2, "o": 8}[s[self.i + 1]]
+            self.i += 2
+            begin = self.i
+            while self.i < len(s) and (s[self.i].isalnum() or s[self.i] == "_"):
+                self.i += 1
+            digits = s[begin:self.i].replace("_", "")
+            v = int(digits, base)
+            return -v if s[start] == "-" else v
+        while self.i < len(s) and (s[self.i].isdigit() or s[self.i] in "._eE" or (
+                s[self.i] in "+-" and s[self.i - 1] in "eE")):
+            self.i += 1
+        text = s[start:self.i].replace("_", "")
+        # Type suffixes such as 1u8 or 2.0f32.
+        while self.i < len(s) and s[self.i].isalnum():
+            self.i += 1
+        try:
+            if any(ch in text for ch in ".eE") and not text.lstrip("+-").startswith("0x"):
+                return float(text)
+            return int(text)
+        except ValueError:
+            self.fail(f"{text!r} isn't a number")
+            return 0
+
+
+#: Node kinds a UI document holds, and the ones that hold other nodes.
+UI_NODE_KINDS = ("column", "row", "stack", "label", "button", "toggle", "slider", "progress",
+                 "image", "space")
+_UI_LAYOUTS = ("column", "row", "stack")
+#: What a node is when its file leaves a field out (Oberon writes only
+#: what differs).
+_UI_NODE_DEFAULTS: dict[str, Any] = {
+    "name": "", "text": "", "anchor": "", "x": 0.0, "y": 0.0, "width": None, "height": None,
+    "gap": 10.0, "padding": 0.0, "columns": 0, "panel": False, "title": "", "size": None,
+    "color": None, "align": "left", "font": "", "value": 0.0, "min": 0.0, "max": 1.0,
+    "step": 0.0, "enabled": True, "visible": True, "children": (),
+}
+_UI_THEME_FIELDS = ("text", "text_dim", "panel", "button", "hover", "press", "accent",
+                    "on_accent", "track", "border", "focus", "text_size", "font")
+
+
+def _ui_node(raw, where):
+    if not isinstance(raw, dict):
+        raise RonError(f"{where}: a node is a (kind: ..., ...) struct, not {raw!r}")
+    node: dict[str, Any] = dict(_UI_NODE_DEFAULTS)
+    node.update(raw)
+    kind = str(node.get("kind", "")).lower()
+    if kind not in UI_NODE_KINDS:
+        raise RonError(f"{where}: there's no node kind {raw.get('kind')!r}"
+                       f"{_did_you_mean(kind, UI_NODE_KINDS)}")
+    node["kind"] = kind
+    node["children"] = [_ui_node(c, f"{where} > {kind}") for c in node["children"] or ()]
+    return node
+
+
+def _ui_format(text, value, top):
+    """A progress bar's text: ``{value}``, ``{max}`` and ``{percent}``
+    filled in (the same as Oberon's preview)."""
+    if "{" not in text:
+        return text
+    def num(v):
+        return str(int(v)) if float(v).is_integer() else f"{v:.1f}"
+    k = 0.0 if top <= 0 else max(0.0, min(1.0, value / top))
+    return (text.replace("{value}", num(value)).replace("{max}", num(top))
+            .replace("{percent}", str(round(k * 100))))
+
+
+class UiDocument:
+    """A UI screen made in Oberon's UI editor: ``ui/<name>.ui.ron``.
+
+    Scripts don't make these; :meth:`Ui.screen` finds them by name and
+    draws them. A HUD document (``hud: true``) shows from the start, under
+    every screen; any other is drawn while its screen is shown."""
+
+    def __init__(self, name, path, log):
+        self.name = name
+        self.path = path
+        self._log = log
+        self.hud = False
+        self.modal, self.pause, self.escape = True, False, True
+        self.design_size = (1280.0, 720.0)
+        self.theme = {}
+        self.nodes = []
+        self.by_name = {}
+        self.mtime = None
+        self.error = None
+        #: Values scripts set or players changed, by widget name.
+        self.values = {}
+        self.hidden = {}
+        self.disabled = {}
+        #: Set by the last draw, read by scripts the frame after.
+        self.clicked = set()
+        self.changed = set()
+        #: A HUD document's own switch (``ctx.ui.screen("hud").visible``).
+        self.visible = True
+        self.load()
+
+    def load(self):
+        try:
+            self.mtime = os.path.getmtime(self.path)
+            with open(self.path, encoding="utf-8") as f:
+                raw = _ron_parse(f.read(), os.path.basename(self.path))
+            if not isinstance(raw, dict):
+                raise RonError(f"{os.path.basename(self.path)}: expected a (...) document")
+            nodes = [_ui_node(n, os.path.basename(self.path)) for n in raw.get("nodes") or ()]
+        except (OSError, RonError, TypeError, ValueError) as exc:
+            if str(exc) != self.error:
+                self._log("error", f"UI document {self.path}: {exc}")
+            self.error = str(exc)
+            return False
+        self.error = None
+        self.nodes = nodes
+        self.hud = bool(raw.get("hud", False))
+        self.modal = bool(raw.get("modal", True))
+        self.pause = bool(raw.get("pause", False))
+        self.escape = bool(raw.get("escape", True))
+        size = raw.get("design_size") or (1280.0, 720.0)
+        self.design_size = (float(size[0]), float(size[1]))
+        theme = raw.get("theme") or {}
+        self.theme = {k: v for k, v in theme.items() if k in _UI_THEME_FIELDS and v is not None}
+        self.by_name = {}
+        stack = list(nodes)
+        while stack:
+            node = stack.pop(0)
+            if node["name"] and node["name"] not in self.by_name:
+                self.by_name[node["name"]] = node
+            stack.extend(node["children"])
+        return True
+
+    def stale(self):
+        try:
+            return os.path.getmtime(self.path) != self.mtime
+        except OSError:
+            return False
+
+    def node(self, name):
+        node = self.by_name.get(name)
+        if node is None:
+            names = sorted(self.by_name)
+            known = f" (it has {', '.join(names)})" if names else " (none of its widgets has a name)"
+            raise KeyError(f"ui/{self.name}.ui.ron has no widget named {name!r}"
+                           f"{_did_you_mean(name, names)}{known}")
+        return node
+
+    def value(self, node):
+        name = node["name"]
+        if name and name in self.values:
+            return self.values[name]
+        kind = node["kind"]
+        if kind == "toggle":
+            return bool(node["value"])
+        if kind in ("slider", "progress"):
+            return float(node["value"])
+        return node["text"]
+
+    def __repr__(self):
+        return f"UiDocument({self.name!r}, hud={self.hud})"
 
 
 class _Layout:
@@ -1659,6 +2169,11 @@ class Ui:
         self._released = False
         self._layouts: list[_Layout] = []
         self._sizes = {}  # anchored layouts' sizes last frame, by id
+        # UI documents from Oberon's UI editor (ui/<name>.ui.ron), by name;
+        # None: looked for and not there.
+        self._documents: dict[str, UiDocument | None] = {}
+        self._docs_scanned = False
+        self._docs_checked = 0.0
         self._screen_ctx = None  # (owner id, screen name) widgets belong to
         self._layered = []  # (item, layer) for HUD items drawn in screens
         # Focus: keys and gamepads.
@@ -1897,7 +2412,7 @@ class Ui:
         y = my + (sh - 2 * my - h) * fy
         return (x, y)
 
-    def screen(self, name: str) -> _ScreenScope:
+    def screen(self, name: str) -> UiScreen:
         """Whether screen ``name`` is shown (see :attr:`screens`). Widgets
         this script draws after it belong to that screen: they draw above
         the screens under it, and take input only when no modal screen is
@@ -1907,7 +2422,217 @@ class Ui:
         running = self._host._running
         owner = running[1].id if running else None
         self._screen_ctx = (owner, name)
-        return _ScreenScope(self, self.screens.shown(name), before)
+        shown = self.screens.shown(name)
+        if not shown and name is not None:
+            doc = self._document(name)
+            shown = doc is not None and doc.hud and doc.visible
+        return UiScreen(self, shown, before, name)
+
+    # -- UI documents (Oberon's UI editor) --
+
+    def _document(self, name):
+        """The ``ui/<name>.ui.ron`` document, loaded once (None: there's
+        none)."""
+        if name in self._documents:
+            return self._documents[name]
+        doc = None
+        path = self._document_path(name)
+        if path is not None and os.path.isfile(path):
+            doc = UiDocument(name, path, self._log)
+        self._documents[name] = doc
+        return doc
+
+    def _document_path(self, name):
+        rel = str(name).replace("\\", "/").strip("/")
+        if not rel or ".." in rel.split("/"):
+            return None
+        return os.path.join(self._host.backend.base_dir(), "ui", *rel.split("/")) + ".ui.ron"
+
+    def _log(self, level, message):
+        self._host.backend.log(level, message)
+
+    def _scan_documents(self):
+        """Finds every document under ``ui/`` (HUD ones show by themselves)."""
+        root = os.path.join(self._host.backend.base_dir(), "ui")
+        if not os.path.isdir(root):
+            return
+        for folder, dirs, files in os.walk(root):
+            dirs.sort()
+            for file in sorted(files):
+                if not file.lower().endswith(".ui.ron"):
+                    continue
+                rel = os.path.relpath(os.path.join(folder, file), root)
+                name = rel[: -len(".ui.ron")].replace(os.sep, "/")
+                if self._documents.get(name) is None:
+                    self._documents.pop(name, None)
+                    self._document(name)
+
+    def _check_documents(self):
+        """Reloads documents whose files changed (Oberon's hot reload)."""
+        self._docs_checked = time.monotonic()
+        for name, doc in list(self._documents.items()):
+            if doc is None:
+                del self._documents[name]
+            elif doc.stale():
+                doc.load()
+        self._scan_documents()
+
+    def _draw_documents(self):
+        """Draws the HUD documents and those of the shown screens (the host
+        calls this after every script's ``update``)."""
+        if not self._docs_scanned:
+            self._docs_scanned = True
+            self._scan_documents()
+        elif self._host.hot_reload and time.monotonic() - self._docs_checked > 0.5:
+            self._check_documents()
+        docs = [d for d in self._documents.values() if d is not None]
+        if not docs:
+            return
+        for doc in docs:
+            doc.clicked = set()
+            doc.changed = set()
+        shown = self.screens.names
+        before = self._screen_ctx
+        try:
+            for doc in docs:
+                if doc.hud and doc.visible and doc.name not in shown:
+                    self._draw_document(doc, None)
+            for name in shown:
+                doc = self._documents.get(name)
+                if doc is not None:
+                    self._draw_document(doc, name)
+        finally:
+            self._screen_ctx = before
+
+    def _draw_document(self, doc, screen):
+        self._screen_ctx = None if screen is None else (None, screen)
+        design, layouts = self.design_size, self._layouts
+        saved = {}
+        self.design_size = doc.design_size
+        self._layouts = []
+        try:
+            for key, value in doc.theme.items():
+                saved[key] = getattr(self.theme, key)
+                if isinstance(value, list):
+                    value = tuple(value)
+                setattr(self.theme, key, value if value != "" else None)
+            for i, node in enumerate(doc.nodes):
+                self._draw_node(doc, node, (i,), True)
+            doc.draw_error = None
+        except (TypeError, ValueError, KeyError) as exc:
+            if str(exc) != getattr(doc, "draw_error", None):
+                self._log("error", f"UI document {doc.path}: {exc}")
+            doc.draw_error = str(exc)
+        finally:
+            for key, value in saved.items():
+                setattr(self.theme, key, value)
+            self.design_size = design
+            self._layouts = layouts
+
+    def _draw_node(self, doc, node, path, top):
+        name = node["name"]
+        key = name or path
+        hidden = doc.hidden.get(name) if name in doc.hidden else not node["visible"]
+        if hidden:
+            return
+        kind = node["kind"]
+        wid = (doc.name, key)
+        w, h = node["width"], node["height"]
+        anchor = (node["anchor"] or None) if top else None
+        margin = (float(node["x"]), float(node["y"]))
+        x = y = None
+        if kind in _UI_LAYOUTS:
+            if top and anchor is None:
+                x, y = margin
+            panel = node["panel"]
+            if panel and node["color"]:
+                panel = tuple(node["color"])
+            options = {"padding": float(node["padding"]), "anchor": anchor,
+                       "margin": margin if anchor else 0.0, "panel": panel, "id": wid}
+            if kind != "stack":
+                options["gap"] = float(node["gap"])
+                options["title"] = node["title"] or None
+            if kind == "row":
+                options["columns"] = int(node["columns"]) or None
+            with getattr(self, kind)(x, y, w, h, **options):
+                for i, child in enumerate(node["children"]):
+                    self._draw_node(doc, child, path + (i,), False)
+            return
+        size = node["size"]
+        if top:
+            bw, bh = self._node_box(doc, node)
+            if anchor is not None:
+                x, y = self.place(anchor, bw, bh, margin)
+            else:
+                x, y = margin
+            if kind == "label":
+                a = str(node["align"]).lower()
+                x += bw / 2 if a in ("center", "centre") else bw if a == "right" else 0.0
+        enabled = bool(node["enabled"]) and not doc.disabled.get(name, False)
+        value = doc.values[key] if key in doc.values else doc.value(node)
+        if kind == "label":
+            self.label(str(value), x, y, size=size, color=node["color"], align=node["align"],
+                       font=node["font"] or None)
+        elif kind == "button":
+            if self.button(str(value), x, y, w, h, id=wid, enabled=enabled, size=size) and name:
+                doc.clicked.add(name)
+        elif kind == "toggle":
+            new = self.toggle(node["text"], bool(value), x, y, id=wid, enabled=enabled, size=size)
+            if new != bool(value):
+                doc.values[key] = new
+                if name:
+                    doc.clicked.add(name)
+                    doc.changed.add(name)
+        elif kind == "slider":
+            step = float(node["step"]) or None
+            new = self.slider(float(value), x, y, w, h, min=float(node["min"]),
+                              max=float(node["max"]), step=step, id=wid, enabled=enabled)
+            if abs(new - float(value)) > 1e-9:
+                doc.values[key] = new
+                if name:
+                    doc.changed.add(name)
+        elif kind == "progress":
+            top_value = float(node["max"])
+            text = _ui_format(node["text"], float(value), top_value) or None
+            self.progress(float(value), x, y, w, h, max=top_value, color=node["color"],
+                          text=text)
+        elif kind == "image":
+            if value:
+                self.image(str(value), x, y, w, h,
+                           color=tuple(node["color"]) if node["color"] else (1.0, 1.0, 1.0, 1.0))
+            elif self._layouts:
+                self.space(w if w is not None else 64.0, h if h is not None else 64.0)
+        elif kind == "space":
+            if self._layouts:
+                self.space(w, h)
+
+    def _node_box(self, doc, node):
+        """The size of a widget placed on its own (anchored or at x, y)."""
+        kind, w, h = node["kind"], node["width"], node["height"]
+        size = self._size(node["size"])
+        if kind == "label":
+            text = str(doc.value(node))
+            lines = text.split("\n")
+            return max(len(line) for line in lines) * size * 0.55, size * len(lines)
+        if kind == "toggle":
+            box = size * 1.2
+            return box + size * 0.5 + len(str(node["text"])) * size * 0.55, box
+        dw, dh = {"button": (160.0, 44.0), "slider": (200.0, 24.0), "progress": (200.0, 18.0),
+                  "image": (64.0, 64.0)}.get(kind, (0.0, 0.0))
+        return (float(dw if w is None else w), float(dh if h is None else h))
+
+    def space(self, width: float | None = None, height: float | None = None) -> None:
+        """Empty room in a layout: ``height`` in a column, ``width`` in a
+        row (a column's spacer fills its width)."""
+        if not self._layouts:
+            raise TypeError("ui.space only works inside ui.column(), ui.row() or ui.stack()")
+        lay = self._layouts[-1]
+        w = None if width is None else float(width)
+        h = None if height is None else float(height)
+        if lay.kind == "row":
+            lay.next(w if w is not None else 0.0, h, 0.0, 0.0)
+        else:
+            lay.next(w, h if h is not None else 0.0, 0.0, 0.0)
 
     def _current_screen(self):
         ctx = self._screen_ctx
@@ -4118,6 +4843,12 @@ class Backend:
     """What a driver provides. Override what applies; the defaults suit a
     driver without physics, audio or engine extras."""
 
+    def base_dir(self):
+        """The scene's folder: project paths (``ui/hud.ui.ron``) are
+        relative to it. The default is the working folder, which is the
+        scene's in Oberon."""
+        return os.getcwd()
+
     def raycast(self, origin, direction, max_distance, ignore_id):
         """``(entity id, point, normal, distance)`` or None. ``direction``
         is normalized."""
@@ -4540,6 +5271,7 @@ class ScriptHost:
         if gone and self._subs:
             self._drop_orphans()
         self._persist()
+        self.ctx.ui._draw_documents()
         self.ctx.ui._layer_items(self.ctx.hud._items)
         out = FrameOutput(writes, self.ctx.audio._queue, self.ctx.hud._items,
                           self.ctx.input._lock_request, self.ctx.settings._take_apply())

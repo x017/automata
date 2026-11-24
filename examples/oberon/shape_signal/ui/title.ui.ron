@@ -1,0 +1,96 @@
+// A UI screen made in Oberon's UI editor. Scripts reach its widgets by
+// name: ctx.ui.screen("title").set("score", 10)
+(
+    design_size: (1280.0, 720.0),
+    hud: false,
+    modal: true,
+    pause: true,
+    escape: false,
+    theme: (
+        panel: Some((0.07, 0.09, 0.14, 0.94)),
+        button: Some((0.16, 0.2, 0.3, 1.0)),
+        hover: Some((0.24, 0.3, 0.44, 1.0)),
+        press: Some((0.11, 0.14, 0.22, 1.0)),
+        accent: Some((1.0, 0.72, 0.25, 1.0)),
+        border: Some((0.3, 0.36, 0.5, 1.0)),
+        text_size: Some(20.0),
+    ),
+    nodes: [
+        (
+            kind: Column,
+            anchor: "center",
+            width: Some(480.0),
+            gap: 14.0,
+            padding: 40.0,
+            panel: true,
+            children: [
+                (
+                    kind: Label,
+                    name: "title",
+                    text: "SHAPE SIGNAL",
+                    size: Some(28.0),
+                    color: Some((1.0, 0.72, 0.25, 1.0)),
+                    align: "center",
+                    font: "fonts/PressStart2P-Regular.ttf",
+                ),
+                (
+                    kind: Label,
+                    text: "One shape lifts. Pick it before it drops:\nclick its button or press 1, 2 or 3.",
+                    size: Some(16.0),
+                    color: Some((0.72, 0.76, 0.84, 1.0)),
+                    align: "center",
+                ),
+                (
+                    kind: Space,
+                    height: Some(6.0),
+                ),
+                (
+                    kind: Button,
+                    name: "play",
+                    text: "Play",
+                    height: Some(54.0),
+                ),
+                (
+                    kind: Row,
+                    columns: 2,
+                    children: [
+                        (
+                            kind: Label,
+                            text: "Volume",
+                        ),
+                        (
+                            kind: Label,
+                            name: "volume_text",
+                            text: "80%",
+                            color: Some((0.72, 0.76, 0.84, 1.0)),
+                            align: "right",
+                        ),
+                    ],
+                ),
+                (
+                    kind: Slider,
+                    name: "volume",
+                    value: 0.8,
+                    step: 0.05,
+                ),
+                (
+                    kind: Toggle,
+                    name: "hints",
+                    text: "Key hints on the HUD",
+                    value: 1.0,
+                ),
+                (
+                    kind: Space,
+                    height: Some(4.0),
+                ),
+                (
+                    kind: Label,
+                    name: "best",
+                    text: "Best 0",
+                    color: Some((0.72, 0.76, 0.84, 1.0)),
+                    align: "center",
+                ),
+            ],
+        ),
+    ],
+)

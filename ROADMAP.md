@@ -800,9 +800,41 @@ Done:
   out for 1280×720 and has menu and settings screens with a UI size
   setting, and it works with the mouse, the keys or a gamepad.
 
-### D4. UI editor in Oberon ⬜ L
+### D4. UI editor in Oberon ✅ L
 #3 phase 5: `hud.ui.ron` documents composed on a canvas, with themes;
 scripts bind to them by name.
+
+Done:
+- **Documents:** `ui/<name>.ui.ron` is plain RON: the screen's options
+  (HUD, modal, pause, escape), its design size, theme overrides and a tree
+  of nodes. The ten node kinds are column, row, stack, label, button,
+  toggle, slider, progress, image and space. Oberon writes only what
+  differs from the defaults. The screen's name is its path under `ui/`.
+- **The UI editor:** `.ui.ron` tabs open on a canvas that draws the screen
+  as the game does, on a choice of preview sizes. Next to it are a widget
+  tree and a properties panel for nodes, the screen and its theme.
+  - Click to select, drag top-level nodes, and use Add, Duplicate, Delete,
+    Up/Down, copy/paste and the arrow keys.
+  - The tab's text is the source of truth. Every change is one undo step,
+    and saving, reloading and *Edit as Text* work as they do for scripts.
+  - **File → New UI Screen…** makes one from a HUD or menu template. The
+    Files panel has an icon and an **Edit UI Screen** item for documents.
+- **Scripts:** `ctx.ui.screen(name)` returns a `UiScreen` with `set`,
+  `get`, `clicked`, `changed`, `set_visible`, `set_enabled`, `widgets`,
+  `visible` and `document`.
+  - A wrong name raises `KeyError` with "did you mean", and a wrong type
+    raises `TypeError`.
+  - HUD documents draw from the start, and screens draw while shown.
+    `screens.show` takes the document's options.
+  - Documents hot-reload, and a broken one is logged once.
+  - Everything works in Play, `run_scene` and exports.
+- **One layout:** `oberon::uidoc::layout` copies the script API's layout
+  rules. A shared fixture (`crates/oberon/tests/fixtures/ui_layout.json`)
+  is checked by both the Rust and the Python tests, so the canvas puts
+  every widget where the game does.
+- **Oberon:** completions for `ctx.ui.screen(...)` members and `ui.space`.
+- **Demo:** `examples/oberon/shape_signal` is a game whose title, HUD and
+  results screens are all documents. Its script only binds by name.
 
 ### D5. Material assets and editor ⬜ M
 - `.mat.ron` material files shared across entities, with texture slots
@@ -912,7 +944,7 @@ per effort. Reorder any time by telling me.
 | 34 | B6 Ragdolls | M | ⬜ |
 | 35 | C6 2D toolkit | L | ⬜ |
 | 36 | D6 Editor workflow | M | ⬜ |
-| 37 | D4 UI editor | L | ⬜ |
+| 37 | D4 UI editor | L | ✅ |
 | 38 | D7 Localization | S | ⬜ |
 | 39 | E1 Android export | L | ⬜ |
 | 40 | E2 macOS export | M | ⬜ |

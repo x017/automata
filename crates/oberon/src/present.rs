@@ -703,6 +703,12 @@ impl EditorApp {
                     self.open_script(&path, None);
                 }
             }
+            Intent::NewUiScreen(path) => {
+                if let Some(path) = self.ensure_ui_screen(path) {
+                    self.ui.files_changed(Some(&path));
+                    self.open_script(&path, None);
+                }
+            }
             Intent::AttachScript { id, path } => {
                 if self.ensure_script(&path) {
                     self.ui.files_changed(None);
@@ -1140,6 +1146,55 @@ impl EditorApp {
                     format!("Create {} failed: {e}", path.display()),
                 );
                 false
+            }
+        }
+    }
+
+    /// Creates a UI document from a template unless it exists: a HUD for
+    /// names ending in "hud", else a menu screen. Returns its path
+    /// (always `*.ui.ron`).
+    fn ensure_ui_screen(&mut self, path: std::path::PathBuf) -> Option<std::path::PathBuf> {
+        let path = if crate::uidoc::is_ui_doc_path(&path) {
+            path
+        } else {
+            let stem = path
+                .file_stem()
+                .map_or_else(|| "screen".into(), |s| s.to_string_lossy().into_owned());
+            path.with_file_name(format!("{stem}.ui.ron"))
+        };
+        let inside_ui = path.parent().is_some_and(|d| {
+            d.ancestors()
+                .any(|a| a.file_name().is_some_and(|n| n == "ui"))
+        });
+        if !inside_ui {
+            self.ui.log(
+                LogLevel::Warn,
+                "Scripts find UI screens in the project's ui/ folder: move it there to use it",
+            );
+        }
+        if path.exists() {
+            return Some(path);
+        }
+        let name = crate::uidoc::screen_name(&path);
+        let doc = if name.ends_with("hud") {
+            crate::uidoc::UiDoc::template_hud()
+        } else {
+            crate::uidoc::UiDoc::template_menu()
+        };
+        match doc.save(&path) {
+            Ok(()) => {
+                self.ui.log(
+                    LogLevel::Info,
+                    format!("Created {} · ctx.ui.screen(\"{name}\")", path.display()),
+                );
+                Some(path)
+            }
+            Err(e) => {
+                self.ui.log(
+                    LogLevel::Error,
+                    format!("Create {} failed: {e}", path.display()),
+                );
+                None
             }
         }
     }

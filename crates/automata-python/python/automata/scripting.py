@@ -235,6 +235,9 @@ class _EngineBackend(api.Backend):
         self.keys = _EngineKeys()
         self._paths: Dict[str, str] = {}
 
+    def base_dir(self) -> str:
+        return self.base
+
     # --- frames -----------------------------------------------------------
 
     def begin(self, ctx: Any) -> List[_ViewRecord]:

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The UI editor · AUTOMATA docs</title>
+<meta name="description" content="The documents draw the same way in Play, under run_scene and in exported games (an export copies the whole project, ui/ included). The script side is in Scripting.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../../dither.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../tutorials/fps.html">A first-person shooter</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="index.html">Introduction</a></li><li><a href="interface.html">The interface</a></li><li><a href="command-line.html">The oberon command</a></li><li><a href="scripting.html">Scripting</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="graphics.html">Graphics</a></li><li><a href="code-editor.html">The code editor</a></li><li><a href="ui-editor.html" aria-current="page">The UI editor</a></li><li><a href="models.html">Models</a></li><li><a href="foliage.html">Grass &amp; foliage</a></li><li><a href="audio.html">Audio</a></li><li><a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="exporting.html">Exporting your game</a></li><li><a href="shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/grass-and-foliage.html">Grass &amp; foliage</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li><li><a href="../guides/performance.html">Performance</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>The UI editor</h1>
+<p>Game menus and HUDs can be laid out in Oberon instead of in code. Each
+screen is a <strong>UI document</strong>, a <code>ui/&lt;name&gt;.ui.ron</code> file in the project. You
+compose it on a canvas from columns, rows, buttons, labels, toggles,
+sliders, progress bars and images, and give it a theme. Scripts don't draw
+it. They fill it in and react to it by the names you gave its widgets:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    hud = ctx.ui.screen(<span class="tok-s">&quot;hud&quot;</span>)              <span class="tok-c"># ui/hud.ui.ron</span>
+    hud.<span class="tok-b">set</span>(<span class="tok-s">&quot;score&quot;</span>, <span class="tok-s">f&quot;SCORE {score}&quot;</span>)      <span class="tok-c"># a label&#x27;s text</span>
+    hud.<span class="tok-b">set</span>(<span class="tok-s">&quot;health&quot;</span>, player_health)        <span class="tok-c"># a progress bar&#x27;s value</span>
+    <span class="tok-k">if</span> ctx.ui.screen(<span class="tok-s">&quot;title&quot;</span>).clicked(<span class="tok-s">&quot;play&quot;</span>):
+        ctx.ui.screens.hide(<span class="tok-s">&quot;title&quot;</span>)</code></pre></div>
+<p>The documents draw the same way in Play, under <code>run_scene</code> and in exported
+games (an export copies the whole project, <code>ui/</code> included). The <a href="scripting.html#ui-documents">script
+side</a> is in Scripting.</p>
+<p><img src="../../../assets/ui/ui_editor.jpg" alt="Oberon's UI editor: the widget tree of Shape Signal's title screen on the left, the screen drawn on a 1280×720 canvas in the middle with the Play button selected, and the button's name, text, size and state on the right" loading="lazy" decoding="async"></p>
+<h2 id="making-one">Making one<a class="anchor" href="#making-one" aria-label="Link to this section">#</a></h2>
+<p><strong>File → New UI Screen…</strong> (or <strong>New UI Screen…</strong> in the Files panel's <code>+</code>
+menu) asks for a name and creates <code>ui/&lt;name&gt;.ui.ron</code> from a template:</p>
+<ul><li>a name ending in <code>hud</code> gets a HUD: a score label and a health bar in
+the top-left corner;</li><li>any other name gets a menu screen: a centred panel with a title and Play
+and Quit buttons.</li></ul>
+<p>The screen's name is its path under <code>ui/</code> without <code>.ui.ron</code>:
+<code>ui/hud.ui.ron</code> is <code>&quot;hud&quot;</code>, and <code>ui/menus/pause.ui.ron</code> is <code>&quot;menus/pause&quot;</code>.
+Documents anywhere else aren't found by scripts.</p>
+<p>Double-click a <code>.ui.ron</code> file in the Files panel to open it. UI documents
+open as tabs next to your scripts, in the editor instead of as text.</p>
+<h2 id="the-editor">The editor<a class="anchor" href="#the-editor" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Part</th><th>What it does</th></tr></thead><tbody><tr><td><strong>Toolbar</strong></td><td><strong>+ Add</strong> a widget, <strong>Duplicate</strong>, <strong>Delete</strong>, move <strong>Up</strong> / <strong>Down</strong> among its siblings, the <strong>Preview</strong> screen size, and <strong>Edit as Text</strong></td></tr><tr><td><strong>Widgets</strong> (left)</td><td>The tree: <strong>Screen</strong> (the document itself), then every node. Click one to select it. Hidden ones are dimmed</td></tr><tr><td><strong>Canvas</strong> (middle)</td><td>The screen as the game draws it, on the preview size: themes, anchors and scaling included. Click a widget to select it. Drag a top-level one to move it</td></tr><tr><td><strong>Properties</strong> (right)</td><td>The selected node's properties, or the screen's and its theme's when <strong>Screen</strong> is selected. Click a field, type, and press Enter (or click away). Under them is the line a script uses to reach the widget, like <code>ctx.ui.screen(&quot;title&quot;).clicked(&quot;play&quot;)</code></td></tr><tr><td><strong>Status line</strong></td><td>The screen's name, how many nodes and names it has, unsaved changes, and names used twice</td></tr></tbody></table></div>
+<p><strong>+ Add</strong> puts the new widget inside the selected column, row or stack,
+after the selected widget otherwise, or (with <strong>Screen</strong> selected) at the
+top level, centred. A pasted or duplicated widget whose name is taken gets
+a fresh one (<code>score_2</code>), since scripts need names to be unique.</p>
+<p><strong>Preview</strong> lays the screen out on 1280×720, 1920×1080, 800×600 or a
+720×1280 portrait phone, so you can check it scales. The document's
+<strong>design size</strong> (1280×720 unless you change it) is what it's laid out for.
+Like <a href="scripting.html#scaling-to-any-screen"><code>ctx.ui.design_size</code></a>, it scales
+to fit any window.</p>
+<h3 id="keys">Keys<a class="anchor" href="#keys" aria-label="Link to this section">#</a></h3>
+<p>Click the canvas or the tree first.</p>
+<div class="table"><table><thead><tr><th>Keys</th><th>Action</th></tr></thead><tbody><tr><td>Delete / Backspace</td><td>Delete the selected widget</td></tr><tr><td>Ctrl+D</td><td>Duplicate it</td></tr><tr><td>Ctrl+C / Ctrl+X / Ctrl+V</td><td>Copy / cut / paste widgets</td></tr><tr><td>← → ↑ ↓ (Shift: by 10)</td><td>Move a top-level widget by its margin</td></tr><tr><td>Alt+↑ / Alt+↓</td><td>Move it up / down among its siblings</td></tr><tr><td>Tab / Shift+Tab</td><td>Select the next / previous widget in the tree</td></tr><tr><td>Esc</td><td>Select the screen</td></tr><tr><td>Ctrl+Z / Ctrl+Y</td><td>Undo / redo</td></tr><tr><td>Ctrl+S</td><td>Save</td></tr></tbody></table></div>
+<p>Every change is one undo step. The file is the document, so the unsaved
+dot, <strong>Save All</strong>, reloading after an outside change, and <em>save before
+Play</em> work as they do for scripts. <strong>Edit as Text</strong> shows the file in the
+code editor. <strong>Back to the Editor</strong> returns. If the text stops being a
+valid document, the editor says why, with a <strong>Fix it as Text</strong> button.</p>
+<h2 id="nodes">Nodes<a class="anchor" href="#nodes" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Kind</th><th>Is</th><th>A script's <code>set(name, value)</code> gives it</th></tr></thead><tbody><tr><td><strong>Column</strong></td><td>Children top to bottom</td><td>(<code>set_visible</code> hides it with its children)</td></tr><tr><td><strong>Row</strong></td><td>Children side by side; <strong>Columns</strong> makes them equal</td><td></td></tr><tr><td><strong>Stack</strong></td><td>Children on top of each other</td><td></td></tr><tr><td><strong>Label</strong></td><td>Text. <strong>Align</strong>, <strong>Colour</strong>, <strong>Font</strong></td><td>Its text</td></tr><tr><td><strong>Button</strong></td><td><code>clicked(name)</code> is True after a click</td><td>Its text</td></tr><tr><td><strong>Toggle</strong></td><td>A check box with text</td><td>On or off (<code>get</code> reads it)</td></tr><tr><td><strong>Slider</strong></td><td><strong>Min</strong>, <strong>Max</strong>, <strong>Step</strong></td><td>Its value (<code>get</code> reads it)</td></tr><tr><td><strong>Progress</strong></td><td>A bar filled to value / max. Its <strong>Text</strong> can use <code>{value}</code>, <code>{max}</code> and <code>{percent}</code></td><td>Its value</td></tr><tr><td><strong>Image</strong></td><td>An image file, stretched over its box</td><td>Its file</td></tr><tr><td><strong>Space</strong></td><td>Room between widgets</td><td></td></tr></tbody></table></div>
+<p>Every node has a <strong>Name</strong> (what scripts use), <strong>Width</strong> and <strong>Height</strong>
+(empty means automatic, the same as leaving them out of a <code>ctx.ui</code> call),
+<strong>Visible</strong>, and for buttons, toggles and sliders, <strong>Enabled</strong>.</p>
+<p>Top-level nodes are placed on the screen with an <strong>Anchor</strong> (one of nine:
+<code>top_left</code>, <code>top</code>, …, <code>center</code>, …, <code>bottom_right</code>) and a <strong>Margin</strong> from
+it. With no anchor, <strong>X</strong> and <strong>Y</strong> are the top-left corner. Nodes inside a
+layout go where the layout puts them. Columns and rows have a <strong>Gap</strong>
+between children and <strong>Padding</strong> inside their edge. With <strong>Panel</strong> on they
+draw a panel behind themselves, with an optional <strong>Title</strong>.</p>
+<h2 id="screens-huds-and-themes">Screens, HUDs and themes<a class="anchor" href="#screens-huds-and-themes" aria-label="Link to this section">#</a></h2>
+<p>Select <strong>Screen</strong> in the tree for the document's own settings:</p>
+<div class="table"><table><thead><tr><th>Setting</th><th>What it does</th></tr></thead><tbody><tr><td><strong>HUD</strong></td><td>Shown from the start, under every screen, until a script sets <code>ctx.ui.screen(&quot;hud&quot;).visible = False</code>. Without it the document is a screen, shown with <code>ctx.ui.screens.show(name)</code></td></tr><tr><td><strong>Modal</strong></td><td>As a screen, it takes the input; what's under it doesn't react</td></tr><tr><td><strong>Pause</strong></td><td>As a screen, <code>ctx.ui.screens.paused</code> is True while it's shown</td></tr><tr><td><strong>Escape</strong></td><td>As a screen, Escape (or a gamepad's B) closes it</td></tr><tr><td><strong>Design W / H</strong></td><td>The size it's laid out for</td></tr><tr><td><strong>Theme</strong></td><td>Text size, font, and the eleven <a href="scripting.html#game-ui">theme colours</a>. Empty means the default; type <code>#rrggbb</code> (or <code>#rrggbbaa</code>) to change one</td></tr></tbody></table></div>
+<p><code>ctx.ui.screens.show(name)</code> uses the document's Modal, Pause and Escape
+unless the call passes its own. Each document draws with its own theme and
+design size, so a HUD and a menu can look different. Keyboard and gamepad
+focus work on documents as on any <a href="scripting.html#keyboard-and-gamepad-focus">screen</a>.</p>
+<h2 id="the-file">The file<a class="anchor" href="#the-file" aria-label="Link to this section">#</a></h2>
+<p>A document is plain RON. Oberon writes the screen's settings, then only
+the theme colours and node fields that differ from the defaults, so the
+files stay short and diff well:</p>
+<div class="codeblock" data-lang="ron"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c">// A UI screen made in Oberon&#x27;s UI editor. Scripts reach its widgets by</span>
+<span class="tok-c">// name: ctx.ui.screen(&quot;hud&quot;).set(&quot;score&quot;, 10)</span>
+(
+    design_size: (<span class="tok-n">1280.0</span>, <span class="tok-n">720.0</span>),
+    hud: <span class="tok-k">true</span>,
+    modal: <span class="tok-k">false</span>,
+    pause: <span class="tok-k">false</span>,
+    escape: <span class="tok-k">true</span>,
+    theme: (accent: <span class="tok-k">Some</span>((<span class="tok-n">0.3</span>, <span class="tok-n">0.85</span>, <span class="tok-n">0.75</span>, <span class="tok-n">1.0</span>))),
+    nodes: [
+        (
+            kind: <span class="tok-t">Column</span>,
+            anchor: <span class="tok-s">&quot;top_left&quot;</span>,
+            x: <span class="tok-n">28.0</span>,
+            y: <span class="tok-n">24.0</span>,
+            children: [
+                (kind: <span class="tok-t">Label</span>, name: <span class="tok-s">&quot;score&quot;</span>, text: <span class="tok-s">&quot;SCORE 0&quot;</span>, size: <span class="tok-k">Some</span>(<span class="tok-n">22.0</span>)),
+                (kind: <span class="tok-t">Progress</span>, name: <span class="tok-s">&quot;lives&quot;</span>, text: <span class="tok-s">&quot;{value} / {max} lives&quot;</span>, value: <span class="tok-n">3.0</span>, <span class="tok-b">max</span>: <span class="tok-n">3.0</span>),
+            ],
+        ),
+    ],
+)</code></pre></div>
+<p>The game reads the files directly and checks them for changes every half
+second, so saving in Oberon updates a game in Play straight away. A
+document with a mistake (<code>kind: Buton</code>) is reported once in the Console,
+with a suggestion, and the other documents keep drawing.</p>
+<h2 id="example">Example<a class="anchor" href="#example" aria-label="Link to this section">#</a></h2>
+<p><code>examples/oberon/shape_signal</code> is a small game made this way. One of three
+shapes lifts, and you pick it with the HUD's buttons (or 1, 2, 3) before it
+drops. Its title screen, HUD and results screen are documents in its
+<code>ui/</code> folder, each themed in the editor. <code>scripts/game.py</code> doesn't draw
+anything: it only calls <code>set</code>, <code>clicked</code> and <code>changed</code> by name.</p>
+<p><img src="../../../assets/ui/shape_signal_hud.jpg" alt="Shape Signal playing: SCORE 0 at the top left, the time bar and a red "3 / 3 lives" bar at the top right, the lifted, glowing Tower between the Cube and the Slab, and the 1 Cube, 2 Tower and 3 Slab buttons along the bottom" loading="lazy" decoding="async"></p>
+    </article>
+    <footer class="pager"><a class="prev" href="code-editor.html"><small>Previous</small>The code editor</a><a class="next" href="models.html"><small>Next</small>Models</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/ui-editor.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#making-one">Making one</a></li><li class="l2"><a href="#the-editor">The editor</a></li><li class="l3"><a href="#keys">Keys</a></li><li class="l2"><a href="#nodes">Nodes</a></li><li class="l2"><a href="#screens-huds-and-themes">Screens, HUDs and themes</a></li><li class="l2"><a href="#the-file">The file</a></li><li class="l2"><a href="#example">Example</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

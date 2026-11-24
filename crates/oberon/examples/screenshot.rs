@@ -164,6 +164,21 @@ fn main() {
                 ui.code_text("ctx");
             }
         }
+        "ui-editor" | "ui-editor-hud" => {
+            // The UI editor on the Shape Signal demo's title screen (or HUD),
+            // with a widget selected so the properties show.
+            let ui_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/oberon/shape_signal/ui");
+            let hud = scene == "ui-editor-hud";
+            let file = if hud { "hud.ui.ron" } else { "title.ui.ron" };
+            ui.open_code(&ui_dir.join(file), None);
+            ui.code.focused = true;
+            let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+            ui.select_ui_node(Some(if hud { vec![3] } else { vec![0, 3] }));
+            if hud {
+                ui.set_ui_preview(1);
+            }
+        }
         "code-tabs" | "code-switcher" => {
             // Many tabs (the strip scrolls), multi-caret editing, and the
             // Ctrl+Tab switcher.

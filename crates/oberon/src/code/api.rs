@@ -42,6 +42,8 @@ pub enum Ty {
     UiTheme,
     /// `ctx.ui.screens`.
     Screens,
+    /// `ctx.ui.screen(name)`: a screen, and its UI document's widgets.
+    UiScreen,
 }
 
 /// What a string argument names.
@@ -317,11 +319,64 @@ const UI_THEME: &[Member] = &[
     ),
 ];
 
+const UI_SCREEN: &[Member] = &[
+    meth(
+        "set",
+        "(widget, value) -> None",
+        "Sets a widget of its ui/<name>.ui.ron by name: a label's text, a progress bar's or slider's value, a toggle's state.",
+        None,
+    ),
+    meth(
+        "get",
+        "(widget) -> Any",
+        "A widget's value now: what set() gave it or what the player chose.",
+        None,
+    ),
+    meth(
+        "clicked",
+        "(widget) -> bool",
+        "The button was clicked (or the toggle / slider used) the last time the document was drawn.",
+        None,
+    ),
+    meth(
+        "changed",
+        "(widget) -> bool",
+        "The player changed this slider or toggle the last time the document was drawn.",
+        None,
+    ),
+    meth(
+        "set_visible",
+        "(widget, visible=True) -> None",
+        "Shows or hides a widget, or a whole column, row or stack.",
+        None,
+    ),
+    meth(
+        "set_enabled",
+        "(widget, enabled=True) -> None",
+        "Enables or disables (dims) a widget.",
+        None,
+    ),
+    prop("widgets", "list[str]", "The names of the document's widgets.", None),
+    prop(
+        "visible",
+        "bool",
+        "Whether the screen shows. Set a HUD document's to False to hide it.",
+        None,
+    ),
+    prop(
+        "document",
+        "UiDocument | None",
+        "Its ui/<name>.ui.ron from Oberon's UI editor, if there is one.",
+        None,
+    ),
+    prop("name", "str", "The screen's name.", None),
+];
+
 const SCREENS: &[Member] = &[
     meth(
         "show",
-        "(name, *, modal=True, pause=False, escape=True) -> None",
-        "Shows a screen on top. Modal screens take the UI's input; Escape closes them.",
+        "(name, *, modal=None, pause=None, escape=None) -> None",
+        "Shows a screen on top. Modal screens take the UI's input; Escape closes them. Options left out come from its ui/<name>.ui.ron, else modal, not paused, closed by Escape.",
         None,
     ),
     meth("hide", "(name) -> None", "Hides a screen.", None),
@@ -446,8 +501,14 @@ const UI: &[Member] = &[
     ),
     meth(
         "screen",
-        "(name) -> bool",
-        "Whether a screen is shown; widgets drawn after it belong to it.",
+        "(name) -> UiScreen",
+        "A screen: truthy while it's shown (widgets drawn after it belong to it); set() / clicked() reach its ui/<name>.ui.ron widgets by name.",
+        Some(Ty::UiScreen),
+    ),
+    meth(
+        "space",
+        "(width=None, height=None) -> None",
+        "Leaves room in the current column or row.",
         None,
     ),
     prop(
@@ -794,6 +855,7 @@ impl Ty {
             Self::Hud => HUD,
             Self::UiTheme => UI_THEME,
             Self::Screens => SCREENS,
+            Self::UiScreen => UI_SCREEN,
         }
     }
 
@@ -815,6 +877,7 @@ impl Ty {
             Self::Hud => "Hud",
             Self::UiTheme => "UiTheme",
             Self::Screens => "Screens",
+            Self::UiScreen => "UiScreen",
         }
     }
 
@@ -836,6 +899,7 @@ impl Ty {
             Self::Hud => "Text, rectangles and images over the game for one frame.",
             Self::UiTheme => "The colours, text size and font ctx.ui draws with.",
             Self::Screens => "Which game UI screens are shown, newest on top.",
+            Self::UiScreen => "A game UI screen and the widgets of its UI document, by name.",
         }
     }
 
@@ -1273,6 +1337,29 @@ mod tests {
         assert_eq!(labels(&complete(&b, p, &names).unwrap()), vec!["health"]);
         let (b, p) = at(SCRIPT, 7, "; print(\"he");
         assert!(complete(&b, p, &names).is_none());
+    }
+
+    #[test]
+    fn ui_screen_completes_its_document_methods() {
+        let src = "def update(entity, ctx):\n    hud = ctx.ui.screen(\"hud\")\n    hud.\n    ctx.ui.screen(\"menu\").cl\n";
+        let b = Buffer::from_text(src);
+        let names = SceneNames::default();
+        let items = complete(&b, Pos::new(2, 8), &names).unwrap();
+        let got = labels(&items);
+        for m in [
+            "set",
+            "get",
+            "clicked",
+            "changed",
+            "set_visible",
+            "set_enabled",
+            "widgets",
+        ] {
+            assert!(got.contains(&m), "{m} missing from {got:?}");
+        }
+        let items = complete(&b, Pos::new(3, 29), &names).unwrap();
+        let got = labels(&items);
+        assert!(got.contains(&"clicked"), "{got:?}");
     }
 
     #[test]

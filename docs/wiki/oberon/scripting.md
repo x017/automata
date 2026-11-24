@@ -438,6 +438,58 @@ folder.
 
 ![The settings screen: a volume slider, a Spin meter toggle, and graphics preset and UI size buttons, with Small focused](../../assets/ui/pause_settings.jpg)
 
+### UI documents
+
+Screens and HUDs can also be made in Oberon's [UI editor](ui-editor.md)
+instead of in code. Each is a `ui/<name>.ui.ron` document in the project.
+The game draws it, with its own theme and design size: a HUD document from
+the start, under every screen, and any other document while its screen is
+shown. Scripts reach its widgets by the names given in the editor:
+
+```python
+def update(entity, ctx):
+    hud = ctx.ui.screen("hud")                 # ui/hud.ui.ron
+    hud.set("score", f"SCORE {entity.state['score']}")
+    hud.set("health", entity.attributes["health"])
+    if hud.clicked("menu"):
+        ctx.ui.screens.show("pause")           # ui/pause.ui.ron, with its own options
+    pause = ctx.ui.screen("pause")
+    if pause.changed("volume"):
+        ctx.settings.volume = pause.get("volume")
+```
+
+| `ctx.ui.screen(name)` | |
+|---|---|
+| `set(widget, value)` | A label's or button's text, a progress bar's or slider's value, a toggle's state, an image's file |
+| `get(widget)` | Its value now: what `set` gave it, or what the player chose |
+| `clicked(widget)` | The button was clicked (or the toggle or slider used) the last time the document drew |
+| `changed(widget)` | The player changed the slider or toggle the last time it drew |
+| `set_visible(widget, visible=True)`, `set_enabled(widget, enabled=True)` | Show or hide a widget (a column, row or stack hides its children too), and enable or dim one |
+| `visible` | Whether the screen shows; set a HUD document's to `False` to hide it |
+| `widgets`, `document`, `name` | Its widget names, its `UiDocument`, and its name |
+
+- **Names are checked.** A widget name that isn't in the document raises
+  `KeyError` with the closest match (`ui/hud.ui.ron has no widget named
+  'scroe'; did you mean 'score'?`). A value of the wrong type raises
+  `TypeError` (`'health' is a progress: set it to a number`). A screen with
+  no document raises `LookupError` as soon as you `set` or `clicked`.
+- **Clicks arrive a frame later**, like any widget's: the document draws
+  after every script's `update`, so `clicked` reports the click made
+  when it was last drawn.
+- **Screens:** `ctx.ui.screens.show("pause")` takes the document's Modal,
+  Pause and Escape settings unless the call passes its own. Keys,
+  gamepads and focus work as on any screen.
+- **Hot reload:** saving a document in Oberon redraws it in the running
+  game within half a second. A broken document is reported once in the
+  Console, and the others keep drawing.
+- **Mixing:** `ui.screen(name)` is still truthy while the screen is shown,
+  so a script can draw extra widgets onto a document's screen with
+  `if ui.screen("pause"): ...`.
+
+`examples/oberon/shape_signal` is a game whose title screen, HUD and
+results screen are all documents. Its script only calls `set`, `clicked`
+and `changed`.
+
 ## Keys
 
 Scripts can read and write any entity's state with a key, Redis style.

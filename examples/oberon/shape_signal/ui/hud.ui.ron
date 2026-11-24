@@ -1,0 +1,132 @@
+// A UI screen made in Oberon's UI editor. Scripts reach its widgets by
+// name: ctx.ui.screen("hud").set("score", 10)
+(
+    design_size: (1280.0, 720.0),
+    hud: true,
+    modal: false,
+    pause: false,
+    escape: true,
+    theme: (
+        button: Some((0.1, 0.13, 0.2, 0.86)),
+        hover: Some((0.18, 0.24, 0.36, 0.92)),
+        accent: Some((0.3, 0.85, 0.75, 1.0)),
+        text_size: Some(18.0),
+    ),
+    nodes: [
+        (
+            kind: Column,
+            anchor: "top_left",
+            x: 28.0,
+            y: 24.0,
+            width: Some(320.0),
+            gap: 8.0,
+            children: [
+                (
+                    kind: Label,
+                    name: "score",
+                    text: "SCORE 0",
+                    size: Some(22.0),
+                    font: "fonts/PressStart2P-Regular.ttf",
+                ),
+                (
+                    kind: Label,
+                    name: "streak",
+                    size: Some(18.0),
+                    color: Some((1.0, 0.72, 0.25, 1.0)),
+                ),
+            ],
+        ),
+        (
+            kind: Column,
+            anchor: "top_right",
+            x: 28.0,
+            y: 24.0,
+            width: Some(280.0),
+            gap: 8.0,
+            children: [
+                (
+                    kind: Row,
+                    columns: 2,
+                    children: [
+                        (
+                            kind: Label,
+                            text: "TIME",
+                            size: Some(14.0),
+                            font: "fonts/PressStart2P-Regular.ttf",
+                        ),
+                        (
+                            kind: Label,
+                            name: "clock",
+                            text: "45 s",
+                            size: Some(14.0),
+                            align: "right",
+                            font: "fonts/PressStart2P-Regular.ttf",
+                        ),
+                    ],
+                ),
+                (
+                    kind: Progress,
+                    name: "time",
+                    height: Some(12.0),
+                    value: 45.0,
+                    max: 45.0,
+                ),
+                (
+                    kind: Progress,
+                    name: "lives",
+                    text: "{value} / {max} lives",
+                    height: Some(24.0),
+                    color: Some((0.95, 0.35, 0.4, 1.0)),
+                    value: 3.0,
+                    max: 3.0,
+                ),
+            ],
+        ),
+        (
+            kind: Label,
+            name: "verdict",
+            anchor: "top",
+            y: 150.0,
+            size: Some(26.0),
+            align: "center",
+            font: "fonts/PressStart2P-Regular.ttf",
+        ),
+        (
+            kind: Row,
+            name: "picks",
+            anchor: "bottom",
+            y: 40.0,
+            width: Some(630.0),
+            height: Some(58.0),
+            gap: 15.0,
+            columns: 3,
+            children: [
+                (
+                    kind: Button,
+                    name: "pick_1",
+                    text: "1  Cube",
+                ),
+                (
+                    kind: Button,
+                    name: "pick_2",
+                    text: "2  Tower",
+                ),
+                (
+                    kind: Button,
+                    name: "pick_3",
+                    text: "3  Slab",
+                ),
+            ],
+        ),
+        (
+            kind: Label,
+            name: "keys",
+            text: "Pick the shape that lifts: click its button or press 1, 2 or 3",
+            anchor: "bottom",
+            y: 112.0,
+            size: Some(16.0),
+            color: Some((0.85, 0.88, 0.94, 1.0)),
+            align: "center",
+        ),
+    ],
+)
