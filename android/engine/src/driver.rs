@@ -50,6 +50,10 @@ pub(crate) fn run(host: &mut dyn Host) -> Result<()> {
     sdl3::hint::set("SDL_ANDROID_BLOCK_ON_PAUSE", "0");
 
     let sdl = sdl3::init().map_err(platform)?;
+    info!(
+        block_on_pause = ?sdl3::hint::get("SDL_ANDROID_BLOCK_ON_PAUSE"),
+        "SDL initialised"
+    );
     let video = sdl.video().map_err(platform)?;
     let (width, height) = host.window_config().size;
     let mut builder = video.window(host.title(), width, height);

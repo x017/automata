@@ -6,7 +6,12 @@ sends it to the background and back, and reads the `automata-spike` lines
 it prints (python-for-android sends them to logcat, tag `python`).
 """
 
+import os
+
 import automata as at
+
+# The smoke test reads SDL's own record of the events it queues.
+os.environ.setdefault("SDL_EVENT_LOGGING", "1")
 
 print(f"automata-spike start platform={getattr(at._core, 'platform', 'desktop')}")
 
