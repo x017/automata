@@ -43,7 +43,8 @@ this and `oberon run`, `test`, `export` and `doctor`.
 | [Materials](materials.md) | Shared `.mat.ron` looks with textures: the material editor, its live preview, dragging materials onto objects |
 | [Models](models.md) | Importing glTF and OBJ models, the Assets tab, import settings (scale, rotation, pivot), fitted colliders |
 | [Audio](audio.md) | Sound files, Audio Sources, previews, playing sounds from scripts |
-| [Prefabs & attributes](prefabs-and-attributes.md) | Reusable objects and custom per-entity data |
+| [Prefabs & attributes](prefabs-and-attributes.md) | Reusable objects that stay linked: overrides, Apply / Revert, variants; custom per-entity data |
+| [Editor workflow](editor-workflow.md) | Editing many objects at once, snapping, Duplicate Along a Line, the Profiler |
 | [Exporting your game](exporting.md) | Building standalone Windows and Linux games (Ctrl+Shift+B) |
 
 New to Oberon? Do the [first scene tutorial](../tutorials/first-scene.md)

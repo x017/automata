@@ -15,6 +15,8 @@
 #![forbid(unsafe_code)]
 
 use std::collections::HashSet;
+
+use automata_core::TransformData;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -185,6 +187,8 @@ struct EditorApp {
     lsp_failed: bool,
     /// Whether the "scripts are slow" warning was shown this session.
     bridge_slow_warned: bool,
+    /// The scripts' time in their last answered frame (for the Profiler).
+    last_script_ms: f32,
     /// Gamepads for scripts (`"pad_*"` keys), opened when Play first sends
     /// a frame.
     gamepads: Pads,
@@ -253,6 +257,7 @@ impl EditorApp {
             lsp: None,
             lsp_failed: false,
             bridge_slow_warned: false,
+            last_script_ms: 0.0,
             gamepads: Pads::NotOpened,
             edit_camera: None,
             last_frame: Instant::now(),
@@ -411,6 +416,103 @@ impl EditorApp {
         {
             return; // the scene is read-only while simulating
         }
+        if self.fan_out(&intent) {
+            return;
+        }
+        self.apply_edit(intent);
+    }
+
+    /// Applies an edit aimed at one of several selected entities to every
+    /// selected entity, as one undo step. Returns false (doing nothing) for
+    /// intents that aren't such an edit.
+    fn fan_out(&mut self, intent: &Intent) -> bool {
+        let ids = self.doc.selection();
+        let Some(primary) = intent.fan_target() else {
+            return false;
+        };
+        if ids.len() < 2 || !ids.contains(&primary) {
+            return false;
+        }
+        let data = |doc: &Document, id: u64| doc.index_of(id).map(|i| doc.entities[i].data.clone());
+        let Some(lead) = data(&self.doc, primary) else {
+            return false;
+        };
+        let list: Vec<Intent> = match intent {
+            Intent::Duplicate(_) => {
+                let copies = self.doc.duplicate_many(&ids);
+                self.ui.log(
+                    LogLevel::Info,
+                    format!("Duplicated {} entities", copies.len()),
+                );
+                return true;
+            }
+            // Every selected entity takes the lead's new value.
+            Intent::Toggle { flag, .. } => {
+                let Some(on) = fields::get_flag(&lead, *flag) else {
+                    return false;
+                };
+                ids.iter()
+                    .filter(|&&id| {
+                        data(&self.doc, id).and_then(|d| fields::get_flag(&d, *flag)) == Some(on)
+                    })
+                    .map(|&id| Intent::Toggle { id, flag: *flag })
+                    .collect()
+            }
+            Intent::Cycle { choice, .. } => {
+                let mut next = lead.clone();
+                fields::cycle(&mut next, *choice);
+                let Some(label) = fields::choice_label(&next, *choice) else {
+                    return false;
+                };
+                ids.iter()
+                    .map(|&id| Intent::SetChoice {
+                        id,
+                        choice: *choice,
+                        label,
+                    })
+                    .collect()
+            }
+            Intent::SetTransform { transform, .. } => {
+                let Some(before) = lead.transform else {
+                    return false;
+                };
+                ids.iter()
+                    .filter_map(|&id| {
+                        let t = data(&self.doc, id)?.transform?;
+                        let transform = if id == primary {
+                            *transform
+                        } else {
+                            group_transform(&before, transform, &t)
+                        };
+                        Some(Intent::SetTransform { id, transform })
+                    })
+                    .collect()
+            }
+            other => {
+                let list: Vec<Intent> = ids.iter().filter_map(|&id| other.retarget(id)).collect();
+                if list.is_empty() {
+                    return false;
+                }
+                list
+            }
+        };
+        let deleting = matches!(intent, Intent::Delete(_));
+        let count = list.len();
+        self.doc.begin_batch();
+        for i in list {
+            self.apply_edit(i);
+        }
+        self.doc.end_batch();
+        if deleting {
+            self.ui
+                .log(LogLevel::Info, format!("Deleted {count} entities"));
+        }
+        true
+    }
+
+    /// Applies one edit (or editor action) to the document.
+    #[allow(clippy::too_many_lines)]
+    fn apply_edit(&mut self, intent: Intent) {
         let doc = &mut self.doc;
         match intent {
             Intent::Brush {
@@ -426,6 +528,23 @@ impl EditorApp {
                 doc.select(id);
                 if let Some(play) = &mut self.play {
                     play.doc.select(id);
+                }
+            }
+            Intent::SelectMore { id, range } => {
+                if range {
+                    doc.select_range(id);
+                } else {
+                    doc.toggle_selected(id);
+                }
+                let ids = doc.selection();
+                if let Some(play) = &mut self.play {
+                    play.doc.select_many(&ids);
+                }
+            }
+            Intent::SelectMany(ids) => {
+                doc.select_many(&ids);
+                if let Some(play) = &mut self.play {
+                    play.doc.select_many(&ids);
                 }
             }
             Intent::Create(kind) => {
@@ -513,8 +632,8 @@ impl EditorApp {
             }
             Intent::EndGesture => doc.end_gesture(),
             Intent::NudgeSelected(delta) => {
-                if let Some(i) = doc.selected_index() {
-                    let id = doc.entities[i].id;
+                // One coalesced undo step moves the whole selection.
+                for id in doc.selection() {
                     doc.nudge_entity(id, delta);
                 }
             }
@@ -659,6 +778,75 @@ impl EditorApp {
                 }
             }
             Intent::Open(path) => self.open_scene(&path),
+            Intent::DuplicateAlong {
+                id,
+                count,
+                step,
+                turn_y,
+            } => {
+                let ids = doc.duplicate_along(id, count, step, turn_y);
+                self.ui.log(
+                    LogLevel::Info,
+                    format!("Placed {} copies along a line", ids.len()),
+                );
+            }
+            Intent::ApplyPrefab(id) => match doc.apply_to_prefab(id) {
+                Ok((path, 0)) => self.ui.log(
+                    LogLevel::Info,
+                    format!("Nothing to apply: it matches {}", path.display()),
+                ),
+                Ok((path, n)) => {
+                    self.ui.log(
+                        LogLevel::Info,
+                        format!(
+                            "Applied {n} override(s) to {}; its instances follow",
+                            path.display()
+                        ),
+                    );
+                    self.ui.files_changed(Some(&path));
+                }
+                Err(e) => self.ui.log(LogLevel::Error, format!("Apply failed: {e}")),
+            },
+            Intent::RevertPrefab { id, paths } => {
+                if doc.revert_overrides(id, paths.as_deref()) {
+                    self.ui.log(LogLevel::Info, "Reverted to the prefab");
+                }
+            }
+            Intent::UnlinkPrefab(id) => {
+                if doc.unlink_prefab(id) {
+                    self.ui.log(
+                        LogLevel::Info,
+                        "Unlinked from its prefab (it keeps its values)",
+                    );
+                }
+            }
+            Intent::SelectInstances(id) => {
+                let path = doc
+                    .index_of(id)
+                    .and_then(|i| doc.entities[i].data.prefab.as_ref())
+                    .map(|l| l.path.clone());
+                if let Some(path) = path {
+                    let mut ids = doc.instances_of(&path);
+                    // Keep the clicked one primary.
+                    ids.retain(|&x| x != id);
+                    ids.push(id);
+                    doc.select_many(&ids);
+                    self.ui.log(
+                        LogLevel::Info,
+                        format!("Selected {} instance(s) of {path}", ids.len()),
+                    );
+                }
+            }
+            Intent::CreateVariant(path) => match doc.create_variant(&path) {
+                Ok(variant) => {
+                    self.ui.log(
+                        LogLevel::Info,
+                        format!("Created variant {}", variant.display()),
+                    );
+                    self.ui.files_changed(Some(&variant));
+                }
+                Err(e) => self.ui.log(LogLevel::Error, format!("Variant failed: {e}")),
+            },
             Intent::SaveAs(path) => {
                 self.doc.path = Some(path.clone());
                 self.save();
@@ -836,9 +1024,13 @@ impl EditorApp {
             std::fs::write(path, text).map_err(|e| e.to_string())
         });
         match result {
-            Ok(()) => self
-                .ui
-                .log(LogLevel::Info, format!("Saved prefab {}", path.display())),
+            Ok(()) => {
+                // The entity becomes its first instance.
+                let rel = self.doc.relative(path);
+                self.doc.link_prefab(id, &rel);
+                self.ui
+                    .log(LogLevel::Info, format!("Saved prefab {}", path.display()));
+            }
             Err(e) => self
                 .ui
                 .log(LogLevel::Error, format!("Save prefab failed: {e}")),
@@ -881,6 +1073,18 @@ impl EditorApp {
                 self.ui
                     .log(LogLevel::Info, "Asset files changed on disk; reloaded");
             }
+            if self.play.is_none() {
+                let n = self.doc.poll_prefabs();
+                if n > 0 {
+                    self.ui.log(
+                        LogLevel::Info,
+                        format!("A prefab changed on disk; {n} instance(s) follow"),
+                    );
+                }
+            }
+        }
+        for note in std::mem::take(&mut self.doc.notes) {
+            self.ui.log(LogLevel::Warn, note);
         }
     }
 
@@ -1120,7 +1324,10 @@ impl EditorApp {
                     .first()
                     .and_then(|e| e.transform)
                     .map_or(0.0, |tr| tr.position[1]);
-                let ids = self.doc.instantiate(&prefab, [t[0], ground, t[2]]);
+                let rel = self.doc.relative(path);
+                let ids = self
+                    .doc
+                    .instantiate_linked(&rel, &prefab, [t[0], ground, t[2]]);
                 self.ui.log(
                     LogLevel::Info,
                     format!("Instantiated {} ({} entity(s))", path.display(), ids.len()),
@@ -1674,6 +1881,9 @@ impl EditorApp {
             }
             BridgeMsg::Reloaded(_) | BridgeMsg::Bye => {}
             BridgeMsg::Frame(reply) => {
+                if let Some(ms) = reply.script_ms {
+                    self.last_script_ms = ms;
+                }
                 let mut lock = None;
                 if let Some(play) = &mut self.play {
                     play.apply_frame(&reply);
@@ -2068,7 +2278,16 @@ impl EditorApp {
             (KeyCode::KeyY, true) => Some(Intent::Redo),
             (KeyCode::KeyS, true) => Some(Intent::Save),
             (KeyCode::KeyN, true) => Some(Intent::New),
+            (KeyCode::KeyD, true) if shift => {
+                if let Some(id) = selected {
+                    self.ui.open_duplicate_along(&self.doc, id);
+                }
+                None
+            }
             (KeyCode::KeyD, true) => selected.map(Intent::Duplicate),
+            (KeyCode::KeyA, true) => Some(Intent::SelectMany(
+                self.doc.entities.iter().map(|e| e.id).collect(),
+            )),
             (KeyCode::KeyP, true) => Some(if self.ui.play == PlayState::Editing {
                 Intent::Play
             } else {
@@ -2217,6 +2436,7 @@ impl EditorApp {
         self.tick_scripts(dt);
         self.poll_build();
         self.watch_models();
+        let mut physics_ms = 0.0;
         let ms = dt * 1000.0;
         let prev = self.ui.stats.frame_ms;
         self.ui.stats.frame_ms = if prev <= 0.0 || ms > 250.0 {
@@ -2244,7 +2464,9 @@ impl EditorApp {
             let scene_cam = play.scene_camera();
             let yaw = scene_cam.map_or(self.ui.camera.yaw, |c| ViewCamera::from_camera3d(&c).yaw);
             play.input = self.input.play_input(yaw);
+            let t = Instant::now();
             play.update(dt);
+            physics_ms = t.elapsed().as_secs_f32() * 1000.0;
         }
         if self.play.is_some() {
             let root = self.doc.base_dir();
@@ -2276,6 +2498,9 @@ impl EditorApp {
 
         // `composited`: where the GPU should show the scene view this frame
         // (physical top-left corner), when it renders without a readback.
+        let draw_start = Instant::now();
+        // Time spent rendering the scene (and previews) inside the draw.
+        let mut scene_ms = 0.0_f32;
         let (intents, composited) = {
             let Self {
                 doc,
@@ -2316,20 +2541,25 @@ impl EditorApp {
                     // The GPU path: the scene stays on the GPU and is
                     // composited under the UI at present time.
                     Some(r) => {
+                        let t = Instant::now();
                         viewport.render_play_gpu(r, session, cam, vw, vh);
+                        scene_ms += t.elapsed().as_secs_f32() * 1000.0;
                         for e in viewport.take_hud_font_errors() {
                             ui.log(LogLevel::Warn, format!("{e}; using the built-in font"));
                         }
                         ui.frame_composited(canvas, &session.doc, pointer, (vw, vh))
                     }
                     None => {
+                        let t = Instant::now();
                         let (frame, fw, fh) = viewport.render_play(None, session, cam, vw, vh);
+                        scene_ms += t.elapsed().as_secs_f32() * 1000.0;
                         let intents =
                             ui.frame(canvas, &session.doc, pointer, Some((frame, fw, fh)));
                         (intents, None)
                     }
                 },
                 None => {
+                    let t = Instant::now();
                     viewport.tick_particles(dt);
                     // The Inspector's animation preview follows the
                     // selection, and plays without pressing Play.
@@ -2360,10 +2590,12 @@ impl EditorApp {
                     match renderer.as_mut() {
                         Some(r) => {
                             viewport.render_gpu(r, doc, cam, vw, vh);
+                            scene_ms += t.elapsed().as_secs_f32() * 1000.0;
                             ui.frame_composited(canvas, doc, pointer, (vw, vh))
                         }
                         None => {
                             let (frame, fw, fh) = viewport.render(None, doc, cam, vw, vh);
+                            scene_ms += t.elapsed().as_secs_f32() * 1000.0;
                             (ui.frame(canvas, doc, pointer, Some((frame, fw, fh))), None)
                         }
                     }
@@ -2388,11 +2620,25 @@ impl EditorApp {
             self.save_prefs();
         }
 
+        let draw_ms = draw_start.elapsed().as_secs_f32() * 1000.0;
+        let present = Instant::now();
         if let (Some(renderer), Some(canvas)) = (&mut self.renderer, &self.canvas) {
             let scene =
                 composited.and_then(|origin| Some((self.viewport.scene_texture()?, origin)));
             renderer.present_composited(canvas.pixels(), canvas.size(), scene);
         }
+        let present_ms = present.elapsed().as_secs_f32() * 1000.0;
+        self.ui.profiler.record(crate::ui::profiler::FrameSample {
+            scripts: if self.play.is_some() {
+                self.last_script_ms
+            } else {
+                0.0
+            },
+            physics: physics_ms,
+            render: scene_ms + present_ms,
+            ui: (draw_ms - scene_ms).max(0.0),
+            total: ms.min(1000.0),
+        });
         self.update_window_chrome(&window);
         self.autosave();
     }
@@ -2784,6 +3030,49 @@ fn code_char(code: KeyCode) -> Option<char> {
     letters.iter().find(|(k, _)| *k == code).map(|(_, c)| *c)
 }
 
+/// Where entity transform `t` goes when the lead of a group selection moves
+/// from `before` to `after`: moved by the same offset, turned by the same
+/// rotation about the lead's pivot, and scaled by the same factors.
+fn group_transform(
+    before: &TransformData,
+    after: &TransformData,
+    t: &TransformData,
+) -> TransformData {
+    use glam::{EulerRot, Quat, Vec3};
+
+    let quat = |e: [f32; 3]| Quat::from_euler(EulerRot::XYZ, e[0], e[1], e[2]);
+    let turn = quat(after.rotation_euler) * quat(before.rotation_euler).inverse();
+    let pivot = Vec3::from(before.position);
+    let offset = Vec3::from(t.position) - pivot;
+    // A plain move leaves each rotation exactly as it was.
+    let still = turn.angle_between(Quat::IDENTITY) < 1e-6;
+    let position = if still {
+        Vec3::from(after.position) + offset
+    } else {
+        Vec3::from(after.position) + turn * offset
+    };
+    let (ex, ey, ez) = if still {
+        (
+            t.rotation_euler[0],
+            t.rotation_euler[1],
+            t.rotation_euler[2],
+        )
+    } else {
+        (turn * quat(t.rotation_euler)).to_euler(EulerRot::XYZ)
+    };
+    let mut scale = t.scale;
+    for (i, s) in scale.iter_mut().enumerate() {
+        if before.scale[i].abs() > 1e-6 {
+            *s *= after.scale[i] / before.scale[i];
+        }
+    }
+    TransformData {
+        position: position.to_array(),
+        rotation_euler: [ex, ey, ez],
+        scale,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2797,5 +3086,30 @@ mod tests {
         );
         assert_eq!(frame_interval(0, true), Some(Duration::from_millis(100)));
         assert_eq!(frame_interval(240, true), Some(Duration::from_millis(100)));
+    }
+
+    #[test]
+    fn a_group_follows_its_lead() {
+        let t = |p: [f32; 3], yaw: f32, s: f32| TransformData {
+            position: p,
+            rotation_euler: [0.0, yaw, 0.0],
+            scale: [s, s, s],
+        };
+        let lead = t([0.0, 0.0, 0.0], 0.0, 1.0);
+        let other = t([2.0, 0.0, 0.0], 0.3, 2.0);
+        // A move carries the others by the same offset, rotation untouched.
+        let moved = group_transform(&lead, &t([1.0, 0.5, 0.0], 0.0, 1.0), &other);
+        assert_eq!(moved.position, [3.0, 0.5, 0.0]);
+        assert_eq!(moved.rotation_euler, other.rotation_euler);
+        // A quarter turn swings them around the lead.
+        let quarter = std::f32::consts::FRAC_PI_2;
+        let turned = group_transform(&lead, &t([0.0, 0.0, 0.0], quarter, 1.0), &other);
+        assert!((turned.position[0]).abs() < 1e-5 && (turned.position[2] + 2.0).abs() < 1e-5);
+        let r = turned.rotation_euler;
+        let q = glam::Quat::from_euler(glam::EulerRot::XYZ, r[0], r[1], r[2]);
+        assert!(q.angle_between(glam::Quat::from_rotation_y(0.3 + quarter)) < 1e-4);
+        // Scaling the lead ×2 scales the others ×2.
+        let scaled = group_transform(&lead, &t([0.0, 0.0, 0.0], 0.0, 2.0), &other);
+        assert_eq!(scaled.scale, [4.0, 4.0, 4.0]);
     }
 }

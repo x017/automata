@@ -109,6 +109,12 @@ pub enum UiAction {
     ShowConsole,
     /// Show (or hide) the Assets tab of the bottom dock.
     ShowAssets,
+    /// Show (or hide) the Profiler tab of the bottom dock.
+    ShowProfiler,
+    /// Turn gizmo snapping on or off.
+    ToggleSnap,
+    /// Open Duplicate Along for an entity.
+    DuplicateAlong(u64),
     /// Show the Files panel in the left sidebar.
     ShowFiles,
     /// Open the Settings dialog.
@@ -380,9 +386,21 @@ impl Ui {
                     editing && !self.entity_clipboard.is_empty(),
                 ),
                 MenuItem::intent("Duplicate", "Ctrl+D", Intent::Duplicate(sel), has_sel),
+                MenuItem::ui(
+                    "Duplicate Along…",
+                    "Ctrl+Shift+D",
+                    UiAction::DuplicateAlong(sel),
+                    has_sel,
+                ),
                 MenuItem::intent("Delete", "Del", Intent::Delete(sel), has_sel),
                 MenuItem::ui("Rename", "F2", UiAction::Rename(sel), has_sel),
                 MenuItem::separator(),
+                MenuItem::intent(
+                    "Select All",
+                    "Ctrl+A",
+                    Intent::SelectMany(doc.entities.iter().map(|e| e.id).collect()),
+                    !doc.entities.is_empty(),
+                ),
                 MenuItem::ui(
                     "Frame Selected",
                     "F",
@@ -394,6 +412,19 @@ impl Ui {
                 MenuItem::ui("Move Tool", "W", UiAction::Gizmo(GizmoMode::Move), true),
                 MenuItem::ui("Rotate Tool", "E", UiAction::Gizmo(GizmoMode::Rotate), true),
                 MenuItem::ui("Scale Tool", "R", UiAction::Gizmo(GizmoMode::Scale), true),
+                MenuItem::ui(
+                    format!(
+                        "{}Snap",
+                        if self.prefs.snap.enabled {
+                            "✓ "
+                        } else {
+                            "   "
+                        }
+                    ),
+                    "",
+                    UiAction::ToggleSnap,
+                    true,
+                ),
                 MenuItem::separator(),
                 MenuItem::intent(
                     if editing { "Play" } else { "Stop" },
@@ -517,6 +548,16 @@ impl Ui {
                         UiAction::ShowAssets,
                         true,
                     ),
+                    MenuItem::ui(
+                        check(
+                            self.panels.show_bottom
+                                && self.bottom_tab == super::BottomTab::Profiler,
+                            "Profiler",
+                        ),
+                        "",
+                        UiAction::ShowProfiler,
+                        true,
+                    ),
                     MenuItem::separator(),
                     MenuItem::ui("Reset Layout", "", UiAction::ResetLayout, true),
                 ]
@@ -573,6 +614,12 @@ impl Ui {
         let mut items = vec![
             MenuItem::ui("Rename", "F2", UiAction::Rename(id), editing),
             MenuItem::intent("Duplicate", "Ctrl+D", Intent::Duplicate(id), editing),
+            MenuItem::ui(
+                "Duplicate Along…",
+                "Ctrl+Shift+D",
+                UiAction::DuplicateAlong(id),
+                editing,
+            ),
             MenuItem::ui("Copy", "Ctrl+C", UiAction::CopyEntity(id), true),
             MenuItem::intent(
                 "Paste",
@@ -592,6 +639,30 @@ impl Ui {
         ];
         if let Some(i) = doc.index_of(id) {
             let d = &doc.entities[i].data;
+            if d.prefab.is_some() {
+                let changed = doc.prefab_overrides(id).is_some_and(|o| !o.is_empty());
+                items.extend([
+                    MenuItem::intent(
+                        "Apply to Prefab",
+                        "",
+                        Intent::ApplyPrefab(id),
+                        editing && changed,
+                    ),
+                    MenuItem::intent(
+                        "Revert to Prefab",
+                        "",
+                        Intent::RevertPrefab { id, paths: None },
+                        editing && changed,
+                    ),
+                    MenuItem::intent("Unlink Prefab", "", Intent::UnlinkPrefab(id), editing),
+                    MenuItem::intent(
+                        "Select Prefab Instances",
+                        "",
+                        Intent::SelectInstances(id),
+                        true,
+                    ),
+                ]);
+            }
             match &d.script {
                 Some(script) => items.push(MenuItem::intent(
                     "Edit Script",
@@ -735,6 +806,19 @@ impl Ui {
             }
             UiAction::ShowFiles => self.panels.show_files = true,
             UiAction::ShowAssets => self.toggle_assets(),
+            UiAction::ShowProfiler => {
+                if self.panels.show_bottom && self.bottom_tab == super::BottomTab::Profiler {
+                    self.panels.show_bottom = false;
+                } else {
+                    self.panels.show_bottom = true;
+                    self.bottom_tab = super::BottomTab::Profiler;
+                }
+            }
+            UiAction::DuplicateAlong(id) => self.open_duplicate_along(doc, id),
+            UiAction::ToggleSnap => {
+                self.prefs.snap.enabled = !self.prefs.snap.enabled;
+                self.prefs_dirty = true;
+            }
             UiAction::BuildSettings => {
                 self.load_build_settings(doc.path.as_deref());
                 self.open_settings_page(super::settings::SettingsPage::Build);
@@ -751,6 +835,19 @@ impl Ui {
 
     /// Copies an entity to the entity clipboard.
     pub(super) fn copy_entity(&mut self, doc: &Document, id: u64) {
+        // Inside a multi-selection, the whole selection (in scene order).
+        if doc.selection_len() > 1 && doc.is_selected(id) {
+            let all: Vec<EntityData> = doc
+                .entities
+                .iter()
+                .filter(|e| doc.is_selected(e.id))
+                .map(|e| e.data.clone())
+                .collect();
+            let n = all.len();
+            self.entity_clipboard = all;
+            self.log(super::LogLevel::Info, format!("Copied {n} entities"));
+            return;
+        }
         if let Some(i) = doc.index_of(id) {
             let data: EntityData = doc.entities[i].data.clone();
             self.entity_clipboard = vec![data];

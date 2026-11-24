@@ -602,6 +602,12 @@ impl Ui {
             AssetKind::Scene => menu.push(item_menu("Open Scene", open_intent(&item.path, false))),
             AssetKind::Prefab => {
                 menu.push(item_menu("Instantiate", open_intent(&item.path, false)));
+                menu.push(MenuItem {
+                    label: "Create Variant".into(),
+                    shortcut: "",
+                    action: Some(Action::Intent(Intent::CreateVariant(item.path.clone()))),
+                    enabled: editing,
+                });
             }
             AssetKind::UiScreen => {
                 menu.push(item_menu("Edit UI Screen", open_intent(&item.path, false)));

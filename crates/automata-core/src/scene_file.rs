@@ -126,6 +126,11 @@ pub struct EntityData {
     /// A sound the entity plays (see [`crate::audio_source`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_source: Option<crate::AudioSource>,
+    /// The prefab this entity is an instance of (see [`crate::prefab`]):
+    /// loading re-syncs it with the prefab file except for the fields it
+    /// overrides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefab: Option<crate::prefab::PrefabLink>,
 }
 
 /// A custom attribute value: the small set of types an editor can show and

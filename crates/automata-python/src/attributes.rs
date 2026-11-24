@@ -281,6 +281,9 @@ fn repr_value(value: &AttributeValue) -> String {
 #[derive(Debug, Clone, Default)]
 pub struct PyPrefab {
     entities: Vec<StagedEntity>,
+    /// The file it was loaded from (relative to the asset root): instances
+    /// link to it.
+    source: Option<String>,
 }
 
 #[pymethods]
@@ -295,6 +298,7 @@ impl PyPrefab {
         if let Ok(entity) = entities.cast::<PyEntity>() {
             return Ok(Self {
                 entities: vec![entity.borrow().staged().clone()],
+                source: None,
             });
         }
         let mut staged = Vec::new();
@@ -305,7 +309,10 @@ impl PyPrefab {
                 .map_err(|_| PyTypeError::new_err("Prefab takes an Entity or a list of them"))?;
             staged.push(entity.borrow().staged().clone());
         }
-        Ok(Self { entities: staged })
+        Ok(Self {
+            entities: staged,
+            source: None,
+        })
     }
 
     /// Parses a prefab from RON text (the scene-file format).
@@ -313,7 +320,10 @@ impl PyPrefab {
     fn from_ron(_cls: &Bound<'_, pyo3::types::PyType>, text: &str) -> PyResult<Self> {
         let entities = crate::serialize::scene_from_ron(text)
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
-        Ok(Self { entities })
+        Ok(Self {
+            entities,
+            source: None,
+        })
     }
 
     /// Loads a `.prefab` file.
@@ -321,13 +331,29 @@ impl PyPrefab {
     fn load(cls: &Bound<'_, pyo3::types::PyType>, path: &str) -> PyResult<Self> {
         let text =
             std::fs::read_to_string(path).map_err(|err| PyIOError::new_err(err.to_string()))?;
-        Self::from_ron(cls, &text)
+        // A variant follows its base prefab (linked relative to the asset
+        // root, else the working directory).
+        let _ = cls;
+        let root = crate::serialize::link_root();
+        let entities = crate::serialize::scene_from_file_text(&text, &root)
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        Ok(Self {
+            entities,
+            source: Some(link_path(&root, path)),
+        })
     }
 
     /// Serializes the prefab to RON text.
     fn to_ron(&self) -> PyResult<String> {
         crate::serialize::scene_to_ron(&self.entities)
             .map_err(|err| PyValueError::new_err(err.to_string()))
+    }
+
+    /// The file this prefab was loaded from (relative to the asset root),
+    /// which its instances link to; `None` for one built in code.
+    #[getter]
+    fn path(&self) -> Option<String> {
+        self.source.clone()
     }
 
     /// Writes the prefab to `path`.
@@ -392,6 +418,15 @@ impl PyPrefab {
         name: Option<String>,
     ) -> Vec<StagedEntity> {
         let mut out = self.entities.clone();
+        if let Some(source) = &self.source {
+            for (i, entity) in out.iter_mut().enumerate() {
+                entity.prefab = Some(automata_core::PrefabLink {
+                    path: source.clone(),
+                    index: u32::try_from(i).unwrap_or(0),
+                    overrides: Vec::new(),
+                });
+            }
+        }
         if let Some((x, y, z)) = position {
             let origin = out
                 .first()
@@ -426,4 +461,25 @@ fn transform_of(entity: &StagedEntity) -> Option<automata_scene::Transform> {
         StagedComponent::Transform(t) => Some(*t),
         _ => None,
     })
+}
+
+/// `path` as a prefab link: relative to `root` (with `/`) when inside it,
+/// else as given.
+fn link_path(root: &std::path::Path, path: &str) -> String {
+    let p = std::path::Path::new(path);
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(p)
+    };
+    let root = std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf());
+    abs.strip_prefix(&root).map_or_else(
+        |_| path.replace('\\', "/"),
+        |rel| {
+            rel.components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/")
+        },
+    )
 }

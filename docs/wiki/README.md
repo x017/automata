@@ -63,6 +63,7 @@ hours.
 | Lay out game menus and HUDs in Oberon | [The UI editor](oberon/ui-editor.md) |
 | Share textured looks between objects | [Materials](oberon/materials.md) |
 | Reuse objects and add custom data | [Prefabs & attributes](oberon/prefabs-and-attributes.md) |
+| Edit many objects at once, snap to a grid, see frame timings | [Editor workflow](oberon/editor-workflow.md) |
 | Ship your game for Windows and Linux | [Exporting your game](oberon/exporting.md) |
 | Look up a shortcut | [Keyboard shortcuts](oberon/shortcuts.md) |
 

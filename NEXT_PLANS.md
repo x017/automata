@@ -451,11 +451,11 @@ Placing UI phases 2–5 after animation is a proposal, since you chose
 the full UI system after picking this order. Swap them if menus and buttons
 matter sooner.
 
-Beyond this list, work follows ROADMAP's order table. Latest: **D5
-material assets and editor** ✅: shared `.mat.ron` materials with base,
-normal, roughness-metal and emission textures on any mesh, Oberon's
-material editor with a live GPU preview, and dragging materials onto
-objects (demo: `examples/oberon/workshop`). Next: D6 editor workflow.
+Beyond this list, work follows ROADMAP's order table. Latest: **D6
+editor workflow** ✅: linked prefab instances with per-instance overrides,
+Apply / Revert and variants; multi-select editing; snapping and Duplicate
+Along a Line; and a Profiler tab (demo: `examples/oberon/lamplight_lane`).
+Next: D7 localization.
 
 ## Process note
 

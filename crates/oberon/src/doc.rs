@@ -8,8 +8,10 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use automata_core::prefab::{self, PrefabLink};
 use automata_core::{EntityData, MeshVisualData, PrimitiveData, SceneFile, TransformData};
 
 /// The maximum number of undo snapshots retained.
@@ -40,8 +42,11 @@ pub struct Document {
     next_id: u64,
     /// The on-disk path, if the document has been saved.
     pub path: Option<PathBuf>,
-    /// The selected entity id, if any.
+    /// The selected entity id, if any: the primary selection, which the
+    /// Inspector shows and the gizmo sits on.
     pub selected: Option<u64>,
+    /// The other selected entities (multi-select), oldest first.
+    also_selected: Vec<u64>,
     dirty: bool,
     undo: Vec<String>,
     redo: Vec<String>,
@@ -52,6 +57,13 @@ pub struct Document {
     change_counter: u64,
     /// True while a move gesture is in progress (coalesces nudge undo).
     mid_gesture: bool,
+    /// While edits are batched into one undo step: whether it was taken.
+    batch: Option<bool>,
+    /// Each prefab link's entity as last synced (resolved through
+    /// variants), keyed by path and index.
+    prefab_bases: HashMap<(String, u32), EntityData>,
+    /// Prefab problems (unreadable files) for the app to show, once each.
+    pub notes: Vec<String>,
 }
 
 /// The local bounding box `(center, size)` of an entity's mesh, before the
@@ -120,6 +132,18 @@ pub fn default_animation(data: &EntityData) -> automata_scene::Animation {
         .and_then(|rig| automata_scene::Animation::default_clip(&rig).map(str::to_string))
         .unwrap_or_default();
     automata_scene::Animation::new(clip)
+}
+
+/// Euler angles for `t` turned `angle` radians about the world Y axis.
+fn turn_about_y(t: &TransformData, angle: f32) -> [f32; 3] {
+    if angle == 0.0 {
+        return t.rotation_euler;
+    }
+    let [x, y, z] = t.rotation_euler;
+    let q =
+        glam::Quat::from_rotation_y(angle) * glam::Quat::from_euler(glam::EulerRot::XYZ, x, y, z);
+    let (ex, ey, ez) = q.to_euler(glam::EulerRot::XYZ);
+    [ex, ey, ez]
 }
 
 /// Gives an entity whose model has clips an Animation (or, if it has one
@@ -697,11 +721,15 @@ impl Document {
             next_id: 1,
             path: None,
             selected: None,
+            also_selected: Vec::new(),
             dirty: false,
             undo: Vec::new(),
             redo: Vec::new(),
             change_counter: 0,
             mid_gesture: false,
+            batch: None,
+            prefab_bases: HashMap::new(),
+            notes: Vec::new(),
         }
     }
 
@@ -826,6 +854,101 @@ impl Document {
     /// Selects an entity by id (`None` clears the selection).
     pub fn select(&mut self, id: Option<u64>) {
         self.selected = id;
+        self.also_selected.clear();
+    }
+
+    /// Every selected entity's id, the primary last.
+    #[must_use]
+    pub fn selection(&self) -> Vec<u64> {
+        let Some(primary) = self.selected else {
+            return Vec::new();
+        };
+        let mut ids: Vec<u64> = self
+            .also_selected
+            .iter()
+            .copied()
+            .filter(|&id| id != primary && self.index_of(id).is_some())
+            .collect();
+        ids.push(primary);
+        ids
+    }
+
+    /// How many entities are selected.
+    #[must_use]
+    pub fn selection_len(&self) -> usize {
+        self.selection().len()
+    }
+
+    /// Whether `id` is selected (primary or not).
+    #[must_use]
+    pub fn is_selected(&self, id: u64) -> bool {
+        self.selected == Some(id) || (self.selected.is_some() && self.also_selected.contains(&id))
+    }
+
+    /// Ctrl+click: adds `id` to the selection (as the primary), or takes it
+    /// out if it was in.
+    pub fn toggle_selected(&mut self, id: u64) {
+        if self.is_selected(id) {
+            if self.selected == Some(id) {
+                self.selected = self.also_selected.pop();
+            } else {
+                self.also_selected.retain(|&x| x != id);
+            }
+        } else {
+            if let Some(old) = self.selected {
+                self.also_selected.push(old);
+            }
+            self.selected = Some(id);
+        }
+    }
+
+    /// Shift+click: selects every entity from the primary to `id` in scene
+    /// order, `id` becoming the primary.
+    pub fn select_range(&mut self, id: u64) {
+        let (Some(from), Some(to)) = (self.selected_index(), self.index_of(id)) else {
+            self.select(Some(id));
+            return;
+        };
+        let (lo, hi) = (from.min(to), from.max(to));
+        let ids: Vec<u64> = self.entities[lo..=hi].iter().map(|e| e.id).collect();
+        let mut all = self.also_selected.clone();
+        for x in ids {
+            if x != id && !all.contains(&x) {
+                all.push(x);
+            }
+        }
+        self.also_selected = all;
+        if let Some(old) = self.selected.filter(|&old| old != id) {
+            if !self.also_selected.contains(&old) {
+                self.also_selected.push(old);
+            }
+        }
+        self.selected = Some(id);
+        self.also_selected.retain(|&x| x != id);
+    }
+
+    /// Selects exactly `ids`, the last one primary.
+    pub fn select_many(&mut self, ids: &[u64]) {
+        let mut seen = std::collections::HashSet::new();
+        let mut ids: Vec<u64> = ids
+            .iter()
+            .copied()
+            .filter(|&id| self.index_of(id).is_some() && seen.insert(id))
+            .collect();
+        self.selected = ids.pop();
+        self.also_selected = ids;
+    }
+
+    /// Starts merging every undo snapshot into one until
+    /// [`Document::end_batch`], so an edit fanned out over a selection
+    /// undoes in one step.
+    pub fn begin_batch(&mut self) {
+        self.batch = Some(false);
+    }
+
+    /// Ends [`Document::begin_batch`].
+    pub fn end_batch(&mut self) {
+        self.batch = None;
     }
 
     /// A copy of the document for play mode: the same entities, ids,
@@ -837,19 +960,33 @@ impl Document {
             next_id: self.next_id,
             path: self.path.clone(),
             selected: self.selected,
+            also_selected: self.also_selected.clone(),
             dirty: self.dirty,
             undo: Vec::new(),
             redo: Vec::new(),
             change_counter: self.change_counter,
             mid_gesture: false,
+            batch: None,
+            prefab_bases: self.prefab_bases.clone(),
+            notes: Vec::new(),
         }
     }
 
     fn snapshot(&self) -> String {
-        self.to_scene_file().to_ron().unwrap_or_default()
+        SceneFile {
+            version: automata_core::SCENE_FILE_VERSION,
+            entities: self.entities.iter().map(|e| e.data.clone()).collect(),
+        }
+        .to_ron()
+        .unwrap_or_default()
     }
 
     fn push_undo(&mut self) {
+        match self.batch {
+            Some(true) => return, // the batch's one step is taken
+            Some(false) => self.batch = Some(true),
+            None => {}
+        }
         // A discrete edit ends any in-progress move gesture, so the next
         // nudge snapshots fresh.
         self.mid_gesture = false;
@@ -894,7 +1031,7 @@ impl Document {
             ..Default::default()
         };
         self.entities.push(EntityEntry { id, data });
-        self.selected = Some(id);
+        self.select(Some(id));
         self.touch();
         self.entities.len() - 1
     }
@@ -906,8 +1043,8 @@ impl Document {
         };
         self.push_undo();
         self.entities.remove(idx);
-        if self.selected == Some(id) {
-            self.selected = None;
+        if self.is_selected(id) {
+            self.toggle_selected(id);
         }
         self.touch();
         true
@@ -1119,7 +1256,7 @@ impl Document {
         self.push_undo();
         let id = self.alloc_id();
         self.entities.push(EntityEntry { id, data });
-        self.selected = Some(id);
+        self.select(Some(id));
         self.touch();
         id
     }
@@ -1180,7 +1317,7 @@ impl Document {
         self.push_undo();
         let id = self.alloc_id();
         self.entities.push(EntityEntry { id, data });
-        self.selected = Some(id);
+        self.select(Some(id));
         self.touch();
         id
     }
@@ -1378,7 +1515,7 @@ impl Document {
         self.push_undo();
         let id = self.alloc_id();
         self.entities.push(EntityEntry { id, data });
-        self.selected = Some(id);
+        self.select(Some(id));
         self.touch();
         id
     }
@@ -1411,7 +1548,7 @@ impl Document {
             let id = self.alloc_id();
             self.entities.push(EntityEntry { id, data });
         }
-        self.selected = None;
+        self.select(None);
         self.touch();
         n
     }
@@ -1426,7 +1563,7 @@ impl Document {
         self.push_undo();
         self.entities.retain(|e| !e.name().starts_with("Test "));
         if self.selected.is_some_and(|id| self.index_of(id).is_none()) {
-            self.selected = None;
+            self.select(None);
         }
         self.touch();
         before - self.entities.len()
@@ -1443,7 +1580,7 @@ impl Document {
         let new_id = self.alloc_id();
         self.entities
             .insert(idx + 1, EntityEntry { id: new_id, data });
-        self.selected = Some(new_id);
+        self.select(Some(new_id));
         self.touch();
         Some(new_id)
     }
@@ -1566,7 +1703,7 @@ impl Document {
             .max(self.next_id)
             + 1;
         if self.selected.and_then(|id| self.index_of(id)).is_none() {
-            self.selected = self.entities.first().map(|e| e.id);
+            self.select(self.entities.first().map(|e| e.id));
         }
     }
 
@@ -1723,7 +1860,7 @@ impl Document {
             self.entities.push(EntityEntry { id, data });
             ids.push(id);
         }
-        self.selected = ids.last().copied();
+        self.select(ids.last().copied());
         self.touch();
         ids
     }
@@ -1732,9 +1869,11 @@ impl Document {
     #[must_use]
     pub fn prefab_of(&self, id: u64) -> Option<SceneFile> {
         let idx = self.index_of(id)?;
+        let mut data = self.entities[idx].data.clone();
+        data.prefab = None; // a new prefab of its own
         Some(SceneFile {
             version: automata_core::SCENE_FILE_VERSION,
-            entities: vec![self.entities[idx].data.clone()],
+            entities: vec![data],
         })
     }
 
@@ -1750,12 +1889,369 @@ impl Document {
         self.paste_entities(&prefab.entities, offset)
     }
 
-    /// Builds the engine [`SceneFile`] from the document.
+    /// Duplicates every entity in `ids` (each placed after the last one,
+    /// in scene order) as one undo step, selecting the copies. Returns the
+    /// new ids.
+    pub fn duplicate_many(&mut self, ids: &[u64]) -> Vec<u64> {
+        let mut order: Vec<usize> = ids.iter().filter_map(|&id| self.index_of(id)).collect();
+        order.sort_unstable();
+        order.dedup();
+        if order.is_empty() {
+            return Vec::new();
+        }
+        self.push_undo();
+        let mut new_ids = Vec::with_capacity(order.len());
+        let first_free = order[order.len() - 1] + 1;
+        for (insert_at, idx) in (first_free..).zip(order) {
+            let mut data = self.entities[idx].data.clone();
+            let base = self.entities[idx].name().to_string();
+            data.name = Some(self.unique_name(&base));
+            let new_id = self.alloc_id();
+            self.entities
+                .insert(insert_at, EntityEntry { id: new_id, data });
+            new_ids.push(new_id);
+        }
+        self.select_many(&new_ids);
+        self.touch();
+        new_ids
+    }
+
+    /// Copies entity `id` `count` times along a line: copy *k* sits at
+    /// `k × step` from the original, turned `k × turn_y` radians about Y.
+    /// One undo step; the whole row (original and copies) is selected, so
+    /// it moves as one. Returns the copies' ids.
+    pub fn duplicate_along(
+        &mut self,
+        id: u64,
+        count: usize,
+        step: [f32; 3],
+        turn_y: f32,
+    ) -> Vec<u64> {
+        let Some(idx) = self.index_of(id) else {
+            return Vec::new();
+        };
+        if count == 0 {
+            return Vec::new();
+        }
+        self.push_undo();
+        let source = self.entities[idx].data.clone();
+        let base = source.name.clone().unwrap_or_else(|| "Entity".to_string());
+        let mut ids = Vec::with_capacity(count);
+        for k in 1..=count {
+            let mut data = source.clone();
+            data.name = Some(self.unique_name(&base));
+            if let Some(t) = &mut data.transform {
+                #[allow(clippy::cast_precision_loss)] // copy counts are small
+                let kf = k as f32;
+                for (p, d) in t.position.iter_mut().zip(step) {
+                    *p += d * kf;
+                }
+                t.rotation_euler = turn_about_y(t, turn_y * kf);
+            }
+            let new_id = self.alloc_id();
+            self.entities
+                .insert(idx + k, EntityEntry { id: new_id, data });
+            ids.push(new_id);
+        }
+        let mut all = vec![id];
+        all.extend(&ids);
+        self.select_many(&all);
+        self.touch();
+        ids
+    }
+
+    // ----- prefab links ----------------------------------------------------
+
+    /// The prefab entity `link` follows, as last synced (resolved through
+    /// variants).
+    #[must_use]
+    pub fn prefab_base(&self, link: &PrefabLink) -> Option<&EntityData> {
+        self.prefab_bases.get(&(link.path.clone(), link.index))
+    }
+
+    /// The fields entity `id` overrides on its prefab (`None` when it isn't
+    /// linked, or its prefab couldn't be read).
+    #[must_use]
+    pub fn prefab_overrides(&self, id: u64) -> Option<Vec<String>> {
+        let data = &self.entities[self.index_of(id)?].data;
+        let base = self.prefab_base(data.prefab.as_ref()?)?;
+        Some(prefab::overrides(base, data))
+    }
+
+    /// Every entity linked to the prefab file `path` (as the scene names it).
+    #[must_use]
+    pub fn instances_of(&self, path: &str) -> Vec<u64> {
+        self.entities
+            .iter()
+            .filter(|e| e.data.prefab.as_ref().is_some_and(|l| l.path == path))
+            .map(|e| e.id)
+            .collect()
+    }
+
+    /// Reads (or re-reads) the prefab a link follows, keeping the result
+    /// for [`Document::prefab_base`]. A failure is noted once.
+    fn load_prefab_base(&mut self, link: &PrefabLink) -> Option<EntityData> {
+        match prefab::load_base(link, &self.base_dir()) {
+            Ok(base) => {
+                self.prefab_bases
+                    .insert((link.path.clone(), link.index), base.clone());
+                Some(base)
+            }
+            Err(e) => {
+                let note = format!("Prefab {e}");
+                if !self.notes.contains(&note) {
+                    self.notes.push(note);
+                }
+                None
+            }
+        }
+    }
+
+    /// Re-syncs every prefab instance with its prefab file as saved in the
+    /// scene (each keeps its stored overrides). Used after loading.
+    fn sync_prefabs_from_files(&mut self) {
+        let links: Vec<PrefabLink> = self.distinct_links();
+        for link in links {
+            let Some(base) = self.load_prefab_base(&link) else {
+                continue;
+            };
+            for e in &mut self.entities {
+                let Some(own) = e.data.prefab.clone() else {
+                    continue;
+                };
+                if own.path != link.path || own.index != link.index {
+                    continue;
+                }
+                match prefab::apply(&base, &e.data, &own.overrides) {
+                    Ok(synced) => e.data = synced,
+                    Err(err) => self.notes.push(format!("{}: {err}", e.name())),
+                }
+            }
+        }
+    }
+
+    fn distinct_links(&self) -> Vec<PrefabLink> {
+        let mut links: Vec<PrefabLink> = Vec::new();
+        for e in &self.entities {
+            if let Some(l) = &e.data.prefab {
+                if !links.iter().any(|x| x.path == l.path && x.index == l.index) {
+                    links.push(PrefabLink {
+                        overrides: Vec::new(),
+                        ..l.clone()
+                    });
+                }
+            }
+        }
+        links
+    }
+
+    /// Re-reads every linked prefab file and re-syncs the instances of any
+    /// that changed, keeping each instance's overrides. Not an undo step
+    /// (the change came from the file). Returns how many entities changed.
+    pub fn poll_prefabs(&mut self) -> usize {
+        let mut changed = 0;
+        for link in self.distinct_links() {
+            let old = self.prefab_base(&link).cloned();
+            let Some(new) = self.load_prefab_base(&link) else {
+                continue;
+            };
+            let Some(old) = old else {
+                continue; // first read: nothing to compare with
+            };
+            if old == new {
+                continue;
+            }
+            for e in &mut self.entities {
+                let Some(own) = &e.data.prefab else {
+                    continue;
+                };
+                if own.path != link.path || own.index != link.index {
+                    continue;
+                }
+                let ov = prefab::overrides(&old, &e.data);
+                if let Ok(synced) = prefab::apply(&new, &e.data, &ov) {
+                    if synced != e.data {
+                        e.data = synced;
+                        changed += 1;
+                    }
+                }
+            }
+        }
+        if changed > 0 {
+            self.change_counter += 1;
+        }
+        changed
+    }
+
+    /// Links entity `id` to the prefab file `rel` (scene-relative), which
+    /// it matches now (after Save as Prefab).
+    pub fn link_prefab(&mut self, id: u64, rel: &str) -> bool {
+        let link = PrefabLink::new(rel);
+        let changed = self.modify(id, false, |d| d.prefab = Some(link.clone()));
+        if changed {
+            self.load_prefab_base(&link);
+        }
+        changed
+    }
+
+    /// Takes entity `id` off its prefab: it keeps its current values.
+    pub fn unlink_prefab(&mut self, id: u64) -> bool {
+        self.modify(id, false, |d| d.prefab = None)
+    }
+
+    /// Puts the prefab's values back on entity `id` for `paths` (every
+    /// override when `None`). One undo step.
+    pub fn revert_overrides(&mut self, id: u64, paths: Option<&[String]>) -> bool {
+        let Some(idx) = self.index_of(id) else {
+            return false;
+        };
+        let Some(link) = self.entities[idx].data.prefab.clone() else {
+            return false;
+        };
+        let Some(base) = self
+            .prefab_base(&link)
+            .cloned()
+            .or_else(|| self.load_prefab_base(&link))
+        else {
+            return false;
+        };
+        let all = prefab::overrides(&base, &self.entities[idx].data);
+        let paths = paths.map_or(all, <[String]>::to_vec);
+        match prefab::copy_paths(&base, &self.entities[idx].data, &paths) {
+            Ok(reverted) => self.modify(id, false, |d| *d = reverted),
+            Err(e) => {
+                self.notes.push(format!("Revert failed: {e}"));
+                false
+            }
+        }
+    }
+
+    /// Writes entity `id`'s overrides into its prefab file (into the
+    /// variant's own overrides, for a variant), then re-syncs every
+    /// instance. Returns the prefab file and how many fields were applied.
+    ///
+    /// # Errors
+    ///
+    /// When the entity isn't linked, or the prefab file can't be read or
+    /// written.
+    pub fn apply_to_prefab(&mut self, id: u64) -> Result<(PathBuf, usize), String> {
+        let idx = self.index_of(id).ok_or("no such entity")?;
+        let instance = self.entities[idx].data.clone();
+        let link = instance
+            .prefab
+            .clone()
+            .ok_or_else(|| format!("{} isn't a prefab instance", self.entities[idx].name()))?;
+        let root = self.base_dir();
+        let base = prefab::load_base(&link, &root)?;
+        let ov = prefab::overrides(&base, &instance);
+        let file_path = prefab::resolve_path(&root, &link.path);
+        if ov.is_empty() {
+            return Ok((file_path, 0));
+        }
+        let text =
+            std::fs::read_to_string(&file_path).map_err(|e| format!("{}: {e}", link.path))?;
+        let mut file = SceneFile::from_ron(&text).map_err(|e| format!("{}: {e}", link.path))?;
+        let slot = file
+            .entities
+            .get_mut(link.index as usize)
+            .ok_or_else(|| format!("{} has no entity {}", link.path, link.index))?;
+        // The prefab's entity with the instance's values where it differs.
+        let mut updated = prefab::copy_paths(&instance, &base, &ov)?;
+        updated.prefab = match slot.prefab.clone() {
+            // A variant keeps following its base: store what differs.
+            Some(base_link) => {
+                let grand = prefab::load_base(&base_link, &root)?;
+                Some(PrefabLink {
+                    overrides: prefab::overrides(&grand, &updated),
+                    ..base_link
+                })
+            }
+            None => None,
+        };
+        *slot = updated;
+        let text = file.to_ron().map_err(|e| e.to_string())?;
+        std::fs::write(&file_path, text).map_err(|e| format!("{}: {e}", file_path.display()))?;
+        self.poll_prefabs();
+        Ok((file_path, ov.len()))
+    }
+
+    /// Writes a variant of the prefab at `prefab_path`: a new prefab that
+    /// follows it and can override its fields. Returns the new file.
+    ///
+    /// # Errors
+    ///
+    /// When the prefab can't be read or the variant can't be written.
+    pub fn create_variant(&self, prefab_path: &Path) -> Result<PathBuf, String> {
+        let rel = self.relative(prefab_path);
+        let link = PrefabLink::new(rel.clone());
+        let base = prefab::load_base(&link, &self.base_dir())?;
+        let stem = prefab_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("prefab");
+        let dir = prefab_path.parent().unwrap_or_else(|| Path::new("."));
+        let mut target = dir.join(format!("{stem}_variant.prefab"));
+        let mut n = 2;
+        while target.exists() {
+            target = dir.join(format!("{stem}_variant_{n}.prefab"));
+            n += 1;
+        }
+        let mut entity = base;
+        let name = entity.name.clone().unwrap_or_else(|| stem.to_string());
+        entity.name = Some(format!("{name} Variant"));
+        entity.prefab = Some(link);
+        let file = SceneFile {
+            version: automata_core::SCENE_FILE_VERSION,
+            entities: vec![entity],
+        };
+        let text = file.to_ron().map_err(|e| e.to_string())?;
+        std::fs::write(&target, text).map_err(|e| format!("{}: {e}", target.display()))?;
+        Ok(target)
+    }
+
+    /// Adds linked instances of the prefab file `rel` (already read as
+    /// `prefab`), its first entity placed at `at`. Returns the new ids.
+    pub fn instantiate_linked(&mut self, rel: &str, prefab: &SceneFile, at: [f32; 3]) -> Vec<u64> {
+        let mut file = prefab.clone();
+        // Variants arrive resolved; each copy links to its entity.
+        let _ = file.resolve_prefabs(&self.base_dir());
+        for (i, e) in file.entities.iter_mut().enumerate() {
+            e.prefab = Some(PrefabLink {
+                path: rel.to_string(),
+                index: u32::try_from(i).unwrap_or(0),
+                overrides: Vec::new(),
+            });
+        }
+        let ids = self.instantiate(&file, at);
+        for link in self.distinct_links() {
+            if link.path == rel {
+                self.load_prefab_base(&link);
+            }
+        }
+        ids
+    }
+
+    /// Builds the engine [`SceneFile`] from the document, each prefab
+    /// instance's overrides listed as they are now.
     #[must_use]
     pub fn to_scene_file(&self) -> SceneFile {
         SceneFile {
             version: automata_core::SCENE_FILE_VERSION,
-            entities: self.entities.iter().map(|e| e.data.clone()).collect(),
+            entities: self
+                .entities
+                .iter()
+                .map(|e| {
+                    let mut data = e.data.clone();
+                    let base = data.prefab.as_ref().and_then(|l| self.prefab_base(l));
+                    if let Some(base) = base {
+                        let ov = prefab::overrides(base, &data);
+                        if let Some(link) = &mut data.prefab {
+                            link.overrides = ov;
+                        }
+                    }
+                    data
+                })
+                .collect(),
         }
     }
 
@@ -1785,6 +2281,9 @@ impl Document {
             .map_err(|e| e.to_string())
             .map(|mut doc| {
                 doc.path = Some(path.to_path_buf());
+                // Instances follow their prefab files, which may have
+                // changed since the scene was saved.
+                doc.sync_prefabs_from_files();
                 doc
             })
     }
@@ -2486,5 +2985,214 @@ pub(crate) mod tests {
             doc.entities[ia].data.mesh_visual.as_ref().unwrap().color,
             [0.1, 0.2, 0.3, 1.0]
         );
+    }
+
+    #[test]
+    fn multi_select_by_ctrl_shift_and_lists() {
+        let mut doc = Document::new();
+        let ids: Vec<u64> = (0..5).map(|i| cube(&mut doc, &format!("C{i}"))).collect();
+        doc.select(Some(ids[1]));
+        doc.toggle_selected(ids[3]);
+        assert_eq!(doc.selection(), vec![ids[1], ids[3]], "primary last");
+        assert!(doc.is_selected(ids[1]) && doc.is_selected(ids[3]));
+        assert!(!doc.is_selected(ids[2]));
+        // Ctrl+click again takes it out; the previous primary leads.
+        doc.toggle_selected(ids[3]);
+        assert_eq!(doc.selection(), vec![ids[1]]);
+        assert_eq!(doc.selected, Some(ids[1]));
+        // Shift+click: the run from the primary, the clicked one leading.
+        doc.select_range(ids[4]);
+        assert_eq!(doc.selection_len(), 4);
+        assert_eq!(doc.selected, Some(ids[4]));
+        assert!(!doc.is_selected(ids[0]));
+        // A plain select drops the rest.
+        doc.select(Some(ids[0]));
+        assert_eq!(doc.selection(), vec![ids[0]]);
+        // Lists skip repeats and missing ids.
+        doc.select_many(&[ids[2], ids[0], ids[2], 99_999]);
+        assert_eq!(doc.selection(), vec![ids[2], ids[0]]);
+        // Deleting a selected entity leaves the rest selected.
+        assert!(doc.delete_entity(ids[0]));
+        assert_eq!(doc.selection(), vec![ids[2]]);
+        assert!(doc.delete_entity(ids[2]));
+        assert_eq!(doc.selection(), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn batched_edits_and_group_duplicates_undo_in_one_step() {
+        let mut doc = Document::new();
+        let a = cube(&mut doc, "A");
+        let b = cube(&mut doc, "B");
+        doc.begin_batch();
+        doc.modify(a, false, |d| d.name = Some("A2".into()));
+        doc.modify(b, false, |d| d.name = Some("B2".into()));
+        doc.end_batch();
+        assert!(doc.undo());
+        let names: Vec<&str> = doc.entities.iter().map(EntityEntry::name).collect();
+        assert_eq!(names, ["A", "B"], "one undo reverts the whole batch");
+
+        let copies = doc.duplicate_many(&[a, b]);
+        assert_eq!(copies.len(), 2);
+        assert_eq!(doc.entity_count(), 4);
+        assert_eq!(doc.selection(), copies, "the copies are selected");
+        assert!(doc.undo());
+        assert_eq!(doc.entity_count(), 2);
+    }
+
+    #[test]
+    fn duplicate_along_spaces_and_turns_the_copies() {
+        let mut doc = Document::new();
+        let a = cube(&mut doc, "Post");
+        let i = doc.index_of(a).unwrap();
+        doc.entities[i].data.transform.as_mut().unwrap().position = [1.0, 0.0, 0.0];
+        let line = doc.duplicate_along(a, 3, [2.0, 0.0, 0.5], std::f32::consts::FRAC_PI_2);
+        assert_eq!(line.len(), 3);
+        for (k, id) in line.iter().enumerate() {
+            let t = doc.entities[doc.index_of(*id).unwrap()]
+                .data
+                .transform
+                .unwrap();
+            #[allow(clippy::cast_precision_loss)]
+            let k = (k + 1) as f32;
+            assert!((t.position[0] - (1.0 + 2.0 * k)).abs() < 1e-5);
+            assert!((t.position[2] - 0.5 * k).abs() < 1e-5);
+            let turned = crate::view::rotation_of(&t) * glam::Vec3::X;
+            let want = glam::Quat::from_rotation_y(std::f32::consts::FRAC_PI_2 * k) * glam::Vec3::X;
+            assert!(
+                turned.abs_diff_eq(want, 1e-4),
+                "copy {k}: {turned} vs {want}"
+            );
+        }
+        let mut row = vec![a];
+        row.extend(&line);
+        assert_eq!(doc.selection(), row, "the whole row is selected");
+        assert_eq!(
+            doc.duplicate_along(a, 0, [1.0, 0.0, 0.0], 0.0),
+            Vec::<u64>::new()
+        );
+        assert!(doc.undo());
+        assert_eq!(doc.entity_count(), 1, "one undo removes the whole line");
+    }
+
+    #[test]
+    fn prefab_instances_follow_the_file_and_keep_overrides() {
+        let dir = std::env::temp_dir().join(format!("oberon-prefab-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut doc = Document::new();
+        doc.path = Some(dir.join("level.ron"));
+        let a = cube(&mut doc, "Crate");
+        let file = doc.prefab_of(a).unwrap();
+        let prefab_path = dir.join("crate.prefab");
+        std::fs::write(&prefab_path, file.to_ron().unwrap()).unwrap();
+        assert!(doc.link_prefab(a, "crate.prefab"));
+        assert_eq!(doc.prefab_overrides(a), Some(Vec::new()));
+
+        // A second instance elsewhere: where it stands isn't an override.
+        let b = doc.instantiate_linked("crate.prefab", &file, [4.0, 0.0, 0.0])[0];
+        assert_eq!(doc.prefab_overrides(b), Some(Vec::new()));
+        assert_eq!(doc.instances_of("crate.prefab"), vec![a, b]);
+        let red = [1.0, 0.0, 0.0, 1.0];
+        doc.modify(b, false, |d| d.mesh_visual.as_mut().unwrap().color = red);
+        assert_eq!(doc.prefab_overrides(b).unwrap(), ["mesh_visual.color"]);
+        let mesh = |doc: &Document, id: u64| {
+            doc.entities[doc.index_of(id).unwrap()]
+                .data
+                .mesh_visual
+                .clone()
+                .unwrap()
+        };
+
+        // The file changes: both instances follow, B keeps its colour.
+        let mut edited = file.clone();
+        edited.entities[0]
+            .mesh_visual
+            .as_mut()
+            .unwrap()
+            .draw_distance = 77.0;
+        std::fs::write(&prefab_path, edited.to_ron().unwrap()).unwrap();
+        assert_eq!(doc.poll_prefabs(), 2);
+        assert_eq!(doc.poll_prefabs(), 0, "nothing new the second time");
+        assert!((mesh(&doc, a).draw_distance - 77.0).abs() < 1e-6);
+        assert!((mesh(&doc, b).draw_distance - 77.0).abs() < 1e-6);
+        assert_eq!(mesh(&doc, b).color, red);
+        assert_eq!(
+            doc.entities[doc.index_of(b).unwrap()]
+                .data
+                .transform
+                .unwrap()
+                .position[0],
+            4.0
+        );
+
+        // The scene file lists B's override; saving and loading keeps it.
+        let scene = doc.to_scene_file();
+        let link = scene.entities[1].prefab.clone().unwrap();
+        assert_eq!(link.overrides, ["mesh_visual.color"]);
+        let saved = doc.save(None).unwrap();
+        let loaded = Document::load(&saved).unwrap();
+        assert_eq!(
+            loaded.entities[1].data.prefab.as_ref().unwrap().path,
+            "crate.prefab"
+        );
+        assert_eq!(mesh(&loaded, loaded.entities[1].id).color, red);
+
+        // Revert one field.
+        assert!(doc.revert_overrides(b, Some(&["mesh_visual.color".to_string()])));
+        assert_eq!(doc.prefab_overrides(b), Some(Vec::new()));
+        assert_ne!(mesh(&doc, b).color, red);
+
+        // Apply A's change to the file: B (no override) picks it up.
+        let green = [0.0, 1.0, 0.0, 1.0];
+        doc.modify(a, false, |d| d.mesh_visual.as_mut().unwrap().color = green);
+        let (written, n) = doc.apply_to_prefab(a).unwrap();
+        assert_eq!((written, n), (prefab_path.clone(), 1));
+        assert_eq!(mesh(&doc, b).color, green);
+        assert_eq!(doc.prefab_overrides(a), Some(Vec::new()));
+
+        // A variant follows its parent and adds its own overrides.
+        let variant = doc.create_variant(&prefab_path).unwrap();
+        assert_eq!(variant, dir.join("crate_variant.prefab"));
+        assert_eq!(
+            doc.create_variant(&prefab_path).unwrap(),
+            dir.join("crate_variant_2.prefab")
+        );
+        let v = doc.instantiate_linked(
+            "crate_variant.prefab",
+            &SceneFile::from_ron(&std::fs::read_to_string(&variant).unwrap()).unwrap(),
+            [8.0, 0.0, 0.0],
+        )[0];
+        assert_eq!(mesh(&doc, v).color, green);
+        let blue = [0.0, 0.0, 1.0, 1.0];
+        doc.modify(v, false, |d| d.mesh_visual.as_mut().unwrap().color = blue);
+        doc.apply_to_prefab(v).unwrap();
+        // The variant now overrides the colour; the parent is untouched.
+        assert_eq!(mesh(&doc, a).color, green);
+        let mut parent =
+            SceneFile::from_ron(&std::fs::read_to_string(&prefab_path).unwrap()).unwrap();
+        let _ = parent.resolve_prefabs(&dir);
+        assert_eq!(
+            parent.entities[0].mesh_visual.as_ref().unwrap().color,
+            green
+        );
+        let mut child = SceneFile::from_ron(&std::fs::read_to_string(&variant).unwrap()).unwrap();
+        assert_eq!(child.resolve_prefabs(&dir), Vec::<String>::new());
+        assert_eq!(child.entities[0].mesh_visual.as_ref().unwrap().color, blue);
+        assert!(
+            (child.entities[0]
+                .mesh_visual
+                .as_ref()
+                .unwrap()
+                .draw_distance
+                - 77.0)
+                .abs()
+                < 1e-6
+        );
+
+        // Unlink: values stay, the link goes.
+        assert!(doc.unlink_prefab(b));
+        assert!(doc.entities[doc.index_of(b).unwrap()].data.prefab.is_none());
+        assert_eq!(mesh(&doc, b).color, green);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

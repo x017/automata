@@ -52,6 +52,8 @@ pub struct Prefs {
     pub vsync: bool,
     /// Frame rate cap; 0 = none (V-Sync, when on, still paces frames).
     pub fps_limit: u32,
+    /// Gizmo snapping (grid, angle and scale steps).
+    pub snap: crate::view::Snap,
 }
 
 impl Default for Prefs {
@@ -74,6 +76,7 @@ impl Default for Prefs {
             camera_preview: true,
             vsync: true,
             fps_limit: 0,
+            snap: crate::view::Snap::default(),
         }
     }
 }

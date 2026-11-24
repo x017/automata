@@ -308,6 +308,31 @@ pub fn ray_box(origin: Vec3, dir: Vec3, model: Mat4, half: Vec3) -> Option<f32> 
     Some(t_min.max(0.0))
 }
 
+/// Entities whose centre lands inside the screen rectangle spanned by
+/// `a` and `b` (a selection box), in scene order.
+#[must_use]
+pub fn pick_box(doc: &Document, proj: &Projector, a: (f32, f32), b: (f32, f32)) -> Vec<u64> {
+    let (x0, x1) = (a.0.min(b.0), a.0.max(b.0));
+    let (y0, y1) = (a.1.min(b.1), a.1.max(b.1));
+    doc.entities
+        .iter()
+        .filter(|e| {
+            let Some(t) = e.data.transform else {
+                return false;
+            };
+            let centre = if e.data.mesh_visual.is_some() {
+                let (c, _) = local_bounds(&e.data);
+                model_matrix(&t).transform_point3(c)
+            } else {
+                Vec3::from(t.position)
+            };
+            proj.project(centre)
+                .is_some_and(|(x, y)| (x0..=x1).contains(&x) && (y0..=y1).contains(&y))
+        })
+        .map(|e| e.id)
+        .collect()
+}
+
 /// Picks the nearest entity under screen point `(sx, sy)`.
 #[must_use]
 pub fn pick(doc: &Document, proj: &Projector, sx: f32, sy: f32) -> Option<u64> {
@@ -533,6 +558,112 @@ impl Gizmo {
     }
 }
 
+/// Gizmo snapping: moves land on a grid, turns on whole angle steps and
+/// scales on whole steps. Saved with the preferences.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Snap {
+    /// Snap while dragging (holding Ctrl does the opposite).
+    pub enabled: bool,
+    /// Grid size for moves (metres).
+    pub step: f32,
+    /// Angle step for turns (degrees).
+    pub angle: f32,
+    /// Step for scales.
+    pub scale: f32,
+}
+
+impl Default for Snap {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            step: 0.5,
+            angle: 15.0,
+            scale: 0.1,
+        }
+    }
+}
+
+impl Snap {
+    /// Move steps offered in the scene view (metres).
+    pub const STEPS: [f32; 6] = [0.1, 0.25, 0.5, 1.0, 2.0, 5.0];
+    /// Turn steps offered (degrees).
+    pub const ANGLES: [f32; 5] = [5.0, 15.0, 30.0, 45.0, 90.0];
+    /// Scale steps offered.
+    pub const SCALES: [f32; 4] = [0.05, 0.1, 0.25, 0.5];
+
+    /// The step `mode` snaps to, as the scene view shows it.
+    #[must_use]
+    pub fn label(&self, mode: GizmoMode) -> String {
+        match mode {
+            GizmoMode::Move => format!("{} m", crate::fields::format_value(self.step)),
+            GizmoMode::Rotate => format!("{}°", crate::fields::format_value(self.angle)),
+            GizmoMode::Scale => format!("{}×", crate::fields::format_value(self.scale)),
+        }
+    }
+
+    /// The step for `mode`.
+    #[must_use]
+    pub fn step_for(&self, mode: GizmoMode) -> f32 {
+        match mode {
+            GizmoMode::Move => self.step,
+            GizmoMode::Rotate => self.angle,
+            GizmoMode::Scale => self.scale,
+        }
+    }
+
+    /// Sets the step for `mode`.
+    pub fn set_step(&mut self, mode: GizmoMode, value: f32) {
+        let v = value.max(0.001);
+        match mode {
+            GizmoMode::Move => self.step = v,
+            GizmoMode::Rotate => self.angle = v,
+            GizmoMode::Scale => self.scale = v,
+        }
+    }
+
+    /// `free` (where an unsnapped drag on `axis` from `start` has got to)
+    /// snapped for gizmo `mode`: the dragged position coordinate onto the
+    /// grid, the turn since `start` onto whole angle steps, or the dragged
+    /// scale onto whole steps.
+    #[must_use]
+    pub fn apply(
+        &self,
+        mode: GizmoMode,
+        axis: usize,
+        start: &TransformData,
+        free: &TransformData,
+    ) -> TransformData {
+        let axis = axis.min(2);
+        let mut out = *free;
+        let round = |v: f32, step: f32| (v / step).round() * step;
+        match mode {
+            GizmoMode::Move if self.step > 0.0 => {
+                out.position[axis] = round(free.position[axis], self.step);
+            }
+            GizmoMode::Rotate if self.angle > 0.0 => {
+                let world = [Vec3::X, Vec3::Y, Vec3::Z][axis];
+                let turn = rotation_of(free) * rotation_of(start).inverse();
+                let (turn_axis, angle) = turn.to_axis_angle();
+                let signed = if turn_axis.dot(world) < 0.0 {
+                    -angle
+                } else {
+                    angle
+                };
+                let step = self.angle.to_radians();
+                let q = Quat::from_axis_angle(world, round(signed, step)) * rotation_of(start);
+                let (ex, ey, ez) = q.to_euler(EulerRot::XYZ);
+                out.rotation_euler = [ex, ey, ez];
+            }
+            GizmoMode::Scale if self.scale > 0.0 => {
+                out.scale[axis] = round(free.scale[axis], self.scale).max(self.scale);
+            }
+            _ => {}
+        }
+        out
+    }
+}
+
 /// A right-handed basis `(u, v)` spanning the plane perpendicular to world
 /// axis `a`, with `u × v = axis`.
 fn ring_basis(a: usize) -> (Vec3, Vec3) {
@@ -647,6 +778,79 @@ mod tests {
         let proj = Projector::new(&cam, rect());
         let (sx, sy) = proj.project(Vec3::new(0.0, 0.5, 0.0)).unwrap();
         assert_eq!(pick(&doc, &proj, sx, sy), Some(cube.id));
+    }
+
+    #[test]
+    fn a_selection_box_takes_what_it_surrounds() {
+        let doc = Document::starter();
+        let cube = doc.entities.iter().find(|e| e.name() == "Cube").unwrap();
+        let cam = ViewCamera::default();
+        let proj = Projector::new(&cam, rect());
+        let (sx, sy) = proj.project(Vec3::new(0.0, 0.5, 0.0)).unwrap();
+        let picked = pick_box(&doc, &proj, (sx - 20.0, sy - 20.0), (sx + 20.0, sy + 20.0));
+        assert!(picked.contains(&cube.id), "{picked:?}");
+        // Corners in either order; an empty corner of the sky has nothing.
+        assert_eq!(
+            pick_box(&doc, &proj, (sx + 20.0, sy + 20.0), (sx - 20.0, sy - 20.0)),
+            picked
+        );
+        assert_eq!(
+            pick_box(&doc, &proj, (0.0, 0.0), (8.0, 8.0)),
+            Vec::<u64>::new()
+        );
+        // The whole view takes everything with a place in the world.
+        let all = pick_box(&doc, &proj, (-1e4, -1e4), (1e4, 1e4));
+        assert!(all.len() >= picked.len());
+    }
+
+    #[test]
+    fn snapping_rounds_moves_turns_and_scales() {
+        let snap = Snap {
+            enabled: true,
+            step: 0.5,
+            angle: 15.0,
+            scale: 0.25,
+        };
+        let start = TransformData {
+            position: [0.1, 2.0, -0.3],
+            rotation_euler: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        };
+        // Move: only the dragged axis lands on the grid.
+        let mut free = start;
+        free.position = [1.37, 2.0, -0.3];
+        let out = snap.apply(GizmoMode::Move, 0, &start, &free);
+        assert_eq!(out.position, [1.5, 2.0, -0.3]);
+        // Turn: 20° about Y snaps to 15°.
+        let mut free = start;
+        free.rotation_euler = [0.0, 20f32.to_radians(), 0.0];
+        let out = snap.apply(GizmoMode::Rotate, 1, &start, &free);
+        let q = rotation_of(&out);
+        let want = Quat::from_rotation_y(15f32.to_radians());
+        assert!(q.angle_between(want) < 1e-4, "{:?}", out.rotation_euler);
+        // Negative turns too: -40° snaps to -45°.
+        free.rotation_euler = [0.0, (-40f32).to_radians(), 0.0];
+        let out = snap.apply(GizmoMode::Rotate, 1, &start, &free);
+        let want = Quat::from_rotation_y((-45f32).to_radians());
+        assert!(rotation_of(&out).angle_between(want) < 1e-4);
+        // Scale: whole steps, never below one step.
+        let mut free = start;
+        free.scale = [1.0, 1.0, 1.4];
+        assert_eq!(
+            snap.apply(GizmoMode::Scale, 2, &start, &free).scale,
+            [1.0, 1.0, 1.5]
+        );
+        free.scale = [1.0, 1.0, 0.01];
+        assert_eq!(
+            snap.apply(GizmoMode::Scale, 2, &start, &free).scale,
+            [1.0, 1.0, 0.25]
+        );
+        // Labels and steps per tool.
+        let mut s = Snap::default();
+        s.set_step(GizmoMode::Rotate, 45.0);
+        assert_eq!(s.step_for(GizmoMode::Rotate), 45.0);
+        assert_eq!(s.label(GizmoMode::Rotate), "45°");
+        assert_eq!(s.label(GizmoMode::Move), "0.5 m");
     }
 
     #[test]

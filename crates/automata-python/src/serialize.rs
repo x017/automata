@@ -17,6 +17,7 @@ pub fn staged_to_entity_data(entity: &StagedEntity) -> EntityData {
         name: entity.name.clone(),
         attributes: entity.attributes.clone(),
         script: entity.script.clone().map(|path| Script { path }),
+        prefab: entity.prefab.clone(),
         ..EntityData::default()
     };
     for component in &entity.components {
@@ -120,14 +121,32 @@ pub fn entity_data_to_staged(data: &EntityData) -> StagedEntity {
         components,
         attributes: data.attributes.clone(),
         script: data.script.as_ref().map(|s| s.path.clone()),
+        prefab: data.prefab.clone(),
     }
 }
 
 /// Serializes a staged scene to RON.
 pub fn scene_to_ron(entities: &[StagedEntity]) -> Result<String, SceneFileError> {
+    let root = link_root();
     let file = SceneFile {
         version: SCENE_FILE_VERSION,
-        entities: entities.iter().map(staged_to_entity_data).collect(),
+        entities: entities
+            .iter()
+            .map(|e| {
+                let mut data = staged_to_entity_data(e);
+                // A prefab instance lists the fields it changes, as Oberon
+                // writes them (kept as stored when the prefab can't be read).
+                if let Some(link) = &data.prefab {
+                    if let Ok(base) = automata_core::prefab::load_base(link, &root) {
+                        let ov = automata_core::prefab::overrides(&base, &data);
+                        if let Some(link) = &mut data.prefab {
+                            link.overrides = ov;
+                        }
+                    }
+                }
+                data
+            })
+            .collect(),
     };
     file.to_ron()
 }
@@ -140,4 +159,30 @@ pub fn scene_to_ron(entities: &[StagedEntity]) -> Result<String, SceneFileError>
 pub fn scene_from_ron(text: &str) -> Result<Vec<StagedEntity>, SceneFileError> {
     let file = SceneFile::from_ron(text)?;
     Ok(file.entities.iter().map(entity_data_to_staged).collect())
+}
+
+/// Parses a scene or prefab file whose prefab instances follow their
+/// prefab files (paths relative to `root`, the asset root). Instances whose
+/// prefab can't be read keep their stored data, with a warning.
+///
+/// # Errors
+///
+/// As [`scene_from_ron`].
+pub fn scene_from_file_text(
+    text: &str,
+    root: &std::path::Path,
+) -> Result<Vec<StagedEntity>, SceneFileError> {
+    let mut file = SceneFile::from_ron(text)?;
+    for problem in file.resolve_prefabs(root) {
+        tracing::warn!("{problem}");
+    }
+    Ok(file.entities.iter().map(entity_data_to_staged).collect())
+}
+
+/// The asset root, else the working directory: where prefab links resolve.
+#[must_use]
+pub fn link_root() -> std::path::PathBuf {
+    automata_assets::root()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_default()
 }

@@ -876,11 +876,48 @@ Done:
 - Not yet: a colour picker for material colours (hex fields today) and
   editing materials at runtime from scripts.
 
-### D6. Editor workflow ⬜ M
-- Multi-select editing (change a field on 20 entities at once).
-- Prefab variants and per-instance overrides.
-- A profiler panel (scripts / physics / render per frame).
-- Snapping and duplicate-along-a-line.
+### D6. Editor workflow ✅ M
+Multi-select editing (change a field on 20 entities at once); prefab
+variants and per-instance overrides; a profiler panel (scripts / physics /
+render per frame); snapping and duplicate-along-a-line.
+
+Done:
+- **Linked prefabs:** an entity's `prefab: (path, index, overrides)` links
+  it to entity `index` of a `.prefab` file. Loading fills every field the
+  instance doesn't override from the prefab (`automata_core::prefab`), so
+  editing the file updates every instance; name, position, rotation and the
+  link are always the instance's own. Overrides are computed on save as
+  dotted field paths (`mesh_visual.color`, `attributes.hp`).
+- **Variants:** a `.prefab` whose entities are themselves linked to another
+  prefab stores only their differences (nesting up to 16 deep). Oberon's
+  **Create Variant…** writes one from a modified instance.
+- **Oberon's Prefab block:** the Inspector shows the file, the instance
+  count, **Apply** (writes the overrides into the prefab, updating every
+  other instance), **Revert** (all, or one override at a time), **Unlink**
+  and **Select All**; Hierarchy rows of instances are blue. Instantiating
+  from the Files panel links, and prefab files are watched (500 ms) and
+  re-applied on change.
+- **Multi-select:** Ctrl/Shift+click in the Hierarchy (Shift: a run) and
+  the scene view, Shift+drag box select, Ctrl+A. Every Inspector edit,
+  attribute, component add/remove/paste and the gizmo (about the lead,
+  keeping the layout) applies to the whole selection as one undo step;
+  duplicate, copy/paste, delete and nudge too.
+- **Snapping:** a Snap toggle with cycling steps for move (0.5 m), rotate
+  (15°) and scale (0.1); Ctrl flips it for one drag; saved in preferences.
+- **Duplicate Along a Line** (Ctrl+Shift+D): copies, a per-copy offset and
+  turn about Y; one undo step; prefab links kept.
+- **Profiler:** a bottom-dock tab graphing 240 frames of scripts (from the
+  script runner's own timing), physics, render and editor UI against the
+  whole frame, with now/avg/max, hover read-outs, Pause and Clear.
+- **Python:** `Prefab.load`, `Prefab.path`, linked `instantiate`,
+  `Entity.prefab` (set or unlink), and `Scene.save` writing overrides.
+  `Entity.add` now replaces an existing component of the same kind.
+- **Demo:** `examples/oberon/lamplight_lane`, a night street of linked
+  lamps (a warm variant), fence panels in a line and crates with an
+  overridden Heavy Crate, built by `build_level.py`.
+- Not yet: nested prefabs inside prefabs (other than variants), overriding
+  single vector components (a position-like field overrides as a whole),
+  and the profiler for exported games.
 
 ### D7. Localization ⬜ S
 - String tables (CSV) with `ctx.tr("menu.play")`, a language setting, and
@@ -976,7 +1013,7 @@ per effort. Reorder any time by telling me.
 | 33 | A13 Terrain | L | ⬜ |
 | 34 | B6 Ragdolls | M | ⬜ |
 | 35 | C6 2D toolkit | L | ⬜ |
-| 36 | D6 Editor workflow | M | ⬜ |
+| 36 | D6 Editor workflow | M | ✅ |
 | 37 | D4 UI editor | L | ✅ |
 | 38 | D7 Localization | S | ⬜ |
 | 39 | E1 Android export | L | ⬜ |

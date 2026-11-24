@@ -34,6 +34,9 @@ pub struct StagedEntity {
     pub attributes: AttributeMap,
     /// Path of the behaviour script attached in Oberon, if any.
     pub script: Option<String>,
+    /// The prefab file this entity is an instance of, if any (kept so a
+    /// saved scene stays linked; the game itself ignores it).
+    pub prefab: Option<automata_core::PrefabLink>,
 }
 
 /// A game object builder. Attach components with [`Entity.add`], then place
@@ -99,6 +102,20 @@ impl PyEntity {
         self.staged.script = path;
     }
 
+    /// The prefab file this entity is an instance of (relative to the
+    /// asset root), or `None`. Instances from `Prefab.load(...)` are
+    /// linked: a saved scene keeps following the file, as in Oberon. Set
+    /// `None` to unlink, or a path to link.
+    #[getter]
+    fn prefab(&self) -> Option<String> {
+        self.staged.prefab.as_ref().map(|l| l.path.clone())
+    }
+
+    #[setter]
+    fn set_prefab(&mut self, path: Option<String>) {
+        self.staged.prefab = path.map(automata_core::PrefabLink::new);
+    }
+
     /// The entity's name, if any.
     #[getter]
     fn name(&self) -> Option<String> {
@@ -116,13 +133,25 @@ impl PyEntity {
         Ok(())
     }
 
-    /// Attaches a component (`Transform`, `Camera3D`, `Camera2D`). Returns
-    /// the entity so calls can chain.
+    /// Attaches a component (`Transform`, `MeshRenderer`, a light, …),
+    /// replacing one of the same kind. Returns the entity so calls can
+    /// chain.
     fn add<'py>(
         mut slf: PyRefMut<'py, Self>,
         component: &Bound<'_, PyAny>,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.staged.components.push(extract_component(component)?);
+        // One of each kind: adding a second Transform (say) replaces the
+        // first, so a copied entity can be re-dressed.
+        let component = extract_component(component)?;
+        let kind = std::mem::discriminant(&component);
+        let staged = &mut slf.staged.components;
+        match staged
+            .iter_mut()
+            .find(|c| std::mem::discriminant(*c) == kind)
+        {
+            Some(existing) => *existing = component,
+            None => staged.push(component),
+        }
         Ok(slf)
     }
 
@@ -312,11 +341,16 @@ impl PyScene {
     fn load(cls: &Bound<'_, pyo3::types::PyType>, path: &str) -> PyResult<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|err| pyo3::exceptions::PyIOError::new_err(err.to_string()))?;
-        // Model paths in the scene are relative to its folder.
+        // Model paths in the scene are relative to its folder (and so are
+        // prefab links, whose instances follow their prefab files).
         if let Ok(abs) = std::path::absolute(path) {
             automata_assets::set_root(abs.parent());
         }
-        Self::from_ron(cls, &text)
+        let _ = cls;
+        let entities =
+            crate::serialize::scene_from_file_text(&text, &crate::serialize::link_root())
+                .map_err(|err| pyo3::exceptions::PyValueError::new_err(err.to_string()))?;
+        Ok(Self { entities })
     }
 }
 

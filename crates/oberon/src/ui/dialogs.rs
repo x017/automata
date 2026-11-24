@@ -32,6 +32,58 @@ pub enum Dialog {
         /// Body lines.
         lines: Vec<String>,
     },
+    /// Duplicate Along a Line: how many copies, how far apart, how turned.
+    DuplicateAlong(DuplicateAlong),
+}
+
+/// The Duplicate Along dialog's settings.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DuplicateAlong {
+    /// The entity to copy.
+    pub id: u64,
+    /// How many copies.
+    pub count: usize,
+    /// Offset from one copy to the next (metres, world space).
+    pub step: [f32; 3],
+    /// Turn from one copy to the next about Y (degrees).
+    pub turn: f32,
+}
+
+impl DuplicateAlong {
+    /// Most copies one go makes.
+    pub const MAX_COUNT: usize = 500;
+
+    /// Settings for copying `e`: five copies in a row along X, each its
+    /// own width (rounded up to a quarter metre) plus half a metre apart.
+    #[must_use]
+    pub fn for_entity(e: &crate::doc::EntityEntry) -> Self {
+        let width = e.data.transform.map_or(1.0, |t| {
+            if e.data.mesh_visual.is_some() {
+                let half =
+                    crate::view::local_half_extents(&e.data) * glam::Vec3::from(t.scale).abs();
+                (2.0 * half.x / 0.25).ceil() * 0.25 + 0.5
+            } else {
+                1.0
+            }
+        });
+        Self {
+            id: e.id,
+            count: 5,
+            step: [width, 0.0, 0.0],
+            turn: 0.0,
+        }
+    }
+
+    /// The intent that makes the copies.
+    #[must_use]
+    pub fn intent(&self) -> Intent {
+        Intent::DuplicateAlong {
+            id: self.id,
+            count: self.count,
+            step: self.step,
+            turn_y: self.turn.to_radians(),
+        }
+    }
 }
 
 /// The keyboard shortcut reference.
@@ -45,6 +97,8 @@ pub fn shortcut_lines() -> Vec<String> {
         "Editing",
         "  Ctrl+Z / Ctrl+Y undo / redo · Ctrl+C / Ctrl+V copy / paste entity",
         "  Ctrl+D duplicate · Del delete · F2 rename · Esc deselect",
+        "  Ctrl+click add/remove · Shift+click range · Shift+drag box select (edits apply to all)",
+        "  Snap (scene view toolbar) grid / angle / scale steps · hold Ctrl while dragging to flip",
         "  Inspector numbers: drag to scrub (Shift fine, Ctrl coarse), click to type",
         "  Number fields accept math: 2*pi, 90/4, 1.5+2",
         "Files",
@@ -122,11 +176,31 @@ impl Ui {
     /// Enter in a dialog without a text field: confirms a deletion,
     /// otherwise closes the dialog.
     pub fn dialog_enter(&mut self) {
-        if let Some(Dialog::ConfirmDelete(path)) = self.dialog.take() {
-            self.out.push(Intent::DeleteFile(path));
-            return;
+        match self.dialog.take() {
+            Some(Dialog::ConfirmDelete(path)) => {
+                self.out.push(Intent::DeleteFile(path));
+                return;
+            }
+            Some(Dialog::DuplicateAlong(d)) => {
+                self.out.push(d.intent());
+                return;
+            }
+            other => self.dialog = other,
         }
         self.close_dialog();
+    }
+
+    /// Opens Duplicate Along for entity `id`.
+    pub fn open_duplicate_along(&mut self, doc: &Document, id: u64) {
+        let Some(i) = doc.index_of(id) else {
+            return;
+        };
+        self.menu = None;
+        self.picker = None;
+        self.edit = None;
+        self.dialog = Some(Dialog::DuplicateAlong(DuplicateAlong::for_entity(
+            &doc.entities[i],
+        )));
     }
 
     /// Whether a modal dialog is open.
@@ -158,6 +232,7 @@ impl Ui {
             Dialog::ConfirmDelete(_) => (480.0, 160.0),
             Dialog::Settings(_) => (820.0, 600.0),
             Dialog::Message { lines, .. } => (640.0, 90.0 + lines.len() as f32 * 19.0),
+            Dialog::DuplicateAlong(_) => (420.0, 292.0),
         };
         let dw = dw.min(w - 20.0);
         let dh = dh.min(h - 20.0);
@@ -266,6 +341,7 @@ impl Ui {
             }
             Dialog::File(_) => self.draw_file_dialog(canvas, r),
             Dialog::ConfirmDelete(path) => self.draw_confirm_delete(canvas, r, &path),
+            Dialog::DuplicateAlong(d) => self.draw_duplicate_along(canvas, r, d),
         }
         self.p = saved_p;
         self.clip = saved_clip;
@@ -273,6 +349,124 @@ impl Ui {
 }
 
 impl Ui {
+    /// Duplicate Along: a stepper per setting (Shift for bigger steps).
+    fn draw_duplicate_along(&mut self, canvas: &mut Canvas, r: Rect, mut d: DuplicateAlong) {
+        canvas.text(
+            r.x + 18.0,
+            r.y + 16.0,
+            15.0,
+            "Duplicate Along a Line",
+            color::accent_soft(),
+        );
+        let big = self.p.shift;
+        let fmt = crate::fields::format_value;
+        let rows: [(&str, String, f32); 5] = [
+            ("Copies", d.count.to_string(), if big { 5.0 } else { 1.0 }),
+            (
+                "Offset X",
+                format!("{} m", fmt(d.step[0])),
+                if big { 1.0 } else { 0.25 },
+            ),
+            (
+                "Offset Y",
+                format!("{} m", fmt(d.step[1])),
+                if big { 1.0 } else { 0.25 },
+            ),
+            (
+                "Offset Z",
+                format!("{} m", fmt(d.step[2])),
+                if big { 1.0 } else { 0.25 },
+            ),
+            (
+                "Turn",
+                format!("{}°", fmt(d.turn)),
+                if big { 45.0 } else { 15.0 },
+            ),
+        ];
+        let mut y = r.y + 50.0;
+        for (i, (label, value, step)) in rows.iter().enumerate() {
+            canvas.text(
+                r.x + 18.0,
+                y + 5.0,
+                layout::FONT_SIZE,
+                label,
+                color::text_dim(),
+            );
+            let minus = Rect::new(r.x + 150.0, y, 28.0, 24.0);
+            let field = Rect::new(minus.x + 32.0, y, 130.0, 24.0);
+            let plus = Rect::new(field.x + field.w + 4.0, y, 28.0, 24.0);
+            canvas.fill_rounded(
+                field.x,
+                field.y,
+                field.w,
+                field.h,
+                layout::RADIUS,
+                color::field(),
+            );
+            let tw = canvas.measure_text(layout::FONT_SIZE, value);
+            canvas.text(
+                field.x + (field.w - tw) / 2.0,
+                y + 5.0,
+                layout::FONT_SIZE,
+                value,
+                color::text(),
+            );
+            let mut delta = 0.0;
+            if self.button(canvas, minus, "−", ButtonStyle::Normal) {
+                delta = -step;
+            }
+            if self.button(canvas, plus, "+", ButtonStyle::Normal) {
+                delta = *step;
+            }
+            if delta != 0.0 {
+                match i {
+                    0 => {
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        let n = (d.count as f32 + delta).round().max(1.0) as usize;
+                        d.count = n.min(DuplicateAlong::MAX_COUNT);
+                    }
+                    1..=3 => d.step[i - 1] = ((d.step[i - 1] + delta) / step).round() * step,
+                    _ => d.turn = ((d.turn + delta) / step).round() * step,
+                }
+            }
+            y += 30.0;
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let reach = glam::Vec3::from(d.step).length() * d.count as f32;
+        canvas.text_clipped(
+            r.x + 18.0,
+            y + 4.0,
+            layout::SMALL_SIZE,
+            &format!(
+                "{} cop{} reaching {} m · Shift for bigger steps",
+                d.count,
+                if d.count == 1 { "y" } else { "ies" },
+                fmt(reach)
+            ),
+            color::text_faint(),
+            r.w - 36.0,
+        );
+        self.dialog = Some(Dialog::DuplicateAlong(d));
+        let by = r.y + r.h - 42.0;
+        if self.button(
+            canvas,
+            Rect::new(r.x + 18.0, by, 90.0, 28.0),
+            "Cancel",
+            ButtonStyle::Normal,
+        ) {
+            self.dialog = None;
+        }
+        if self.button(
+            canvas,
+            Rect::new(r.x + r.w - 128.0, by, 110.0, 28.0),
+            "Duplicate",
+            ButtonStyle::Accent,
+        ) {
+            self.dialog = None;
+            self.out.push(d.intent());
+        }
+    }
+
     fn draw_confirm_delete(&mut self, canvas: &mut Canvas, r: Rect, path: &Path) {
         let name = crate::files::display_name(path);
         let what = if path.is_dir() { "folder" } else { "file" };

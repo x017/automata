@@ -15,6 +15,7 @@ pub mod config;
 mod driver;
 pub mod error;
 pub mod logging;
+pub mod prefab;
 pub mod scene_file;
 pub mod time;
 pub mod window;
@@ -23,6 +24,7 @@ pub use app::{AppContext, AppState, Application, SharedAudio, WorldState};
 pub use audio_source::{AudioCommand, AudioSource, AudioSourcePlayer};
 pub use config::EngineConfig;
 pub use error::{Error, Result};
+pub use prefab::PrefabLink;
 pub use scene_file::{
     AttributeValue, Attributes, EntityData, MeshVisualData, PrimitiveData, SceneFile,
     SceneFileError, Script, TransformData, SCENE_FILE_VERSION,

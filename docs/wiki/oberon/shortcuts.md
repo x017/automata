@@ -26,17 +26,22 @@ means ⌘.
 | Keys | Action |
 |---|---|
 | Click | Select |
+| Ctrl+click / Shift+click | Add to or remove from the selection (Hierarchy: Shift+click selects a run) |
+| Shift+drag on empty space | Box select ([Editor workflow](editor-workflow.md)) |
+| Ctrl+A | Select everything |
 | Drag, right-drag, Alt+drag | Orbit |
 | Middle-drag | Pan |
 | Wheel | Zoom |
 | F | Frame the selection |
 | W / E / R | Move / Rotate / Scale gizmo |
+| Ctrl while dragging a gizmo | Flip snapping for this drag |
 | Arrows | Nudge the selection across the ground, relative to the view |
 | PgUp / PgDn | Nudge the selection up / down |
 | Shift + nudge | Fine steps |
 | Ctrl+Z / Ctrl+Y | Undo / Redo |
-| Ctrl+C / Ctrl+V | Copy / Paste entity |
-| Ctrl+D | Duplicate |
+| Ctrl+C / Ctrl+V | Copy / Paste the selection |
+| Ctrl+D | Duplicate the selection |
+| Ctrl+Shift+D | Duplicate Along a Line… |
 | Del | Delete |
 | F2 | Rename |
 | Esc | Deselect |

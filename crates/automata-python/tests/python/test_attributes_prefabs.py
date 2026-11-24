@@ -112,6 +112,56 @@ def test_prefabs_instantiate_and_save(tmp_path):
         at.Prefab(42)
 
 
+def test_prefab_instances_stay_linked_and_list_their_overrides(tmp_path):
+    """Instances of a loaded prefab link to its file, as Oberon's do: a
+    saved scene lists only what each instance changes, and loading it
+    again follows the (edited) prefab file."""
+    at.set_asset_root(str(tmp_path))
+    try:
+        (tmp_path / "prefabs").mkdir()
+        template = at.Entity("Crate").add(at.Transform(position=(0.0, 0.5, 0.0)))
+        template.add(at.MeshRenderer.cube(1.0, color=(0.6, 0.4, 0.2, 1.0)))
+        template.attributes["hp"] = 3
+        at.Prefab(template).save(str(tmp_path / "prefabs" / "crate.prefab"))
+        assert at.Prefab(template).path is None
+
+        crate = at.Prefab.load(str(tmp_path / "prefabs" / "crate.prefab"))
+        assert crate.path == "prefabs/crate.prefab"
+        plain = crate.instantiate(position=(2.0, 0.5, 0.0), name="Plain")
+        tough = crate.instantiate(position=(4.0, 0.5, 0.0), name="Tough")
+        tough.attributes["hp"] = 9
+        assert plain.prefab == tough.prefab == "prefabs/crate.prefab"
+        loose = crate.instantiate(name="Loose")
+        loose.prefab = None
+        assert loose.prefab is None
+
+        scene_path = tmp_path / "level.ron"
+        at.Scene().add(plain).add(tough).add(loose).save(str(scene_path))
+        text = scene_path.read_text()
+        assert text.count('path: "prefabs/crate.prefab"') == 2
+        # Only Tough lists an override; where an instance stands and its
+        # name never count.
+        assert text.count("overrides:") == 1
+        listed = text.split("overrides:")[1].split("]")[0]
+        assert '"attributes.hp"' in listed and "position" not in listed
+
+        # The prefab changes: the linked instances follow on load, the
+        # override survives, the unlinked copy keeps its old values.
+        template.attributes["hp"] = 5
+        template.attributes["armour"] = 1
+        at.Prefab(template).save(str(tmp_path / "prefabs" / "crate.prefab"))
+        loaded = at.Scene.load(str(scene_path))
+        by_name = {e.name: e for e in loaded.entities()}
+        assert by_name["Plain"].attributes["hp"] == 5
+        assert by_name["Plain"].attributes["armour"] == 1
+        assert by_name["Tough"].attributes["hp"] == 9
+        assert by_name["Tough"].attributes["armour"] == 1
+        assert "armour" not in by_name["Loose"].attributes
+        assert by_name["Plain"].prefab == "prefabs/crate.prefab"
+    finally:
+        at.set_asset_root(None)
+
+
 def test_prefabs_spawn_at_runtime():
     game = make_game()
     bullet = at.Entity("bullet").add(at.Transform())

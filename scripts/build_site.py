@@ -68,6 +68,7 @@ NAV: list[tuple[str, list[tuple[str, str]]]] = [
         ("wiki/oberon/foliage.md", "Grass & foliage"),
         ("wiki/oberon/audio.md", "Audio"),
         ("wiki/oberon/prefabs-and-attributes.md", "Prefabs & attributes"),
+        ("wiki/oberon/editor-workflow.md", "Editor workflow"),
         ("wiki/oberon/exporting.md", "Exporting your game"),
         ("wiki/oberon/shortcuts.md", "Keyboard shortcuts"),
     ]),

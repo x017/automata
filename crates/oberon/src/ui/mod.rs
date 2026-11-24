@@ -38,6 +38,8 @@ pub mod material_editor;
 pub mod menus;
 pub mod palette;
 pub mod picker;
+pub mod prefab_panel;
+pub mod profiler;
 pub mod project_panel;
 pub mod settings;
 pub mod springs;
@@ -168,6 +170,8 @@ pub enum BottomTab {
     Console,
     /// The project's models and sounds as thumbnails.
     Assets,
+    /// Per-frame timings: scripts, physics, rendering, editor UI.
+    Profiler,
 }
 
 /// The editor's panel rectangles for a window of a given logical size.
@@ -259,6 +263,44 @@ fn clamp_files_h(files_h: f32, body_h: f32) -> f32 {
 pub enum Intent {
     /// Select an entity (`None` clears the selection).
     Select(Option<u64>),
+    /// Ctrl+click (`range: false`: add or remove one entity) or Shift+click
+    /// (`range: true`: everything from the primary to it) in the selection.
+    SelectMore {
+        /// The entity clicked.
+        id: u64,
+        /// Select the range up to it.
+        range: bool,
+    },
+    /// Select exactly these entities (the last one primary).
+    SelectMany(Vec<u64>),
+    /// Copy an entity `count` times along a line (one undo step).
+    DuplicateAlong {
+        /// The entity to copy.
+        id: u64,
+        /// How many copies.
+        count: usize,
+        /// The offset from one copy to the next (metres, world space).
+        step: [f32; 3],
+        /// The turn from one copy to the next about Y (radians).
+        turn_y: f32,
+    },
+    /// Write an instance's overrides into its prefab file; every instance
+    /// follows.
+    ApplyPrefab(u64),
+    /// Put the prefab's values back on an instance: these override paths,
+    /// or all of them (`None`).
+    RevertPrefab {
+        /// Entity id.
+        id: u64,
+        /// The override paths (`None`: every override).
+        paths: Option<Vec<String>>,
+    },
+    /// Take an instance off its prefab (it keeps its values).
+    UnlinkPrefab(u64),
+    /// Select every instance of the prefab an entity follows.
+    SelectInstances(u64),
+    /// Write a variant of a prefab file (a prefab that follows it).
+    CreateVariant(PathBuf),
     /// Lay a foliage brush dab on an entity's Grass or Scatter (part of a
     /// stroke: coalesced undo).
     Brush {
@@ -549,12 +591,85 @@ pub enum Intent {
 }
 
 impl Intent {
+    /// The entity an edit applies to, for intents that can apply to every
+    /// selected entity at once.
+    #[must_use]
+    pub fn fan_target(&self) -> Option<u64> {
+        match self {
+            Self::AddComponent(id, _)
+            | Self::RemoveComponent(id, _)
+            | Self::ResetComponent(id, _)
+            | Self::ResetTransform(id)
+            | Self::FitCollider(id)
+            | Self::DetachScript(id)
+            | Self::Delete(id)
+            | Self::Duplicate(id)
+            | Self::UnlinkPrefab(id)
+            | Self::SetField { id, .. }
+            | Self::SetColor { id, .. }
+            | Self::SetChoice { id, .. }
+            | Self::Toggle { id, .. }
+            | Self::Cycle { id, .. }
+            | Self::SetTransform { id, .. }
+            | Self::SetAnimationClip { id, .. }
+            | Self::SetJointTarget { id, .. }
+            | Self::PasteComponent { id, .. }
+            | Self::SetAttribute { id, .. }
+            | Self::RemoveAttribute { id, .. }
+            | Self::RenameAttribute { id, .. }
+            | Self::SetModel { id, .. }
+            | Self::SetMaterial { id, .. }
+            | Self::SetAudioClip { id, .. }
+            | Self::AttachScript { id, .. }
+            | Self::RevertPrefab { id, paths: None } => Some(*id),
+            _ => None,
+        }
+    }
+
+    /// This intent aimed at entity `to` instead (for the intents
+    /// [`Intent::fan_target`] names, except the ones that need the
+    /// document: toggles, cycles, transforms, duplicates).
+    #[must_use]
+    pub fn retarget(&self, to: u64) -> Option<Self> {
+        let mut out = self.clone();
+        match &mut out {
+            Self::AddComponent(id, _)
+            | Self::RemoveComponent(id, _)
+            | Self::ResetComponent(id, _)
+            | Self::ResetTransform(id)
+            | Self::FitCollider(id)
+            | Self::DetachScript(id)
+            | Self::Delete(id)
+            | Self::UnlinkPrefab(id)
+            | Self::SetField { id, .. }
+            | Self::SetColor { id, .. }
+            | Self::SetChoice { id, .. }
+            | Self::SetAnimationClip { id, .. }
+            | Self::SetJointTarget { id, .. }
+            | Self::PasteComponent { id, .. }
+            | Self::SetAttribute { id, .. }
+            | Self::RemoveAttribute { id, .. }
+            | Self::RenameAttribute { id, .. }
+            | Self::SetModel { id, .. }
+            | Self::SetMaterial { id, .. }
+            | Self::SetAudioClip { id, .. }
+            | Self::AttachScript { id, .. }
+            | Self::RevertPrefab { id, paths: None } => *id = to,
+            _ => return None,
+        }
+        Some(out)
+    }
+
     /// Whether this intent edits the document (blocked during play mode).
     #[must_use]
     pub fn edits_document(&self) -> bool {
         !matches!(
             self,
             Self::Select(_)
+                | Self::SelectMore { .. }
+                | Self::SelectMany(_)
+                | Self::SelectInstances(_)
+                | Self::CreateVariant(_)
                 | Self::EndGesture
                 | Self::Save
                 | Self::SaveAs(_)
@@ -693,17 +808,23 @@ struct TextEdit {
 enum Drag {
     None,
     /// Left press in the scene view: a click selects; a drag orbits.
+    /// With Ctrl or Shift held (`adding`), a click adds to the selection
+    /// and a drag draws a selection box.
     ViewPress {
         start: (f32, f32),
         last: (f32, f32),
         orbiting: bool,
         double: bool,
+        adding: bool,
     },
-    /// Dragging a gizmo handle.
+    /// Dragging a gizmo handle. `start` is the transform at the press,
+    /// `free` where the drag has got to before snapping.
     Gizmo {
         id: u64,
         axis: usize,
         last: (f32, f32),
+        start: TransformData,
+        free: TransformData,
     },
     /// A foliage brush stroke on an entity.
     Brush {
@@ -807,6 +928,8 @@ pub struct Ui {
     pub right_tab: RightTab,
     /// Frame statistics for the Graphics panel (set by the app).
     pub stats: FrameStats,
+    /// Per-frame timings for the Profiler tab (recorded by the app).
+    pub profiler: profiler::Profiler,
     /// The selected camera's view, rendered by the app: RGBA, size.
     camera_preview: Option<(Vec<u8>, u32, u32)>,
     /// The animation playing or scrubbed in the scene view while editing
@@ -932,6 +1055,7 @@ impl Ui {
             bottom_tab: BottomTab::Console,
             right_tab: RightTab::Inspector,
             stats: FrameStats::default(),
+            profiler: profiler::Profiler::default(),
             camera_preview: None,
             anim_preview: None,
             brush: brush::Brush::default(),
@@ -2060,6 +2184,91 @@ impl Ui {
             self.tip(r, tip);
             x += bw;
         }
+        self.snap_group(canvas, view);
+    }
+
+    /// The snapping controls, right of the tool group: an on/off toggle
+    /// and the current tool's step (click for the next, Shift for the
+    /// previous).
+    fn snap_group_rect(canvas: &mut Canvas, view: Rect) -> Rect {
+        let tools = Self::tool_group_rect(canvas, view);
+        let w = canvas.measure_text(layout::FONT_SIZE, "Snap")
+            + canvas.measure_text(layout::FONT_SIZE, "0.25 m")
+            + 52.0;
+        Rect::new(tools.x + tools.w + 6.0, tools.y, w, tools.h)
+    }
+
+    fn snap_group(&mut self, canvas: &mut Canvas, view: Rect) {
+        let g = Self::snap_group_rect(canvas, view);
+        canvas.fill_rounded(g.x, g.y, g.w, g.h, layout::RADIUS + 1.0, color::surface());
+        let on = self.prefs.snap.enabled;
+        let sw = canvas.measure_text(layout::FONT_SIZE, "Snap") + 24.0;
+        let toggle = Rect::new(g.x + 2.0, g.y + 2.0, sw, g.h - 4.0);
+        let step = Rect::new(toggle.x + toggle.w, g.y + 2.0, g.w - sw - 4.0, g.h - 4.0);
+        for (r, active) in [(toggle, on), (step, false)] {
+            if active || self.hot(r) {
+                let bg = if active {
+                    color::select()
+                } else {
+                    color::hover()
+                };
+                canvas.fill_rounded(r.x, r.y, r.w, r.h, layout::RADIUS, bg);
+            }
+            if self.hot(r) {
+                self.cursor = CursorHint::Pointer;
+            }
+        }
+        let ty = toggle.y + (toggle.h - layout::FONT_SIZE) / 2.0 - 1.0;
+        canvas.text(
+            toggle.x + 12.0,
+            ty,
+            layout::FONT_SIZE,
+            "Snap",
+            if on { color::text() } else { color::text_dim() },
+        );
+        let label = self.prefs.snap.label(self.gizmo);
+        let lw = canvas.measure_text(layout::FONT_SIZE, &label);
+        canvas.text(
+            step.x + (step.w - lw) / 2.0,
+            ty,
+            layout::FONT_SIZE,
+            &label,
+            if on {
+                color::text_dim()
+            } else {
+                color::text_faint()
+            },
+        );
+        self.tip(
+            toggle,
+            "Snap to the grid while dragging  (hold Ctrl to flip)",
+        );
+        self.tip(step, "Snap step for this tool (click for the next)");
+        if self.hot(toggle) && self.p.pressed {
+            self.prefs.snap.enabled = !on;
+            self.prefs_dirty = true;
+        }
+        if self.hot(step) && self.p.pressed {
+            let options: &[f32] = match self.gizmo {
+                GizmoMode::Move => &view::Snap::STEPS,
+                GizmoMode::Rotate => &view::Snap::ANGLES,
+                GizmoMode::Scale => &view::Snap::SCALES,
+            };
+            let current = self.prefs.snap.step_for(self.gizmo);
+            let at = options
+                .iter()
+                .position(|v| (v - current).abs() < 1e-4)
+                .unwrap_or(0);
+            let n = options.len();
+            let next = if self.p.shift {
+                (at + n - 1) % n
+            } else {
+                (at + 1) % n
+            };
+            self.prefs.snap.set_step(self.gizmo, options[next]);
+            self.prefs.snap.enabled = true;
+            self.prefs_dirty = true;
+        }
     }
 
     /// Requests a tooltip for `r` while the pointer rests on it.
@@ -2122,36 +2331,55 @@ impl Ui {
         for entity in &doc.entities {
             let row = Rect::new(rect.x + 4.0, y, rect.w - 9.0, layout::ROW_H);
             if self.row_visible(row) {
-                let selected = doc.selected == Some(entity.id);
+                let selected = doc.is_selected(entity.id);
+                let primary = doc.selected == Some(entity.id);
                 let hot = self.hot(row);
                 if selected {
                     canvas.fill_rounded(row.x, row.y, row.w, row.h, 3.0, color::select());
+                    if primary && doc.selection_len() > 1 {
+                        // The lead (the Inspector shows its values).
+                        canvas.fill_rect(row.x, row.y + 4.0, 2.0, row.h - 8.0, color::accent());
+                    }
                 } else if hot {
                     canvas.fill_rounded(row.x, row.y, row.w, row.h, 3.0, color::hover());
                 }
                 entity_icon(canvas, row.x + 12.0, row.y + row.h / 2.0, &entity.data);
+                // Prefab instances read in blue (as in Unity).
+                let fg = match (entity.data.prefab.is_some(), selected) {
+                    (true, _) => color::axis_z(),
+                    (false, true) => color::text(),
+                    (false, false) => color::text_dim(),
+                };
                 canvas.text_clipped(
                     row.x + 26.0,
                     row.y + 5.0,
                     layout::FONT_SIZE,
                     entity.name(),
-                    if selected {
-                        color::text()
-                    } else {
-                        color::text_dim()
-                    },
+                    fg,
                     row.w - 30.0,
                 );
                 if hot && self.p.pressed {
                     row_clicked = true;
-                    self.out.push(Intent::Select(Some(entity.id)));
-                    if self.p.double_click {
-                        self.focus_entity(entity);
+                    // Ctrl adds or removes one; Shift extends a range.
+                    if self.p.ctrl || self.p.shift {
+                        self.out.push(Intent::SelectMore {
+                            id: entity.id,
+                            range: self.p.shift,
+                        });
+                    } else {
+                        self.out.push(Intent::Select(Some(entity.id)));
+                        if self.p.double_click {
+                            self.focus_entity(entity);
+                        }
                     }
                 }
                 if hot && self.p.right_pressed {
                     row_clicked = true;
-                    self.out.push(Intent::Select(Some(entity.id)));
+                    // Right-clicking inside a multi-selection keeps it, so
+                    // the menu's commands apply to all of it.
+                    if !selected {
+                        self.out.push(Intent::Select(Some(entity.id)));
+                    }
                     let items = self.entity_menu(doc, entity.id);
                     self.open_menu(self.p.x, self.p.y, items);
                 }
@@ -2321,6 +2549,8 @@ impl Ui {
             }
         }
         y += 22.0;
+        y = self.multi_select_note(canvas, doc, x, y, w);
+        y = self.prefab_block(canvas, doc, e, x, y, w);
 
         if d.transform.is_some() {
             let (ny, open) = self.section(canvas, x, y, w, "Transform", id, None, true);
@@ -4197,7 +4427,9 @@ impl Ui {
         let raw = self.raw;
         let editing = self.play == PlayState::Editing;
         // The floating tool switch owns its corner of the view.
-        let over_tools = editing && Self::tool_group_rect(canvas, rect).contains(p.x, p.y);
+        let over_tools = editing
+            && (Self::tool_group_rect(canvas, rect).contains(p.x, p.y)
+                || Self::snap_group_rect(canvas, rect).contains(p.x, p.y));
         let inside = rect.contains(p.x, p.y) && !over_tools;
         let selected = doc.selected_index().map(|i| &doc.entities[i]);
         // The foliage brush takes the left button while it's on.
@@ -4282,24 +4514,41 @@ impl Ui {
         // --- Left button: select / gizmo drag / orbit drag. ---
         let drag = self.drag;
         match drag {
-            Drag::Gizmo { id, axis, last } => {
+            Drag::Gizmo {
+                id,
+                axis,
+                last,
+                start,
+                mut free,
+            } => {
                 if raw.down {
                     let delta = (raw.x - last.0, raw.y - last.1);
-                    if delta != (0.0, 0.0) {
-                        let t = doc
-                            .index_of(id)
-                            .and_then(|i| doc.entities[i].data.transform);
-                        if let Some(t) = t {
-                            if let Some(g) = Gizmo::build(self.gizmo, &t, &proj) {
-                                let transform = g.drag(axis, &t, (raw.x, raw.y), delta);
-                                self.out.push(Intent::SetTransform { id, transform });
+                    let t = doc
+                        .index_of(id)
+                        .and_then(|i| doc.entities[i].data.transform);
+                    if let Some(t) = t {
+                        if delta != (0.0, 0.0) {
+                            if let Some(g) = Gizmo::build(self.gizmo, &free, &proj) {
+                                free = g.drag(axis, &free, (raw.x, raw.y), delta);
                             }
+                        }
+                        // Holding Ctrl flips snapping for this drag.
+                        let snapping = self.prefs.snap.enabled != raw.ctrl;
+                        let transform = if snapping {
+                            self.prefs.snap.apply(self.gizmo, axis, &start, &free)
+                        } else {
+                            free
+                        };
+                        if transform != t {
+                            self.out.push(Intent::SetTransform { id, transform });
                         }
                     }
                     self.drag = Drag::Gizmo {
                         id,
                         axis,
                         last: (raw.x, raw.y),
+                        start,
+                        free,
                     };
                     self.cursor = CursorHint::Grabbing;
                 } else {
@@ -4312,10 +4561,12 @@ impl Ui {
                 last,
                 orbiting,
                 double,
+                adding,
             } => {
+                let dist = ((raw.x - start.0).powi(2) + (raw.y - start.1).powi(2)).sqrt();
+                let boxing = adding && !orbiting && dist > 4.0;
                 if raw.down {
-                    let dist = ((raw.x - start.0).powi(2) + (raw.y - start.1).powi(2)).sqrt();
-                    let orbiting = orbiting || dist > 4.0;
+                    let orbiting = orbiting || (!adding && dist > 4.0);
                     if orbiting {
                         self.camera.orbit(raw.x - last.0, raw.y - last.1);
                         self.cursor = CursorHint::Move;
@@ -4325,11 +4576,24 @@ impl Ui {
                         last: (raw.x, raw.y),
                         orbiting,
                         double,
+                        adding,
                     };
+                } else if boxing {
+                    self.drag = Drag::None;
+                    let picked = view::pick_box(doc, &proj, start, (raw.x, raw.y));
+                    let mut ids = doc.selection();
+                    for id in picked {
+                        if !ids.contains(&id) {
+                            ids.push(id);
+                        }
+                    }
+                    self.out.push(Intent::SelectMany(ids));
                 } else {
                     self.drag = Drag::None;
-                    if !orbiting {
-                        let hit = view::pick(doc, &proj, start.0, start.1);
+                    let hit = (!orbiting).then(|| view::pick(doc, &proj, start.0, start.1));
+                    if let (Some(Some(id)), true) = (hit, adding) {
+                        self.out.push(Intent::SelectMore { id, range: false });
+                    } else if let (Some(hit), false) = (hit, adding) {
                         self.out.push(Intent::Select(hit));
                         if double {
                             if let Some(e) = hit
@@ -4362,17 +4626,21 @@ impl Ui {
                 } else {
                     gizmo.as_ref().and_then(|g| g.hit(p.x, p.y))
                 };
-                self.drag = match (handle, selected) {
-                    (Some(axis), Some(e)) => Drag::Gizmo {
-                        id: e.id,
+                let held = selected.and_then(|e| Some((e.id, e.data.transform?)));
+                self.drag = match (handle, held) {
+                    (Some(axis), Some((id, t))) => Drag::Gizmo {
+                        id,
                         axis,
                         last: (p.x, p.y),
+                        start: t,
+                        free: t,
                     },
                     _ => Drag::ViewPress {
                         start: (p.x, p.y),
                         last: (p.x, p.y),
                         orbiting: p.alt,
                         double: p.double_click,
+                        adding: !p.alt && (p.ctrl || p.shift),
                     },
                 };
             }
@@ -4393,8 +4661,27 @@ impl Ui {
         if editing {
             draw_markers(canvas, doc, &proj, rect);
             draw_camera_frustums(canvas, doc, &proj, selected.map(|e| e.id));
-            if let Some(e) = selected {
-                draw_selection(canvas, &e.data, &proj);
+            for id in doc.selection() {
+                if let Some(i) = doc.index_of(id) {
+                    let lead = Some(id) == doc.selected;
+                    draw_selection(canvas, &doc.entities[i].data, &proj, lead);
+                }
+            }
+            if let Drag::ViewPress {
+                start,
+                adding: true,
+                orbiting: false,
+                ..
+            } = self.drag
+            {
+                let (x0, y0) = (start.0.min(raw.x), start.1.min(raw.y));
+                let (w, h) = ((raw.x - start.0).abs(), (raw.y - start.1).abs());
+                if w.max(h) > 4.0 {
+                    let mut fill = color::accent();
+                    fill.apply_opacity(0.15);
+                    canvas.fill_rect(x0, y0, w, h, fill);
+                    canvas.stroke_rect(x0, y0, w, h, color::accent(), 1.0);
+                }
             }
             if let Some(g) = &gizmo {
                 draw_gizmo(canvas, g, self.hover_axis);
@@ -4516,6 +4803,7 @@ impl Ui {
         match self.bottom_tab {
             BottomTab::Console => self.console_body(canvas, body),
             BottomTab::Assets => self.assets_body(canvas, doc, body),
+            BottomTab::Profiler => self.profiler_body(canvas, body),
         }
         // Tab strip.
         canvas.fill_rect(
@@ -4550,6 +4838,7 @@ impl Ui {
         for (tab, label) in [
             (BottomTab::Console, console_label),
             (BottomTab::Assets, "Assets".to_string()),
+            (BottomTab::Profiler, "Profiler".to_string()),
         ] {
             let tw = canvas.measure_text(layout::TITLE_SIZE, &label) + 22.0;
             let r = Rect::new(x, rect.y, tw, layout::TITLEBAR_H);
@@ -4580,6 +4869,10 @@ impl Ui {
         if self.bottom_tab == BottomTab::Assets {
             let strip = Rect::new(x, rect.y, rect.x + rect.w - x, layout::TITLEBAR_H);
             self.assets_toolbar(canvas, doc, strip);
+        }
+        if self.bottom_tab == BottomTab::Profiler {
+            let strip = Rect::new(x, rect.y, rect.x + rect.w - x, layout::TITLEBAR_H);
+            self.profiler_toolbar(canvas, strip);
         }
         if self.bottom_tab == BottomTab::Console {
             let clear = Rect::new(
@@ -4727,7 +5020,15 @@ impl Ui {
         let mut left = format!("{} entities", doc.entity_count());
         if let Some(i) = doc.selected_index() {
             left.push_str("  ·  ");
-            left.push_str(doc.entities[i].name());
+            let n = doc.selection_len();
+            if n > 1 {
+                left.push_str(&n.to_string());
+                left.push_str(" selected (last: ");
+                left.push_str(doc.entities[i].name());
+                left.push(')');
+            } else {
+                left.push_str(doc.entities[i].name());
+            }
         }
         let lw = canvas.text(
             rect.x + layout::PAD,
@@ -5130,8 +5431,15 @@ fn draw_light_reach(canvas: &mut Canvas, d: &EntityData, proj: &Projector) {
 
 /// The selection outline (oriented box), plus a light's direction arrow
 /// or reach.
-fn draw_selection(canvas: &mut Canvas, d: &EntityData, proj: &Projector) {
-    draw_light_reach(canvas, d, proj);
+fn draw_selection(canvas: &mut Canvas, d: &EntityData, proj: &Projector, lead: bool) {
+    if lead {
+        draw_light_reach(canvas, d, proj);
+    }
+    // The lead's box is bright; the rest of a multi-selection is softer.
+    let mut edge = color::gizmo_hot();
+    if !lead {
+        edge.apply_opacity(0.6);
+    }
     if d.mesh_visual.is_some() {
         if let Some(corners) = view::box_corners(d) {
             let screen: Vec<Option<(f32, f32)>> =
@@ -5140,7 +5448,7 @@ fn draw_selection(canvas: &mut Canvas, d: &EntityData, proj: &Projector) {
                 for bit in [1usize, 2, 4] {
                     if i & bit == 0 {
                         if let (Some(a), Some(b)) = (screen[i], screen[i | bit]) {
-                            canvas.line(a.0, a.1, b.0, b.1, color::gizmo_hot(), 1.5);
+                            canvas.line(a.0, a.1, b.0, b.1, edge, 1.5);
                         }
                     }
                 }
@@ -6704,6 +7012,285 @@ mod tests {
         assert!(Intent::Delete(1).edits_document());
         assert!(!Intent::Select(Some(1)).edits_document());
         assert!(!Intent::Stop.edits_document());
+        // Selecting is fine while playing; prefab edits aren't.
+        assert!(!Intent::SelectMore { id: 1, range: true }.edits_document());
+        assert!(!Intent::SelectMany(vec![1, 2]).edits_document());
+        assert!(!Intent::SelectInstances(1).edits_document());
+        assert!(Intent::ApplyPrefab(1).edits_document());
+        assert!(Intent::RevertPrefab { id: 1, paths: None }.edits_document());
+        assert!(Intent::UnlinkPrefab(1).edits_document());
+        assert!(Intent::DuplicateAlong {
+            id: 1,
+            count: 2,
+            step: [1.0, 0.0, 0.0],
+            turn_y: 0.0
+        }
+        .edits_document());
+    }
+
+    #[test]
+    fn edits_fan_out_to_every_selected_entity() {
+        // Retargeting keeps everything but the entity.
+        let set = Intent::SetColor {
+            id: 1,
+            target: picker::ColorTarget::Mesh,
+            rgba: [1.0, 0.0, 0.0, 1.0],
+            gesture: false,
+        };
+        assert_eq!(set.fan_target(), Some(1));
+        assert_eq!(
+            set.retarget(7),
+            Some(Intent::SetColor {
+                id: 7,
+                target: picker::ColorTarget::Mesh,
+                rgba: [1.0, 0.0, 0.0, 1.0],
+                gesture: false,
+            })
+        );
+        assert_eq!(Intent::Delete(3).retarget(4), Some(Intent::Delete(4)));
+        // Selection and one-off commands stay put.
+        assert_eq!(Intent::Select(Some(1)).fan_target(), None);
+        assert_eq!(Intent::ApplyPrefab(1).fan_target(), None);
+        assert_eq!(
+            Intent::RevertPrefab {
+                id: 1,
+                paths: Some(vec!["mesh_visual.color".into()])
+            }
+            .fan_target(),
+            None
+        );
+    }
+
+    fn click_with(
+        ui: &mut Ui,
+        c: &mut Canvas,
+        doc: &Document,
+        (x, y): (f32, f32),
+        ctrl: bool,
+        shift: bool,
+    ) -> Vec<Intent> {
+        let press = Pointer {
+            x,
+            y,
+            down: true,
+            pressed: true,
+            shift,
+            ctrl,
+            ..Pointer::default()
+        };
+        let mut out = ui.frame(c, doc, press, None);
+        let release = Pointer {
+            x,
+            y,
+            shift,
+            ctrl,
+            ..Pointer::default()
+        };
+        out.extend(ui.frame(c, doc, release, None));
+        out
+    }
+
+    #[test]
+    fn ctrl_and_shift_clicks_extend_the_selection() {
+        let mut c = canvas();
+        let mut doc = Document::starter();
+        let ids: Vec<u64> = doc.entities.iter().map(|e| e.id).collect();
+        assert!(ids.len() >= 3);
+        doc.select(Some(ids[0]));
+        let mut ui = Ui::new();
+        let hier = lay().hierarchy;
+        #[allow(clippy::cast_precision_loss)]
+        let row = |i: usize| {
+            (
+                hier.x + 60.0,
+                hier.y + layout::TITLEBAR_H + 4.0 + layout::ROW_H * (i as f32 + 0.5),
+            )
+        };
+        let out = click_with(&mut ui, &mut c, &doc, row(2), true, false);
+        assert!(
+            out.contains(&Intent::SelectMore {
+                id: ids[2],
+                range: false
+            }),
+            "{out:?}"
+        );
+        let out = click_with(&mut ui, &mut c, &doc, row(1), false, true);
+        assert!(
+            out.contains(&Intent::SelectMore {
+                id: ids[1],
+                range: true
+            }),
+            "{out:?}"
+        );
+        // Right-clicking inside a multi-selection keeps it.
+        doc.select_many(&[ids[0], ids[2]]);
+        let out = right_click(&mut ui, &mut c, &doc, row(0).0, row(0).1);
+        assert!(
+            !out.iter().any(|i| matches!(i, Intent::Select(_))),
+            "{out:?}"
+        );
+        let menu = ui.menu.as_ref().expect("context menu");
+        assert!(menu.items.iter().any(|i| i.label == "Duplicate Along…"));
+        // In the scene view, Ctrl+click on the cube adds it.
+        ui.menu = None;
+        doc.select(Some(ids[0]));
+        let cube = doc.entities.iter().find(|e| e.name() == "Cube").unwrap().id;
+        let proj = Projector::new(&ui.camera, lay().viewport);
+        let at = proj.project(Vec3::new(0.0, 0.5, 0.0)).unwrap();
+        let mut ui = Ui::new();
+        let out = click_with(&mut ui, &mut c, &doc, at, true, false);
+        assert!(
+            out.contains(&Intent::SelectMore {
+                id: cube,
+                range: false
+            }),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn snapping_the_move_gizmo_lands_on_the_grid() {
+        let mut c = canvas();
+        let mut doc = Document::starter();
+        let cube = select_named(&mut doc, "Cube");
+        let mut ui = Ui::new();
+        // The scene view's Snap toggle and step.
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        let g = Ui::snap_group_rect(&mut c, lay().viewport);
+        click(&mut ui, &mut c, &doc, g.x + 12.0, g.y + g.h / 2.0);
+        assert!(ui.prefs.snap.enabled);
+        click(&mut ui, &mut c, &doc, g.x + g.w - 12.0, g.y + g.h / 2.0);
+        assert!((ui.prefs.snap.step - 1.0).abs() < 1e-6, "0.5 m → 1 m");
+        assert!(ui.take_prefs_dirty());
+        ui.prefs.snap.step = 0.5;
+
+        let proj = Projector::new(&ui.camera, lay().viewport);
+        let t = doc.entities[doc.index_of(cube).unwrap()]
+            .data
+            .transform
+            .unwrap();
+        let gz = Gizmo::build(GizmoMode::Move, &t, &proj).unwrap();
+        let tip = gz.tips[1].unwrap();
+        let grab = (
+            f32::midpoint(gz.origin.0, tip.0),
+            f32::midpoint(gz.origin.1, tip.1),
+        );
+        let at = |dy: f32, down: bool, pressed: bool| Pointer {
+            x: grab.0,
+            y: grab.1 - dy,
+            down,
+            pressed,
+            ..Pointer::default()
+        };
+        ui.frame(&mut c, &doc, at(0.0, true, true), None);
+        // A nudge too small to reach the next grid line: nothing yet.
+        let out = ui.frame(&mut c, &doc, at(3.0, true, false), None);
+        assert!(
+            !out.iter().any(|i| matches!(i, Intent::SetTransform { .. })),
+            "{out:?}"
+        );
+        // Further: the drag accumulates and lands on a whole step.
+        let out = ui.frame(&mut c, &doc, at(90.0, true, false), None);
+        let moved = out
+            .iter()
+            .find_map(|i| match i {
+                Intent::SetTransform { id, transform } if *id == cube => Some(*transform),
+                _ => None,
+            })
+            .expect("a snapped move");
+        let y = moved.position[1];
+        assert!(y > t.position[1]);
+        assert!(
+            ((y / 0.5) - (y / 0.5).round()).abs() < 1e-4,
+            "{y} on the grid"
+        );
+        assert_eq!(moved.position[0], t.position[0]);
+        ui.frame(&mut c, &doc, at(90.0, false, false), None);
+    }
+
+    #[test]
+    fn the_inspector_shows_prefab_overrides_and_multi_selection() {
+        let mut c = canvas();
+        let dir = std::env::temp_dir().join(format!("oberon-ui-prefab-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut doc = Document::starter();
+        doc.path = Some(dir.join("level.ron"));
+        let cube = select_named(&mut doc, "Cube");
+        let file = doc.prefab_of(cube).unwrap();
+        std::fs::write(dir.join("cube.prefab"), file.to_ron().unwrap()).unwrap();
+        assert!(doc.link_prefab(cube, "cube.prefab"));
+        doc.modify(cube, false, |d| {
+            d.mesh_visual.as_mut().unwrap().color = [1.0, 0.0, 0.0, 1.0];
+        });
+        let mut ui = Ui::new();
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        // Find the per-override Revert button by sweeping the Inspector.
+        let ins = lay().inspector;
+        let mut reverted = None;
+        let mut applied = false;
+        let mut y = ins.y + layout::TITLEBAR_H;
+        while y < ins.y + ins.h && (reverted.is_none() || !applied) {
+            for x in [ins.x + ins.w - 40.0, ins.x + 40.0] {
+                let out = click(&mut ui, &mut c, &doc, x, y);
+                ui.dialog = None;
+                ui.menu = None;
+                for i in out {
+                    match i {
+                        Intent::RevertPrefab { id, paths: Some(p) } if id == cube => {
+                            reverted = Some(p);
+                        }
+                        Intent::ApplyPrefab(id) if id == cube => applied = true,
+                        _ => {}
+                    }
+                }
+            }
+            y += 6.0;
+        }
+        assert_eq!(reverted, Some(vec!["mesh_visual.color".to_string()]));
+        assert!(applied, "the Apply button");
+        // Multi-selection draws its note without trouble.
+        let light = doc.entities.iter().find(|e| e.id != cube).unwrap().id;
+        doc.select_many(&[light, cube]);
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_profiler_tab_draws_its_graph() {
+        let mut c = canvas();
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        ui.panels.show_bottom = true;
+        ui.bottom_tab = BottomTab::Profiler;
+        for i in 0..50 {
+            #[allow(clippy::cast_precision_loss)]
+            ui.profiler.record(profiler::FrameSample {
+                scripts: 1.0,
+                physics: 2.0,
+                render: 4.0 + (i % 5) as f32,
+                ui: 3.0,
+                total: 16.0,
+            });
+        }
+        let before = c.pixels().to_vec();
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        assert_ne!(before, c.pixels().to_vec());
+        // Hovering a bar shows that frame's figures; Pause holds the graph.
+        let dock = ui.layout(1600.0, 950.0).console;
+        ui.frame(
+            &mut c,
+            &doc,
+            Pointer {
+                x: dock.x + dock.w - 30.0,
+                y: dock.y + dock.h / 2.0,
+                ..Pointer::default()
+            },
+            None,
+        );
+        ui.profiler.paused = true;
+        ui.profiler.record(profiler::FrameSample::default());
+        assert_eq!(ui.profiler.len(), 50);
     }
 
     #[test]

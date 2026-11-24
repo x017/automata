@@ -41,6 +41,12 @@ fn main() {
     if doc.path.is_some() {
         ui.project_root = doc.base_dir();
     }
+    // `OBERON_VIEW=scene` looks through the scene's own camera.
+    if std::env::var("OBERON_VIEW").is_ok_and(|v| v == "scene") {
+        if let Some(cam) = doc.entities.iter().find_map(|e| e.data.camera_3d) {
+            ui.camera = oberon::view::ViewCamera::from_camera3d(&cam);
+        }
+    }
 
     // Render the viewport frame on an offscreen GPU renderer when one is
     // available; otherwise use the software wireframe fallback.
@@ -53,7 +59,7 @@ fn main() {
 
     // Optional scene: `picker`, `menu`, `dialog`, `project`, `code`,
     // `code-complete`, `code-api`, `settings`, `build`, `build-menu`, `palette`,
-    // `assets`, `assets-sounds`, `assets-fonts`, `bone-picker`, `clip-picker`.
+    // `assets`, `assets-sounds`, `assets-fonts`, `bone-picker`, `clip-picker`, `workflow`.
     let scene = std::env::args().nth(2).unwrap_or_default();
     let selected = doc.selected;
     let pointer = Pointer {
@@ -78,6 +84,42 @@ fn main() {
         let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
     }
     match scene.as_str() {
+        "workflow" => {
+            // D6: a multi-selection whose lead is a prefab instance with
+            // overrides, Snap on, and the Profiler with a few seconds of
+            // (synthetic, typical) frame timings.
+            let names = ["Crate 1", "Crate 2", "Heavy Crate"];
+            let ids: Vec<u64> = names
+                .iter()
+                .filter_map(|n| doc.entities.iter().find(|e| e.name() == *n).map(|e| e.id))
+                .collect();
+            doc.select_many(&ids);
+            ui.prefs.snap.enabled = true;
+            ui.panels.show_bottom = true;
+            ui.bottom_tab = oberon::ui::BottomTab::Profiler;
+            for i in 0..oberon::ui::profiler::HISTORY {
+                let t = i as f32;
+                let wobble = (t * 0.37).sin() * 0.35 + (t * 0.11).cos() * 0.25;
+                let spike = if i % 61 == 40 { 6.5 } else { 0.0 };
+                record_sample(
+                    &mut ui,
+                    0.9 + wobble * 0.3 + spike * 0.6,
+                    1.6 + wobble * 0.4,
+                    5.2 + wobble + spike * 0.4,
+                    3.1 + wobble * 0.5,
+                );
+            }
+            // Scroll the Hierarchy to its end, where the crates are.
+            let hier = Layout::compute(w as f32, h as f32).hierarchy;
+            let wheel = Pointer {
+                x: hier.x + hier.w / 2.0,
+                y: hier.y + hier.h / 2.0,
+                scroll: -100.0,
+                ..Pointer::default()
+            };
+            let _ = ui.frame(&mut canvas, &doc, wheel, Some((&frame, fw, fh)));
+            let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+        }
         "picker" => {
             if let Some(id) = selected {
                 ui.open_color_picker(&doc, id, oberon::ui::ColorTarget::Mesh);
@@ -350,4 +392,17 @@ fn main() {
     image::save_buffer(&out, canvas.pixels(), w, h, image::ExtendedColorType::Rgba8)
         .expect("write png");
     println!("wrote {out} ({w}x{h})");
+}
+
+/// One Profiler sample for the `workflow` screenshot (frame time paced
+/// to 60 fps, as with V-Sync).
+fn record_sample(ui: &mut Ui, scripts: f32, physics: f32, render: f32, interface: f32) {
+    let busy = scripts + physics + render + interface;
+    ui.profiler.record(oberon::ui::profiler::FrameSample {
+        scripts,
+        physics,
+        render,
+        ui: interface,
+        total: busy.max(1000.0 / 60.0),
+    });
 }
