@@ -73,12 +73,13 @@ impl Default for Gamepads {
 
 impl Gamepads {
     /// Initialise gamepad support. On platforms or sandboxes without
-    /// gamepad devices this yields an empty manager (no connected pads).
+    /// gamepad devices this yields an empty manager (no connected pads);
+    /// so does a platform gilrs has no backend for (Android, for now).
     ///
     /// # Panics
     ///
-    /// Panics only if the platform's gamepad backend fails to initialise
-    /// (never observed on Linux/Windows/macOS).
+    /// Panics only if a supported platform's gamepad backend fails to
+    /// initialise (never observed on Linux/Windows/macOS).
     #[must_use]
     pub fn new() -> Self {
         Self::try_new().expect("gilrs init")
@@ -89,7 +90,13 @@ impl Gamepads {
     /// crash over a missing gamepad, like the editor).
     #[must_use]
     pub fn try_new() -> Option<Self> {
-        let gilrs = Gilrs::new().ok()?;
+        let gilrs = match Gilrs::new() {
+            Ok(gilrs) => gilrs,
+            // No backend for this platform: gilrs hands back a context
+            // that never sees a gamepad, which is what we want.
+            Err(gilrs::Error::NotImplemented(dummy)) => dummy,
+            Err(_) => return None,
+        };
         let mut this = Self {
             gilrs,
             connected: HashSet::new(),
