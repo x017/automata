@@ -10,7 +10,7 @@
 //!    (Android destroys it) and stop running frames; on return, attach the
 //!    new one. Textures, meshes and the scene all stay in GPU memory.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use automata_core::platform::{FrameStep, Host};
 use automata_core::{Error, Result};
@@ -30,6 +30,9 @@ const TOUCH_MOUSE_ID: u32 = u32::MAX;
 /// SDL's id for touches it made up from the mouse.
 const MOUSE_TOUCH_ID: u64 = u64::MAX;
 
+/// How long the loop sleeps at a time while frames are paused.
+const PAUSED_WAIT: Duration = Duration::from_millis(250);
+
 /// Runs a windowed game to completion with SDL.
 pub(crate) fn run(host: &mut dyn Host) -> Result<()> {
     // Touches are touches: the engine already treats the mouse as finger
@@ -38,6 +41,13 @@ pub(crate) fn run(host: &mut dyn Host) -> Result<()> {
     sdl3::hint::set("SDL_MOUSE_TOUCH_EVENTS", "0");
     // Back is a key the game sees (`back_button`), not "close the app".
     sdl3::hint::set("SDL_ANDROID_TRAP_BACK_BUTTON", "1");
+    // By default SDL blocks any event pump from the moment it queues the
+    // background events until the app is back, so they only arrive on
+    // return (unless handled in an event watch). The loop sleeps in short
+    // slices while paused instead, and sees them right away. (SDL also
+    // pauses its own audio only when blocking; the engine's audio isn't
+    // SDL's.)
+    sdl3::hint::set("SDL_ANDROID_BLOCK_ON_PAUSE", "0");
 
     let sdl = sdl3::init().map_err(platform)?;
     let video = sdl.video().map_err(platform)?;
@@ -78,7 +88,7 @@ pub(crate) fn run(host: &mut dyn Host) -> Result<()> {
                 None => None,
             }
         } else {
-            Some(events.wait_event())
+            events.wait_event_timeout(PAUSED_WAIT)
         };
         for event in event.into_iter().chain(events.poll_iter()) {
             if driver.handle(event)? == Flow::Quit {
@@ -114,9 +124,8 @@ struct SdlDriver<'a> {
     /// Whether the app is on screen.
     foreground: bool,
     /// Whether the window has the focus. Losing it pauses frames too:
-    /// Android takes it first when the app is leaving, and presenting to
-    /// a window that's no longer shown can block until the surface dies,
-    /// which would keep SDL from delivering the background events.
+    /// Android takes it first when the app is leaving (and when the
+    /// notification shade comes down, where mobile games pause anyway).
     focused: bool,
     modifiers: ModifiersState,
     /// When the next frame is due (`None`: now).

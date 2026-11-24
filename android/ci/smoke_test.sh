@@ -51,6 +51,8 @@ wait_for() {
 # where a hung app is stuck.
 stacks() {
   local pid
+  # The shell user may not trace the app; root may.
+  adb root > /dev/null 2>&1 && adb wait-for-device || true
   pid=$(adb shell pidof "$pkg" | tr -d '\r' || true)
   {
     echo "== pid ${pid:-none}"

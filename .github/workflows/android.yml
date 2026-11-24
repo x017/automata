@@ -179,7 +179,7 @@ jobs:
             --exclude "extracting|pythonutil|AppsFilter|SemanticLocation|nativeloader|CarrierSvc|ImsResolver"
           if [ -e android-smoke/stacks.txt ]; then
             python3 android/ci/report.py "android: stacks" --log android-smoke/stacks.txt \
-              --lines 900 --grep "^==|^\"|#[0-9]+ pc|  at |native: |state=|Activity" \
+              --lines 900 --grep "^==|^\"|#[0-9]+ pc|  at |native: |state=|Activity|debuggerd|denied|rror|ailed" \
               --exclude "libart\.so|libbase\.so|libc\.so \(__epoll|/system/framework/"
           fi
           for shot in android-smoke/*.png; do
