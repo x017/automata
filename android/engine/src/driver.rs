@@ -57,6 +57,18 @@ pub(crate) fn run(host: &mut dyn Host) -> Result<()> {
     // pauses its own audio only when blocking; the engine's audio isn't
     // SDL's.)
     sdl3::hint::set("SDL_ANDROID_BLOCK_ON_PAUSE", "0");
+    // Hold the screen the way the game's window is shaped (a resizable
+    // window would otherwise follow the device's rotation), unless the
+    // app says otherwise.
+    let (width, height) = host.window_config().size;
+    if sdl3::hint::get("SDL_ORIENTATIONS").is_none() {
+        let orientations = if width >= height {
+            "LandscapeLeft LandscapeRight"
+        } else {
+            "Portrait PortraitUpsideDown"
+        };
+        sdl3::hint::set("SDL_ORIENTATIONS", orientations);
+    }
 
     let sdl = sdl3::init().map_err(platform)?;
     info!(
@@ -64,7 +76,6 @@ pub(crate) fn run(host: &mut dyn Host) -> Result<()> {
         "SDL initialised"
     );
     let video = sdl.video().map_err(platform)?;
-    let (width, height) = host.window_config().size;
     let mut builder = video.window(host.title(), width, height);
     builder.fullscreen().high_pixel_density();
     if host.window_config().resizable {

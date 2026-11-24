@@ -1051,7 +1051,7 @@ pub fn export(
         std::fs::remove_dir_all(&folder)
             .map_err(|e| format!("could not clear {}: {e}", folder.display()))?;
     }
-    std::fs::create_dir_all(folder.join("game")).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
 
     // The launcher, renamed after the game.
     let exe = folder.join(format!("{name}{}", target.exe_suffix()));
@@ -1070,13 +1070,11 @@ pub fn export(
     }
 
     // The game files.
-    let skip = Skip::new(cfg);
-    let n = copy_tree(project, &folder.join("game"), &|rel| !skip.excluded(rel))?;
+    let n = copy_game(project, cfg, &folder.join("game"))?;
     progress(Message::info(format!(
         "{}: game ({n} files)",
         target.label()
     )));
-    write_manifest(&folder.join("game").join("game.json"), cfg).map_err(|e| e.to_string())?;
 
     let archive_path = if cfg.archive {
         let file = format!(
@@ -1116,6 +1114,72 @@ pub fn export(
         archive: archive_path,
         standalone,
     })
+}
+
+/// Writes the game folder an export ships (`game/` in a build) to `dest`:
+/// the project's files minus the left-out ones, plus `game.json`. Builds
+/// that don't come from a desktop template use this; the Android build
+/// packs the folder into its APK. Returns how many project files were
+/// copied. A previous staged folder at `dest` is replaced.
+///
+/// # Errors
+///
+/// When the project has errors (each reported through `progress`), when
+/// `dest` is the project, holds it, or sits inside it without being left
+/// out (the copy would include itself), when `dest` is a folder with other
+/// things in it, or when files can't be copied.
+pub fn stage_game(
+    project: &Path,
+    cfg: &BuildConfig,
+    dest: &Path,
+    progress: &mut dyn FnMut(Message),
+) -> Result<usize, String> {
+    let mut failed = false;
+    for p in validate(project, cfg) {
+        failed |= p.level == Level::Error;
+        progress(p);
+    }
+    if failed {
+        return Err("the project has errors; fix them and build again".into());
+    }
+    let skip = Skip::new(cfg);
+    if project.starts_with(dest) {
+        return Err(format!(
+            "{} holds the project; stage the game somewhere else",
+            dest.display()
+        ));
+    }
+    if let Ok(rel) = dest.strip_prefix(project) {
+        if !skip.excluded(&archive::slash_path(rel)) {
+            return Err(format!(
+                "{} is inside the project and would be copied into itself; use the output folder ({}) or somewhere outside",
+                dest.display(),
+                cfg.output
+            ));
+        }
+    }
+    let foreign = std::fs::read_dir(dest).is_ok_and(|mut entries| entries.next().is_some())
+        && !dest.join("game.json").is_file();
+    if foreign {
+        return Err(format!(
+            "{} isn't empty and isn't a staged game; choose an empty or new folder",
+            dest.display()
+        ));
+    }
+    copy_game(project, cfg, dest)
+}
+
+/// Replaces `dest` with the project's shipped files and `game.json`.
+fn copy_game(project: &Path, cfg: &BuildConfig, dest: &Path) -> Result<usize, String> {
+    if dest.exists() {
+        std::fs::remove_dir_all(dest)
+            .map_err(|e| format!("could not clear {}: {e}", dest.display()))?;
+    }
+    std::fs::create_dir_all(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    let skip = Skip::new(cfg);
+    let n = copy_tree(project, dest, &|rel| !skip.excluded(rel))?;
+    write_manifest(&dest.join("game.json"), cfg).map_err(|e| e.to_string())?;
+    Ok(n)
 }
 
 /// Paths an export leaves out.
@@ -1327,6 +1391,54 @@ mod tests {
             std::fs::write(dir.join("runtime/bin/python3"), b"py").unwrap();
         }
         dir
+    }
+
+    #[test]
+    fn stages_the_game_folder_without_a_template() {
+        let dir = project("stage");
+        let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
+        cfg.name = "Coin Run".into();
+        let cfg = cfg;
+        let out = std::env::temp_dir().join(format!("automata-stage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        let n = stage_game(&dir, &cfg, &out, &mut |_| {}).unwrap();
+        assert_eq!(n, 2, "the scene and the script");
+        assert!(out.join("scripts/coin.py").is_file());
+        assert!(out.join("level.ron").is_file());
+        assert!(!out.join(".oberon").exists());
+        assert!(!out.join("scripts/__pycache__").exists());
+        let manifest = std::fs::read_to_string(out.join("game.json")).unwrap();
+        assert!(manifest.contains("\"name\": \"Coin Run\""));
+        assert!(manifest.contains("\"start_scene\": \"level.ron\""));
+
+        // Staging again replaces the previous folder.
+        std::fs::write(out.join("stale.txt"), "x").unwrap();
+        stage_game(&dir, &cfg, &out, &mut |_| {}).unwrap();
+        assert!(!out.join("stale.txt").exists());
+
+        // The output folder inside the project is fine; other places inside
+        // it, the project itself, and folders with other things in them aren't.
+        let inside = dir.join(&cfg.output).join("game");
+        stage_game(&dir, &cfg, &inside, &mut |_| {}).unwrap();
+        assert!(inside.join("game.json").is_file());
+        let no = |dest: &Path| stage_game(&dir, &cfg, dest, &mut |_| {}).unwrap_err();
+        assert!(no(&dir.join("scripts/game")).contains("copied into itself"));
+        assert!(no(&dir).contains("holds the project"));
+        let busy = std::env::temp_dir().join(format!("automata-busy-{}", std::process::id()));
+        std::fs::create_dir_all(&busy).unwrap();
+        std::fs::write(busy.join("notes.txt"), "mine").unwrap();
+        assert!(no(&busy).contains("isn't a staged game"));
+        assert!(busy.join("notes.txt").is_file(), "left alone");
+
+        // A project with errors isn't staged.
+        let mut broken = cfg.clone();
+        broken.start_scene = Some("missing.ron".into());
+        let err = stage_game(&dir, &broken, &out, &mut |_| {}).unwrap_err();
+        assert!(err.contains("errors"));
+
+        for d in [dir, out, busy] {
+            let _ = std::fs::remove_dir_all(d);
+        }
     }
 
     #[test]

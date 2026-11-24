@@ -5,6 +5,7 @@
 //! automata-export build [PROJECT] [--target linux|windows|all] [--template DIR]
 //! automata-export init [PROJECT] [--scene level.ron | --main main.py]
 //! automata-export check [PROJECT]
+//! automata-export stage [PROJECT] [--out DIR]
 //! automata-export templates path | list
 //! automata-export templates download [--target T]
 //! automata-export templates install ARCHIVE --target T
@@ -24,13 +25,16 @@ usage:
   automata-export build [PROJECT] [--target linux|windows|all] [--template DIR]
   automata-export init [PROJECT] [--scene SCENE.ron | --main MAIN.py] [--name NAME]
   automata-export check [PROJECT]
+  automata-export stage [PROJECT] [--out DIR]
   automata-export templates path|list
   automata-export templates download [--target linux|windows|all]
   automata-export templates install ARCHIVE --target linux|windows
   automata-export templates dev PLAYER [--target linux|windows]
   automata-export templates pack DIR --target linux|windows --out ARCHIVE
 
-PROJECT defaults to the current folder; settings come from PROJECT/build.ron.";
+PROJECT defaults to the current folder; settings come from PROJECT/build.ron.
+`stage` writes only the game folder a build ships (game files and game.json),
+by default to PROJECT/<output>/game; the Android build packs it into an APK.";
 
 struct Args {
     positional: Vec<String>,
@@ -168,6 +172,16 @@ pub fn run(args: impl IntoIterator<Item = String>, program: &str) -> Result<(), 
                 return Err("the project has errors".into());
             }
             println!("{} is ready to export", cfg.name);
+        }
+        "stage" => {
+            let project = absolute(&project(&args, 1));
+            let cfg = BuildConfig::for_project(&project, None);
+            let out = args.flag("out").map_or_else(
+                || project.join(&cfg.output).join("game"),
+                |dir| std::path::absolute(dir).unwrap_or_else(|_| PathBuf::from(dir)),
+            );
+            let n = crate::stage_game(&project, &cfg, &out, &mut |m| print(&m))?;
+            println!("staged {} ({n} files) in {}", cfg.name, out.display());
         }
         "templates" => templates(&args, program)?,
         "help" | "-h" | "--help" => println!("{}", usage(program)),

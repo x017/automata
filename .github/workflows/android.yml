@@ -85,11 +85,12 @@ jobs:
       - name: Build tools
         run: |
           sudo apt-get update
-          # python-for-android's own list (its Dockerfile), plus patchelf.
+          # python-for-android's own list (its Dockerfile), plus patchelf,
+          # and libudev for building automata-export (gamepads).
           sudo apt-get install -y --no-install-recommends \
             ant autoconf automake autopoint ccache cmake g++ gcc git lbzip2 \
             libffi-dev libltdl-dev libtool libssl-dev make patch pkg-config \
-            unzip wget zip zlib1g-dev libncurses-dev patchelf
+            unzip wget zip zlib1g-dev libncurses-dev patchelf libudev-dev
           python -m pip install --upgrade pip
           python -m pip install "cython<3.2" \
             "python-for-android @ git+https://github.com/kivy/python-for-android@${P4A_REF}"
@@ -120,6 +121,21 @@ jobs:
         # Progress lines only; the full log is printed when the build fails.
         run: android/build_apk.sh android/app x86_64 2>&1 | tee build.log | sed -n '/INFO\|WARNING\|ERROR/p'
 
+      - name: Stage Coin Run
+        # As an export would: build.ron from `init` (the example has none,
+        # like the export CI's copy), then only the files a build ships.
+        run: |
+          cp -r examples/oberon/coin_run "$RUNNER_TEMP/coin_run"
+          cargo run -q -p automata-export -- init "$RUNNER_TEMP/coin_run" --scene level.ron --name "Coin Run"
+          cargo run -q -p automata-export -- stage "$RUNNER_TEMP/coin_run" --out "$RUNNER_TEMP/coin_run_game"
+
+      - name: Build the Coin Run APK
+        # Reuses the distribution the first build compiled.
+        env:
+          AUTOMATA_PACKAGE: org.automata.coinrun
+          AUTOMATA_NAME: Coin Run
+        run: android/build_apk.sh "$RUNNER_TEMP/coin_run_game" x86_64 2>&1 | tee build.log | sed -n '/INFO\|WARNING\|ERROR/p'
+
       - name: Build log (on failure)
         if: failure()
         env:
@@ -131,11 +147,13 @@ jobs:
           fi
 
       - name: APK size
-        run: ls -la dist/*.apk && unzip -l dist/*.apk | grep -E "\.so$" | sort -k1 -n -r | head -20
+        run: |
+          ls -la dist/*.apk
+          unzip -l dist/org.automata.spike-x86_64.apk | grep -E "\.so$" | sort -k1 -n -r | head -20
 
       - uses: actions/upload-artifact@v4
         with:
-          name: automata-spike-apk
+          name: automata-apks
           path: dist/*.apk
           if-no-files-found: error
 
@@ -148,7 +166,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: automata-spike-apk
+          name: automata-apks
           path: apk
 
       - name: Enable KVM
@@ -167,7 +185,9 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
-          script: android/ci/smoke_test.sh "$(ls apk/*.apk | head -1)" android-smoke
+          script: |
+            android/ci/smoke_test.sh apk/org.automata.spike-x86_64.apk android-smoke
+            android/ci/coin_run_test.sh apk/org.automata.coinrun-x86_64.apk android-smoke/coin_run
 
       - name: Report the smoke test
         if: always()
@@ -182,15 +202,21 @@ jobs:
           python3 android/ci/report.py "android: logcat" --log android-smoke/logcat.txt \
             --lines 700 --grep "python|SDL|automata|wgpu|AndroidRuntime|DEBUG|ActivityTaskManager|WindowManager|Fatal" \
             --exclude "extracting|pythonutil|AppsFilter|SemanticLocation|nativeloader|CarrierSvc|ImsResolver"
-          if [ -e android-smoke/stacks.txt ]; then
-            python3 android/ci/report.py "android: stacks" --log android-smoke/stacks.txt \
+          if [ -e android-smoke/coin_run/logcat.txt ]; then
+            python3 android/ci/report.py "android: coin run logcat" --log android-smoke/coin_run/logcat.txt \
+              --lines 500 --grep "python|SDL|automata|wgpu|AndroidRuntime|DEBUG|Fatal" \
+              --exclude "extracting|pythonutil|AppsFilter|SemanticLocation|nativeloader|CarrierSvc|ImsResolver"
+          fi
+          for stacks in android-smoke/stacks.txt android-smoke/coin_run/stacks.txt; do
+            [ -e "$stacks" ] || continue
+            python3 android/ci/report.py "android: stacks ($(dirname "$stacks"))" --log "$stacks" \
               --lines 900 --grep "^==|^\"|#[0-9]+ pc|  at |native: |state=|Activity|debuggerd|denied|rror|ailed" \
               --exclude "libart\.so|libbase\.so|libc\.so \(__epoll|/system/framework/"
-          fi
+          done
           command -v convert > /dev/null || {
             sudo apt-get update -q && sudo apt-get install -y -q imagemagick > /dev/null
           }
-          for shot in android-smoke/*.png; do
+          for shot in android-smoke/*.png android-smoke/coin_run/*.png; do
             [ -e "$shot" ] || continue
             name="$(basename "$shot" .png)"
             convert "$shot" -resize 640x640 -quality 70 "android-smoke/$name-small.jpg"
