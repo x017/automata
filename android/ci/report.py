@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Publishes a CI report as a GitHub check run, readable through the API.
 
-    report.py NAME --log FILE [--lines N] [--grep REGEX]
+    report.py NAME --log FILE [--lines N] [--grep REGEX] [--exclude REGEX]
     report.py NAME --image FILE
 
 `--log` puts the end of a log in the check run's text (only lines matching
-`--grep`, when given). `--image` puts a small JPEG there as base64
+`--grep` and not `--exclude`, when given). `--image` puts a small JPEG there as base64
 (make it small first: the text holds at most 65535 characters). Needs
 GITHUB_TOKEN, GITHUB_REPOSITORY and GITHUB_SHA, and `checks: write`.
 """
@@ -21,11 +21,13 @@ import urllib.request
 LIMIT = 65000
 
 
-def log_text(path, lines, pattern):
+def log_text(path, lines, pattern, exclude):
     with open(path, encoding="utf-8", errors="replace") as f:
         rows = f.read().splitlines()
     if pattern:
         rows = [r for r in rows if re.search(pattern, r)]
+    if exclude:
+        rows = [r for r in rows if not re.search(exclude, r)]
     # Escape sequences make the text unreadable; drop them.
     rows = [re.sub(r"\x1b\[[0-9;]*m", "", r) for r in rows[-lines:]]
     text = "\n".join(rows)
@@ -39,6 +41,7 @@ def main():
     parser.add_argument("--image")
     parser.add_argument("--lines", type=int, default=400)
     parser.add_argument("--grep")
+    parser.add_argument("--exclude")
     parser.add_argument("--conclusion", default="neutral")
     args = parser.parse_args()
 
@@ -56,7 +59,7 @@ def main():
             print(f"no {args.log}; nothing to report")
             return
         summary, text = f"last lines of {os.path.basename(args.log)}", log_text(
-            args.log, args.lines, args.grep
+            args.log, args.lines, args.grep, args.exclude
         )
     else:
         sys.exit("give --log or --image")

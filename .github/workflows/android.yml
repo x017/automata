@@ -175,7 +175,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 android/ci/report.py "android: logcat" --log android-smoke/logcat.txt \
-            --lines 600 --grep "python|SDL|automata|wgpu|AndroidRuntime|DEBUG|libc"
+            --lines 700 --grep "python|SDL|automata|wgpu|AndroidRuntime|DEBUG|ActivityTaskManager|WindowManager|Fatal" \
+            --exclude "extracting|pythonutil|AppsFilter|SemanticLocation|nativeloader|CarrierSvc|ImsResolver"
           for shot in android-smoke/*.png; do
             [ -e "$shot" ] || continue
             name="$(basename "$shot" .png)"

@@ -33,6 +33,8 @@ p4a apk \
   --bootstrap sdl3 \
   --requirements python3,automata \
   --local-recipes "$repo/android/recipes" \
+  --add-source "$repo/android/java" \
+  --android-entrypoint org.automata.AutomataActivity \
   --arch "$arch" \
   --orientation landscape \
   --android-api "${ANDROID_API:-35}" \
