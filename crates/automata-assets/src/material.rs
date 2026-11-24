@@ -854,6 +854,9 @@ mod tests {
 
     #[test]
     fn materials_load_share_and_reload() {
+        let _serial = crate::REFRESH_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = temp_dir("load");
         png(&dir.join("textures/red.png"), [255, 0, 0, 255]);
         let path = dir.join("materials/red.mat.ron");

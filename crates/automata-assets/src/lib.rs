@@ -838,6 +838,11 @@ pub(crate) fn unweld_flat(vertices: &[automata_renderer::Vertex], indices: &[u32
     MeshData::new(out_v, (0..count).collect())
 }
 
+/// Serialises the tests that call [`refresh`]: it checks every cache at
+/// once, so one test's file changes would show up in another's result.
+#[cfg(test)]
+pub(crate) static REFRESH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -868,6 +873,9 @@ mod tests {
 
     #[test]
     fn the_cache_shares_models_and_reloads_changed_files() {
+        let _serial = crate::REFRESH_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = std::env::temp_dir().join(format!("automata-cache-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("tri.obj");
