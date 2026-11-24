@@ -553,6 +553,25 @@ fontTools' <code>pyftsubset</code> makes one:</p>
 <div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>pyftsubset MPLUSRounded1c-Medium.ttf --text-file=lang/strings.csv --output-file=fonts/JP.ttf</code></pre></div>
 <p>Full-width characters count as twice as wide when layouts estimate text
 size, so Japanese labels get the room they need.</p>
+<p><strong>Right-to-left languages</strong> (Persian, Arabic, Urdu, Hebrew) need nothing
+special in the table: write the text in reading order, as you'd type it.
+The renderer takes care of the rest:</p>
+<ul><li><strong>Joining:</strong> Persian and Arabic letters take their joined forms from
+their neighbours, including پ چ ژ گ ک ی, and لا becomes one ligature.
+The half-space (ZWNJ, U+200C) breaks a join, as in «می‌روم».</li><li><strong>Ordering:</strong> a line whose first letter is right-to-left reads right to
+left. Numbers (<code>120</code>, <code>۴۵</code>, <code>1,250</code>, <code>80%</code>) and Latin words inside it
+keep their own order, and brackets are mirrored.</li><li><strong>Alignment:</strong> in a left-aligned label of several lines, right-to-left
+lines line up on its right edge.</li></ul>
+<p>This uses the presentation-form characters most Persian and Arabic fonts
+have. Vazirmatn, which Shape Signal uses, does. When you cut a font down,
+keep U+FB50–U+FDFF and U+FE70–U+FEFF:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>pyftsubset Vazirmatn.ttf --unicodes=&quot;U+0020-007E,U+0600-06FF,U+200C-200F,U+FB50-FDFF,U+FE70-FEFF&quot; --output-file=fonts/FA.ttf</code></pre></div>
+<p>Not yet: diacritics placed by a font's positioning rules (they're drawn at
+the font's default spot, which suits Persian's occasional marks), scripts
+that need full shaping (Devanagari, Bengali, Thai), and mirrored layouts
+(widgets keep their places; set a label's <code>align=&quot;right&quot;</code> for
+right-to-left text).</p>
+<p><img src="../../../assets/ui/shape_signal_fa.jpg" alt="Shape Signal's title in Persian: سیگنال شکل in amber over the tagline, the بازی button, صدا with the volume slider, the hints toggle and the زبان: فارسی button" loading="lazy" decoding="async"></p>
 <p><strong>In Oberon</strong>, edited tables reload while the game plays, and <code>ctx.tr(&quot;</code>
 completes keys with their text in the first language. The UI editor's
 <strong>Text</strong> menu shows a document in any language, or as keys.</p>

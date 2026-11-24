@@ -909,6 +909,24 @@ pub fn translate(doc: &mut UiDoc, table: &automata_core::StringTable, language: 
     n
 }
 
+/// Puts right-to-left text (Persian, Arabic, Hebrew) in drawing order with
+/// its letters joined, as the game's renderer draws it
+/// ([`automata_renderer::bidi`]), for the editor's canvas, which draws
+/// characters as given.
+pub fn for_display(doc: &mut UiDoc) {
+    fn walk(nodes: &mut [UiNode]) {
+        for node in nodes {
+            for field in [&mut node.text, &mut node.title] {
+                if field.chars().any(automata_renderer::bidi::is_rtl) {
+                    *field = automata_renderer::bidi::visual(field);
+                }
+            }
+            walk(&mut node.children);
+        }
+    }
+    walk(&mut doc.nodes);
+}
+
 /// A label's estimated width (the script API can't measure text on every
 /// runner, so neither do we).
 #[allow(clippy::cast_precision_loss)]
@@ -1158,6 +1176,11 @@ mod tests {
         assert_eq!(ja.nodes[0].children[2].text, "Quit");
         let mut en = doc;
         translate(&mut en, &table, "en");
+        assert_eq!(en.nodes[0].children[1].text, "Play");
+        // Persian is put in drawing order for the editor's canvas.
+        en.nodes[0].children[2].text = "سلام".into();
+        for_display(&mut en);
+        assert_eq!(en.nodes[0].children[2].text, "\u{FEE1}\u{FEFC}\u{FEB3}");
         assert_eq!(en.nodes[0].children[1].text, "Play");
     }
 

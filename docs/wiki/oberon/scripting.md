@@ -871,6 +871,35 @@ pyftsubset MPLUSRounded1c-Medium.ttf --text-file=lang/strings.csv --output-file=
 Full-width characters count as twice as wide when layouts estimate text
 size, so Japanese labels get the room they need.
 
+**Right-to-left languages** (Persian, Arabic, Urdu, Hebrew) need nothing
+special in the table: write the text in reading order, as you'd type it.
+The renderer takes care of the rest:
+
+- **Joining:** Persian and Arabic letters take their joined forms from
+  their neighbours, including پ چ ژ گ ک ی, and لا becomes one ligature.
+  The half-space (ZWNJ, U+200C) breaks a join, as in «می‌روم».
+- **Ordering:** a line whose first letter is right-to-left reads right to
+  left. Numbers (`120`, `۴۵`, `1,250`, `80%`) and Latin words inside it
+  keep their own order, and brackets are mirrored.
+- **Alignment:** in a left-aligned label of several lines, right-to-left
+  lines line up on its right edge.
+
+This uses the presentation-form characters most Persian and Arabic fonts
+have. Vazirmatn, which Shape Signal uses, does. When you cut a font down,
+keep U+FB50–U+FDFF and U+FE70–U+FEFF:
+
+```console
+pyftsubset Vazirmatn.ttf --unicodes="U+0020-007E,U+0600-06FF,U+200C-200F,U+FB50-FDFF,U+FE70-FEFF" --output-file=fonts/FA.ttf
+```
+
+Not yet: diacritics placed by a font's positioning rules (they're drawn at
+the font's default spot, which suits Persian's occasional marks), scripts
+that need full shaping (Devanagari, Bengali, Thai), and mirrored layouts
+(widgets keep their places; set a label's `align="right"` for
+right-to-left text).
+
+![Shape Signal's title in Persian: سیگنال شکل in amber over the tagline, the بازی button, صدا with the volume slider, the hints toggle and the زبان: فارسی button](../../assets/ui/shape_signal_fa.jpg)
+
 **In Oberon**, edited tables reload while the game plays, and `ctx.tr("`
 completes keys with their text in the first language. The UI editor's
 **Text** menu shows a document in any language, or as keys.

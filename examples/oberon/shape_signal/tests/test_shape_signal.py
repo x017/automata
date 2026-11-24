@@ -262,8 +262,8 @@ def _keys_used():
 
 def test_every_key_is_in_the_table_in_every_language(play):
     tr = play.host.ctx.tr
-    assert tr.languages == ("en", "es", "ja")
-    assert [tr.name(code) for code in tr.languages] == ["English", "Español", "日本語"]
+    assert tr.languages == ("en", "es", "ja", "fa")
+    assert [tr.name(code) for code in tr.languages] == ["English", "Español", "日本語", "فارسی"]
     used = _keys_used()
     assert {"title.play", "hud.keys", "results.again", "hud.score", "hud.slow"} <= used
     assert sorted(used - set(tr.keys())) == [], "keys the table lacks"
@@ -355,7 +355,39 @@ def test_the_language_button_switches_every_screen(play, tmp_path):
     play.press("タイトル")
     play.step()
     play.press("言語: 日本語")
+    assert play.host.ctx.settings.language == "fa"
+    play.step()
+    play.press("زبان: فارسی")
     assert play.host.ctx.settings.language == "en", "it wraps around"
+
+
+def test_persian_reads_right_to_left_with_its_own_font():
+    p = Play(system="fa-IR")
+    p.step()
+    p.step()
+    assert p.host.ctx.settings.language == "fa"
+    texts = p.texts()
+    # Text stays in reading order here; the renderer joins the letters and
+    # lays the line out right to left.
+    assert "سیگنال شکل" in texts and "بازی" in texts and "زبان: فارسی" in texts
+    play = next(i for i in p.out.hud if i["k"] == "text" and i["text"] == "بازی")
+    assert play["fallback"] == "fonts/Vazirmatn-ShapeSignal.ttf"
+    p.press("بازی")
+    p.step()
+    texts = p.texts()
+    assert "امتیاز 0" in texts and "۱  مکعب" in texts and "45 ثانیه" in texts
+
+
+def test_the_persian_font_has_every_letter_and_its_joined_forms(play):
+    tr = play.host.ctx.tr
+    cmap = _font_characters(os.path.join(GAME, tr.font("fa")))
+    text = "".join(tr(k, language="fa") for k in tr.keys()) + tr.name("fa")
+    assert [c for c in text if c not in "\n" and ord(c) not in cmap] == []
+    # The forms joined letters are drawn with: beh, peh, gaf and farsi yeh
+    # in all four, and the lam-alef ligature.
+    for first in (0xFE8F, 0xFB56, 0xFB92, 0xFBFC):
+        assert all(first + i in cmap for i in range(4)), hex(first)
+    assert 0xFEFB in cmap and 0xFEFC in cmap
 
 
 def test_the_chosen_language_is_remembered(tmp_path):

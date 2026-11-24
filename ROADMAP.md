@@ -951,11 +951,23 @@ Done:
   keys, and loads the tables' `@font`s into the editor canvas.
 - **Export** warns about table problems and untranslated keys. It errors
   on a missing or unshippable `@font`, or on excluded tables.
-- **Demo:** Shape Signal in English, Spanish and Japanese, with a
-  Language button on the title and a 113 KB Rounded M+ subset for the
-  kana.
-- Not yet: plural rules (`{count}` picks a form), right-to-left text and
-  shaping (Arabic, Hebrew, Indic), and a table editor inside Oberon.
+- **Right-to-left text** (`automata_renderer::bidi`), in every text layout:
+  - Arabic-script joining through presentation forms, including Persian
+    letters, ZWNJ/ZWJ and the لا ligature. Forms the fonts lack stay as the
+    plain letter.
+  - A simplified bidi algorithm: the line takes the direction of its first
+    strong letter, numbers and Latin runs keep their order, neutrals
+    resolve, brackets mirror.
+  - Right-to-left lines align right inside a left-aligned block. A space
+    takes the width of its neighbour's font.
+  - The UI editor's canvas and Text menu use it too.
+- **Demo:** Shape Signal in English, Spanish, Japanese and Persian, with a
+  Language button on the title, a 113 KB Rounded M+ subset for the kana
+  and a 54 KB Vazirmatn subset for Persian.
+- Not yet: plural rules (`{count}` picks a form), mark positioning from
+  GPOS, full shaping for Indic scripts and Thai, mirrored UI layouts, and
+  a table editor inside Oberon. Text in Oberon's own panels (entity and
+  file names, the code editor) isn't joined.
 
 ---
 

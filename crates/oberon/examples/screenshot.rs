@@ -206,7 +206,7 @@ fn main() {
                 ui.code_text("ctx");
             }
         }
-        "ui-editor" | "ui-editor-hud" | "ui-editor-ja" => {
+        "ui-editor" | "ui-editor-hud" | "ui-editor-ja" | "ui-editor-fa" => {
             // The UI editor on the Shape Signal demo's title screen (or HUD),
             // with a widget selected so the properties show.
             let ui_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -222,8 +222,8 @@ fn main() {
             }
             // `ui-editor-ja`: the canvas in Japanese (with OBERON_SCENE set
             // to the demo's level, so its lang/strings.csv is found).
-            if scene == "ui-editor-ja" {
-                ui.set_ui_language(Some("ja"));
+            if let Some(lang) = scene.strip_prefix("ui-editor-").filter(|l| *l != "hud") {
+                ui.set_ui_language(Some(lang));
             }
         }
         "material" => {

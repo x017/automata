@@ -10,6 +10,7 @@
 //! that simple consumers do not need a direct `wgpu` dependency.
 
 mod batch;
+pub mod bidi;
 mod camera;
 mod composite;
 mod context;

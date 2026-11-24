@@ -454,8 +454,9 @@ matter sooner.
 Beyond this list, work follows ROADMAP's order table. Latest: **D7
 localization** ✅: `lang/*.csv` string tables read with `ctx.tr`, a saved
 `ctx.settings.language` that starts as the computer's, UI documents that
-translate their keys, and a per-language fallback font (demo: Shape Signal
-in English, Spanish and Japanese). Before it, D6 editor workflow ✅.
+translate their keys, a per-language fallback font, and right-to-left text
+with Persian/Arabic letter joining (demo: Shape Signal in English, Spanish,
+Japanese and Persian). Before it, D6 editor workflow ✅.
 Next: E1 Android export.
 
 ## Process note

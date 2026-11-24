@@ -972,8 +972,10 @@ impl Ui {
         let mut left_end = pb.x + pb.w;
         if !self.strings.table.languages.is_empty() {
             let shown = self.ui_preview_language();
+            // Language names in their own script: Persian or Arabic ones
+            // are joined and put in drawing order.
             let name = match &shown {
-                Some(l) => self.strings.table.name(l).to_string(),
+                Some(l) => automata_renderer::bidi::visual(self.strings.table.name(l)),
                 None => "Keys".to_string(),
             };
             let label = format!("Text {name}");
@@ -993,7 +995,11 @@ impl Ui {
                 for (i, code) in table.languages.iter().enumerate() {
                     let on = shown.as_deref() == Some(code.as_str());
                     items.push(MenuItem::ui(
-                        format!("{}{} ({code})", mark(on), table.name(code)),
+                        format!(
+                            "{}{} ({code})",
+                            mark(on),
+                            automata_renderer::bidi::visual(table.name(code))
+                        ),
                         "",
                         UiAction::UiDoc(UiDocAction::Language(i + 1)),
                         true,
@@ -1074,6 +1080,7 @@ impl Ui {
         if let Some(lang) = self.ui_preview_language() {
             uidoc::translate(&mut view, &self.strings.table, &lang);
         }
+        uidoc::for_display(&mut view);
         let placed = uidoc::layout(&view, &frame);
         let theme = view.theme.resolve();
 

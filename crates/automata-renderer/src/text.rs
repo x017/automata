@@ -261,6 +261,10 @@ pub fn builtin_font() -> FontRef<'static> {
 /// Lines (split on `\n`) are stacked and the block is centred vertically on
 /// the anchor; each line is placed horizontally by `align`. Glyph origins
 /// are snapped to whole pixels so glyphs draw crisply at 1:1.
+///
+/// Right-to-left text (Persian, Arabic, Hebrew) is joined and ordered by
+/// [`crate::bidi`]; in a left-aligned block, its lines line up on the
+/// block's right edge.
 #[must_use]
 pub fn layout(font: &impl Font, text: &str, size: f32, align: TextAlign) -> TextLayout {
     layout_with::<_, FontRef<'static>>(font, &[], text, size, align)
@@ -290,13 +294,28 @@ pub fn layout_with<F: Font, G: Font>(
     let top = -height / 2.0;
     let mut glyphs = Vec::new();
     let mut widest = 0.0_f32;
-    for (row, line) in lines.iter().enumerate() {
+    let has = |c: char| font.glyph_id(c).0 != 0 || backups.iter().any(|b| b.glyph_id(c).0 != 0);
+    // Each line's glyphs, width and direction; placed once the widest is
+    // known.
+    let mut rows: Vec<(usize, f32, bool)> = Vec::with_capacity(lines.len());
+    for line in &lines {
+        let (line, rtl) = crate::bidi::visual_line(line, &has);
         let mut pen = 0.0_f32;
         let mut prev: Option<(GlyphId, u8)> = None;
         let start = glyphs.len();
         for c in line.chars() {
             let mut id = font.glyph_id(c);
             let mut source = 0_u8;
+            // A space between words from a fallback font takes that font's
+            // width (a pixel font's space is far wider than Vazirmatn's).
+            if c.is_whitespace() {
+                if let Some((_, from @ 1..)) = prev {
+                    let other = backups[usize::from(from) - 1].glyph_id(c);
+                    if other.0 != 0 {
+                        (id, source) = (other, from);
+                    }
+                }
+            }
             if id.0 == 0 {
                 for (i, b) in backups.iter().enumerate() {
                     let other = b.glyph_id(c);
@@ -332,14 +351,19 @@ pub fn layout_with<F: Font, G: Font>(
             prev = Some((id, source));
         }
         widest = widest.max(pen);
+        rows.push((start, pen, rtl));
+    }
+    for (row, &(start, pen, rtl)) in rows.iter().enumerate() {
+        let end = rows.get(row + 1).map_or(glyphs.len(), |r| r.0);
         let shift = match align {
+            TextAlign::Left if rtl => widest - pen,
             TextAlign::Left => 0.0,
             TextAlign::Center => -pen / 2.0,
             TextAlign::Right => -pen,
         };
         #[allow(clippy::cast_precision_loss)]
         let baseline = top + scaled.ascent() + line_height * row as f32;
-        for g in &mut glyphs[start..] {
+        for g in &mut glyphs[start..end] {
             g.origin = Vec2::new((g.origin.x + shift).round(), baseline.round());
         }
     }
@@ -810,6 +834,111 @@ mod tests {
         assert_eq!(backed.glyphs[1].id, builtin.glyph_id('\u{1e9e}'));
         // Line metrics stay the main font's.
         assert!((alone.height - backed.height).abs() < 1e-3);
+    }
+
+    fn demo_font(name: &str) -> FontArc {
+        load_font_file(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/oberon/shape_signal/fonts")
+                .join(name),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn persian_joins_and_reads_right_to_left_through_the_fallback_font() {
+        let pixel = load_font_file(&pixel_font_path()).unwrap();
+        let persian = demo_font("Vazirmatn-ShapeSignal.ttf");
+        let builtin = FontArc::new(builtin_font());
+        let fonts = [&persian, &builtin];
+        // سلام: three glyphs (lam-alef is one), right to left, all from
+        // the Persian font.
+        let l = layout_with(&pixel, &fonts, "سلام", 20.0, TextAlign::Left);
+        assert_eq!(l.missing, Vec::<char>::new());
+        let ids: Vec<GlyphId> = l.glyphs.iter().map(|g| g.id).collect();
+        let want: Vec<GlyphId> = ['\u{FEE1}', '\u{FEFC}', '\u{FEB3}']
+            .iter()
+            .map(|&c| persian.glyph_id(c))
+            .collect();
+        assert_eq!(ids, want);
+        assert!(l.glyphs.iter().all(|g| g.source == 1));
+        assert!(l.glyphs.windows(2).all(|w| w[0].origin.x < w[1].origin.x));
+        // A score: the digits come from the pixel font, on the left.
+        let l = layout_with(&pixel, &fonts, "امتیاز 120", 20.0, TextAlign::Left);
+        assert_eq!(l.glyphs[0].id, pixel.glyph_id('1'));
+        assert_eq!(l.glyphs[0].source, 0);
+        assert_eq!(l.glyphs.last().unwrap().id, persian.glyph_id('\u{FE8D}'));
+        // The space between two Persian words is the Persian font's, not the
+        // pixel font's much wider one.
+        let two = layout_with(&pixel, &fonts, "شکل شکل", 20.0, TextAlign::Left);
+        let one = layout_with(&pixel, &fonts, "شکل", 20.0, TextAlign::Left);
+        let space = persian
+            .as_scaled(PxScale::from(20.0))
+            .h_advance(persian.glyph_id(' '));
+        assert!(
+            (two.width - 2.0 * one.width - space).abs() < 1.0,
+            "{} {}",
+            two.width,
+            one.width
+        );
+    }
+
+    #[test]
+    fn right_to_left_lines_line_up_on_the_right_of_a_left_aligned_block() {
+        let persian = demo_font("Vazirmatn-ShapeSignal.ttf");
+        let builtin = FontArc::new(builtin_font());
+        let text = "یک شکل بالا می‌رود\nبازی";
+        let right_edge = |l: &TextLayout, row_y: f32| {
+            l.glyphs
+                .iter()
+                .filter(|g| (g.origin.y - row_y).abs() < 0.5)
+                .map(|g| g.origin.x + persian.as_scaled(PxScale::from(20.0)).h_advance(g.id))
+                .fold(f32::MIN, f32::max)
+        };
+        let l = layout_with(&builtin, &[&persian], text, 20.0, TextAlign::Left);
+        let rows: Vec<f32> = {
+            let mut ys: Vec<f32> = l.glyphs.iter().map(|g| g.origin.y).collect();
+            ys.dedup();
+            ys
+        };
+        assert_eq!(rows.len(), 2);
+        let (a, b) = (right_edge(&l, rows[0]), right_edge(&l, rows[1]));
+        assert!((a - b).abs() <= 1.5, "both lines end on the right: {a} {b}");
+        assert!((a - l.width).abs() <= 1.5);
+        // Left-to-right lines still start on the left.
+        let l = layout_with(
+            &builtin,
+            &[&persian],
+            "Long line\nab",
+            20.0,
+            TextAlign::Left,
+        );
+        assert!(l.glyphs.iter().all(|g| g.origin.x < l.width));
+        assert!(l
+            .glyphs
+            .iter()
+            .any(|g| g.origin.y > 0.0 && g.origin.x.abs() < 2.0));
+    }
+
+    #[test]
+    fn every_text_in_the_demo_has_its_glyphs() {
+        let pixel = load_font_file(&pixel_font_path()).unwrap();
+        let persian = demo_font("Vazirmatn-ShapeSignal.ttf");
+        let builtin = FontArc::new(builtin_font());
+        let table = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/oberon/shape_signal/lang/strings.csv"),
+        )
+        .unwrap();
+        let persian_chars: String = table.chars().filter(|&c| crate::bidi::is_rtl(c)).collect();
+        assert!(
+            persian_chars.chars().count() > 200,
+            "the table has a Persian column"
+        );
+        let japanese = demo_font("MPLUSRounded1c-ShapeSignal.ttf");
+        let fonts = [&persian, &japanese, &builtin];
+        let l = layout_with(&pixel, &fonts, &table, 16.0, TextAlign::Left);
+        assert_eq!(l.missing, Vec::<char>::new());
     }
 
     #[test]
