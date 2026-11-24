@@ -112,6 +112,8 @@ Other Android work:
 
    The SDL lessons (activity re-creation, lifecycle events through an event
    watch, no gamepad backend) are in `android/README.md`.
+   ([Emulator screenshots](docs/assets/ui/e1_android_emulator.jpg): running,
+   then after Home and back.)
 2. **Python on device:** run Coin Run on a device or emulator.
 3. **Touch:** `ctx.input.touches` (*done in E1a*: fingers with stable
    numbers, start points and phases; the left mouse button is finger 0 on
