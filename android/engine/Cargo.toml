@@ -39,8 +39,13 @@ all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
 [profile.release]
-# APK size: no debug symbols in the shipped library (exports stay).
+# APK size: no debug symbols in the shipped library (exports stay), and
+# whole-program optimization, which drops the parts of wgpu, naga and the
+# rest the engine never calls. Speed stays at opt-level 3, and panics keep
+# unwinding (PyO3 turns them into Python exceptions).
 strip = true
+lto = "fat"
+codegen-units = 1
 
 # Not part of the repository's workspace.
 [workspace]

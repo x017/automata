@@ -28,6 +28,12 @@ launch
 
 # First start unpacks Python and the game, which takes a while on an emulator.
 wait_for "automata-spike start" 240
+wait_for "automata-spike stdlib (ok|missing)" 60
+if log | grep -q "automata-spike stdlib missing"; then
+  log | grep "automata-spike stdlib missing"
+  echo "::error::standard library modules are missing from the APK"
+  exit 1
+fi
 wait_for "GPU adapter selected" 60
 wait_for "automata-spike frame=120" 120
 sleep 1

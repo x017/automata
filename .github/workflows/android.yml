@@ -198,10 +198,15 @@ jobs:
           ls -la dist/*.apk
           gh release download export-templates --repo "$GITHUB_REPOSITORY" \
             --pattern automata-template-android.apk --output "$RUNNER_TEMP/published.apk" || true
-          python3 android/ci/apk_size.py dist/automata-template-android.apk \
-            --before "$RUNNER_TEMP/published.apk" | tee size.txt
+          # The budget: what one processor type may add to a game (NEXT_PLANS: +20 MB).
+          s=0
+          python3 android/ci/apk_size.py dist/automata-template-android.apk --budget 20 \
+            --before "$RUNNER_TEMP/published.apk" > size.txt || s=1
+          cat size.txt
           { echo '### Android template size'; echo '```'; cat size.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          python3 android/ci/report.py "android: template size" --log size.txt --lines 200
+          python3 android/ci/report.py "android: template size" --log size.txt --lines 200 \
+            --conclusion $([ $s = 0 ] && echo neutral || echo failure)
+          exit $s
 
       - uses: actions/upload-artifact@v4
         with:

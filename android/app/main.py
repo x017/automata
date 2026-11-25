@@ -6,9 +6,47 @@ sends it to the background and back, and reads the `automata-spike` lines
 it prints (python-for-android sends them to logcat, tag `python`).
 """
 
+import importlib
+
 import automata as at
 
 print(f"automata-spike start platform={getattr(at._core, 'platform', 'desktop')}")
+
+# The standard library a game may use must survive the trimmed stdlib.zip
+# (android/recipes/python3). CI waits for "stdlib ok".
+STDLIB = """
+    abc argparse array ast asyncio base64 bisect calendar collections colorsys
+    concurrent.futures contextlib copy csv ctypes dataclasses datetime decimal
+    difflib email.parser enum fnmatch fractions functools gettext glob gzip
+    hashlib heapq hmac html http.client importlib.resources inspect io
+    ipaddress itertools json locale logging math operator os pathlib
+    pickle platform pprint queue random re secrets shlex shutil socket sqlite3
+    ssl statistics string struct subprocess tarfile tempfile textwrap
+    threading time tomllib traceback types typing unicodedata urllib.parse
+    urllib.request uuid warnings weakref xml.etree.ElementTree zipfile zlib
+    zoneinfo
+""".split()
+# Built only when their p4a recipes (libbz2, liblzma) are requested: reported.
+OPTIONAL = ["bz2", "lzma"]
+
+
+def import_failures(names):
+    failures = []
+    for name in names:
+        try:
+            importlib.import_module(name)
+        except Exception as e:  # noqa: BLE001 - report every failure
+            failures.append(f"{name} ({type(e).__name__}: {e})")
+    return failures
+
+
+missing = import_failures(STDLIB)
+absent = import_failures(OPTIONAL)
+print(f"automata-spike stdlib optional: {'; '.join(absent) or 'all present'}")
+if missing:
+    print(f"automata-spike stdlib missing: {'; '.join(missing)}")
+else:
+    print(f"automata-spike stdlib ok ({len(STDLIB)} modules)")
 
 game = at.Game(title="AUTOMATA", target_fps=60, clear_color=(0.10, 0.12, 0.18, 1.0))
 game.load_scene(

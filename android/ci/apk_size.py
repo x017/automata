@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """What an APK's size is made of, optionally next to an older build.
 
-    android/ci/apk_size.py APK [--before OLD_APK] [--top N]
+    android/ci/apk_size.py APK [--before OLD_APK] [--top N] [--budget MB]
 
-Prints three tables:
+Prints five tables:
+- what each processor type (ABI) adds, compressed: its `lib/<abi>/`
+  files. With `--budget`, the script fails when one ABI adds more;
 - the APK by part: each native library per ABI, the app's files
   (`assets/private.tar`), the Java code and the rest, compressed (what a
   download costs). python-for-android packs each ABI's Python (standard
@@ -73,6 +75,7 @@ class Apk:
         self.inner: Counter[str] = Counter()  # inside assets archives
         self.stdlib: Counter[str] = Counter()  # top-level stdlib packages
         self.files: Counter[str] = Counter()  # files inside assets archives
+        self.abis: Counter[str] = Counter()  # compressed, per lib/<abi>/
         self.total = 0
         with open(path, "rb") as f:
             data = f.read()
@@ -81,6 +84,10 @@ class Apk:
             for info in z.infolist():
                 part = part_of(info.filename)
                 self.parts[part] += info.compress_size
+                if info.filename.startswith("lib/") and info.filename.count("/") >= 2:
+                    self.abis[info.filename.split("/")[1]] += info.compress_size
+                else:
+                    self.abis["(shared: Java, resources, app files)"] += info.compress_size
                 self.raw[part] += info.file_size
                 if info.filename.startswith("assets/") and part != "assets/(other)":
                     self._read_archive(z.read(info), "")
@@ -148,6 +155,7 @@ def main() -> int:
     parser.add_argument("apk")
     parser.add_argument("--before", help="an older APK to compare with")
     parser.add_argument("--top", type=int, default=30)
+    parser.add_argument("--budget", type=float, help="fail when one ABI adds more MB than this")
     args = parser.parse_args()
 
     new = Apk(args.apk)
@@ -161,6 +169,13 @@ def main() -> int:
         f" (before: {mb(old.total).strip()} MB, {delta(new.total, old.total).strip()} MB)"
         if old else "")]
     out.append("")
+    out += table("per processor type (compressed)", new.abis, old.abis if old else None, args.top)
+    over = []
+    if args.budget is not None:
+        over = [abi for abi, n in new.abis.items() if not abi.startswith("(") and n > args.budget * MB]
+        out.append(f"budget: {args.budget:g} MB per processor type: "
+                   + (f"OVER for {', '.join(sorted(over))}" if over else "ok"))
+    out.append("")
     out += table("APK part (compressed, as downloaded)", new.parts, old.parts if old else None, args.top)
     out.append("")
     out += table("inside the Python archives (uncompressed)", new.inner, old.inner if old else None, args.top)
@@ -171,7 +186,7 @@ def main() -> int:
     out += table("largest files in the Python archives (uncompressed)", new.files,
                  old.files if old else None, args.top)
     print("\n".join(out))
-    return 0
+    return 1 if over else 0
 
 
 if __name__ == "__main__":
