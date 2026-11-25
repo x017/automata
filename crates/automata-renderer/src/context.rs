@@ -99,8 +99,15 @@ impl RenderContext {
             wgpu::PresentMode::AutoNoVsync
         };
         // Allow CPU-composited UIs (Oberon) to upload a finished frame to the
-        // swapchain with `Queue::write_texture` in addition to normal rendering.
-        config.usage |= wgpu::TextureUsages::COPY_DST;
+        // swapchain with `Queue::write_texture` in addition to normal rendering,
+        // where the surface allows it (WebGL's doesn't).
+        if surface
+            .get_capabilities(&adapter)
+            .usages
+            .contains(wgpu::TextureUsages::COPY_DST)
+        {
+            config.usage |= wgpu::TextureUsages::COPY_DST;
+        }
         surface.configure(&device, &config);
         info!(
             format = ?config.format,
