@@ -21,6 +21,11 @@ tracing.workspace = true
 ab_glyph.workspace = true
 wgpu.workspace = true
 
+# The browser build (Pyodide, wasm32-unknown-emscripten) is single-threaded:
+# wgpu's types may be Send + Sync there, as the engine's statics need.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { workspace = true, features = ["fragile-send-sync-non-atomic-wasm"] }
+
 [dev-dependencies]
 naga = { workspace = true, features = ["wgsl-in"] }
 pollster.workspace = true
