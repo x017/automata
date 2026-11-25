@@ -64,13 +64,19 @@ pub struct ClipInfo {
 /// How many slices [`ClipInfo::peaks`] has.
 pub const PEAK_BUCKETS: usize = 96;
 
+/// Decodes a sound file. (kira's `from_file` doesn't exist on wasm32,
+/// though the browser build has a file system: Pyodide's.)
+fn load_file(path: &str) -> Result<StaticSoundData, kira::sound::FromFileError> {
+    StaticSoundData::from_media_source(std::fs::File::open(path)?)
+}
+
 /// Decodes a sound file and summarizes it (length, rate, waveform).
 ///
 /// # Errors
 ///
 /// [`AudioError::Load`] if the file cannot be read or decoded.
 pub fn probe(path: &str) -> Result<ClipInfo, AudioError> {
-    let data = StaticSoundData::from_file(path).map_err(|source| AudioError::Load {
+    let data = load_file(path).map_err(|source| AudioError::Load {
         path: path.to_owned(),
         source,
     })?;
@@ -427,7 +433,7 @@ impl AudioEngine {
                 return Ok(data.clone());
             }
         }
-        let data = StaticSoundData::from_file(path).map_err(|source| AudioError::Load {
+        let data = load_file(path).map_err(|source| AudioError::Load {
             path: path.to_owned(),
             source,
         })?;
