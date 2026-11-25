@@ -199,7 +199,7 @@ Other Android work:
 
 ### Web, next
 
-Decided and planned in [#7](#7-web-export--decided-phase-1-in-progress).
+Decided and planned in [#7](#7-web-export--decided-phase-1-done).
 
 ---
 
@@ -517,7 +517,7 @@ tracking or failures).
 
 ---
 
-## 7. Web export 🟢 decided (phase 1 in progress)
+## 7. Web export 🟢 decided (phase 1 done)
 
 ROADMAP E3. Games run in the browser with the same Python scripts as on
 desktop and Android.

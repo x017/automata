@@ -1051,13 +1051,14 @@ and its own input types. The game-facing API stays the same everywhere.
 - Signing and notarisation are documented.
 
 ### E3. Web export 🔨 L
-[`NEXT_PLANS.md` #7](NEXT_PLANS.md#7-web-export--decided-phase-1-in-progress):
+[`NEXT_PLANS.md` #7](NEXT_PLANS.md#7-web-export--decided-phase-1-done):
 Pyodide 314 (CPython 3.14), with the engine as a Pyodide extension module
 drawing through WebGL2 (wgpu's GLES backend under emscripten). Pyodide is
 bundled in every export, and it targets desktop and phone browsers.
-- 🔨 Spike: a stepped run (the browser owns the loop), the engine wheel for
+- ✅ Spike: a stepped run (the browser owns the loop), the engine wheel for
   Pyodide, and a spinning cube in headless Chromium in CI, with size and
-  startup time. See [`web/README.md`](web/README.md).
+  startup time: 17.1 MB download (10.0 MB gzipped), first frame 2.7 s
+  after navigation on SwiftShader. See [`web/README.md`](web/README.md).
 - ⬜ Input and lifecycle: keys, mouse and pointer lock, touch, gamepads,
   resizing, hidden tabs; audio through an AudioWorklet.
 - ⬜ Real games: `game.zip`, and saves and settings in IndexedDB. Coin Run

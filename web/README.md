@@ -53,6 +53,34 @@ Desktop tests can run games stepped too: `automata._core._use_stepped_runs(True)
 installs a windowless step driver, and `automata._core.step_running_game()`
 runs a frame (see `crates/automata-python/tests/python/test_stepped.py`).
 
+## First measurements
+
+From the spike in CI (Pyodide 314.0.8, headless Chromium, WebGL2 on
+SwiftShader, a 960×540 canvas):
+
+| | |
+| --- | --- |
+| Download | 17.12 MB in 11 files, 9.97 MB gzipped |
+| `pyodide.asm.wasm` (CPython) | 9.60 MB, 3.59 MB gzipped |
+| The engine wheel | 3.58 MB (already compressed) |
+| `python_stdlib.zip` | 2.55 MB |
+| Pyodide ready / engine imported / game started / first frame | 1.6 s / 1.9 s / 2.1 s / 2.7 s after navigation |
+| Frame rate | ~9.5 fps (a CPU rasterizer; real GPUs run far faster) |
+
+Phase 5 sets the budget; trimming the standard library and the wheel are
+the obvious levers.
+
+## WebGL2 notes
+
+The renderer works within WebGL2's limits: the surface allows only
+`COLOR_TARGET` (no `COPY_DST`), passes that only `textureLoad` scene depth
+bind it as unfilterable float (GLSL can't load from depth textures), and
+the point shadow array gets a spare layer on wasm so wgpu's GL backend
+doesn't make it a cube-map array, which WebGL2 lacks. The Beautiful
+preset's soft sun shadows still `textureLoad` the shadow cascades, so
+Beautiful won't build its pipelines on WebGL2 until that's reworked (phase
+2); the default High and the other presets do.
+
 ## Building
 
 Only CI builds it (`.github/workflows/web.yml`); locally you'd need the
