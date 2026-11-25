@@ -24,6 +24,10 @@ done
 cp "$repo/web/player/index.html" "$repo/web/player/player.js" "$site/"
 wheel="$(basename "$(ls "$dist"/wheel/*.whl | head -1)")"
 cp "$dist/wheel/$wheel" "$site/"
+# The module must only import what Pyodide provides.
+rm -rf "$dist/wheel-unpacked" && mkdir -p "$dist/wheel-unpacked"
+(cd "$dist/wheel-unpacked" && unzip -q "$dist/wheel/$wheel")
+node "$repo/web/ci/wasm_imports.mjs" "$(find "$dist/wheel-unpacked" -name '_core*.so' | head -1)"
 cp "$main" "$site/main.py"
 printf '{"wheel": "%s", "main": "main.py"}\n' "$wheel" > "$site/player.json"
 du -ab "$site" | sort -n | tail -20

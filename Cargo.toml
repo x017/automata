@@ -33,7 +33,18 @@ winit = "0.30"
 # nothing does and tiny-skia-path has no float maths without it.
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 ab_glyph = "0.2"
-wgpu = "30"
+# wgpu's defaults without `webgpu`: that backend is for wasm32-unknown-unknown
+# only, and in the Pyodide build (emscripten, WebGL2 through `gles`) its
+# wasm-bindgen glue would leave imports no Emscripten module can satisfy.
+wgpu = { version = "30", default-features = false, features = [
+    "std",
+    "parking_lot",
+    "dx12",
+    "metal",
+    "gles",
+    "vulkan",
+    "wgsl",
+] }
 pollster = "1.0"
 glam = { version = "0.33", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }

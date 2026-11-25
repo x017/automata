@@ -102,7 +102,16 @@ jobs:
           fi
 
       - name: Package the player
-        run: web/ci/package.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          s=0
+          web/ci/package.sh > package.log 2>&1 || s=1
+          cat package.log
+          if [ $s != 0 ]; then
+            python3 android/ci/report.py "web: package log" --log package.log --lines 300 --conclusion failure
+          fi
+          exit $s
 
       - name: Chromium
         working-directory: web/ci
