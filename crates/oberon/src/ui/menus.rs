@@ -579,6 +579,12 @@ impl Ui {
                         Intent::Build(Some(Target::Windows)),
                         idle,
                     ),
+                    MenuItem::intent(
+                        "Build for Android",
+                        "",
+                        Intent::Build(Some(Target::Android)),
+                        idle,
+                    ),
                     MenuItem::separator(),
                     MenuItem::ui("Build Settings…", "", UiAction::BuildSettings, true),
                     MenuItem::intent("Open Build Folder", "", Intent::OpenBuildFolder, true),

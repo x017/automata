@@ -1,4 +1,5 @@
-//! Exports AUTOMATA games to standalone builds for Windows and Linux.
+//! Exports AUTOMATA games to standalone builds for Windows, Linux and
+//! Android.
 //!
 //! An export copies an **export template** (the `automata-player` launcher
 //! plus a portable Python with the engine installed) and adds the project:
@@ -16,9 +17,12 @@
 //! the compiled engine, exporting needs no compiler: any machine can export
 //! for any supported platform.
 //!
+//! Android builds work the same way with a template APK: see [`android`].
+//!
 //! Project settings live in `build.ron` next to the project's scenes
 //! ([`BuildConfig`]).
 
+pub mod android;
 pub mod archive;
 pub mod cli;
 
@@ -49,11 +53,17 @@ pub enum Target {
     Linux,
     /// 64-bit Windows 10+ (`x86_64`).
     Windows,
+    /// Android 7+ phones and tablets (`arm64-v8a`, and `x86_64` for
+    /// emulators), as a signed APK.
+    Android,
 }
 
 impl Target {
     /// Every supported target.
-    pub const ALL: [Target; 2] = [Target::Linux, Target::Windows];
+    pub const ALL: [Target; 3] = [Target::Linux, Target::Windows, Target::Android];
+
+    /// The desktop targets (a template with a launcher and Python).
+    pub const DESKTOP: [Target; 2] = [Target::Linux, Target::Windows];
 
     /// Short name (`linux`, `windows`).
     #[must_use]
@@ -61,6 +71,7 @@ impl Target {
         match self {
             Target::Linux => "linux",
             Target::Windows => "windows",
+            Target::Android => "android",
         }
     }
 
@@ -70,6 +81,7 @@ impl Target {
         match self {
             Target::Linux => "Linux",
             Target::Windows => "Windows",
+            Target::Android => "Android",
         }
     }
 
@@ -79,15 +91,18 @@ impl Target {
         match self {
             Target::Linux => "linux-x86_64",
             Target::Windows => "windows-x86_64",
+            Target::Android => "android",
         }
     }
 
-    /// The launcher's file name inside a template.
+    /// The launcher's file name inside a template (the template APK for
+    /// Android).
     #[must_use]
     pub fn player_file(self) -> &'static str {
         match self {
             Target::Linux => "automata-player",
             Target::Windows => "automata-player.exe",
+            Target::Android => android::TEMPLATE_FILE,
         }
     }
 
@@ -97,15 +112,18 @@ impl Target {
         match self {
             Target::Linux => "",
             Target::Windows => ".exe",
+            Target::Android => ".apk",
         }
     }
 
-    /// The archive extension for exported builds.
+    /// The archive extension for exported builds (Android builds are an
+    /// APK already).
     #[must_use]
     pub fn archive_ext(self) -> &'static str {
         match self {
             Target::Linux => "tar.gz",
             Target::Windows => "zip",
+            Target::Android => "apk",
         }
     }
 
@@ -121,7 +139,7 @@ impl Target {
         }
     }
 
-    /// Parses `linux` / `windows`.
+    /// Parses `linux` / `windows` / `android`.
     #[must_use]
     pub fn parse(s: &str) -> Option<Target> {
         Target::ALL
@@ -129,10 +147,14 @@ impl Target {
             .find(|t| t.name().eq_ignore_ascii_case(s.trim()))
     }
 
-    /// The template archive name (`automata-template-linux-x86_64.tar.gz`).
+    /// The template archive name (`automata-template-linux-x86_64.tar.gz`,
+    /// `automata-template-android.apk`).
     #[must_use]
     pub fn template_archive(self) -> String {
-        format!("automata-template-{}.tar.gz", self.triple())
+        match self {
+            Target::Android => "automata-template-android.apk".into(),
+            _ => format!("automata-template-{}.tar.gz", self.triple()),
+        }
     }
 }
 
@@ -170,6 +192,55 @@ pub struct BuildConfig {
     /// On-screen thumbsticks and buttons for touch screens (Android), which
     /// hold the game's keys. `None`: no touch controls.
     pub touch_controls: Option<TouchControls>,
+    /// Android app settings.
+    pub android: AndroidConfig,
+}
+
+/// Android app settings (`build.ron`'s `android`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AndroidConfig {
+    /// The app ID (`com.yourname.game`). Empty: `com.example.<name>`,
+    /// fine for testing; set your own before publishing, since it can't
+    /// change once people install the game.
+    pub package: String,
+    /// The version Android compares for updates: raise it with each
+    /// release.
+    pub version_code: u32,
+}
+
+impl Default for AndroidConfig {
+    fn default() -> Self {
+        Self {
+            package: String::new(),
+            version_code: 1,
+        }
+    }
+}
+
+/// Checks an Android app ID: at least two dot-separated parts, each a
+/// letter followed by letters, digits or `_`.
+///
+/// # Errors
+///
+/// What's wrong with it.
+pub fn check_android_package(package: &str) -> Result<(), String> {
+    let parts: Vec<&str> = package.split('.').collect();
+    if parts.len() < 2 {
+        return Err(format!(
+            "the Android app ID `{package}` needs at least two parts, like com.yourname.game"
+        ));
+    }
+    for part in parts {
+        let ok = part.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !ok {
+            return Err(format!(
+                "the Android app ID `{package}`: each part must start with a letter and hold only letters, digits and _ (like com.yourname.game)"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// On-screen controls for touch screens (`build.ron`'s `touch_controls`),
@@ -354,6 +425,7 @@ impl Default for BuildConfig {
             archive: true,
             exclude: vec!["tests/".into()],
             touch_controls: None,
+            android: AndroidConfig::default(),
         }
     }
 }
@@ -404,6 +476,26 @@ impl BuildConfig {
         let path = project.join(CONFIG_FILE);
         std::fs::write(&path, format!("// Export settings for automata-cli and Oberon (Build → Build Settings).\n{text}\n"))
             .map_err(|e| format!("{}: {e}", path.display()))
+    }
+
+    /// The Android app ID: `android.package`, else `com.example.` and the
+    /// game's name in lowercase letters and digits.
+    #[must_use]
+    pub fn android_package(&self) -> String {
+        let set = self.android.package.trim();
+        if !set.is_empty() {
+            return set.to_string();
+        }
+        let mut name: String = self
+            .name
+            .chars()
+            .filter(char::is_ascii_alphanumeric)
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        if !name.starts_with(|c: char| c.is_ascii_alphabetic()) {
+            name.insert_str(0, "game");
+        }
+        format!("com.example.{name}")
     }
 
     /// The executable / folder name: the game name without characters
@@ -1031,19 +1123,21 @@ pub fn templates_dir() -> PathBuf {
 /// The installed template folder for `target`, if there is one.
 #[must_use]
 pub fn find_template(target: Target) -> Option<PathBuf> {
+    // (The Android template's "player" is the template APK.)
     let dir = templates_dir().join(target.triple());
     dir.join(target.player_file()).is_file().then_some(dir)
 }
 
 /// Whether a template folder bundles its own Python (a development
-/// template doesn't, and needs Python with `automata` installed).
+/// template doesn't, and needs Python with `automata` installed). The
+/// Android template APK always does.
 #[must_use]
 pub fn template_has_runtime(dir: &Path) -> bool {
-    dir.join("runtime").is_dir()
+    dir.join("runtime").is_dir() || android::installed_template(dir).is_some()
 }
 
-/// Installs a template archive (`automata-template-<target>.tar.gz`) for
-/// `target`, replacing any installed one.
+/// Installs a template archive (`automata-template-<target>.tar.gz`, or
+/// the APK for Android) for `target`, replacing any installed one.
 ///
 /// # Errors
 ///
@@ -1053,8 +1147,19 @@ pub fn install_template(archive_path: &Path, target: Target) -> Result<PathBuf, 
     let staging = dest.with_extension("installing");
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
-    archive::extract_tar_gz(archive_path, &staging)
-        .map_err(|e| format!("{}: {e}", archive_path.display()))?;
+    if target == Target::Android {
+        // The template is the APK itself.
+        let bytes =
+            std::fs::read(archive_path).map_err(|e| format!("{}: {e}", archive_path.display()))?;
+        if android::zip::read(&bytes).is_err() {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(format!("{} is not an APK", archive_path.display()));
+        }
+        std::fs::write(staging.join(android::TEMPLATE_FILE), bytes).map_err(|e| e.to_string())?;
+    } else {
+        archive::extract_tar_gz(archive_path, &staging)
+            .map_err(|e| format!("{}: {e}", archive_path.display()))?;
+    }
     if !staging.join(target.player_file()).is_file() {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(format!(
@@ -1213,6 +1318,9 @@ fn asset_api_url(json: &str, name: &str) -> Option<String> {
 ///
 /// When the folder holds no player or the archive can't be written.
 pub fn pack_template(dir: &Path, target: Target, dest: &Path) -> Result<(), String> {
+    if target == Target::Android {
+        return Err("the Android template is an APK already: install it as it is".into());
+    }
     if !dir.join(target.player_file()).is_file() {
         return Err(format!("{} has no {}", dir.display(), target.player_file()));
     }
@@ -1231,6 +1339,9 @@ pub fn pack_template(dir: &Path, target: Target, dest: &Path) -> Result<(), Stri
 ///
 /// When the player can't be copied.
 pub fn install_dev_template(player: &Path, target: Target) -> Result<PathBuf, String> {
+    if target == Target::Android {
+        return Err("Android has no development template: install the template APK".into());
+    }
     let dest = templates_dir().join(target.triple());
     let _ = std::fs::remove_dir_all(&dest);
     std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
@@ -1285,6 +1396,9 @@ pub fn export(
     }
     if failed {
         return Err("the project has errors; fix them and build again".into());
+    }
+    if target == Target::Android {
+        return android::export(project, cfg, template, progress);
     }
     let player = template.join(target.player_file());
     if !player.is_file() {
@@ -1352,8 +1466,8 @@ pub fn export(
         })
         .map_err(|e| e.to_string())?;
         match target {
-            Target::Linux => archive::write_tar_gz(&path, &entries),
             Target::Windows => archive::write_zip(&path, &entries),
+            _ => archive::write_tar_gz(&path, &entries),
         }
         .map_err(|e| format!("{}: {e}", path.display()))?;
         progress(Message::info(format!(
@@ -1433,7 +1547,7 @@ pub fn stage_game(
 }
 
 /// Replaces `dest` with the project's shipped files and `game.json`.
-fn copy_game(project: &Path, cfg: &BuildConfig, dest: &Path) -> Result<usize, String> {
+pub(crate) fn copy_game(project: &Path, cfg: &BuildConfig, dest: &Path) -> Result<usize, String> {
     if dest.exists() {
         std::fs::remove_dir_all(dest)
             .map_err(|e| format!("could not clear {}: {e}", dest.display()))?;
@@ -1803,7 +1917,7 @@ mod tests {
         let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
         cfg.name = "Coin Run".into();
         assert_eq!(cfg.start_scene.as_deref(), Some("level.ron"));
-        for target in Target::ALL {
+        for target in Target::DESKTOP {
             let tpl = template(target.name(), target, true);
             let mut log = Vec::new();
             let out = export(&dir, &cfg, target, &tpl, &mut |m| log.push(m)).unwrap();
@@ -1828,6 +1942,82 @@ mod tests {
             assert!(archive.to_string_lossy().ends_with(target.archive_ext()));
             assert!(log.iter().all(|m| m.level != Level::Error));
         }
+    }
+
+    #[test]
+    fn exports_an_android_apk_from_the_template() {
+        let dir = project("apk");
+        let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
+        cfg.name = "Coin Run".into();
+        let tpl = std::env::temp_dir().join(format!("automata-apk-tpl-{}", std::process::id()));
+        std::fs::create_dir_all(&tpl).unwrap();
+        let apk_bytes = android::tests::template();
+        let installed_from = tpl.join("downloaded.apk");
+        std::fs::write(&installed_from, &apk_bytes).unwrap();
+        std::fs::write(tpl.join(android::TEMPLATE_FILE), &apk_bytes).unwrap();
+        assert!(template_has_runtime(&tpl));
+        let key_file = tpl.join("debug.key");
+        let mut log = Vec::new();
+        let out =
+            android::export_with_key(&dir, &cfg, &tpl, &key_file, &mut |m| log.push(m)).unwrap();
+        assert!(out.executable.ends_with("android/Coin Run-0.1.0.apk"));
+        // The staged copy is gone: only the APK is left.
+        assert!(!out.folder.join("game").exists());
+        let text: Vec<&str> = log.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            text.iter().any(|t| t.contains("com.example.coinrun")),
+            "{text:?}"
+        );
+        assert!(
+            text.iter().any(|t| t.contains("debug signing key")),
+            "{text:?}"
+        );
+        let (key, new) = android::key::load_or_create(&key_file).unwrap();
+        assert!(!new);
+        let apk = std::fs::read(&out.executable).unwrap();
+        android::sign::verify(&apk, &key).unwrap();
+        let names: Vec<String> = android::zip::read(&apk)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert!(names.contains(&"assets/automata/game/scripts/coin.py".to_string()));
+        assert!(!names.iter().any(|n| n.contains(".oberon")));
+
+        // A bad app ID stops the build.
+        cfg.android.package = "Coin Run".into();
+        let err = android::export_with_key(&dir, &cfg, &tpl, &key_file, &mut |_| {}).unwrap_err();
+        assert!(err.contains("app ID"), "{err}");
+        // A broken template is reported.
+        std::fs::write(tpl.join(android::TEMPLATE_FILE), b"nope").unwrap();
+        cfg.android.package = "com.example.run".into();
+        assert!(android::export_with_key(&dir, &cfg, &tpl, &key_file, &mut |_| {}).is_err());
+        for d in [dir, tpl] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[test]
+    fn android_app_ids() {
+        let mut cfg = BuildConfig {
+            name: "3D Coin Run!".into(),
+            ..BuildConfig::default()
+        };
+        assert_eq!(cfg.android_package(), "com.example.game3dcoinrun");
+        cfg.android.package = " org.me.run ".into();
+        assert_eq!(cfg.android_package(), "org.me.run");
+        assert!(check_android_package("org.me.run_2").is_ok());
+        for bad in ["run", "org..run", "org.2run", "org.me-run", "org.mé"] {
+            assert!(check_android_package(bad).is_err(), "{bad}");
+        }
+        let old: BuildConfig = ron::from_str("(name: \"Old\")").unwrap();
+        assert_eq!(old.android, AndroidConfig::default());
+        assert_eq!(old.android.version_code, 1);
+        assert_eq!(Target::parse("Android"), Some(Target::Android));
+        assert_eq!(
+            Target::Android.template_archive(),
+            "automata-template-android.apk"
+        );
     }
 
     #[test]

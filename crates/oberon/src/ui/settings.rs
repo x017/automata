@@ -47,7 +47,7 @@ impl SettingsPage {
             Self::Editor => "Typing, display and saving in the built-in script editor.",
             Self::Python => "The interpreter that runs Play mode scripts and the language server behind completions.",
             Self::Files => "Autosave and recently opened scenes.",
-            Self::Build => "Export this project as a game for Windows and Linux. Saved to build.ron in the project folder.",
+            Self::Build => "Export this project as a game for Windows, Linux and Android. Saved to build.ron in the project folder.",
         }
     }
 }
@@ -67,6 +67,10 @@ pub enum SettingText {
     BuildScene,
     /// Build: the output folder.
     BuildOutput,
+    /// Build: the Android app ID.
+    BuildPackage,
+    /// Build: the Android version code.
+    BuildVersionCode,
 }
 
 const ROW: f32 = 52.0;
@@ -109,7 +113,9 @@ impl Ui {
             SettingText::BuildName
             | SettingText::BuildVersion
             | SettingText::BuildScene
-            | SettingText::BuildOutput => {
+            | SettingText::BuildOutput
+            | SettingText::BuildPackage
+            | SettingText::BuildVersionCode => {
                 self.commit_build_text(which, value);
                 return None;
             }
@@ -548,6 +554,21 @@ impl Ui {
     }
 
     fn commit_build_text(&mut self, which: SettingText, value: Option<String>) {
+        // The Android fields only take valid values.
+        let problem = match (which, value.as_deref()) {
+            (SettingText::BuildPackage, Some(v)) => crate::build::check_android_package(v).err(),
+            (SettingText::BuildVersionCode, Some(v)) => match v.parse::<u32>() {
+                Ok(n) if n >= 1 => None,
+                _ => Some(format!(
+                    "the Android version code must be a whole number from 1 up, not `{v}`"
+                )),
+            },
+            _ => None,
+        };
+        if let Some(problem) = problem {
+            self.log(super::LogLevel::Error, format!("Build settings: {problem}"));
+            return;
+        }
         let cfg = self.build_settings();
         let defaults = crate::build::BuildConfig::default();
         match which {
@@ -560,6 +581,12 @@ impl Ui {
                 }
             }
             SettingText::BuildOutput => cfg.output = value.unwrap_or(defaults.output),
+            SettingText::BuildPackage => cfg.android.package = value.unwrap_or_default(),
+            SettingText::BuildVersionCode => {
+                cfg.android.version_code = value
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(defaults.android.version_code);
+            }
             SettingText::Python | SettingText::LanguageServer => return,
         }
         self.save_build_settings();
@@ -570,6 +597,7 @@ impl Ui {
         let cfg = self.build_settings().clone();
         let half = (body.w - 16.0) / 2.0;
         let right = body.x + half + 16.0;
+        let package_hint = cfg.android_package();
         let pairs = [
             (
                 "Game name",
@@ -592,6 +620,16 @@ impl Ui {
                 SettingText::BuildOutput,
                 cfg.output.clone(),
                 "build",
+            ),
+            (
+                "Android app ID",
+                SettingText::BuildPackage,
+                cfg.android.package.clone(),
+                package_hint.as_str(),
+                "Android version code",
+                SettingText::BuildVersionCode,
+                cfg.android.version_code.to_string(),
+                "1",
             ),
         ];
         for (l1, w1, v1, p1, l2, w2, v2, p2) in pairs {
@@ -632,7 +670,7 @@ impl Ui {
             190.0,
         );
         let mut x = body.x + body.w;
-        for t in [Target::Windows, Target::Linux] {
+        for t in [Target::Android, Target::Windows, Target::Linux] {
             let on = cfg.targets.contains(&t);
             let label = if on {
                 format!("✓ {}", t.label())
@@ -664,7 +702,7 @@ impl Ui {
             body,
             *y,
             "Archive",
-            "Also write a .zip (Windows) or .tar.gz (Linux), ready to upload.",
+            "Also write a .zip (Windows) or .tar.gz (Linux), ready to upload. Android builds are an .apk.",
             cfg.archive,
         ) {
             self.build_settings().archive = !cfg.archive;

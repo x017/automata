@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Emulator test for Coin Run, built as an exported game
-# (`automata-cli stage` + android/build_apk.sh):
+# Emulator test for Coin Run, built as an exported game the way users
+# build it: `automata-cli build --target android` adds it to the template
+# APK and signs it with a debug key, no Android tools involved.
 #
+# 0. it installs (the signature holds) with its own app ID and version,
+#    and the first start unpacks the game from the APK;
 # 1. it starts: the level loads and its scripts run (1-start.png);
 # 2. keys reach the scripts: F2 cycles the graphics preset (2-playing.png);
 # 3. the setting lands in the app's private storage;
 # 4. after Android kills the app, the next start remembers it: F2 goes
-#    on from the saved preset;
+#    on from the saved preset (and doesn't unpack the game again);
 # 5. the touch controls show by themselves on Android, and the left stick
 #    walks the player forward into the coin ahead (3-stick.png);
 # 6. the Jump button lights up while it's held (4-jump.png).
@@ -26,11 +29,19 @@ mkdir -p "$out"
 last_preset() { log | sed -n 's/.*Graphics: \([a-z]*\).*/\1/p' | tail -1; }
 
 adb install -r "$apk"
+info=$(adb shell dumpsys package "$pkg" | tr -d '\r')
+for want in "versionCode=1 " "versionName=0.1.0"; do
+  grep -q "$want" <<< "$info" ||
+    { echo "::error::$pkg doesn't show $want: $(grep -m3 version <<< "$info" | tr '\n' ' ')"; exit 1; }
+done
+echo "ok: installed as $pkg 0.1.0"
 adb logcat -c
 launch
 
 # First start unpacks Python and the game.
 wait_for "Collect [0-9]+ coins" 240
+log | grep -q "automata: unpacked the game" ||
+  { echo "::error::the game wasn't unpacked from the APK"; exit 1; }
 wait_for "window and GPU context ready" 60
 sleep 6
 shot coin-1-start
@@ -72,6 +83,10 @@ adb shell input keyevent KEYCODE_F2
 wait_for "Graphics: " 30
 second=$(last_preset)
 echo "F2 after the restart chose: $second"
+if log | grep -q "automata: unpacked the game"; then
+  echo "::error::the second start unpacked the game again (the stamp didn't match)"
+  exit 1
+fi
 presets=(low medium high ultra beautiful)
 for i in "${!presets[@]}"; do
   [ "${presets[$i]}" = "$first" ] && expected="${presets[$(((i + 1) % ${#presets[@]}))]}"

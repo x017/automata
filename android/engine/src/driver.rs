@@ -9,6 +9,13 @@
 //! 4. When Android sends the app to the background, let go of the surface
 //!    (Android destroys it) and stop running frames; on return, attach the
 //!    new one. Textures, meshes and the scene all stay in GPU memory.
+//!
+//! SDL's lifecycle events can come late, out of order with the window's
+//! own events, or not at all when Android re-creates the activity (SDL
+//! makes a new lifecycle semaphore then, while its thread may be waiting
+//! on the old one). So the driver acts on them before every event, and it
+//! also follows the window's `ANativeWindow`: a new one means Android
+//! replaced the surface, whatever the events said.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
@@ -108,6 +115,8 @@ pub(crate) fn run(host: &mut dyn Host) -> Result<()> {
         host,
         window,
         attached: false,
+        surface: None,
+        released: None,
         foreground: true,
         focused: true,
         modifiers: ModifiersState::empty(),
@@ -139,13 +148,8 @@ pub(crate) fn run(host: &mut dyn Host) -> Result<()> {
                 return Ok(());
             }
         }
-        let changes = LIFECYCLE.swap(0, Ordering::SeqCst);
-        if changes & WENT_BACKGROUND != 0 {
-            driver.enter_background();
-        }
-        if changes & WENT_FOREGROUND != 0 {
-            driver.enter_foreground()?;
-        }
+        driver.apply_lifecycle()?;
+        driver.sync_surface()?;
         if !driver.active() || driver.deadline.is_some_and(|d| Instant::now() < d) {
             continue;
         }
@@ -172,6 +176,13 @@ struct SdlDriver<'a> {
     window: Window,
     /// Whether the engine has a surface on the window.
     attached: bool,
+    /// The address of the `ANativeWindow` the engine draws to, while
+    /// attached.
+    surface: Option<usize>,
+    /// The last `ANativeWindow` the engine let go of. SDL leaves its
+    /// address in the window's properties until Android gives a new one,
+    /// so this tells a new surface from the old one.
+    released: Option<usize>,
     /// Whether the app is on screen.
     foreground: bool,
     /// Whether the window has the focus. Losing it pauses frames too:
@@ -199,8 +210,10 @@ impl SdlDriver<'_> {
             return Ok(());
         };
         let size = self.window.size_in_pixels();
+        let id = target.id;
         self.host.attach_surface(target.into(), size)?;
         self.attached = true;
+        self.surface = Some(id);
         Ok(())
     }
 
@@ -209,7 +222,43 @@ impl SdlDriver<'_> {
         if self.attached {
             self.host.detach_surface();
             self.attached = false;
+            self.released = self.surface.take();
         }
+    }
+
+    /// Acts on the lifecycle changes the event watch saw.
+    fn apply_lifecycle(&mut self) -> Result<()> {
+        let changes = LIFECYCLE.swap(0, Ordering::SeqCst);
+        if changes & WENT_BACKGROUND != 0 {
+            self.enter_background();
+        }
+        if changes & WENT_FOREGROUND != 0 {
+            self.enter_foreground()?;
+        }
+        Ok(())
+    }
+
+    /// Follows the window's `ANativeWindow`. A different one while
+    /// attached means Android replaced the surface (the activity was
+    /// re-created): the engine moves to the new one. A new one while away
+    /// means the app is back, even if SDL's foreground event got lost.
+    fn sync_surface(&mut self) -> Result<()> {
+        let current = NativeWindow::of(&self.window).map(|native| native.id);
+        if self.attached {
+            if current != self.surface {
+                info!("Android replaced the window's surface: moving to the new one");
+                self.detach();
+                self.attach()?;
+            }
+        } else if current.is_some() && current != self.released {
+            if self.foreground {
+                self.attach()?;
+            } else {
+                info!("a new surface arrived: back in the foreground");
+                self.enter_foreground()?;
+            }
+        }
+        Ok(())
     }
 
     /// Stops frames and lets go of the surface (Android destroys it).
@@ -238,6 +287,9 @@ impl SdlDriver<'_> {
 
     /// Handles one SDL event.
     fn handle(&mut self, event: Event) -> Result<Flow> {
+        // The watch may have seen the app leave after this event was
+        // queued: let go of the surface before anything touches it.
+        self.apply_lifecycle()?;
         match event {
             Event::Quit { .. } | Event::AppTerminating { .. } => return Ok(Flow::Quit),
             Event::AppWillEnterBackground { .. } | Event::AppDidEnterBackground { .. } => {
@@ -263,6 +315,8 @@ impl SdlDriver<'_> {
                     u32::try_from(width).unwrap_or(0),
                     u32::try_from(height).unwrap_or(0),
                 );
+                // A new size often comes with a new surface.
+                self.sync_surface()?;
                 if self.attached {
                     self.host.resize(size.0, size.1);
                 } else if self.foreground {
@@ -277,6 +331,11 @@ impl SdlDriver<'_> {
                 self.host.input(&InputEvent::FocusLost);
             }
             WindowEvent::FocusGained => {
+                if !self.foreground {
+                    // The window is on screen with the focus, so the app
+                    // is back even if SDL's foreground event got lost.
+                    self.enter_foreground()?;
+                }
                 if !self.focused {
                     info!("focus back: running frames");
                 }
@@ -448,6 +507,8 @@ fn platform(error: impl std::fmt::Display) -> Error {
 
 /// The window's native surface, as wgpu takes it.
 struct NativeWindow {
+    /// The `ANativeWindow`'s address, to tell surfaces apart.
+    id: usize,
     window: RawWindowHandle,
     display: RawDisplayHandle,
 }
@@ -477,6 +538,7 @@ impl NativeWindow {
             };
             let native = std::ptr::NonNull::new(native)?;
             Some(Self {
+                id: native.as_ptr().addr(),
                 window: RawWindowHandle::AndroidNdk(AndroidNdkWindowHandle::new(native)),
                 display: RawDisplayHandle::Android(AndroidDisplayHandle::new()),
             })
@@ -492,8 +554,9 @@ impl NativeWindow {
 
 // SAFETY: the handles are plain pointers to the `ANativeWindow`, which
 // SDL keeps a reference to (and so alive) while the window has a surface.
-// The engine drops its GPU surface on `detach`, before the app goes to the
-// background, so the pointer is never used after Android replaces it.
+// wgpu's surface takes its own reference when it's made from the handle,
+// and the driver drops it on `detach` or when Android replaces the window,
+// so the pointer is never used after Android lets go of it.
 #[allow(unsafe_code)]
 unsafe impl Send for NativeWindow {}
 // SAFETY: as for `Send`; the handles are only read.

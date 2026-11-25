@@ -193,6 +193,9 @@ dependencies = [
  "automata-physics",
  "crc32fast",
  "flate2",
+ "getrandom 0.4.3",
+ "num-bigint",
+ "num-traits",
  "ron",
  "serde",
 ]

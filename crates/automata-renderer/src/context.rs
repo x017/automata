@@ -18,6 +18,9 @@ pub struct RenderContext {
     /// The instance the surface came from, kept to make a new surface when
     /// the window comes back (Android destroys it in the background).
     instance: Option<wgpu::Instance>,
+    /// The adapter (windowed only), to check a surface still works before
+    /// configuring it.
+    adapter: Option<wgpu::Adapter>,
     surface: Option<wgpu::Surface<'static>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -110,6 +113,7 @@ impl RenderContext {
         Ok(Self {
             format: config.format,
             instance: Some(instance),
+            adapter: Some(adapter),
             surface: Some(surface),
             device,
             queue,
@@ -156,6 +160,7 @@ impl RenderContext {
         let (width, height) = (size.0.max(1), size.1.max(1));
         Ok(Self {
             instance: None,
+            adapter: None,
             surface: None,
             device,
             queue,
@@ -264,10 +269,30 @@ impl RenderContext {
     }
 
     /// Reconfigures the surface (helper for acquire/resize paths).
+    ///
+    /// A surface the OS has destroyed (Android, when the activity goes
+    /// away) can't be configured; wgpu treats trying as a fatal error. Such
+    /// a surface is dropped instead, and frames are skipped until the
+    /// window gives a new one ([`resume`](Self::resume)).
     fn reconfigure(&mut self) {
-        if let (Some(surface), Some(config)) = (&self.surface, &self.config) {
+        let (Some(surface), Some(config)) = (&self.surface, &self.config) else {
+            return;
+        };
+        if self.surface_usable(surface) {
             surface.configure(&self.device, config);
+        } else {
+            warn!("the window's surface is gone: skipping frames until there's a new one");
+            self.surface = None;
         }
+    }
+
+    /// Whether `surface` can still be configured: a destroyed one reports
+    /// no support and no formats.
+    fn surface_usable(&self, surface: &wgpu::Surface<'_>) -> bool {
+        self.adapter.as_ref().is_none_or(|adapter| {
+            adapter.is_surface_supported(surface)
+                && !surface.get_capabilities(adapter).formats.is_empty()
+        })
     }
 
     /// Drops the window surface, as when the app goes to the background
@@ -304,7 +329,13 @@ impl RenderContext {
         let (width, height) = (size.0.max(1), size.1.max(1));
         config.width = width;
         config.height = height;
-        surface.configure(&self.device, config);
+        let config = config.clone();
+        if !self.surface_usable(&surface) {
+            warn!("the window's new surface can't be drawn to yet: skipping frames");
+            return Ok(());
+        }
+        surface.configure(&self.device, &config);
+        self.config = Some(config);
         self.surface = Some(surface);
         self.size = (width, height);
         self.needs_reconfigure = false;

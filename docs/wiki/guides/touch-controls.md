@@ -6,7 +6,7 @@ touch screen without touch code. Scripts keep reading
 `ctx.input.pressed("jump")` and `ctx.input.axis("left", "right")`, and the
 controls hold those keys.
 
-They show on touch screens only (the Android build that's coming). On a
+They show on touch screens only ([Android builds](../oberon/exporting.md#android)). On a
 computer the keyboard and mouse play as usual.
 
 ## Set them up

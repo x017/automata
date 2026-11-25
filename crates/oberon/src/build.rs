@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::Instant;
 
-pub use automata_cli::{BuildConfig, Level, Target};
+pub use automata_cli::{check_android_package, BuildConfig, Level, Target};
 
 /// The touch controls Build Settings turns on: a stick holding WASD and a
 /// Jump button holding Space, the keys most templates use.
@@ -426,7 +426,7 @@ mod tests {
             assert!(start.elapsed().as_secs() < 20, "the job finishes");
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        assert_eq!(job.failed.len(), 2);
+        assert_eq!(job.failed.len(), Target::ALL.len());
         assert_eq!(job.succeeded, Vec::new());
         assert!(logs > 0, "validation problems are logged");
         let _ = std::fs::remove_dir_all(&dir);

@@ -152,13 +152,35 @@ Other Android work:
    ([Screenshots](docs/assets/ui/e1_touch_controls_android.jpg).)
 4. **Template + export:** `--target android` in `automata-cli` and
    Oberon, with debug signing.
+   *Done:* `android/build_apk.sh template` builds the template APK (the
+   player and no game, `arm64-v8a` + `x86_64`). CI publishes it to the
+   `export-templates` release (`automata-cli templates download --target
+   android`). A build (`automata-cli`'s `android` module, in plain Rust)
+   does the following:
+   - puts the game under `assets/automata/game/` with a hash stamp;
+   - patches the binary manifest (package, label, version) and the
+     resource table's package name;
+   - drops the old signature, aligns stored entries (4 bytes, 16 KB for
+     `.so`) and signs with v2 (RSA 2048 / SHA-256, with its own SHA-256,
+     DER and certificate code).
+
+   The key is a per-machine debug key in `~/.config/automata/
+   android-debug.key`, with a certificate derived from it, so updates
+   install. On the device, `main.py` unpacks the game (the activity
+   passes the APK path as `AUTOMATA_APK`) when the stamp changes.
+   Oberon has **Build for Android**, the app ID and version code fields,
+   and the Android template row. In CI, Coin Run is built this way and
+   installs and plays on the emulator. Checked locally against
+   `apksigtool` and androguard with real AGP-built APKs.
 5. **Size and polish:** trim the standard library (target: well under
    +20 MB), check startup time.
 
 ### Open questions
 
 - APK size budget, and which standard library modules to drop.
-- Signing: bundle a tool or implement APK signing (v2) in Rust.
+- ~~Signing: bundle a tool or implement APK signing (v2) in Rust.~~
+  Answered: v2 signing in Rust (`automata-cli`'s `android::sign`). Next:
+  release keys (a keystore or PEM key of the developer's own).
 - ~~How the FPS-style mouse look maps to touch (drag-to-look area?).~~
   Answered: `touch_controls`' `look` side.
 

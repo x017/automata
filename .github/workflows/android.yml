@@ -1,8 +1,13 @@
 name: Android
 
-# Builds the SDL3 spike APK (android/app) with python-for-android and runs
-# it on an emulator: it must draw, take a tap, survive background and
-# foreground, and quit on Back. See android/README.md.
+# Builds the SDL3 spike APK (android/app) and the export template (the
+# player with no game, for phones and emulators) with python-for-android.
+# Coin Run is then built from the template with `automata-cli build
+# --target android`, as users build games. On an emulator the spike must
+# draw, take a tap, survive background and foreground, and quit on Back;
+# Coin Run must install, play and keep its settings. The template is then
+# published to the `export-templates` release, where `automata-cli
+# templates download` finds it. See android/README.md.
 
 on:
   workflow_dispatch:
@@ -28,7 +33,7 @@ defaults:
 # Reports (logs, screenshots) are published as check runs, so they can be
 # read through the API (android/ci/report.py).
 permissions:
-  contents: read
+  contents: write
   checks: write
 
 jobs:
@@ -60,7 +65,7 @@ jobs:
           python3 android/ci/report.py "android: clippy log" --log clippy.log --lines 300
 
   apk:
-    name: APK (x86_64)
+    name: APKs (spike, template)
     needs: check
     runs-on: ubuntu-24.04
     steps:
@@ -121,20 +126,24 @@ jobs:
         # Progress lines only; the full log is printed when the build fails.
         run: android/build_apk.sh android/app x86_64 2>&1 | tee build.log | sed -n '/INFO\|WARNING\|ERROR/p'
 
-      - name: Stage Coin Run
-        # As an export would: build.ron from `init` (the example has none,
-        # like the export CI's copy), then only the files a build ships.
-        run: |
-          cp -r examples/oberon/coin_run "$RUNNER_TEMP/coin_run"
-          cargo run -q -p automata-cli -- init "$RUNNER_TEMP/coin_run" --scene level.ron --name "Coin Run"
-          cargo run -q -p automata-cli -- stage "$RUNNER_TEMP/coin_run" --out "$RUNNER_TEMP/coin_run_game"
+      - name: Build the template APK
+        # Phones (arm64-v8a) and emulators (x86_64) in one APK.
+        run: android/build_apk.sh template arm64-v8a,x86_64 2>&1 | tee build.log | sed -n '/INFO\|WARNING\|ERROR/p'
 
-      - name: Build the Coin Run APK
-        # Reuses the distribution the first build compiled.
-        env:
-          AUTOMATA_PACKAGE: org.automata.coinrun
-          AUTOMATA_NAME: Coin Run
-        run: android/build_apk.sh "$RUNNER_TEMP/coin_run_game" x86_64 2>&1 | tee build.log | sed -n '/INFO\|WARNING\|ERROR/p'
+      - name: Build Coin Run from the template
+        # As users build: build.ron from `init` (the example has none, like
+        # the export CI's copy), then `build --target android`, which signs
+        # with a debug key it makes on first use.
+        run: |
+          cargo build -q -p automata-cli
+          cli=target/debug/automata-cli
+          export AUTOMATA_TEMPLATES="$RUNNER_TEMP/templates"
+          export AUTOMATA_ANDROID_KEY="$RUNNER_TEMP/android-debug.key"
+          $cli templates install dist/automata-template-android.apk --target android
+          cp -r examples/oberon/coin_run "$RUNNER_TEMP/coin_run"
+          $cli init "$RUNNER_TEMP/coin_run" --scene level.ron --name "Coin Run" --package org.automata.coinrun
+          $cli build "$RUNNER_TEMP/coin_run" --target android
+          cp "$RUNNER_TEMP/coin_run/build/android/Coin Run-0.1.0.apk" dist/org.automata.coinrun-x86_64.apk
 
       - name: Build log (on failure)
         if: failure()
@@ -149,7 +158,7 @@ jobs:
       - name: APK size
         run: |
           ls -la dist/*.apk
-          unzip -l dist/org.automata.spike-x86_64.apk | grep -E "\.so$" | sort -k1 -n -r | head -20
+          unzip -l dist/automata-template-android.apk | grep -E "\.so$" | sort -k1 -n -r | head -30
 
       - uses: actions/upload-artifact@v4
         with:
@@ -235,3 +244,24 @@ jobs:
         with:
           name: android-smoke
           path: android-smoke/
+
+  publish:
+    # The template every Android build starts from, once it passed.
+    name: publish the template
+    needs: emulator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: automata-apks
+          path: dist
+      - name: Update the export-templates release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -la dist
+          gh release view export-templates >/dev/null 2>&1 || \
+            gh release create export-templates --title "Export templates" --prerelease \
+              --notes "Templates for automata-cli / Oberon Build. Installed with: automata-cli templates download"
+          gh release upload export-templates dist/automata-template-android.apk --clobber

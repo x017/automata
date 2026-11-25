@@ -1013,7 +1013,17 @@ and its own input types. The game-facing API stays the same everywhere.
   images `builtin:circle`/`builtin:ring`. Coin Run has a move stick, a turn
   stick and Jump. On the emulator its stick walks into a coin and Jump
   lights up.
-- ⬜ `--target android` with debug signing; size.
+- ✅ **`--target android` with debug signing:** CI publishes a template
+  APK (Python, the engine and the player, for `arm64-v8a` and `x86_64`)
+  to the `export-templates` release. `automata-cli build --target android`
+  and Oberon's **Build for Android** add the game to a copy, give it the
+  game's app ID (`android.package` in `build.ron`), name and version (in
+  the compiled manifest and resource table), and align and sign it (APK
+  Signature Scheme v2) with a debug key made once per machine. This needs
+  no Android SDK, NDK or Java. The player unpacks the game on first start,
+  and again only when an update changes it. In CI, Coin Run built this
+  way installs and plays on the emulator.
+- ⬜ Size and startup time; release signing with your own key.
 
 ### E2. macOS export ⬜ M
 - A macOS template build in CI (Apple Silicon and Intel) and an `.app`

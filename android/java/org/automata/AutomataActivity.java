@@ -67,6 +67,8 @@ public class AutomataActivity extends PythonActivity {
         try {
             loadLibraries();
             nativeSetenv(ALLOW_RECREATE, "1");
+            // The player unpacks a game built into the APK from here.
+            nativeSetenv("AUTOMATA_APK", getApplicationInfo().sourceDir);
         } catch (UnsatisfiedLinkError | RuntimeException e) {
             // SDL's finishLoad reports a library that doesn't load.
             Log.w(TAG, "couldn't allow activity re-creation: " + e);

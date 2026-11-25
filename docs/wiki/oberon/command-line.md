@@ -25,7 +25,7 @@ lists them all.
 | `oberon setup [--upgrade]` | Makes or repairs the project's `.venv`. `--upgrade` moves the project to this Oberon's engine. |
 | `oberon run [SCENE] [--headless] [--frames N]` | Plays a scene without the editor. |
 | `oberon test [ARGS…]` | Runs `tests/` with pytest. Extra arguments go to pytest. |
-| `oberon export [--target linux\|windows\|all]` | Builds the game. `oberon export check`, `init` and `templates` work the same as [`automata-cli`](exporting.md). |
+| `oberon export [--target linux\|windows\|android\|all]` | Builds the game. `oberon export check`, `init` and `templates` work the same as [`automata-cli`](exporting.md). |
 | `oberon bench SCENE [--frames N] [--out stats.json]` | Times a scene in headless Play (see [Performance](../guides/performance.md)). |
 | `oberon python [ARGS…]` | Runs the project's own Python. |
 | `oberon pip [ARGS…]` | Installs packages into the project's Python. |

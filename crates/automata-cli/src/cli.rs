@@ -2,8 +2,8 @@
 //! binary and `oberon export`.
 //!
 //! ```text
-//! automata-cli build [PROJECT] [--target linux|windows|all] [--template DIR]
-//! automata-cli init [PROJECT] [--scene level.ron | --main main.py]
+//! automata-cli build [PROJECT] [--target linux|windows|android|all] [--template DIR]
+//! automata-cli init [PROJECT] [--scene level.ron | --main main.py] [--package ID]
 //! automata-cli check [PROJECT]
 //! automata-cli stage [PROJECT] [--out DIR]
 //! automata-cli templates path | list
@@ -19,22 +19,28 @@ use crate::{BuildConfig, Level, Message, Target};
 
 /// The usage text, as printed by `automata-cli help`.
 pub const USAGE: &str = "\
-automata-cli — the AUTOMATA command line: export games to Windows and Linux
+automata-cli — the AUTOMATA command line: export games to Windows, Linux and
+Android
 
 usage:
-  automata-cli build [PROJECT] [--target linux|windows|all] [--template DIR]
+  automata-cli build [PROJECT] [--target linux|windows|android|all] [--template DIR]
   automata-cli init [PROJECT] [--scene SCENE.ron | --main MAIN.py] [--name NAME]
+                    [--package com.you.game]
   automata-cli check [PROJECT]
   automata-cli stage [PROJECT] [--out DIR]
   automata-cli templates path|list
-  automata-cli templates download [--target linux|windows|all]
-  automata-cli templates install ARCHIVE --target linux|windows
+  automata-cli templates download [--target linux|windows|android|all]
+  automata-cli templates install ARCHIVE --target linux|windows|android
   automata-cli templates dev PLAYER [--target linux|windows]
   automata-cli templates pack DIR --target linux|windows --out ARCHIVE
 
 PROJECT defaults to the current folder; settings come from PROJECT/build.ron.
+`--target android` writes PROJECT/<output>/android/NAME-VERSION.apk, signed
+with this machine's debug key: android-debug.key in ~/.config/automata
+(%APPDATA%\\automata on Windows) or $AUTOMATA_ANDROID_KEY, made on first use.
+`--package` sets the Android app ID (build.ron's android.package).
 `stage` writes only the game folder a build ships (game files and game.json),
-by default to PROJECT/<output>/game; the Android build packs it into an APK.";
+by default to PROJECT/<output>/game.";
 
 struct Args {
     positional: Vec<String>,
@@ -159,6 +165,10 @@ pub fn run(args: impl IntoIterator<Item = String>, program: &str) -> Result<(), 
             }
             if let Some(name) = args.flag("name") {
                 cfg.name = name.to_string();
+            }
+            if let Some(package) = args.flag("package") {
+                crate::check_android_package(package)?;
+                cfg.android.package = package.to_string();
             }
             cfg.save(&project)?;
             println!("wrote {}", project.join(crate::CONFIG_FILE).display());

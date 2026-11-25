@@ -2,17 +2,22 @@
 
 Work in progress: roadmap item E1. This folder builds an APK of a Python
 game with [python-for-android] (p4a), using its SDL3 launcher. It builds
-two kinds of APK:
-- **an exported game**, as `automata-cli stage` writes it. CI builds
-  *Coin Run* this way and plays it on an emulator. Its scenes and scripts
-  run unchanged, and its saves and settings go to the app's own storage;
+three kinds of APK:
+- **the export template** (`build_apk.sh template`): Python, the engine
+  and the player, with no game. `automata-cli build --target android`
+  (and Oberon's Build for Android) adds a game to a copy of it, renames
+  and signs it, with no Android tools (see `crates/automata-cli/src/android`).
+  CI builds *Coin Run* this way and plays it on an emulator. Its scenes
+  and scripts run unchanged, and its saves and settings go to the app's
+  own storage;
+- **an exported game packaged by p4a**, from the folder
+  `automata-cli stage` writes (handy when changing the player itself);
 - **a spike** (`app/`) that tests the platform layer: drawing through SDL's
   window, touches, going to the background and coming back.
 
 Coin Run plays with on-screen controls: a stick to walk, a stick to turn
 the camera, and a Jump button (`ctx.input.touch_controls`, which shows
-them on touch screens; see the wiki's Touch controls guide). Next is
-`automata-cli build --target android`, which will use this folder.
+them on touch screens; see the wiki's Touch controls guide).
 
 | Path | What it is |
 | --- | --- |
@@ -21,7 +26,7 @@ them on touch screens; see the wiki's Touch controls guide). Next is
 | `pyproject.toml` | maturin settings for that build (placed at the root of a staged copy of the repo) |
 | `build_apk.sh` | Stages the repo and runs `p4a apk` |
 | `java/` | `AutomataActivity`, the launcher's activity with two small changes (below) |
-| `player/main.py` | The entry point for an exported game: runs the staged folder with `automata.player` |
+| `player/main.py` | The entry point for an exported game: unpacks the game built into the APK (or uses a bundled `game/`) and runs it with `automata.player` |
 | `app/main.py` | The spike game: a spinning cube, finger markers, Back to quit |
 | `ci/smoke_test.sh` | The emulator test for the spike |
 | `ci/coin_run_test.sh` | The emulator test for Coin Run |
@@ -34,6 +39,10 @@ them on touch screens; see the wiki's Touch controls guide). Next is
    app's `main.py`. For an exported game that's `player/main.py`, which runs
    the game folder (`game/` beside it) through `automata.player`, just as
    the desktop launcher does. `game.json` names the start scene or script.
+   A game built from the template lives in the APK under
+   `assets/automata/game/`. `main.py` unpacks it into `game/` the first
+   time, and again when `assets/automata/stamp` (a hash of the files)
+   changes. The activity passes the APK's path as `AUTOMATA_APK`.
 2. `import automata` loads `engine/`, which does three things:
    - sends the engine's logs to logcat (tag `SDL/APP`);
    - installs its SDL driver with `automata_core::platform::install_driver`;
@@ -85,6 +94,15 @@ Things the emulator taught us, each handled in `java/` or
   activity lets go without telling SDL to quit, and the new one adopts
   SDL's running thread, which sees a background/foreground and a new
   surface.
+- **Lost lifecycle events.** On a re-creation SDL makes a new lifecycle
+  semaphore while its thread may still wait on the old one, so the
+  background and foreground events can come late, after the window's
+  queued events, or not at all. The old surface was resized after Android
+  had destroyed it, and wgpu's error was fatal. The driver now acts on the
+  lifecycle watch before every event, and follows the window's
+  `ANativeWindow`: a new one replaces the engine's surface, and a new one
+  (or the focus) while away means the app is back. The renderer drops a
+  surface that reports no support instead of configuring it.
 - **Orientation.** The driver holds the screen to the shape of the game's
   window (landscape for 1280×720) with `SDL_ORIENTATIONS`, unless the app
   sets that hint itself.
@@ -119,7 +137,13 @@ You need:
 - NDK r28c (`ANDROID_NDK_HOME`).
 
 ```sh
-# An exported game: stage what a build ships, then package it.
+# The export template (phones and emulators in one APK):
+android/build_apk.sh template arm64-v8a,x86_64
+#   → dist/automata-template-android.apk; then, without Android tools:
+automata-cli templates install dist/automata-template-android.apk --target android
+automata-cli build my_game --target android
+
+# An exported game packaged by p4a: stage what a build ships, then package it.
 automata-cli init my_game --scene level.ron   # once: writes build.ron
 automata-cli stage my_game --out /tmp/my_game_staged
 AUTOMATA_PACKAGE=org.example.mygame AUTOMATA_NAME="My Game" \
@@ -146,13 +170,14 @@ incomplete Vulkan.
 
 ## CI
 
-The `Android` workflow runs three jobs:
+The `Android` workflow runs four jobs:
 1. **check:** `engine/` compiles for `aarch64-linux-android` and passes
    clippy with no warnings.
-2. **APK:** builds the spike for x86_64, then *Coin Run*: a copy gets a
-   `build.ron` from `automata-cli init`, `automata-cli stage` copies
-   what a build ships, and `build_apk.sh` packages it. The second build
-   reuses the first one's Python and engine.
+2. **APKs:** builds the spike for x86_64 and the template for
+   `arm64-v8a` and `x86_64`. Then it builds *Coin Run* from the template
+   the way users do: a copy gets a `build.ron` from `automata-cli init
+   --package org.automata.coinrun`, and `automata-cli build --target
+   android` signs it with a fresh debug key.
 3. **emulator smoke test:** runs both on an API 34 emulator. For the spike
    it checks that:
    - it starts and draws (`1-running.png`);
@@ -165,6 +190,8 @@ The `Android` workflow runs three jobs:
    - Back quits.
 
    For Coin Run it checks that:
+   - it installs (the v2 signature holds) as `org.automata.coinrun` 0.1.0,
+     and the first start unpacks the game from the APK (the second doesn't);
    - the level loads and its scripts run (`coin-1-start.png`);
    - keys reach the scripts: F2 changes the graphics preset
      (`coin-2-playing.png`);
@@ -185,5 +212,8 @@ The `Android` workflow runs three jobs:
    - `android: screenshot …`;
    - `android: stacks`: every thread's stack, saved when a wait times out;
    - `android: clippy log` and `android: APK build log`.
+4. **publish:** once the emulator test passes, uploads
+   `automata-template-android.apk` to the `export-templates` release,
+   where `automata-cli templates download --target android` gets it.
 
 [python-for-android]: https://github.com/kivy/python-for-android
