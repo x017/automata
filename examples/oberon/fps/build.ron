@@ -1,4 +1,4 @@
-// Export settings for automata-export and Oberon (Build → Build Settings).
+// Export settings for automata-cli and Oberon (Build → Build Settings).
 BuildConfig(
     name: "Blaster Arena",
     version: "0.1.0",

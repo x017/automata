@@ -185,6 +185,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "automata-cli"
+version = "0.1.0"
+dependencies = [
+ "automata-assets",
+ "automata-core",
+ "automata-physics",
+ "crc32fast",
+ "flate2",
+ "ron",
+ "serde",
+]
+
+[[package]]
 name = "automata-core"
 version = "0.1.0"
 dependencies = [
@@ -201,19 +214,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "winit",
-]
-
-[[package]]
-name = "automata-export"
-version = "0.1.0"
-dependencies = [
- "automata-assets",
- "automata-core",
- "automata-physics",
- "crc32fast",
- "flate2",
- "ron",
- "serde",
 ]
 
 [[package]]
@@ -1551,8 +1551,8 @@ dependencies = [
  "ab_glyph",
  "automata-assets",
  "automata-audio",
+ "automata-cli",
  "automata-core",
- "automata-export",
  "automata-input",
  "automata-physics",
  "automata-renderer",

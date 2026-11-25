@@ -433,7 +433,7 @@ impl ScriptBridge {
         // the game would; the runtime folder is the project's `.oberon/`.
         let touch = runtime_dir
             .parent()
-            .and_then(|project| automata_export::BuildConfig::load(project).ok())
+            .and_then(|project| automata_cli::BuildConfig::load(project).ok())
             .and_then(|cfg| cfg.touch_controls)
             .map(|t| t.to_json())
             .unwrap_or_default();

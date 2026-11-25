@@ -29,7 +29,7 @@ python examples/oberon/fps/main.py --headless   # 600 frames, no window
 The folder has a `build.ron`, so it exports as is (also from Build → Build in Oberon):
 
 ```sh
-automata-export build examples/oberon/fps --target all
+automata-cli build examples/oberon/fps --target all
 # → build/linux/Blaster Arena/Blaster Arena
 # → build/windows/Blaster Arena/Blaster Arena.exe
 ```

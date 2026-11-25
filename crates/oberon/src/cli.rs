@@ -113,7 +113,7 @@ usage: oberon export [PROJECT] [--target linux|windows|all] [--template DIR]
        oberon export templates path|list|download|install|dev|pack …
 
 Builds the game into build/ using the project's build.ron (what
-automata-export does)."
+automata-cli does)."
         }
         "bench" => {
             "\
@@ -186,7 +186,7 @@ pub enum Command {
     },
     /// Run the tests.
     Test(Vec<String>),
-    /// `automata-export`'s command line.
+    /// `automata-cli`'s command line.
     Export(Vec<String>),
     /// Headless Play timing.
     Bench(Vec<String>),
@@ -665,7 +665,7 @@ fn export(args: &[String]) -> CliResult {
     {
         full.insert(1, project(None).to_string_lossy().into_owned());
     }
-    automata_export::cli::run(full, "oberon export")?;
+    automata_cli::cli::run(full, "oberon export")?;
     Ok(ExitCode::SUCCESS)
 }
 

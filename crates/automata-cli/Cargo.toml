@@ -1,6 +1,6 @@
 [package]
-name = "automata-export"
-description = "Exports AUTOMATA games to standalone Windows and Linux builds (used by Oberon and the automata-export CLI)."
+name = "automata-cli"
+description = "The AUTOMATA command line: exports games to standalone Windows and Linux builds (also used by Oberon's Build)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -21,5 +21,5 @@ flate2 = "1.1"
 crc32fast = "1.5"
 
 [[bin]]
-name = "automata-export"
+name = "automata-cli"
 path = "src/main.rs"

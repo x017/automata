@@ -4,7 +4,7 @@
 #   android/build_apk.sh [GAME_DIR] [ARCH]
 #
 # GAME_DIR is either
-# - a game folder from `automata-export stage` (it has game.json): the APK
+# - a game folder from `automata-cli stage` (it has game.json): the APK
 #   runs it with automata.player, like the desktop launchers; or
 # - a folder with a main.py to run as is (default: android/app, the spike).
 # ARCH is x86_64 (emulators, the default) or arm64-v8a (phones).

@@ -3,7 +3,7 @@
 Work in progress: roadmap item E1. This folder builds an APK of a Python
 game with [python-for-android] (p4a), using its SDL3 launcher. It builds
 two kinds of APK:
-- **an exported game**, as `automata-export stage` writes it. CI builds
+- **an exported game**, as `automata-cli stage` writes it. CI builds
   *Coin Run* this way and plays it on an emulator. Its scenes and scripts
   run unchanged, and its saves and settings go to the app's own storage;
 - **a spike** (`app/`) that tests the platform layer: drawing through SDL's
@@ -12,7 +12,7 @@ two kinds of APK:
 Coin Run plays with on-screen controls: a stick to walk, a stick to turn
 the camera, and a Jump button (`ctx.input.touch_controls`, which shows
 them on touch screens; see the wiki's Touch controls guide). Next is
-`automata-export build --target android`, which will use this folder.
+`automata-cli build --target android`, which will use this folder.
 
 | Path | What it is |
 | --- | --- |
@@ -114,8 +114,8 @@ You need:
 
 ```sh
 # An exported game: stage what a build ships, then package it.
-automata-export init my_game --scene level.ron   # once: writes build.ron
-automata-export stage my_game --out /tmp/my_game_staged
+automata-cli init my_game --scene level.ron   # once: writes build.ron
+automata-cli stage my_game --out /tmp/my_game_staged
 AUTOMATA_PACKAGE=org.example.mygame AUTOMATA_NAME="My Game" \
   android/build_apk.sh /tmp/my_game_staged arm64-v8a   # for phones
 
@@ -144,7 +144,7 @@ The `Android` workflow runs three jobs:
 1. **check:** `engine/` compiles for `aarch64-linux-android` and passes
    clippy with no warnings.
 2. **APK:** builds the spike for x86_64, then *Coin Run*: a copy gets a
-   `build.ron` from `automata-export init`, `automata-export stage` copies
+   `build.ron` from `automata-cli init`, `automata-cli stage` copies
    what a build ships, and `build_apk.sh` packages it. The second build
    reuses the first one's Python and engine.
 3. **emulator smoke test:** runs both on an API 34 emulator. For the spike

@@ -128,10 +128,10 @@ pub fn create(dir: &Path, template: Template) -> Result<Vec<PathBuf>, String> {
         .map_err(|e| format!("{}: {e}", level.display()))?;
     written.push("level.ron".into());
 
-    let mut cfg = automata_export::BuildConfig::for_project(dir, Some(&level));
+    let mut cfg = automata_cli::BuildConfig::for_project(dir, Some(&level));
     cfg.name = title;
     cfg.save(dir)?;
-    written.push(automata_export::CONFIG_FILE.into());
+    written.push(automata_cli::CONFIG_FILE.into());
     written.sort();
     Ok(written)
 }
@@ -501,7 +501,7 @@ pub fn main_scene(root: &Path) -> Option<PathBuf> {
             p.extension().is_some_and(|e| e == "ron")
                 && !p.to_string_lossy().ends_with(".import.ron")
                 && p.file_name()
-                    .is_some_and(|n| n != automata_export::CONFIG_FILE)
+                    .is_some_and(|n| n != automata_cli::CONFIG_FILE)
         })
         .collect();
     match scenes.as_slice() {

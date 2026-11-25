@@ -1,36 +1,36 @@
-//! The `automata-export` command line, shared by the `automata-export`
+//! The `automata-cli` command line, shared by the `automata-cli`
 //! binary and `oberon export`.
 //!
 //! ```text
-//! automata-export build [PROJECT] [--target linux|windows|all] [--template DIR]
-//! automata-export init [PROJECT] [--scene level.ron | --main main.py]
-//! automata-export check [PROJECT]
-//! automata-export stage [PROJECT] [--out DIR]
-//! automata-export templates path | list
-//! automata-export templates download [--target T]
-//! automata-export templates install ARCHIVE --target T
-//! automata-export templates dev PLAYER [--target T]
-//! automata-export templates pack DIR --target T --out ARCHIVE
+//! automata-cli build [PROJECT] [--target linux|windows|all] [--template DIR]
+//! automata-cli init [PROJECT] [--scene level.ron | --main main.py]
+//! automata-cli check [PROJECT]
+//! automata-cli stage [PROJECT] [--out DIR]
+//! automata-cli templates path | list
+//! automata-cli templates download [--target T]
+//! automata-cli templates install ARCHIVE --target T
+//! automata-cli templates dev PLAYER [--target T]
+//! automata-cli templates pack DIR --target T --out ARCHIVE
 //! ```
 
 use std::path::{Path, PathBuf};
 
 use crate::{BuildConfig, Level, Message, Target};
 
-/// The usage text, as printed by `automata-export help`.
+/// The usage text, as printed by `automata-cli help`.
 pub const USAGE: &str = "\
-automata-export — export AUTOMATA games to Windows and Linux
+automata-cli — the AUTOMATA command line: export games to Windows and Linux
 
 usage:
-  automata-export build [PROJECT] [--target linux|windows|all] [--template DIR]
-  automata-export init [PROJECT] [--scene SCENE.ron | --main MAIN.py] [--name NAME]
-  automata-export check [PROJECT]
-  automata-export stage [PROJECT] [--out DIR]
-  automata-export templates path|list
-  automata-export templates download [--target linux|windows|all]
-  automata-export templates install ARCHIVE --target linux|windows
-  automata-export templates dev PLAYER [--target linux|windows]
-  automata-export templates pack DIR --target linux|windows --out ARCHIVE
+  automata-cli build [PROJECT] [--target linux|windows|all] [--template DIR]
+  automata-cli init [PROJECT] [--scene SCENE.ron | --main MAIN.py] [--name NAME]
+  automata-cli check [PROJECT]
+  automata-cli stage [PROJECT] [--out DIR]
+  automata-cli templates path|list
+  automata-cli templates download [--target linux|windows|all]
+  automata-cli templates install ARCHIVE --target linux|windows
+  automata-cli templates dev PLAYER [--target linux|windows]
+  automata-cli templates pack DIR --target linux|windows --out ARCHIVE
 
 PROJECT defaults to the current folder; settings come from PROJECT/build.ron.
 `stage` writes only the game folder a build ships (game files and game.json),
@@ -99,10 +99,10 @@ fn absolute(p: &Path) -> PathBuf {
 }
 
 /// [`USAGE`] with `program` (`"oberon export"`, say) in place of
-/// `automata-export`.
+/// `automata-cli`.
 #[must_use]
 pub fn usage(program: &str) -> String {
-    USAGE.replace("automata-export", program)
+    USAGE.replace("automata-cli", program)
 }
 
 /// Runs a command line (without the program name): `build`, `init`,

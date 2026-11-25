@@ -78,7 +78,7 @@ Templates** or the **Download** buttons on the Build page. The Linux
 template is about 75 MB and the Windows one about 25 MB.
 
 While the repository is private, the plain download link needs you to be
-signed in. Oberon and `automata-export` try these in order:
+signed in. Oberon and `automata-cli` try these in order:
 
 1. the public release link;
 2. the GitHub CLI, if you've signed in with `gh auth login`;
@@ -106,23 +106,24 @@ another folder by setting `AUTOMATA_TEMPLATES`.
 
 ## Build from the command line
 
-The same exporter is available as `automata-export`. Use it in CI, or for
+The same exporter is available as `automata-cli`, the AUTOMATA command
+line (it was called `automata-export` before). Use it in CI, or for
 code-first games that don't use Oberon:
 
 ```bash
-cargo build --release -p automata-export
-automata-export templates download             # once per engine version
-automata-export init my_game --scene level.ron # writes build.ron
-automata-export check my_game                  # validate without building
-automata-export stage my_game --out staged/    # just the game folder
-automata-export build my_game --target all     # or linux / windows
+cargo build --release -p automata-cli
+automata-cli templates download             # once per engine version
+automata-cli init my_game --scene level.ron # writes build.ron
+automata-cli check my_game                  # validate without building
+automata-cli stage my_game --out staged/    # just the game folder
+automata-cli build my_game --target all     # or linux / windows
 ```
 
 A code-first game, written in Python with `at.Game` and no scene file,
 starts from a script instead of a scene:
 
 ```bash
-automata-export init my_game --main main.py
+automata-cli init my_game --main main.py
 ```
 
 The exported game runs `main.py` exactly like `python main.py` would,

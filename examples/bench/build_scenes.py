@@ -12,7 +12,7 @@ Two kinds of scene, each at every size:
 Every entity runs ``bench.py`` and casts a ray at a ground collider each
 frame. Each project folder holds the scene (``bench.ron``), the script and
 a ``build.ron``, so it opens in Oberon, runs with ``automata.run_scene`` and
-exports with ``automata-export build``. ``run.py`` calls this first.
+exports with ``automata-cli build``. ``run.py`` calls this first.
 """
 
 import argparse

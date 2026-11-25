@@ -1,7 +1,7 @@
 """Runs an exported game: ``python -m automata.player <game folder> [options]``.
 
 The exported game's launcher calls this with the bundled runtime. The game
-folder holds ``game.json`` (written by ``automata-export``) and the
+folder holds ``game.json`` (written by ``automata-cli``) and the
 project's scenes, scripts, and assets.
 
 ``game.json`` either names a ``main`` script (a code-first game such as

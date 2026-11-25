@@ -402,7 +402,7 @@ impl BuildConfig {
         let pretty = ron::ser::PrettyConfig::new().struct_names(true);
         let text = ron::ser::to_string_pretty(self, pretty).map_err(|e| e.to_string())?;
         let path = project.join(CONFIG_FILE);
-        std::fs::write(&path, format!("// Export settings for automata-export and Oberon (Build → Build Settings).\n{text}\n"))
+        std::fs::write(&path, format!("// Export settings for automata-cli and Oberon (Build → Build Settings).\n{text}\n"))
             .map_err(|e| format!("{}: {e}", path.display()))
     }
 
@@ -1129,7 +1129,7 @@ pub fn download_template(target: Target) -> Result<PathBuf, String> {
         tried.push("no GH_TOKEN / GITHUB_TOKEN set".into());
     }
     Err(format!(
-        "could not download {name}. Tried:\n  - {}\nSign in with `gh auth login` (or set GH_TOKEN), or install a template file with `automata-export templates install <file>`.",
+        "could not download {name}. Tried:\n  - {}\nSign in with `gh auth login` (or set GH_TOKEN), or install a template file with `automata-cli templates install <file>`.",
         tried.join("\n  - ")
     ))
 }
@@ -1635,8 +1635,7 @@ mod tests {
     }
 
     fn project(tag: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("automata-export-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("automata-cli-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("scripts")).unwrap();
         std::fs::create_dir_all(dir.join(".oberon")).unwrap();
@@ -2267,7 +2266,7 @@ mod tests {
         ttf(&dir.join("fonts/fake.ttf"), b"PK\x03\x04");
         ttf(&dir.join("tests/Only.ttf"), &[0, 1, 0, 0]);
         let outside =
-            std::env::temp_dir().join(format!("automata-export-font-{}", std::process::id()));
+            std::env::temp_dir().join(format!("automata-cli-font-{}", std::process::id()));
         ttf(&outside.join("Far.ttf"), &[0, 1, 0, 0]);
         let far = outside
             .join("Far.ttf")

@@ -86,7 +86,7 @@ throws up a splash sized by how fast you hit the water. See
 ## Export it
 
 ```sh
-automata-export build examples/oberon/lagoon --target all
+automata-cli build examples/oberon/lagoon --target all
 ```
 
 ## What's inside

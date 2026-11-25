@@ -1,9 +1,9 @@
 name: Export templates
 
-# Builds the per-platform export templates that `automata-export build` and
+# Builds the per-platform export templates that `automata-cli build` and
 # Oberon's Build menu copy games into: the `automata-player` launcher plus a
 # portable CPython with the engine wheel installed. Published to the
-# `export-templates` release, which `automata-export templates download`
+# `export-templates` release, which `automata-cli templates download`
 # fetches.
 
 on:
@@ -76,7 +76,7 @@ jobs:
           template/${{ matrix.python }} --version
 
       - name: Build the player and exporter
-        run: cargo build --release -p automata-player -p automata-export
+        run: cargo build --release -p automata-player -p automata-cli
 
       - name: Build and install the engine wheel
         run: |
@@ -99,7 +99,7 @@ jobs:
       - name: Pack the template
         run: |
           cp target/release/${{ matrix.player }} template/
-          ./target/release/automata-export templates pack template \
+          ./target/release/automata-cli templates pack template \
             --target ${{ matrix.target }} --out automata-template-${{ matrix.target }}-x86_64.tar.gz
 
       # Export a real example with the fresh template and run it headless.
@@ -107,11 +107,11 @@ jobs:
         run: |
           trap 'echo "::error title=Export step failed::line $LINENO: $BASH_COMMAND"' ERR
           export AUTOMATA_TEMPLATES="$PWD/templates"
-          ./target/release/automata-export templates install \
+          ./target/release/automata-cli templates install \
             automata-template-${{ matrix.target }}-x86_64.tar.gz --target ${{ matrix.target }}
           cp -r examples/oberon/coin_run /tmp/coin_run
-          ./target/release/automata-export init /tmp/coin_run --scene level.ron --name "Coin Run"
-          ./target/release/automata-export build /tmp/coin_run --target ${{ matrix.target }}
+          ./target/release/automata-cli init /tmp/coin_run --scene level.ron --name "Coin Run"
+          ./target/release/automata-cli build /tmp/coin_run --target ${{ matrix.target }}
           exe="/tmp/coin_run/build/${{ matrix.target }}/Coin Run/Coin Run"
           if [ "${{ matrix.target }}" = windows ]; then exe="$exe.exe"; fi
           set +e
@@ -252,5 +252,5 @@ jobs:
           ls -la dist
           gh release view export-templates >/dev/null 2>&1 || \
             gh release create export-templates --title "Export templates" --prerelease \
-              --notes "Templates for automata-export / Oberon Build. Installed with: automata-export templates download"
+              --notes "Templates for automata-cli / Oberon Build. Installed with: automata-cli templates download"
           gh release upload export-templates dist/*.tar.gz --clobber

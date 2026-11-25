@@ -2,8 +2,8 @@
 //!
 //! Exports run on a worker thread so the editor stays responsive: the job
 //! streams [`BuildEvent`]s back over a channel and the app drains them into
-//! the console each frame. The heavy lifting lives in `automata-export`, the
-//! same library behind the `automata-export` command-line tool.
+//! the console each frame. The heavy lifting lives in `automata-cli`, the
+//! same library behind the `automata-cli` command-line tool.
 
 #![forbid(unsafe_code)]
 
@@ -11,22 +11,22 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::Instant;
 
-pub use automata_export::{BuildConfig, Level, Target};
+pub use automata_cli::{BuildConfig, Level, Target};
 
 /// The touch controls Build Settings turns on: a stick holding WASD and a
 /// Jump button holding Space, the keys most templates use.
 #[must_use]
-pub fn starter_touch_controls() -> automata_export::TouchControls {
-    automata_export::TouchControls {
-        sticks: vec![automata_export::TouchStick {
-            side: automata_export::TouchSide::Left,
+pub fn starter_touch_controls() -> automata_cli::TouchControls {
+    automata_cli::TouchControls {
+        sticks: vec![automata_cli::TouchStick {
+            side: automata_cli::TouchSide::Left,
             keys: ["w", "a", "s", "d"].map(String::from).to_vec(),
         }],
-        buttons: vec![automata_export::TouchButton {
+        buttons: vec![automata_cli::TouchButton {
             key: "space".into(),
             label: "Jump".into(),
         }],
-        ..automata_export::TouchControls::default()
+        ..automata_cli::TouchControls::default()
     }
 }
 
@@ -78,7 +78,7 @@ impl BuildJob {
             .spawn(move || {
                 // Check the project before fetching any template, so a
                 // broken project never triggers a download.
-                let problems = automata_export::validate(&project, &cfg);
+                let problems = automata_cli::validate(&project, &cfg);
                 let errors: Vec<String> = problems
                     .iter()
                     .filter(|m| m.level == Level::Error)
@@ -109,7 +109,7 @@ impl BuildJob {
                         ));
                         continue;
                     };
-                    let result = automata_export::export(
+                    let result = automata_cli::export(
                         &project,
                         &cfg,
                         target,
@@ -137,7 +137,7 @@ impl BuildJob {
                         Level::Info,
                         format!("Downloading the {} export template…", target.label()),
                     ));
-                    let result = automata_export::download_template(target);
+                    let result = automata_cli::download_template(target);
                     let _ = tx.send(BuildEvent::Finished(target, result));
                 }
             })
@@ -145,7 +145,7 @@ impl BuildJob {
         Self::new(
             JobKind::Download,
             targets,
-            automata_export::templates_dir(),
+            automata_cli::templates_dir(),
             rx,
         )
     }
@@ -205,7 +205,7 @@ impl BuildJob {
 /// (a `cargo build` checkout), so exports work before templates are
 /// downloaded.
 fn template_for(target: Target, log: &mut dyn FnMut(Level, String)) -> Option<PathBuf> {
-    if let Some(dir) = automata_export::find_template(target) {
+    if let Some(dir) = automata_cli::find_template(target) {
         return Some(dir);
     }
     // 1. Download the standalone template (bundled Python).
@@ -216,7 +216,7 @@ fn template_for(target: Target, log: &mut dyn FnMut(Level, String)) -> Option<Pa
             target.label()
         ),
     );
-    match automata_export::download_template(target) {
+    match automata_cli::download_template(target) {
         Ok(dir) => {
             log(
                 Level::Info,
@@ -235,7 +235,7 @@ fn template_for(target: Target, log: &mut dyn FnMut(Level, String)) -> Option<Pa
         return None;
     }
     let player = sibling_player(target).or_else(|| build_player_from_source(target, log))?;
-    match automata_export::install_dev_template(&player, target) {
+    match automata_cli::install_dev_template(&player, target) {
         Ok(dir) => {
             log(
                 Level::Warning,
@@ -329,8 +329,8 @@ pub enum TemplateState {
 /// The template state of `target`.
 #[must_use]
 pub fn template_state(target: Target) -> TemplateState {
-    match automata_export::find_template(target) {
-        Some(dir) if automata_export::template_has_runtime(&dir) => TemplateState::Ready,
+    match automata_cli::find_template(target) {
+        Some(dir) if automata_cli::template_has_runtime(&dir) => TemplateState::Ready,
         Some(_) => TemplateState::Development,
         None => TemplateState::Missing,
     }
@@ -352,10 +352,7 @@ pub fn config_for(project: &Path, scene: Option<&Path>) -> BuildConfig {
 /// Where templates are installed, for display.
 #[must_use]
 pub fn templates_dir_label() -> String {
-    format!(
-        "Installed in {}",
-        automata_export::templates_dir().display()
-    )
+    format!("Installed in {}", automata_cli::templates_dir().display())
 }
 
 /// Opens a folder in the system file manager.

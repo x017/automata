@@ -12,7 +12,7 @@ costs exactly what the scripts and the engine take, in three runners:
 * ``oberon``: Oberon's Play mode (``oberon --bench``). The simulation runs
   in Rust and the scripts in a separate Python process over the bridge.
 * ``run_scene``: ``automata.run_scene``, the scripts in the same process.
-* ``export``: the scene exported with ``automata-export build`` and run with
+* ``export``: the scene exported with ``automata-cli build`` and run with
   ``--headless`` (the game's launcher starts ``run_scene``).
 
 Every runner advances the game by exactly 1/60 s a frame, so physics takes
@@ -129,7 +129,7 @@ def run_run_scene(scene, out, opts):
 
 
 def run_export(project, out, opts, template, bundled):
-    cmd = [binary("automata-export"), "build", project, "--target", TARGET]
+    cmd = [binary("automata-cli"), "build", project, "--target", TARGET]
     if template:
         cmd += ["--template", template]
     built = run(cmd, quiet=True).stdout
@@ -138,7 +138,7 @@ def run_export(project, out, opts, template, bundled):
         None,
     )
     if not exe:
-        raise SystemExit(f"automata-export printed no executable:\n{built}")
+        raise SystemExit(f"automata-cli printed no executable:\n{built}")
     frames = opts.warmup + opts.frames + 1
     env = stats_env(out, opts)
     if not bundled:
@@ -155,7 +155,7 @@ def export_template(work):
     freshly built player. Returns ``(--template dir or None, description,
     bundled Python?)``."""
     listing = subprocess.run(
-        [binary("automata-export"), "templates", "list"],
+        [binary("automata-cli"), "templates", "list"],
         capture_output=True,
         text=True,
         cwd=ROOT,
@@ -264,7 +264,7 @@ def main():
         if "oberon" in runners:
             bins.append("oberon")
         if "export" in runners:
-            bins += ["automata-export", "automata-player"]
+            bins += ["automata-cli", "automata-player"]
         cargo_build(bins)
 
     rows = []

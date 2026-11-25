@@ -638,7 +638,7 @@ the PATH and finds a language server only if one is installed.
   - `oberon new <name> [--template 3d|2d|empty]` makes a project.
   - `oberon run [scene]` plays a scene in a window without the editor.
   - `oberon test` runs the project's tests headless in its venv.
-  - `oberon export --target windows|linux|android …` wraps automata-export.
+  - `oberon export --target windows|linux|android …` wraps automata-cli.
   - `oberon bench` (today's `--bench`).
   - `oberon python …` / `oberon pip …` run the project's own interpreter.
   - `oberon doctor` checks the GPU, Python, the venv and the language server.
@@ -998,7 +998,7 @@ and its own input types. The game-facing API stays the same everywhere.
   python-for-android, then runs it on an API 34 emulator. The test checks
   that it draws, takes a tap, survives Home and coming back on a new
   surface, and quits on Back (see `android/README.md`).
-- ✅ **Coin Run on the emulator:** `automata-export stage` writes the
+- ✅ **Coin Run on the emulator:** `automata-cli stage` writes the
   folder an export ships, and `android/build_apk.sh` packages it with an
   entry point that runs it through `automata.player`, like the desktop
   launcher. In CI, Coin Run loads, its scripts take keys, and its settings

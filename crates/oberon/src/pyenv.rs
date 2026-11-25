@@ -72,7 +72,7 @@ pub fn project_root(start: &Path) -> Option<PathBuf> {
             .iter()
             .any(|marker| dir.join(marker).exists())
         {
-            return Some(automata_export::plain_path(dir));
+            return Some(automata_cli::plain_path(dir));
         }
         if !dir.pop() {
             return None;
@@ -269,7 +269,7 @@ pub fn setup_venv(
 ) -> Result<(), String> {
     // Commands run inside the project, so every path must be absolute.
     let root = &std::fs::canonicalize(root)
-        .map(automata_export::plain_path)
+        .map(automata_cli::plain_path)
         .map_err(|e| format!("{}: {e}", root.display()))?;
     let venv = venv_dir(root);
     let python = venv_python(&venv);
@@ -440,7 +440,7 @@ mod tests {
         let found = project_root(&deep.join("level.ron")).unwrap();
         assert_eq!(
             found,
-            automata_export::plain_path(std::fs::canonicalize(&root).unwrap())
+            automata_cli::plain_path(std::fs::canonicalize(&root).unwrap())
         );
         assert_eq!(project_root(&deep).unwrap(), found);
     }

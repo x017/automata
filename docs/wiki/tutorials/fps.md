@@ -332,7 +332,7 @@ and leaves out `tests/` and `build_level.py`. In Oberon, choose **Build →
 Build Game** (Ctrl+Shift+B), or from a terminal:
 
 ```console
-automata-export build examples/oberon/fps --target all
+automata-cli build examples/oberon/fps --target all
 ```
 
 You get `build/linux/Blaster Arena/Blaster Arena` and

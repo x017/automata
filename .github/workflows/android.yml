@@ -86,7 +86,7 @@ jobs:
         run: |
           sudo apt-get update
           # python-for-android's own list (its Dockerfile), plus patchelf,
-          # and libudev for building automata-export (gamepads).
+          # and libudev for building automata-cli (gamepads).
           sudo apt-get install -y --no-install-recommends \
             ant autoconf automake autopoint ccache cmake g++ gcc git lbzip2 \
             libffi-dev libltdl-dev libtool libssl-dev make patch pkg-config \
@@ -126,8 +126,8 @@ jobs:
         # like the export CI's copy), then only the files a build ships.
         run: |
           cp -r examples/oberon/coin_run "$RUNNER_TEMP/coin_run"
-          cargo run -q -p automata-export -- init "$RUNNER_TEMP/coin_run" --scene level.ron --name "Coin Run"
-          cargo run -q -p automata-export -- stage "$RUNNER_TEMP/coin_run" --out "$RUNNER_TEMP/coin_run_game"
+          cargo run -q -p automata-cli -- init "$RUNNER_TEMP/coin_run" --scene level.ron --name "Coin Run"
+          cargo run -q -p automata-cli -- stage "$RUNNER_TEMP/coin_run" --out "$RUNNER_TEMP/coin_run_game"
 
       - name: Build the Coin Run APK
         # Reuses the distribution the first build compiled.

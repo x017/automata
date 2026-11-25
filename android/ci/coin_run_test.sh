@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Emulator test for Coin Run, built as an exported game
-# (`automata-export stage` + android/build_apk.sh):
+# (`automata-cli stage` + android/build_apk.sh):
 #
 # 1. it starts: the level loads and its scripts run (1-start.png);
 # 2. keys reach the scripts: F2 cycles the graphics preset (2-playing.png);

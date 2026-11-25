@@ -87,7 +87,7 @@ Other Android work:
 1. CI runs **p4a** (SDL3 launcher, the engine as a Rust recipe) and
    publishes a **prebuilt Android template APK** (engine + CPython) with
    the other export templates.
-2. `automata-export build --target android` (and Oberon's Build menu)
+2. `automata-cli build --target android` (and Oberon's Build menu)
    copies the template, swaps in `game/` (in p4a's app bundle), re-aligns
    and signs it. **Users need no Android SDK, NDK or p4a** (the same model
    Godot uses).
@@ -116,7 +116,7 @@ Other Android work:
    then after Home and back.)
 2. **Python on device:** run Coin Run on a device or emulator.
    *Done:* CI builds Coin Run as an exported game and plays it on the
-   emulator. `automata-export stage` writes the game folder a build ships;
+   emulator. `automata-cli stage` writes the game folder a build ships;
    the APK's `android/player/main.py` runs it with `automata.player`, as the
    desktop launcher does. The test checks that:
    - the level loads and its scripts run;
@@ -150,7 +150,7 @@ Other Android work:
    In the emulator test, Coin Run's stick walks the player into a coin and
    the Jump button lights up.
    ([Screenshots](docs/assets/ui/e1_touch_controls_android.jpg).)
-4. **Template + export:** `--target android` in `automata-export` and
+4. **Template + export:** `--target android` in `automata-cli` and
    Oberon, with debug signing.
 5. **Size and polish:** trim the standard library (target: well under
    +20 MB), check startup time.

@@ -97,7 +97,7 @@ python examples/bench/run.py --runners run_scene --sizes 100,1000,5000
 ```
 
 Run it with the Python that has `automata` installed. It builds the
-release binaries with cargo (`oberon`, `automata-export` and
+release binaries with cargo (`oberon`, `automata-cli` and
 `automata-player`), writes the scenes to `examples/bench/scenes/`, runs
 each one and prints the table above with your machine and the date.
 `--out results.json` also saves every frame time. A run that exceeds
