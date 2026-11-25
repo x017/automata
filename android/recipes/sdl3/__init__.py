@@ -23,7 +23,10 @@ _spec.loader.exec_module(_core)
 class LibSDL3Recipe(_core.LibSDL3Recipe):
     """SDL3 alone."""
 
-    depends = []
+    # The same ndk-build also makes libmain from p4a's start.c, which needs
+    # Python's headers: CPython first. (In the core recipe that order came
+    # about through the satellite libraries.)
+    depends = ["python3"]
 
     def get_recipe_dir(self):
         return dirname(_core_file)
