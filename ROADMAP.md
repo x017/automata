@@ -494,12 +494,24 @@ and names with `:` under the entity name. Ponytail Park: C makes the
 Spectator cheer through `ctx.ref("Spectator:animation")`. Docs:
 [Scripting → Keys](docs/wiki/oberon/scripting.md#keys),
 [Channels](docs/wiki/oberon/scripting.md#channels).
-### B4. Animation state machine and graph editor ⬜ L
-NEXT_PLANS #4 phase 4:
-- A `.anim.ron` graph with states, 1D blend spaces and conditional
-  transitions.
-- Scripts only set parameters.
-- An Oberon node editor that highlights the live state during Play.
+### B4. Animation state machine and graph editor 🔨 L
+NEXT_PLANS #4 phase 4. Scope: everything (1D and 2D blend spaces, and
+layers with bone masks).
+- ✅ Graph files and the runtime: `.anim.ron` with parameters (float, int,
+  bool, trigger), layers (weight, bone mask), states (a clip, a 1D or a 2D
+  blend space, speed, loop), and transitions (conditions, triggers, exit
+  time, fade, Any State). The `Animator` runs it; `Animation.graph` names
+  the file. Manual: [`animation-graphs.md`](docs/wiki/oberon/animation-graphs.md).
+- ⬜ Scripts and Play: `entity.animation.set` / `get` / `trigger` /
+  `state` / `layer_weight`, `at.Animation(graph=…)`, graph state over
+  Oberon's bridge, the Inspector's Graph field, `automata-cli check`
+  validating graphs, and Robot Plaza's player driven by a graph (waving
+  on an upper-body layer).
+- ⬜ The Oberon graph editor: `.anim.ron` files open in a tab with a node
+  canvas for states and transitions, panels for conditions, parameters,
+  layers and masks, 1D and 2D blend space editors, and during Play the
+  live state of the selected entity highlighted.
+- ⬜ Docs and an example.
 
 ### B5. Attachments and IK ⬜ M
 - Attach any entity to a bone (a sword in the hand, a hat on the head).
@@ -1128,7 +1140,7 @@ per effort. Reorder any time by telling me.
 | 25 | D1 UI widgets | M | ✅ |
 | 26 | D2 Custom fonts | S | ✅ |
 | 27 | D3 UI layout, focus, screens | M | ✅ |
-| 28 | B4 Animation state machine | L | ⬜ |
+| 28 | B4 Animation state machine | L | 🔨 |
 | 29 | B5 Attachments and IK | M | ⬜ |
 | 30 | C4 Navigation | L | ⬜ |
 | 31 | C5 AI helpers | S | ⬜ |

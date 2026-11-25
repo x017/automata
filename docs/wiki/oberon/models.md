@@ -135,6 +135,10 @@ While you edit, an animated model holds its clip's first frame, so you place
 it in its real pose instead of the T-pose. Press Play and every Animation
 with **Play On Start** starts.
 
+For a character with many clips, an [animation graph](animation-graphs.md)
+picks them for you from a few values your script sets (speed, grounded,
+jump).
+
 ### From a script
 
 `entity.animation` controls the clip while the game runs:

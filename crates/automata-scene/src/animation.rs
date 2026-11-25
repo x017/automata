@@ -17,14 +17,22 @@
 //! across the ground moves the entity instead of the pose: through its
 //! character controller when it has one ([`CharacterMotion`]), otherwise by
 //! moving its transform.
+//!
+//! An animator can also run an animation graph (`Animation::graph`, a
+//! `.anim.ron` file): then the graph picks and blends the clips from the
+//! parameters scripts set ([`AnimationCommand::Set`],
+//! [`AnimationCommand::Trigger`]), and `play` jumps to a state (see
+//! [`crate::anim_graph`]).
 
 use std::sync::Arc;
 
+use automata_assets::anim_graph::AnimGraph;
 use automata_assets::{Clip, ClipMotion, Model, Pose, Rig};
 use glam::{Mat4, Vec3};
 use hecs::Entity;
 use serde::{Deserialize, Serialize};
 
+use crate::anim_graph::{GraphPlayer, GraphState, Sampler};
 use crate::render::{MeshRenderer, MeshVisual};
 use crate::scene::SceneWorld;
 use crate::springs::SpringSim;
@@ -55,6 +63,11 @@ pub struct Animation {
     /// of sliding the model away from it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub root_motion: bool,
+    /// An animation graph (`.anim.ron`, a path like a model's) that picks
+    /// the clips from parameters scripts set; empty plays `clip`. With a
+    /// graph, `speed` scales the graph's own speeds.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub graph: String,
 }
 
 impl Default for Animation {
@@ -65,6 +78,7 @@ impl Default for Animation {
             looping: true,
             play_on_start: true,
             root_motion: false,
+            graph: String::new(),
         }
     }
 }
@@ -200,7 +214,7 @@ impl CharacterMotion {
 /// The events of `clip` a playhead passes going from `from` by `advance`
 /// seconds (negative backwards): `(how far along, name)`. `inclusive`
 /// also counts an event exactly at `from` (a clip that just started).
-fn crossed<'c>(
+pub(crate) fn crossed<'c>(
     clip: &'c Clip,
     from: f32,
     advance: f32,
@@ -285,6 +299,8 @@ pub struct Animator {
     next_event: u64,
     /// The clip has just started: an event at its first moment fires.
     fresh: bool,
+    /// The animation graph picking the clips, and its path.
+    graph: Option<(String, GraphPlayer)>,
 }
 
 impl Animator {
@@ -310,6 +326,7 @@ impl Animator {
             events: Vec::new(),
             next_event: 1,
             fresh: false,
+            graph: None,
         }
     }
 
@@ -322,12 +339,27 @@ impl Animator {
     /// An animator for `rig` set up from an [`Animation`] component:
     /// playing its clip when `autoplay` and `play_on_start`, otherwise
     /// holding the clip's first frame.
+    ///
+    /// With a graph that loads, the graph runs instead (when `autoplay`
+    /// and `play_on_start`; otherwise the model holds the entry state's
+    /// first frame). One that doesn't load is logged and the clip plays.
     #[must_use]
     pub fn from_component(rig: Arc<Rig>, animation: &Animation, autoplay: bool) -> Self {
         let mut a = Self::new(rig);
         a.speed = animation.speed;
         a.looping = animation.looping;
         a.root_motion = animation.root_motion;
+        if !animation.graph.is_empty() {
+            match automata_assets::load_anim_graph(&animation.graph) {
+                Ok(graph) => {
+                    a.set_graph(&animation.graph, graph);
+                    a.advance_clip(0.0);
+                    a.playing = autoplay && animation.play_on_start;
+                    return a;
+                }
+                Err(e) => tracing::warn!("{e}; playing the clip instead"),
+            }
+        }
         if !animation.clip.is_empty() {
             if autoplay && animation.play_on_start {
                 a.play(&animation.clip);
@@ -348,6 +380,37 @@ impl Animator {
     #[must_use]
     pub fn clip_names(&self) -> Vec<&str> {
         self.rig.clip_names()
+    }
+
+    /// Runs `graph` (loaded from `path`) from its entry states, instead of
+    /// playing clips directly. What doesn't fit the model is logged.
+    pub fn set_graph(&mut self, path: &str, graph: Arc<AnimGraph>) {
+        let player = GraphPlayer::new(graph, &self.rig);
+        for problem in player.problems() {
+            tracing::warn!("animation graph {path}: {problem}");
+        }
+        self.fade = None;
+        self.playing = true;
+        self.graph = Some((path.to_string(), player));
+    }
+
+    /// Stops running the graph (the pose stays until something plays).
+    pub fn clear_graph(&mut self) {
+        if self.graph.take().is_some() {
+            self.clip = None;
+            self.playing = false;
+        }
+    }
+
+    /// The graph being run and its path.
+    #[must_use]
+    pub fn graph(&self) -> Option<(&str, &GraphPlayer)> {
+        self.graph.as_ref().map(|(p, g)| (p.as_str(), g))
+    }
+
+    /// The graph being run, to set parameters on.
+    pub fn graph_mut(&mut self) -> Option<&mut GraphPlayer> {
+        self.graph.as_mut().map(|(_, g)| g)
     }
 
     fn find(&self, clip: &str) -> Option<usize> {
@@ -377,7 +440,14 @@ impl Animator {
     /// keeps it going (taking the new loop and speed settings) unless
     /// `options.restart`. Returns `false` (and changes nothing) when the
     /// model has no clip by that name.
+    ///
+    /// With a graph, `clip` names a state of its first layer instead, and
+    /// the graph goes straight there.
     pub fn play_with(&mut self, clip: &str, options: PlayOptions) -> bool {
+        if let Some((_, graph)) = &mut self.graph {
+            self.playing = true;
+            return graph.play_state("", clip, options.fade);
+        }
         let Some(index) = self.find(clip) else {
             return false;
         };
@@ -405,7 +475,11 @@ impl Animator {
     }
 
     /// Stops playback, fading back to the rest pose over `fade` seconds.
+    /// A graph stops running.
     pub fn stop_with(&mut self, fade: f32) {
+        if self.graph.take().is_some() {
+            self.clip = None; // fade from the pose shown
+        }
         self.begin_fade(fade);
         self.clip = None;
         self.time = 0.0;
@@ -577,7 +651,35 @@ impl Animator {
         }
     }
 
+    /// Runs the graph for `dt` seconds (when one is set and playing).
+    /// Returns whether it did.
+    fn advance_graph(&mut self, dt: f32) -> bool {
+        let Some((_, graph)) = &mut self.graph else {
+            return false;
+        };
+        let (rig, motions) = (self.rig.clone(), self.motions.clone());
+        let sampler = Sampler {
+            rig: &rig,
+            motions: &motions,
+            root_motion: self.root_motion,
+        };
+        let dt = if self.playing { dt } else { 0.0 };
+        let out = graph.advance(&sampler, dt, self.speed);
+        let current = graph.current_clip(&rig);
+        self.clip = current.map(|(c, _)| c);
+        self.time = current.map_or(0.0, |(_, t)| t);
+        self.pose = out.pose;
+        self.travel = out.travel;
+        for (clip, name) in out.events {
+            self.fire(clip, &name);
+        }
+        true
+    }
+
     fn advance_clip(&mut self, dt: f32) {
+        if self.advance_graph(dt) {
+            return;
+        }
         let mut travel = Vec3::ZERO;
         if let Some(clip) = self.clip {
             let mut layer = Layer {
@@ -674,13 +776,15 @@ impl Animator {
             springs: self.has_springs(),
             root_motion: self.root_motion,
             events: self.events.clone(),
+            graph_path: self.graph.as_ref().map(|(p, _)| p.clone()),
+            graph: self.graph.as_ref().map(|(_, g)| g.state()),
         }
     }
 }
 
 /// Samples clip `index` at `time` into `pose`, pinning its ground travel
 /// in place when `root_motion`.
-fn sample_clip(
+pub(crate) fn sample_clip(
     rig: &Rig,
     motions: &[Option<ClipMotion>],
     index: usize,
@@ -700,7 +804,7 @@ fn sample_clip(
 }
 
 /// The ground travel of clip `index` from `from` by `advance` seconds.
-fn layer_travel(
+pub(crate) fn layer_travel(
     rig: &Rig,
     motions: &[Option<ClipMotion>],
     index: usize,
@@ -740,6 +844,10 @@ pub struct AnimationState {
     pub root_motion: bool,
     /// The latest events passed (see [`Animator::recent_events`]).
     pub events: Vec<FiredEvent>,
+    /// The animation graph's path, when one runs.
+    pub graph_path: Option<String>,
+    /// The graph's states and parameters, when one runs.
+    pub graph: Option<GraphState>,
 }
 
 /// A script's request to an entity's animation.
@@ -762,6 +870,25 @@ pub enum AnimationCommand {
     ResetSprings,
     /// Turn root motion on or off (see [`Animator::root_motion`]).
     RootMotion(bool),
+    /// Run this animation graph (a `.anim.ron` path), or none with "".
+    Graph(String),
+    /// Set a graph parameter (see [`GraphPlayer::set`]).
+    Set(String, f32),
+    /// Set a graph trigger (see [`GraphPlayer::trigger`]).
+    Trigger(String),
+    /// Clear a graph trigger nothing used.
+    ResetTrigger(String),
+    /// Set a graph layer's weight.
+    LayerWeight(String, f32),
+    /// Go straight to a state of a graph layer ("" for the first layer).
+    PlayState {
+        /// The layer's name.
+        layer: String,
+        /// The state's name.
+        state: String,
+        /// Seconds to crossfade.
+        fade: f32,
+    },
 }
 
 /// A new animator for `entity`'s rigged model (set up from its
@@ -848,6 +975,36 @@ pub fn command_animation(
         AnimationCommand::RootMotion(on) => {
             animator.root_motion = *on;
             true
+        }
+        AnimationCommand::Graph(path) if path.is_empty() => {
+            animator.clear_graph();
+            true
+        }
+        AnimationCommand::Graph(path) => match automata_assets::load_anim_graph(path) {
+            Ok(graph) => {
+                animator.set_graph(path, graph);
+                true
+            }
+            Err(e) => {
+                tracing::warn!("{e}");
+                false
+            }
+        },
+        AnimationCommand::Set(name, value) => {
+            animator.graph_mut().is_some_and(|g| g.set(name, *value))
+        }
+        AnimationCommand::Trigger(name) => animator.graph_mut().is_some_and(|g| g.trigger(name)),
+        AnimationCommand::ResetTrigger(name) => {
+            animator.graph_mut().is_some_and(|g| g.reset_trigger(name))
+        }
+        AnimationCommand::LayerWeight(layer, weight) => animator
+            .graph_mut()
+            .is_some_and(|g| g.set_layer_weight(layer, *weight)),
+        AnimationCommand::PlayState { layer, state, fade } => {
+            animator.playing = true;
+            animator
+                .graph_mut()
+                .is_some_and(|g| g.play_state(layer, state, *fade))
         }
     }
 }
@@ -943,6 +1100,65 @@ mod tests {
 
     fn x(animator: &Animator) -> f32 {
         animator.palette()[0].w_axis.x
+    }
+
+    #[test]
+    fn runs_a_graph_from_its_file() {
+        use automata_assets::anim_graph::{Condition, GraphLayer, Parameter, State, Transition};
+        let dir = std::env::temp_dir().join(format!("automata-graph-{}", std::process::id()));
+        let path = dir.join("slide.anim.ron");
+        let graph = AnimGraph {
+            parameters: vec![Parameter::trigger("go")],
+            layers: vec![GraphLayer {
+                states: vec![
+                    State {
+                        looping: false,
+                        ..State::clip("Rest", "back")
+                    },
+                    State::clip("Go", "slide"),
+                ],
+                transitions: vec![Transition {
+                    fade: 0.0,
+                    ..Transition::new("Rest", "Go", vec![Condition::Triggered("go".into())])
+                }],
+                ..GraphLayer::default()
+            }],
+        };
+        graph.save(&path, "slide.anim.ron").unwrap();
+        let animation = Animation {
+            graph: path.to_string_lossy().into_owned(),
+            ..Animation::default()
+        };
+
+        let mut a = Animator::from_component(rig(), &animation, true);
+        assert_eq!(a.state().graph.unwrap().layers[0].state, "Rest");
+        a.advance(1.0);
+        assert!((x(&a) + 1.0).abs() < 1e-4, "back, halfway: {}", x(&a));
+        assert!(a.graph_mut().unwrap().trigger("go"));
+        a.advance(0.5);
+        assert_eq!(a.clip(), Some("slide"));
+        assert!((x(&a) - 0.5).abs() < 1e-4, "{}", x(&a));
+        // play() picks a state; stop() leaves the graph.
+        assert!(a.play("Rest"));
+        assert!(!a.play("back"), "a clip isn't a state");
+        a.advance(0.0);
+        assert_eq!(a.clip(), Some("back"));
+        a.stop();
+        assert!(a.graph().is_none());
+
+        // In an editor (no autoplay) the entry state holds its first frame.
+        let mut still = Animator::from_component(rig(), &animation, false);
+        still.advance(1.0);
+        assert!(x(&still).abs() < 1e-6);
+        // A graph that doesn't load falls back to the clip.
+        let missing = Animation {
+            graph: dir.join("nope.anim.ron").to_string_lossy().into_owned(),
+            ..Animation::new("slide")
+        };
+        let fallback = Animator::from_component(rig(), &missing, true);
+        assert!(fallback.graph().is_none());
+        assert_eq!(fallback.clip(), Some("slide"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

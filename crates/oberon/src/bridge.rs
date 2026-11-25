@@ -1429,6 +1429,8 @@ mod tests {
                     clip: "Idle".into(),
                     name: "blink".into(),
                 }],
+                graph_path: None,
+                graph: None,
             }),
             ..EntityState::default()
         };

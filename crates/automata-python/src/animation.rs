@@ -47,6 +47,7 @@ impl PyAnimation {
                 looping,
                 play_on_start,
                 root_motion,
+                graph: String::new(),
             },
         })
     }

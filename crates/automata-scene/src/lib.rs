@@ -22,6 +22,7 @@
 //! All ECS types needed for common game code (`Entity`, queries) are
 //! re-exported; `hecs` remains available for advanced use.
 
+pub mod anim_graph;
 mod animation;
 mod events;
 mod foliage;
@@ -33,6 +34,7 @@ mod scene;
 mod springs;
 mod transform;
 
+pub use anim_graph::{GraphLayerState, GraphPlayer, GraphState};
 pub use animation::{
     animate, animation_state, attach_animators, command_animation, Animation, AnimationCommand,
     AnimationState, Animator, CharacterMotion, FiredEvent, PlayOptions, END_EVENT,

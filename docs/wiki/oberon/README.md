@@ -42,6 +42,7 @@ this and `oberon run`, `test`, `export` and `doctor`.
 | [The UI editor](ui-editor.md) | Game menus and HUDs as `ui/*.ui.ron` documents: canvas, widget tree, themes |
 | [Materials](materials.md) | Shared `.mat.ron` looks with textures: the material editor, its live preview, dragging materials onto objects |
 | [Models](models.md) | Importing glTF and OBJ models, the Assets tab, import settings (scale, rotation, pivot), fitted colliders |
+| [Animation graphs](animation-graphs.md) | `.anim.ron` state machines: parameters, blend spaces, transitions, layers with bone masks |
 | [Audio](audio.md) | Sound files, Audio Sources, previews, playing sounds from scripts |
 | [Prefabs & attributes](prefabs-and-attributes.md) | Reusable objects that stay linked: overrides, Apply / Revert, variants; custom per-entity data |
 | [Editor workflow](editor-workflow.md) | Editing many objects at once, snapping, Duplicate Along a Line, the Profiler |

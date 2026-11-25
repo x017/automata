@@ -20,6 +20,7 @@
 //! shared by every entity that uses one, and reloaded when they change.
 
 pub mod anim;
+pub mod anim_graph;
 mod gltf;
 pub mod import;
 pub mod json;
@@ -36,6 +37,7 @@ use automata_renderer::{Mesh, MeshData, Renderer, Texture};
 use glam::Vec3;
 
 pub use anim::{Clip, ClipEvent, ClipMotion, PartSkin, Pose, Rig};
+pub use anim_graph::{load_anim_graph, AnimGraph, AnimGraphError};
 pub use material::{
     is_material_path, load_material, set_material_preview, MapSlot, MaterialAsset, MaterialError,
     MaterialFile,
