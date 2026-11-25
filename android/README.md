@@ -70,6 +70,12 @@ Things the emulator taught us, each handled in `java/` or
   `nativeSetenv` as soon as SDL's library is loaded; an environment
   variable alone would only count once SDL had read it. It also logs which
   configuration changes caused a re-creation.
+- **Re-creation while unpacking.** The first launch unpacks Python for a
+  few seconds before SDL's library loads. A re-creation in that window
+  leaves two unpack tasks, and both end by calling `finishLoad` on the
+  newest activity, so SDL saw a "second" activity before anything could
+  allow one, and quit. `finishLoad` now loads the libraries and allows
+  re-creation itself before SDL's checks, and runs once per activity.
 - **Re-creation while the game runs.** Allowed re-creation means SDL
   quits the game's `main()` and runs it again on the new activity, but
   python-for-android's `main()` runs Python once and then ends the process.

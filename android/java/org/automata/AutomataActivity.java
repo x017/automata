@@ -23,6 +23,12 @@ import org.kivy.android.PythonActivity;
  * without telling SDL to quit, and the new one adopts the running thread
  * and gives it a new surface (the engine already handles that through
  * SDL's background/foreground events).
+ *
+ * Re-creation can also come while the app is still unpacking, before SDL's
+ * library is loaded. Then both activities' unpack tasks end by calling
+ * finishLoad on the newest activity, and SDL's second-activity check runs
+ * before anything could allow it. So finishLoad loads the libraries and
+ * allows re-creation itself first, and runs only once per activity.
  */
 public class AutomataActivity extends PythonActivity {
     private static final String TAG = "automata";
@@ -31,6 +37,9 @@ public class AutomataActivity extends PythonActivity {
 
     /** SDL's thread while a re-created activity takes it over. */
     private static Thread sKeptThread = null;
+
+    /** Whether this activity's finishLoad has run. */
+    private boolean mLoaded = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,12 +54,45 @@ public class AutomataActivity extends PythonActivity {
         try {
             nativeSetenv(ALLOW_RECREATE, "1");
         } catch (UnsatisfiedLinkError e) {
-            Log.w(TAG, "couldn't allow activity re-creation yet: " + e);
+            Log.i(TAG, "re-creation is allowed once the libraries load");
+        }
+    }
+
+    /**
+     * Loads SDL's library (the files are unpacked by now) and sets the hint
+     * that lets SDL accept a re-created activity, before SDL's own
+     * finishLoad checks it. Loading again later is harmless.
+     */
+    private void allowRecreation() {
+        try {
+            loadLibraries();
+            nativeSetenv(ALLOW_RECREATE, "1");
+        } catch (UnsatisfiedLinkError | RuntimeException e) {
+            // SDL's finishLoad reports a library that doesn't load.
+            Log.w(TAG, "couldn't allow activity re-creation: " + e);
         }
     }
 
     @Override
     protected void finishLoad() {
+        if (mLoaded) {
+            // The unpack task of an activity re-created before loading
+            // finished: this activity already loaded (and may be running
+            // the game), and loading again would reset SDL under it.
+            Log.i(TAG, "already loaded; skipping a second finishLoad");
+            if (mAppConfirmedActive) {
+                // The caller shows the loading screen again afterwards.
+                new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        removeLoadingScreen();
+                    }
+                }, 500);
+            }
+            return;
+        }
+        mLoaded = true;
+        allowRecreation();
         super.finishLoad();
         // finishLoad cleared SDL's record of its thread again.
         if (adoptKeptThread()) {
