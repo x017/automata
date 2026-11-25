@@ -23,6 +23,8 @@ them on touch screens; see the wiki's Touch controls guide).
 | --- | --- |
 | `engine/` | The `automata-android` crate: the engine's Python module (`automata._core`) with an SDL3 window driver |
 | `recipes/automata/` | The p4a recipe that builds `engine/` with maturin |
+| `recipes/python3/` | p4a's CPython recipe with a smaller standard library: no REPL, debugger, docs, test tools, server and mail modules, CJK codecs or C test modules |
+| `recipes/sdl3/` | p4a's SDL3 recipe without SDL3_image, SDL3_mixer and SDL3_ttf (the engine does images, audio and text itself) |
 | `pyproject.toml` | maturin settings for that build (placed at the root of a staged copy of the repo) |
 | `build_apk.sh` | Stages the repo and runs `p4a apk` |
 | `java/` | `AutomataActivity`, the launcher's activity with two small changes (below) |

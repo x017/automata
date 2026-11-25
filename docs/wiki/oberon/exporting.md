@@ -162,9 +162,23 @@ Install it on a phone with `adb install "build/android/Coin Run-0.1.0.apk"`,
 or copy the file over and open it. Android asks you to allow installs from
 that app first.
 
-The first time the game starts, it unpacks its files into the app's
-storage, which takes a moment. After that it starts straight away, until an
-update brings different files. Saves and settings stay through updates.
+The first time the game starts, it unpacks Python and its files into the
+app's storage, which takes a moment. After that it starts straight away,
+until an update brings different files. Saves and settings stay through
+updates.
+
+**Size.** Python, the engine and the player add about 16.5 MB per
+processor type to your game's files. The template holds two:
+`arm64-v8a` for phones and tablets, and `x86_64` for emulators. So a build
+with both comes to about 34 MB plus the game, and one with just
+**Android processors** set to `arm64-v8a` comes to about 17 MB plus the game.
+To save space, the Android build of Python leaves out parts of the standard
+library that a game on a phone can't use: the interactive tools (REPL, `pdb`,
+`pydoc`, `doctest`, `unittest`, profilers), `wsgiref`, `xmlrpc`, `dbm`, the
+mail clients (`smtplib`, `imaplib`, ...), and the CJK codecs (`shift_jis`,
+`gbk`, `big5`, ...). `bz2` and `lzma` aren't included either. Everything else
+is there: `json`, `random`, `re`, `dataclasses`, `asyncio`, `sqlite3`, `ssl` and
+`urllib`/`http`, `zipfile`/`gzip`, `xml`, `csv`, `logging`, and the rest.
 
 ### Signing
 

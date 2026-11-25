@@ -13,7 +13,7 @@ of those phases point to.
 
 ---
 
-## 1. Android export 🔨 in progress
+## 1. Android export ✅ done
 
 ### Decisions
 
@@ -172,15 +172,28 @@ Other Android work:
    and the Android template row. In CI, Coin Run is built this way and
    installs and plays on the emulator. Checked locally against
    `apksigtool` and androguard with real AGP-built APKs.
-5. **Size and polish:** trim the standard library (target: well under
-   +20 MB), check startup time.
+5. **Size and polish** (*done*): `android/recipes/python3` and
+   `android/recipes/sdl3` override p4a's recipes. They leave the stdlib's
+   interactive tools, server and mail pieces and pure-Python fallbacks
+   out of `stdlib.zip`, and the CJK codecs, test modules and
+   SDL3_image/mixer/ttf out of the bundle. The engine is built with fat LTO.
+   Each processor type adds **16.5 MB** (arm64-v8a) instead of 20.5 MB, and
+   CI holds it under 18 MB. Startup is measured from logcat on the CI
+   emulator: the first start (unpacking) takes 3.8 s instead of 5.3 s until
+   the scene runs. Release signing with the developer's own key is
+   `automata-cli keygen` plus `android.key`, and also takes existing PEM
+   keys with their certificates.
 
 ### Open questions
 
-- APK size budget, and which standard library modules to drop.
+- ~~APK size budget, and which standard library modules to drop.~~
+  Answered: 18 MB per processor type in CI (16.5 MB today); the list is in
+  `android/recipes/python3`.
 - ~~Signing: bundle a tool or implement APK signing (v2) in Rust.~~
-  Answered: v2 signing in Rust (`automata-cli`'s `android::sign`). Next:
-  release keys (a keystore or PEM key of the developer's own).
+  Answered: v2 signing in Rust (`automata-cli`'s `android::sign`), with
+  release keys from PEM files (`automata-cli keygen`, or an existing key
+  exported from a keystore). Still open: password-protected keys, and an
+  Android App Bundle (`.aab`) for Google Play.
 - ~~How the FPS-style mouse look maps to touch (drag-to-look area?).~~
   Answered: `touch_controls`' `look` side.
 

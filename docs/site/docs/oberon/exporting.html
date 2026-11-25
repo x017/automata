@@ -137,9 +137,22 @@ copies the Android template and then:</p>
 <p>Install it on a phone with <code>adb install &quot;build/android/Coin Run-0.1.0.apk&quot;</code>,
 or copy the file over and open it. Android asks you to allow installs from
 that app first.</p>
-<p>The first time the game starts, it unpacks its files into the app's
-storage, which takes a moment. After that it starts straight away, until an
-update brings different files. Saves and settings stay through updates.</p>
+<p>The first time the game starts, it unpacks Python and its files into the
+app's storage, which takes a moment. After that it starts straight away,
+until an update brings different files. Saves and settings stay through
+updates.</p>
+<p><strong>Size.</strong> Python, the engine and the player add about 16.5 MB per
+processor type to your game's files. The template holds two:
+<code>arm64-v8a</code> for phones and tablets, and <code>x86_64</code> for emulators. So a build
+with both comes to about 34 MB plus the game, and one with just
+<strong>Android processors</strong> set to <code>arm64-v8a</code> comes to about 17 MB plus the game.
+To save space, the Android build of Python leaves out parts of the standard
+library that a game on a phone can't use: the interactive tools (REPL, <code>pdb</code>,
+<code>pydoc</code>, <code>doctest</code>, <code>unittest</code>, profilers), <code>wsgiref</code>, <code>xmlrpc</code>, <code>dbm</code>, the
+mail clients (<code>smtplib</code>, <code>imaplib</code>, ...), and the CJK codecs (<code>shift_jis</code>,
+<code>gbk</code>, <code>big5</code>, ...). <code>bz2</code> and <code>lzma</code> aren't included either. Everything else
+is there: <code>json</code>, <code>random</code>, <code>re</code>, <code>dataclasses</code>, <code>asyncio</code>, <code>sqlite3</code>, <code>ssl</code> and
+<code>urllib</code>/<code>http</code>, <code>zipfile</code>/<code>gzip</code>, <code>xml</code>, <code>csv</code>, <code>logging</code>, and the rest.</p>
 <h3 id="signing">Signing<a class="anchor" href="#signing" aria-label="Link to this section">#</a></h3>
 <p>Android only installs signed apps, and only accepts an update signed by
 the same key.</p>

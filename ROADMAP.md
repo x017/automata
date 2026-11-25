@@ -973,7 +973,7 @@ Done:
 
 ## Track E: Platforms
 
-### E1. Android export 🔨 L
+### E1. Android export ✅ L
 The phases in [`NEXT_PLANS.md` #1](NEXT_PLANS.md#1-android-export--in-progress)
 (CPython on device, a template like Windows/Linux, emulator CI). The
 template is built in CI with python-for-android's **SDL3 launcher**. The
@@ -1023,7 +1023,27 @@ and its own input types. The game-facing API stays the same everywhere.
   no Android SDK, NDK or Java. The player unpacks the game on first start,
   and again only when an update changes it. In CI, Coin Run built this
   way installs and plays on the emulator.
-- ⬜ Size and startup time; release signing with your own key.
+- ✅ **Size, startup time and release signing:** python-for-android's
+  `python3` and `sdl3` recipes are overridden in `android/recipes/`. The
+  stdlib zip loses the REPL, debugger, pydoc, doctest, unittest,
+  profilers, wsgiref/xmlrpc/dbm, the mail clients and the pure-Python
+  fallbacks. The bundle loses the CJK codecs, CPython's test modules and
+  SDL3_image/mixer/ttf. The engine is built with fat LTO. Each processor
+  type now adds 16.5 MB (arm64-v8a) / 17.3 MB (x86_64) instead of
+  20.5 / 21.5 MB, and the template went from 42.1 to 33.8 MB. CI fails above
+  18 MB per processor type (`android/ci/apk_size.py`), and the spike checks
+  on the emulator that 79 common stdlib modules import. First start (with
+  unpacking) on the CI emulator went from 5.3 s to 3.8 s until the scene
+  runs, and later starts take 3.6 s, mostly SwiftShader's GPU setup
+  (`android: startup`, from logcat milestones). `automata-cli keygen` makes
+  a release key (RSA 2048 plus a self-signed certificate, PEM). Builds sign
+  with `android.key` / `--key` / `$AUTOMATA_ANDROID_RELEASE_KEY`, which
+  also take existing PKCS #8 / PKCS #1 keys with their own certificate, so
+  apps published with them keep updating. `android.abis` / `--abis` ship
+  only some processors. Oberon has the **Android release key** (browse,
+  **New**) and **Android processors** fields. CI verifies release-signed
+  builds with `apksigner`. An Android App Bundle (`.aab`) for Google Play
+  is out of scope.
 
 ### E2. macOS export ⬜ M
 - A macOS template build in CI (Apple Silicon and Intel) and an `.app`
@@ -1107,7 +1127,7 @@ per effort. Reorder any time by telling me.
 | 36 | D6 Editor workflow | M | ✅ |
 | 37 | D4 UI editor | L | ✅ |
 | 38 | D7 Localization | S | ✅ |
-| 39 | E1 Android export | L | 🔨 |
+| 39 | E1 Android export | L | ✅ |
 | 40 | E2 macOS export | M | ⬜ |
 | 41 | E3 Web export | L | ⬜ |
 | 42 | E4 Steam integration | M | ⬜ |
