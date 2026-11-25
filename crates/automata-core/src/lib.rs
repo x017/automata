@@ -12,7 +12,7 @@
 pub mod app;
 pub mod audio_source;
 pub mod config;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "emscripten")))]
 mod driver;
 pub mod error;
 pub mod logging;
@@ -23,7 +23,7 @@ pub mod scene_file;
 pub mod strings;
 pub mod time;
 pub mod window;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "emscripten")))]
 pub mod winit_input;
 
 pub use app::{AppContext, AppState, Application, SharedAudio, WorldState};

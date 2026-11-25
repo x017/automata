@@ -1,0 +1,18 @@
+# The web build of the `automata` package, for Pyodide. CI copies the
+# repository to a staging folder, puts this file at its root and runs
+# `pyodide build` there (see web/README.md and web/ci/build_wheel.sh).
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "automata-engine"
+description = "AUTOMATA game engine — Python bindings (web, Pyodide)"
+requires-python = ">=3.10"
+license = { text = "MIT OR Apache-2.0" }
+dynamic = ["version"]
+
+[tool.maturin]
+manifest-path = "web/engine/Cargo.toml"
+module-name = "automata._core"
+python-source = "crates/automata-python/python"

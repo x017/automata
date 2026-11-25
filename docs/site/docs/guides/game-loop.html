@@ -79,6 +79,14 @@ game.run(update, max_frames=<span class="tok-n">300</span>)</code></pre></div>
 <p>The identical loop without window, GPU, or OS input events. Physics,
 events, resources, and your logic all run; <code>MeshRenderer</code> components are
 inert (no GPU exists to materialize them). See <a href="testing.html">Testing</a>.</p>
+<h2 id="in-the-browser">In the browser<a class="anchor" href="#in-the-browser" aria-label="Link to this section">#</a></h2>
+<p>A web page can't sit in a loop: the browser calls it once per animation
+frame. So in a web build <code>game.run()</code> starts the game and <strong>returns at
+once</strong> (0), and the page runs each frame. Your update, events and scenes
+work the same; only code written <em>after</em> <code>game.run()</code> runs right away
+instead of after the game ends. Put cleanup in <code>game.on_finish(fn)</code>, which
+runs when the game ends there, and at once on desktop (by then <code>run</code> has
+returned). <code>game.stepping</code> tells you which case you're in.</p>
 <h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Link to this section">#</a></h2>
 <ul><li>Engine failures (lost GPU device, window errors) raise <code>automata.Error</code>.</li><li>Exceptions raised inside your callback stop the loop and <strong>propagate
 unchanged</strong> out of <code>run</code> — wrap in try/except if you want cleanup.</li></ul>
@@ -88,7 +96,7 @@ unchanged</strong> out of <code>run</code> — wrap in try/except if you want cl
     <footer class="pager"><a class="prev" href="../oberon/shortcuts.html"><small>Previous</small>Keyboard shortcuts</a><a class="next" href="scenes-and-entities.html"><small>Next</small>Scenes &amp; entities</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/game-loop.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#the-loop">The loop</a></li><li class="l2"><a href="#the-frame-contract">The frame contract</a></li><li class="l2"><a href="#ending-the-loop">Ending the loop</a></li><li class="l2"><a href="#frame-pacing">Frame pacing</a></li><li class="l2"><a href="#headless-mode">Headless mode</a></li><li class="l2"><a href="#errors">Errors</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#the-loop">The loop</a></li><li class="l2"><a href="#the-frame-contract">The frame contract</a></li><li class="l2"><a href="#ending-the-loop">Ending the loop</a></li><li class="l2"><a href="#frame-pacing">Frame pacing</a></li><li class="l2"><a href="#headless-mode">Headless mode</a></li><li class="l2"><a href="#in-the-browser">In the browser</a></li><li class="l2"><a href="#errors">Errors</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

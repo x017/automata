@@ -197,13 +197,9 @@ Other Android work:
 - ~~How the FPS-style mouse look maps to touch (drag-to-look area?).~~
   Answered: `touch_controls`' `look` side.
 
-### Web, next: a note for later
+### Web, next
 
-Option A extends to the web: **Pyodide is CPython compiled to
-WebAssembly**, so scripts would keep desktop behaviour there too. The
-engine side needs wgpu's WebGPU/WebGL2 backends, a browser event loop
-(no blocking main loop), and asset loading over HTTP. This needs its own
-discussion before starting.
+Decided and planned in [#7](#7-web-export--decided-phase-1-in-progress).
 
 ---
 
@@ -521,6 +517,90 @@ tracking or failures).
 
 ---
 
+## 7. Web export 🟢 decided (phase 1 in progress)
+
+ROADMAP E3. Games run in the browser with the same Python scripts as on
+desktop and Android.
+
+### Decisions
+
+| Question | Decision |
+|---|---|
+| How Python runs | **Pyodide 314** (CPython 3.14 compiled to WebAssembly, the same Python version as Android). The engine is a Pyodide extension module: `automata._core` built for `wasm32-unknown-emscripten` (platform `pyemscripten_2026_0`: Emscripten 5.0.3, stable Rust ≥ 1.93). |
+| Rendering | **WebGL2 now.** Under emscripten, wgpu 30 draws only through its GLES backend (WebGL2). Its WebGPU backend exists only for `wasm32-unknown-unknown`, which Python can't load extensions from. The renderer already avoids compute shaders and storage buffers (the GLES path), and WebGL2 runs in every current browser, phones included. WebGPU comes later, when wgpu supports it under emscripten. |
+| Where Pyodide comes from | **Bundled in every export**, so a build is a self-contained folder or zip that works offline, on itch.io and on any static host. |
+| Browsers | **Desktop and phone browsers.** Keyboard, mouse and gamepads, plus touch and the on-screen touch controls Android has. |
+
+### Why not the alternatives
+
+- **WebGPU through a separate wasm module** (engine on
+  `wasm32-unknown-unknown`, Python in Pyodide): every API call would cross
+  a hand-written JavaScript bridge, i.e. a second binding layer for the
+  whole engine, and WebGPU support is still uneven across browsers.
+- **JSPI (stack switching) so `game.run()` can block like on desktop:**
+  Safari, and so every iPhone browser, doesn't support it.
+- **Pyodide from a CDN:** a smaller upload, but games would break when the
+  CDN is unreachable or changes.
+
+### How it works
+
+**The browser owns the loop.** A page can't block, so on the web
+`game.run()` (and `at.run_scene`) sets the game up and returns, and each
+`requestAnimationFrame` runs one frame. In the engine this is a **stepped
+run**: `Application` keeps the run's state (input, renderer, draw list)
+between frames instead of on `run`'s stack, and each step drives one frame
+through the same `Host` trait the winit and SDL drivers use (attach the
+surface, input, frame, render). Scripts don't change. Code written *after*
+`game.run()` runs right away on the web instead of after the game ends.
+
+**The page** (`index.html` plus a small `player.js`) loads Pyodide, installs
+the engine wheel, unpacks the game into Pyodide's file system, points
+emscripten at the canvas (`pyodide.canvas.setCanvas3D`) and runs the
+player. DOM events (keys by `KeyboardEvent.code`, pointer, touch, wheel,
+gamepads from `navigator.getGamepads()`, resize and device pixel ratio,
+tab hidden or shown) are queued in JavaScript and handed to the engine at
+the start of each frame.
+
+Still to do:
+- **Audio:** cpal has no emscripten backend. The engine's mixer fills a
+  buffer each frame, and an AudioWorklet plays it. The browser only allows
+  sound after the first click or key.
+- **Saves and settings:** in IndexedDB (emscripten's IDBFS), synced after
+  writes.
+- **The template:** Pyodide's core files, the engine wheel, `index.html`
+  and `player.js`. `automata-cli build --target web` adds `game.zip` and
+  writes `build/web/<name>/` plus a zip ready for itch.io.
+
+### Phases (each tested in CI in headless Chromium, WebGL2 through SwiftShader)
+
+1. **Spike:** the stepped run in the engine (tested on desktop). The engine
+   wheel builds for Pyodide in CI. A page runs a spinning-cube game, and CI
+   loads it in headless Chromium, checks frames run and a screenshot shows
+   the cube, and reports download size and startup time (the prototype
+   NEXT_PLANS #1 asked for).
+2. **Input and lifecycle:** keyboard, mouse (pointer lock for mouse look),
+   wheel, touch, gamepads, resizing and high-DPI, pausing in a hidden tab,
+   fullscreen. Audio through an AudioWorklet.
+3. **Real games:** the player runs a game from `game.zip`, with saves and
+   settings in IndexedDB. Coin Run plays in CI: keys reach scripts, the
+   setting survives a reload, and touch controls work under touch
+   emulation.
+4. **Template and build:** the `web` template is published to the
+   `export-templates` release. `automata-cli build --target web` and
+   Oberon's **Build for Web** produce a folder and an itch.io-ready zip.
+5. **Size and startup:** trim what the web doesn't use, measure, set a
+   budget.
+
+### Open questions
+
+- WebGL2 limits the renderer may hit (uniform buffer sizes, texture
+  formats, shadow map comparisons). Phase 1 shows which.
+- Download size: Pyodide is about 13 MB (about 6 MB gzipped), plus the
+  engine. Phase 1 measures it.
+- Python packages from PyPI in web builds (micropip): later.
+
+---
+
 ## Order
 
 Agreed: **quick wins first.**
@@ -543,7 +623,7 @@ localization** ✅: `lang/*.csv` string tables read with `ctx.tr`, a saved
 translate their keys, a per-language fallback font, and right-to-left text
 with Persian/Arabic letter joining (demo: Shape Signal in English, Spanish,
 Japanese and Persian). Before it, D6 editor workflow ✅.
-Next: E1 Android export.
+E1 Android export ✅ followed. Next: E3 web export (#7).
 
 ## Process note
 

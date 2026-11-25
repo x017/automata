@@ -550,9 +550,16 @@ def run_scene(
         if update is not None:
             update(ctx)
 
-    try:
-        return game.run(tick, max_frames=max_frames)
-    finally:
+    def finish() -> None:
         scripts.stop()
         if stats is not None:
             stats.write()
+
+    try:
+        frames = game.run(tick, max_frames=max_frames)
+    except BaseException:
+        finish()
+        raise
+    # On the web `run` only starts the game; clean up when it ends.
+    game.on_finish(finish)
+    return frames

@@ -34,6 +34,16 @@ mod physics_components;
 mod scene;
 mod screen;
 mod serialize;
+mod stepped;
+
+pub use stepped::{install_step_driver, step_running_game, StepDriver};
+
+/// An `automata.Error` with `message`, for platform crates (the web
+/// build's frame function reports WebGL failures with it).
+#[must_use]
+pub fn engine_error(message: &str) -> PyErr {
+    error::AutomataError::new_err(message.to_owned())
+}
 
 use pyo3::prelude::*;
 
@@ -108,5 +118,7 @@ pub fn init_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<animation::PyAnimationRef>()?;
     m.add_function(wrap_pyfunction!(components::set_asset_root, m)?)?;
     m.add_function(wrap_pyfunction!(components::asset_root, m)?)?;
+    m.add_function(wrap_pyfunction!(stepped::step_running_game, m)?)?;
+    m.add_function(wrap_pyfunction!(stepped::use_stepped_runs, m)?)?;
     Ok(())
 }

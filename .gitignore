@@ -26,3 +26,8 @@ crates/automata-python/python/automata/_core*.pyd
 # which CI resolves from crates.io (its `sdl3` dependency isn't vendored).
 /dist
 /android/engine/Cargo.lock
+
+# Web (web/README.md): the web crate's lockfile (CI resolves it from
+# crates.io), and the page CI and the exporter put together.
+/web/engine/Cargo.lock
+/web/dist

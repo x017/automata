@@ -32,6 +32,8 @@ at.Game(
 | `run(update=None, max_frames=None) -> int` | method | drives the loop; returns frames run; a Game runs once |
 | `load_scene(scene)` | method | replaces the world: at once before `run`, at the end of the frame inside `update` or a handler |
 | `quit()` | method | requests shutdown |
+| `stepping` | property | `True` while the browser drives the game frame by frame (web builds: `run` returns at once) |
+| `on_finish(fn)` | method | calls `fn()` when a web game ends (at once elsewhere): cleanup that would follow `run` |
 | `state` | property | `"created"` / `"running"` / `"shutdown"` |
 | `update(fn)` | decorator | registers the per-frame callback |
 | `on_event(name)` | decorator | registers a handler for events named `name` |

@@ -1050,10 +1050,21 @@ and its own input types. The game-facing API stays the same everywhere.
   bundle from the Export dialog.
 - Signing and notarisation are documented.
 
-### E3. Web export ⬜ L
-- wasm + WebGPU (WebGL2 fallback); Python through Pyodide.
-- The open question in NEXT_PLANS #1 (size and start-up time) gets a
-  prototype first.
+### E3. Web export 🔨 L
+[`NEXT_PLANS.md` #7](NEXT_PLANS.md#7-web-export--decided-phase-1-in-progress):
+Pyodide 314 (CPython 3.14), with the engine as a Pyodide extension module
+drawing through WebGL2 (wgpu's GLES backend under emscripten). Pyodide is
+bundled in every export, and it targets desktop and phone browsers.
+- 🔨 Spike: a stepped run (the browser owns the loop), the engine wheel for
+  Pyodide, and a spinning cube in headless Chromium in CI, with size and
+  startup time. See [`web/README.md`](web/README.md).
+- ⬜ Input and lifecycle: keys, mouse and pointer lock, touch, gamepads,
+  resizing, hidden tabs; audio through an AudioWorklet.
+- ⬜ Real games: `game.zip`, and saves and settings in IndexedDB. Coin Run
+  plays in CI.
+- ⬜ The `web` template, `automata-cli build --target web` and Oberon's
+  **Build for Web** (folder plus an itch.io zip).
+- ⬜ Size and startup budget.
 
 ### E4. Steam integration ⬜ M
 - Achievements, stats, Cloud saves (on top of C3), the overlay, and
@@ -1129,7 +1140,7 @@ per effort. Reorder any time by telling me.
 | 38 | D7 Localization | S | ✅ |
 | 39 | E1 Android export | L | ✅ |
 | 40 | E2 macOS export | M | ⬜ |
-| 41 | E3 Web export | L | ⬜ |
+| 41 | E3 Web export | L | 🔨 |
 | 42 | E4 Steam integration | M | ⬜ |
 | 43 | F3 Custom shaders | M | ⬜ |
 | 44 | F2 Video playback | M | ⬜ |

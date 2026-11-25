@@ -31,6 +31,8 @@ pub struct PyGame {
     sources: automata_core::AudioSourcePlayer,
     /// Images drawn by `ctx.screen`.
     hud: crate::screen::HudTextures,
+    /// A stepped run's per-run state (see `run` on the web).
+    stepped: Option<RunQueues>,
 }
 
 #[pymethods]
@@ -105,6 +107,7 @@ impl PyGame {
             resources: Rc::new(RefCell::new(HashMap::new())),
             sources: automata_core::AudioSourcePlayer::new(),
             hud: crate::screen::HudTextures::default(),
+            stepped: None,
         })
     }
 
@@ -134,62 +137,113 @@ impl PyGame {
     /// `max_frames` is reached. Returns the total number of frames run.
     /// Engine failures raise `automata.Error`; exceptions raised by
     /// `update` stop the loop and propagate unchanged.
+    ///
+    /// On the web the browser owns the loop: `run` starts the game and
+    /// returns 0 at once, and each animation frame runs one frame (see
+    /// `Game.stepping` and `Game.on_finish`).
     #[pyo3(signature = (update, max_frames=None))]
     fn run(
-        &mut self,
+        slf: &Bound<'_, Self>,
         py: Python<'_>,
         update: &Bound<'_, PyAny>,
         max_frames: Option<u64>,
     ) -> PyResult<u64> {
-        if self.app.state() == automata_core::AppState::Shutdown {
+        let mut this = slf.borrow_mut();
+        if this.app.state() != automata_core::AppState::Created {
             return Err(AutomataError::new_err(
-                "this game has already shut down; create a new Game to run again",
+                "this game has already run (or is running); create a new Game to run again",
             ));
         }
-
-        let quit: crate::context::QuitFlag = Rc::new(Cell::new(false));
-        let writes: WriteQueue = Rc::new(RefCell::new(FrameWrites::default()));
-        let physics_queue: crate::physics::PhysicsQueue =
-            Rc::new(RefCell::new(crate::physics::PhysicsFrame::default()));
-        let outbox: EventOutbox = Rc::new(RefCell::new(Vec::new()));
-        let resources = Rc::clone(&self.resources);
-        let mut update_error: Option<PyErr> = None;
         crate::components::default_asset_root(py);
-        let screen: crate::screen::ScreenQueue = Rc::default();
-        let audio_commands: crate::audio::AudioCommands = Rc::default();
+        let run = RunQueues::new(&this.resources, update.clone().unbind(), max_frames);
+        if crate::stepped::driver().is_some()
+            && !matches!(this.app.config().window_mode, WindowMode::Headless)
+        {
+            this.app.start_stepped().map_err(|err| core_error(&err))?;
+            this.stepped = Some(run);
+            drop(this);
+            crate::stepped::set_running(Some(slf.clone().unbind()));
+            return Ok(0);
+        }
         let Self {
             app, sources, hud, ..
-        } = self;
-        let mut extras = FrameExtras {
-            sources,
-            hud,
-            screen: &screen,
-            audio_commands: &audio_commands,
-        };
-
+        } = &mut *this;
+        let mut update_error = None;
         let run_result = app.run(|ctx| {
-            run_python_frame(
-                ctx,
-                update,
-                &quit,
-                &writes,
-                &physics_queue,
-                &outbox,
-                &resources,
-                &mut extras,
-                &mut update_error,
-            );
-            let hit_limit = max_frames.is_some_and(|limit| ctx.time().frame_count() >= limit);
-            if quit.get() || update_error.is_some() || hit_limit {
-                ctx.request_quit();
-            }
+            run.frame(py, ctx, sources, hud, &mut update_error);
         });
-
         run_result.map_err(|err| core_error(&err))?;
         if let Some(err) = update_error {
             return Err(err);
         }
-        Ok(self.app.time().frame_count())
+        Ok(this.app.time().frame_count())
+    }
+
+    /// Whether this game is in a stepped run: started by `run`, with the
+    /// platform (the browser) calling each frame.
+    #[getter]
+    fn stepping(&self) -> bool {
+        self.app.is_stepping()
+    }
+
+    /// Calls `callback()` when a stepped run ends — the cleanup that would
+    /// follow `run` on desktop. Outside a stepped run it is called at once.
+    fn on_finish(&mut self, callback: &Bound<'_, PyAny>) -> PyResult<()> {
+        match self.stepped.as_mut() {
+            Some(run) => {
+                run.finish_hooks.push(callback.clone().unbind());
+                Ok(())
+            }
+            None => callback.call0().map(drop),
+        }
+    }
+
+    /// Runs one frame of a stepped run with the platform's step driver.
+    /// Returns whether the game goes on; once it ends (quit, `max_frames`,
+    /// or an exception from `update`, which this re-raises), the engine
+    /// shuts down and the `on_finish` callbacks run.
+    pub(crate) fn step(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<bool> {
+        let Some(drive) = crate::stepped::driver() else {
+            return Err(AutomataError::new_err("no step driver on this platform"));
+        };
+        let mut this = slf.borrow_mut();
+        let Self {
+            app,
+            sources,
+            hud,
+            stepped,
+            ..
+        } = &mut *this;
+        let Some(run) = stepped.as_mut() else {
+            return Err(AutomataError::new_err("this game is not in a stepped run"));
+        };
+        let mut update_error = None;
+        let step = app
+            .step(
+                |ctx| run.frame(py, ctx, sources, hud, &mut update_error),
+                drive,
+            )
+            .map_err(|err| core_error(&err))?;
+        let finished = step == automata_core::platform::FrameStep::Quit || update_error.is_some();
+        if !finished {
+            return Ok(true);
+        }
+        app.finish_stepped();
+        let hooks = stepped
+            .take()
+            .map(|run| run.finish_hooks)
+            .unwrap_or_default();
+        drop(this);
+        crate::stepped::clear_running(slf);
+        let mut result = update_error.map_or(Ok(false), Err);
+        for hook in hooks {
+            if let Err(err) = hook.call0(py) {
+                if result.is_ok() {
+                    result = Err(err);
+                }
+            }
+        }
+        result
     }
 
     /// Requests shutdown from outside the update callback (for example from
@@ -215,6 +269,74 @@ impl PyGame {
         let text = self.scene_to_ron()?;
         std::fs::write(path, text)
             .map_err(|err| pyo3::exceptions::PyIOError::new_err(err.to_string()))
+    }
+}
+
+/// What a run keeps between frames on the Python side: the update
+/// callback and the queues its frame context writes into.
+struct RunQueues {
+    update: Py<PyAny>,
+    max_frames: Option<u64>,
+    quit: crate::context::QuitFlag,
+    writes: WriteQueue,
+    physics_queue: crate::physics::PhysicsQueue,
+    outbox: EventOutbox,
+    resources: ResourceStore,
+    screen: crate::screen::ScreenQueue,
+    audio_commands: crate::audio::AudioCommands,
+    /// `Game.on_finish` callbacks, for a stepped run.
+    finish_hooks: Vec<Py<PyAny>>,
+}
+
+impl RunQueues {
+    fn new(resources: &ResourceStore, update: Py<PyAny>, max_frames: Option<u64>) -> Self {
+        Self {
+            update,
+            max_frames,
+            quit: Rc::new(Cell::new(false)),
+            writes: Rc::new(RefCell::new(FrameWrites::default())),
+            physics_queue: Rc::new(RefCell::new(crate::physics::PhysicsFrame::default())),
+            outbox: Rc::new(RefCell::new(Vec::new())),
+            resources: Rc::clone(resources),
+            screen: Rc::default(),
+            audio_commands: Rc::default(),
+            finish_hooks: Vec::new(),
+        }
+    }
+
+    /// One frame: the Python update, then a quit request when the game
+    /// quit, raised, or reached `max_frames`.
+    fn frame(
+        &self,
+        py: Python<'_>,
+        ctx: &mut AppContext<'_>,
+        sources: &mut automata_core::AudioSourcePlayer,
+        hud: &mut crate::screen::HudTextures,
+        update_error: &mut Option<PyErr>,
+    ) {
+        let mut extras = FrameExtras {
+            sources,
+            hud,
+            screen: &self.screen,
+            audio_commands: &self.audio_commands,
+        };
+        run_python_frame(
+            ctx,
+            self.update.bind(py),
+            &self.quit,
+            &self.writes,
+            &self.physics_queue,
+            &self.outbox,
+            &self.resources,
+            &mut extras,
+            update_error,
+        );
+        let hit_limit = self
+            .max_frames
+            .is_some_and(|limit| ctx.time().frame_count() >= limit);
+        if self.quit.get() || update_error.is_some() || hit_limit {
+            ctx.request_quit();
+        }
     }
 }
 

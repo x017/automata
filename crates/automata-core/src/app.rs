@@ -414,6 +414,8 @@ pub struct Application {
     time: Time,
     quit_requested: bool,
     world: WorldState,
+    /// A stepped run's window settings and frame-to-frame state.
+    stepped: Option<(crate::window::WindowConfig, crate::runtime::RunState)>,
 }
 
 impl Application {
@@ -433,6 +435,7 @@ impl Application {
             time: Time::default(),
             quit_requested: false,
             world,
+            stepped: None,
         }
     }
 
@@ -510,12 +513,14 @@ impl Application {
                 Ok(())
             }
             WindowMode::Windowed(window_config) => {
+                let mut state = crate::runtime::RunState::new(&self.config);
                 let mut runtime = crate::runtime::Runtime::new(
                     &self.config,
                     &window_config,
                     &mut self.time,
                     &mut self.world,
                     &mut self.quit_requested,
+                    &mut state,
                     update,
                 );
                 run_driver(&mut runtime)
@@ -529,6 +534,90 @@ impl Application {
             "automata shut down"
         );
         result
+    }
+
+    /// Starts a *stepped run*, for platforms whose own loop calls the game
+    /// (the web: each `requestAnimationFrame`). Instead of looping until
+    /// the game quits like [`run`](Application::run), this returns at
+    /// once, and the platform calls [`step`](Application::step) per frame
+    /// until it reports the run is over.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidState`] when the application has already run, and
+    /// [`Error::Platform`] for a headless configuration (it has no frames
+    /// to hand out: use [`run`](Application::run)).
+    pub fn start_stepped(&mut self) -> Result<()> {
+        if self.state != AppState::Created {
+            return Err(Error::InvalidState {
+                expected: format!("{:?}", AppState::Created),
+                found: format!("{:?}", self.state),
+            });
+        }
+        let WindowMode::Windowed(window_config) = self.config.window_mode.clone() else {
+            return Err(Error::Platform(
+                "a headless game runs with run(), not stepped".into(),
+            ));
+        };
+        self.state = AppState::Running;
+        info!("entering a stepped run (the platform drives frames)");
+        self.stepped = Some((window_config, crate::runtime::RunState::new(&self.config)));
+        Ok(())
+    }
+
+    /// Whether a stepped run is going on.
+    #[must_use]
+    pub fn is_stepping(&self) -> bool {
+        self.stepped.is_some()
+    }
+
+    /// One step of a stepped run: `drive` gets the engine as a
+    /// [`crate::platform::Host`], exactly as a driver inside
+    /// [`run`](Application::run) does, and typically attaches the surface
+    /// (first step), feeds the frame's input, then calls
+    /// [`frame`](crate::platform::Host::frame) and
+    /// [`render`](crate::platform::Host::render). `update` is the game's
+    /// per-frame callback.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidState`] when no stepped run is going on.
+    pub fn step<R>(
+        &mut self,
+        update: impl FnMut(&mut AppContext<'_>),
+        drive: impl FnOnce(&mut dyn crate::platform::Host) -> R,
+    ) -> Result<R> {
+        let Some((window_config, state)) = self.stepped.as_mut() else {
+            return Err(Error::InvalidState {
+                expected: "a stepped run".into(),
+                found: format!("{:?}", self.state),
+            });
+        };
+        let mut runtime = crate::runtime::Runtime::new(
+            &self.config,
+            window_config,
+            &mut self.time,
+            &mut self.world,
+            &mut self.quit_requested,
+            state,
+            update,
+        );
+        Ok(drive(&mut runtime))
+    }
+
+    /// Ends a stepped run (after a step returned
+    /// [`FrameStep::Quit`](crate::platform::FrameStep::Quit), or when the
+    /// page goes away): the renderer and window state are dropped and the
+    /// application shuts down. Does nothing when no stepped run is going on.
+    pub fn finish_stepped(&mut self) {
+        if self.stepped.take().is_some() {
+            self.state = AppState::Shutdown;
+            info!(
+                frames = self.time.frame_count(),
+                elapsed_seconds = self.time.elapsed_seconds(),
+                "automata shut down"
+            );
+        }
     }
 
     /// The headless main loop: frames as fast as [`EngineConfig::target_fps`]
@@ -605,14 +694,15 @@ fn run_driver(host: &mut dyn crate::runtime::Host) -> Result<()> {
     if let Some(driver) = crate::platform::installed_driver() {
         return driver(host);
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "emscripten")))]
     {
         crate::driver::run(host)
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "emscripten"))]
     {
         Err(Error::Platform(
-            "no window driver installed (the Android build installs SDL's)".into(),
+            "no window driver installed (Android installs SDL's; the web runs games stepped)"
+                .into(),
         ))
     }
 }
@@ -656,6 +746,61 @@ mod tests {
         assert_eq!(observed_state, Some(AppState::Running));
         assert_eq!(app.state(), AppState::Shutdown);
         assert_eq!(app.time().frame_count(), 1);
+    }
+
+    #[test]
+    fn a_stepped_run_hands_out_frames_until_the_game_quits() {
+        use crate::platform::FrameStep;
+        let mut app = Application::new(EngineConfig {
+            target_fps: None,
+            ..EngineConfig::new("Stepped")
+        });
+        assert!(!app.is_stepping());
+        assert!(app.step(|_| {}, |_| ()).is_err(), "no stepped run yet");
+        app.start_stepped().unwrap();
+        assert!(app.is_stepping());
+        assert_eq!(app.state(), AppState::Running);
+        assert!(app.start_stepped().is_err(), "only once");
+
+        let mut frames = 0;
+        let mut steps = 0;
+        loop {
+            steps += 1;
+            let step = app
+                .step(
+                    |ctx| {
+                        frames += 1;
+                        assert_eq!(ctx.input().cursor_position(), Some((1.0, 2.0)));
+                        if frames == 3 {
+                            ctx.request_quit();
+                        }
+                    },
+                    |host| {
+                        assert_eq!(host.title(), "Stepped");
+                        host.input(&automata_input::InputEvent::CursorMoved { x: 1.0, y: 2.0 });
+                        let step = host.frame();
+                        host.render().unwrap(); // no surface yet: nothing to draw
+                        step
+                    },
+                )
+                .unwrap();
+            if step == FrameStep::Quit {
+                break;
+            }
+        }
+        assert_eq!((frames, steps), (3, 3));
+        assert_eq!(app.time().frame_count(), 3);
+        app.finish_stepped();
+        assert!(!app.is_stepping());
+        assert_eq!(app.state(), AppState::Shutdown);
+        assert!(app.run(|_| {}).is_err());
+    }
+
+    #[test]
+    fn a_headless_game_does_not_step() {
+        let mut app = Application::new(test_config());
+        assert!(matches!(app.start_stepped(), Err(Error::Platform(_))));
+        assert_eq!(app.state(), AppState::Created);
     }
 
     #[test]

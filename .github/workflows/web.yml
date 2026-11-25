@@ -1,0 +1,135 @@
+name: Web
+
+# Builds the engine's Python module for Pyodide (web/engine, WebGL2 through
+# wgpu's GL backend under Emscripten), puts the web player together with
+# the spike game, and loads it in headless Chromium (WebGL2 on SwiftShader):
+# frames must advance, the cube must be on screen. Reports the download
+# size and the start-up time. See web/README.md.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, "arena/**"]
+    paths:
+      - "web/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - ".github/workflows/web.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  PYODIDE_VERSION: "314.0.8"
+  PYODIDE_BUILD_VERSION: "0.39.4"
+
+defaults:
+  run:
+    shell: bash
+
+# Reports (logs, screenshots) are published as check runs, so they can be
+# read through the API (android/ci/report.py).
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  check:
+    # Fast feedback: the web crate is fmt- and clippy-clean, on the host
+    # and for the browser target (no Emscripten needed: nothing links).
+    name: check (wasm32-unknown-emscripten)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-emscripten
+          components: clippy, rustfmt
+      - name: Linux packages
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libudev-dev
+      - name: fmt
+        run: cargo fmt --manifest-path web/engine/Cargo.toml --check
+      - name: clippy
+        env:
+          PYO3_CROSS_PYTHON_VERSION: "3.14"
+        run: |
+          s=0
+          cargo clippy --manifest-path web/engine/Cargo.toml -- -D warnings 2>&1 | tee clippy.log || s=1
+          cargo clippy --manifest-path web/engine/Cargo.toml \
+            --target wasm32-unknown-emscripten -- -D warnings 2>&1 | tee -a clippy.log || s=1
+          exit $s
+      - name: Report clippy
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 android/ci/report.py "web: clippy log" --log clippy.log --lines 300
+
+  player:
+    name: Pyodide wheel and browser smoke test
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # pyodide-build wants the host Python to match Pyodide's.
+          python-version: "3.14"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: pyodide-build
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pyodide-build==${PYODIDE_BUILD_VERSION}" pillow
+
+      - name: Build the wheel
+        run: |
+          s=0
+          web/ci/build_wheel.sh > build.log 2>&1 || s=1
+          tail -60 build.log
+          exit $s
+
+      - name: Build log (on failure)
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f build.log ]; then
+            python3 android/ci/report.py "web: wheel build log" --log build.log --lines 500 \
+              --exclude '^\s+(Compiling|Downloaded|Downloading) '
+          fi
+
+      - name: Package the player
+        run: web/ci/package.sh
+
+      - name: Chromium
+        working-directory: web/ci
+        run: |
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1
+          npx playwright install --with-deps chromium
+
+      - name: Smoke test
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          (cd web/dist/site && python -m http.server 8000 --bind 127.0.0.1 > ../server.log 2>&1 &)
+          sleep 1
+          s=0
+          NODE_PATH=web/ci/node_modules node web/ci/smoke.mjs http://127.0.0.1:8000/ web/dist/site || s=1
+          python3 web/ci/check_screenshot.py web/dist/smoke/screenshot.png | tee -a web/dist/smoke/report.txt || s=1
+          { echo '### Web player'; echo '```'; head -30 web/dist/smoke/report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python3 android/ci/report.py "web: smoke" --log web/dist/smoke/report.txt --lines 400 \
+            --conclusion $([ $s = 0 ] && echo neutral || echo failure)
+          python3 android/ci/report.py "web: screenshot" --image web/dist/smoke/screenshot.jpg
+          exit $s
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: automata-web
+          path: |
+            web/dist/site
+            web/dist/smoke

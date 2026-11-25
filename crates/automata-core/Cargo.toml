@@ -32,5 +32,5 @@ tracing-subscriber.workspace = true
 thiserror.workspace = true
 
 # Desktop windows. Android gets its window from SDL (android/engine).
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "emscripten")))'.dependencies]
 winit.workspace = true

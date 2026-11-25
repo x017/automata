@@ -24,12 +24,12 @@ pub enum Error {
     Io(#[from] std::io::Error),
 
     /// The OS event loop failed to start or run.
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "emscripten")))]
     #[error("event loop error: {0}")]
     EventLoop(#[from] winit::error::EventLoopError),
 
     /// Window creation failed (for example, no display is available).
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "emscripten")))]
     #[error("window error: {0}")]
     Window(#[from] winit::error::OsError),
 

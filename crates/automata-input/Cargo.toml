@@ -11,5 +11,5 @@ publish = false
 [lints]
 workspace = true
 
-[dependencies]
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
 gilrs.workspace = true

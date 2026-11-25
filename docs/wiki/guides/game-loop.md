@@ -84,6 +84,16 @@ The identical loop without window, GPU, or OS input events. Physics,
 events, resources, and your logic all run; `MeshRenderer` components are
 inert (no GPU exists to materialize them). See [Testing](testing.md).
 
+## In the browser
+
+A web page can't sit in a loop: the browser calls it once per animation
+frame. So in a web build `game.run()` starts the game and **returns at
+once** (0), and the page runs each frame. Your update, events and scenes
+work the same; only code written *after* `game.run()` runs right away
+instead of after the game ends. Put cleanup in `game.on_finish(fn)`, which
+runs when the game ends there, and at once on desktop (by then `run` has
+returned). `game.stepping` tells you which case you're in.
+
 ## Errors
 
 - Engine failures (lost GPU device, window errors) raise `automata.Error`.

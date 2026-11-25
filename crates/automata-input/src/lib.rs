@@ -19,10 +19,16 @@
 //! [`InputEvent`]s for [`InputState::handle_event`].
 
 mod gamepad;
+#[cfg(not(target_os = "emscripten"))]
+mod gamepad_gilrs;
+#[cfg(target_os = "emscripten")]
+mod gamepad_web;
 mod keys;
 mod mapping;
 mod state;
 
+#[cfg(target_os = "emscripten")]
+pub use gamepad::PadSnapshot;
 pub use gamepad::{GamepadAxis, GamepadButton, GamepadEvent, GamepadId, Gamepads};
 pub use mapping::{ActionMap, AxisBinding, Binding};
 pub use state::{InputState, Touch};
