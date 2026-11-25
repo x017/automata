@@ -191,6 +191,7 @@ dependencies = [
  "automata-assets",
  "automata-core",
  "automata-physics",
+ "base64",
  "crc32fast",
  "flate2",
  "getrandom 0.4.3",

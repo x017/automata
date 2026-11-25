@@ -14,6 +14,9 @@
 #    walks the player forward into the coin ahead (3-stick.png);
 # 6. the Jump button lights up while it's held (4-jump.png).
 #
+# It also writes startup.txt: how long the first start (which unpacks
+# Python and the game) and a later one take to reach each milestone.
+#
 #   android/ci/coin_run_test.sh APK [OUT_DIR]
 set -euo pipefail
 
@@ -24,6 +27,16 @@ mkdir -p "$out"
 
 # shellcheck source=android/ci/lib.sh
 . "$(dirname "$0")/lib.sh"
+
+# The milestones of a start, in order (see startup_times in lib.sh).
+milestones=(
+  "window_shown=Displayed.*$pkg"
+  "Python_starts=Initializing.Python.for.Android"
+  "Python_ready=Initialized.python"
+  "game_unpacked=automata:.unpacked.the.game"
+  "GPU_ready=window.and.GPU.context.ready"
+  "scene_running=Collect.[0-9]+.coins"
+)
 
 # The preset F2 picked last, from rules.py's "Graphics: <preset>" line.
 last_preset() { log | sed -n 's/.*Graphics: \([a-z]*\).*/\1/p' | tail -1; }
@@ -43,6 +56,7 @@ wait_for "Collect [0-9]+ coins" 240
 log | grep -q "automata: unpacked the game" ||
   { echo "::error::the game wasn't unpacked from the APK"; exit 1; }
 wait_for "window and GPU context ready" 60
+startup_times "first start (unpacks Python and the game)" "${milestones[@]}"
 sleep 6
 shot coin-1-start
 
@@ -78,6 +92,7 @@ adb logcat -c
 launch
 wait_for "Collect [0-9]+ coins" 120
 wait_for "window and GPU context ready" 60
+startup_times "later start (after Android killed it)" "${milestones[@]}"
 sleep 3
 adb shell input keyevent KEYCODE_F2
 wait_for "Graphics: " 30

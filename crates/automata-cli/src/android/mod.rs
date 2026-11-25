@@ -15,6 +15,7 @@
 pub mod axml;
 pub mod der;
 pub mod key;
+pub mod pem;
 pub mod sha256;
 pub mod sign;
 pub mod zip;
@@ -100,11 +101,40 @@ pub fn build_apk(
     game: &[(String, Vec<u8>)],
     key: &RsaKey,
 ) -> Result<Vec<u8>, String> {
+    build_apk_for(template, patch, game, key, &[])
+}
+
+/// The ABI a `lib/<abi>/…` entry is for.
+fn lib_abi(name: &str) -> Option<&str> {
+    name.strip_prefix("lib/")?
+        .split_once('/')
+        .map(|(abi, _)| abi)
+}
+
+/// [`build_apk`] with only the native code for `abis` (all when empty).
+///
+/// # Errors
+///
+/// As [`build_apk`], and when the template has no code for one of `abis`.
+pub fn build_apk_for(
+    template: &[u8],
+    patch: &ManifestPatch,
+    game: &[(String, Vec<u8>)],
+    key: &RsaKey,
+    abis: &[String],
+) -> Result<Vec<u8>, String> {
     let mut entries = Vec::new();
     let mut found = (false, false);
+    let mut have = std::collections::BTreeSet::new();
     for e in zip::read(template)? {
         if old_signature(&e.name) || e.name.starts_with("assets/automata/") {
             continue;
+        }
+        if let Some(abi) = lib_abi(&e.name) {
+            have.insert(abi.to_string());
+            if !abis.is_empty() && !abis.iter().any(|a| a == abi) {
+                continue;
+            }
         }
         match e.name.as_str() {
             "AndroidManifest.xml" => {
@@ -130,6 +160,13 @@ pub fn build_apk(
     }
     if found != (true, true) {
         return Err("the template is not an APK (no manifest or resources)".into());
+    }
+    if let Some(missing) = abis.iter().find(|a| !have.contains(*a)) {
+        let list: Vec<&str> = have.iter().map(String::as_str).collect();
+        return Err(format!(
+            "the template has no {missing} code (it has: {}); check android.abis",
+            list.join(", ")
+        ));
     }
     for (name, bytes) in game {
         entries.push(zip::Entry::new(&format!("{GAME_PREFIX}{name}"), bytes));
@@ -200,6 +237,7 @@ pub fn export_with_key(
             "Android: the app ID is {package}. Set your own (android.package in build.ron, or Build Settings) before publishing: it can't change once people install the game."
         )));
     }
+    let (key, signed_with) = signing_key(project, cfg, key_file, progress)?;
     let folder = project.join(&cfg.output).join(Target::Android.name());
     let game_dir = folder.join("game");
     let n = crate::copy_game(project, cfg, &game_dir)?;
@@ -209,25 +247,29 @@ pub fn export_with_key(
     let game = game?;
     progress(Message::info(format!("Android: game ({n} files)")));
 
-    let (key, new) = key::load_or_create(key_file)?;
-    if new {
-        progress(Message::info(format!(
-            "Android: made a debug signing key in {}. Keep it: builds signed with another key can't install over these.",
-            key_file.display()
-        )));
-    }
     let patch = ManifestPatch {
         package: package.clone(),
         label: cfg.name.trim().to_string(),
         version_code: cfg.android.version_code.max(1),
         version_name: cfg.version.trim().to_string(),
     };
-    let apk = build_apk(&template_bytes, &patch, &game, &key)
+    let abis: Vec<String> = cfg
+        .android
+        .abis
+        .iter()
+        .map(|a| a.trim().to_string())
+        .collect();
+    let apk = build_apk_for(&template_bytes, &patch, &game, &key, &abis)
         .map_err(|e| format!("{}: {e}", template_apk.display()))?;
     let path = folder.join(format!("{}-{}.apk", cfg.file_name(), cfg.version.trim()));
     std::fs::write(&path, &apk).map_err(|e| format!("{}: {e}", path.display()))?;
+    let abis = if abis.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", abis.join(", "))
+    };
     progress(Message::info(format!(
-        "Android: {package}, {:.1} MB, signed with the debug key (SHA-256 {})",
+        "Android: {package}{abis}, {:.1} MB, signed with {signed_with} (SHA-256 {})",
         apk.len() as f64 / 1e6,
         &sign::certificate_fingerprint(&key)[..23]
     )));
@@ -239,6 +281,43 @@ pub fn export_with_key(
         archive: None,
         standalone: true,
     })
+}
+
+/// The key a build signs with, and how to name it in messages: the
+/// release key when one is set (`android.key` or
+/// `$AUTOMATA_ANDROID_RELEASE_KEY`), else the debug key in `debug_file`,
+/// made on first use.
+fn signing_key(
+    project: &Path,
+    cfg: &BuildConfig,
+    debug_file: &Path,
+    progress: &mut dyn FnMut(Message),
+) -> Result<(RsaKey, String), String> {
+    if let Some(path) = pem::release_key_path(project, &cfg.android.key) {
+        let inside = |p: &Path| {
+            let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+            real(p).starts_with(real(project))
+        };
+        if inside(&path) {
+            return Err(format!(
+                "the release key {} is inside the project folder: move it out (it would ship inside the game, and end up in version control)",
+                path.display()
+            ));
+        }
+        let key = pem::load_release_key(&path)?;
+        return Ok((key, format!("your release key {}", path.display())));
+    }
+    let (key, new) = key::load_or_create(debug_file)?;
+    if new {
+        progress(Message::info(format!(
+            "Android: made a debug signing key in {}. Keep it: builds signed with another key can't install over these.",
+            debug_file.display()
+        )));
+    }
+    progress(Message::info(
+        "Android: signing with this machine's debug key, for testing. To publish, make your own key (automata-cli keygen FILE) and set android.key in build.ron.",
+    ));
+    Ok((key, "the debug key".into()))
 }
 
 /// The installed Android template folder's APK, if there is one.
@@ -267,6 +346,33 @@ pub(crate) mod tests {
             zip::Entry::new("assets/private.tar", b"player"),
         ];
         zip::write(&entries).concat()
+    }
+
+    #[test]
+    fn builds_keep_only_the_chosen_abis() {
+        let key = test_key();
+        let patch = ManifestPatch {
+            package: "com.example.coinrun".into(),
+            label: "Coin Run".into(),
+            version_code: 1,
+            version_name: "0.1.0".into(),
+        };
+        let x86 = vec!["x86_64".to_string()];
+        let apk = build_apk_for(&template(), &patch, &[], &key, &x86).unwrap();
+        let names: Vec<String> = zip::read(&apk)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert!(
+            names.contains(&"lib/x86_64/libpython.so".to_string()),
+            "{names:?}"
+        );
+        let phones = vec!["arm64-v8a".to_string()];
+        let err = build_apk_for(&template(), &patch, &[], &key, &phones).unwrap_err();
+        assert!(err.contains("no arm64-v8a code (it has: x86_64)"), "{err}");
+        assert_eq!(lib_abi("lib/arm64-v8a/libmain.so"), Some("arm64-v8a"));
+        assert_eq!(lib_abi("assets/lib/x.so"), None);
     }
 
     fn test_key() -> RsaKey {

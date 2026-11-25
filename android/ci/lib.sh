@@ -50,5 +50,33 @@ stacks() {
 
 shot() { adb exec-out screencap -p > "$out/$1.png"; }
 
+# Appends how long a start took to $out/startup.txt: each milestone in
+# seconds after Android started the app's process, from the logcat's
+# timestamps. $1 names the start; the rest are "label=pattern" pairs, in
+# the order they happen.
+startup_times() {
+  local name="$1"
+  shift
+  adb logcat -d -v epoch | awk -v name="$name" -v pkg="$pkg" -v specs="$*" '
+    BEGIN { n = split(specs, pairs, " ") }
+    !t0 && /Start proc [0-9]+:/ && index($0, ":" pkg "/") { t0 = $1 }
+    t0 {
+      for (i = 1; i <= n; i++) {
+        split(pairs[i], kv, "=")
+        if (!(i in at) && $0 ~ kv[2]) at[i] = $1
+      }
+    }
+    END {
+      printf "%s\n", name
+      if (!t0) { print "  (no \"Start proc\" line in the log)"; exit }
+      for (i = 1; i <= n; i++) {
+        split(pairs[i], kv, "=")
+        label = kv[1]; gsub(/_/, " ", label)
+        if (i in at) printf "  %-28s %6.2f s\n", label, at[i] - t0
+        else printf "  %-28s      -\n", label
+      }
+    }' | tee -a "$out/startup.txt"
+}
+
 launch() { adb shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 > /dev/null; }
 

@@ -150,6 +150,7 @@ impl FileDialog {
             DialogKind::ImportFont => "Import Font",
             DialogKind::BuildScene => "Choose Start Scene",
             DialogKind::BuildOutput => "Choose Output Folder",
+            DialogKind::BuildKey => "Choose Android Release Key",
             DialogKind::PythonInterpreter => "Choose Python Interpreter",
             DialogKind::Shortcuts | DialogKind::About => "",
         }
@@ -167,6 +168,7 @@ impl FileDialog {
             DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => "mat.ron",
             DialogKind::ChooseMaterialMap(_) => "png",
             DialogKind::BuildOutput | DialogKind::PythonInterpreter => "",
+            DialogKind::BuildKey => "pem",
             _ => "ron",
         }
     }
@@ -183,6 +185,7 @@ impl FileDialog {
             DialogKind::SavePrefab(_) | DialogKind::InstantiatePrefab => ".prefab",
             DialogKind::OpenScript | DialogKind::NewScript | DialogKind::AttachScript(_) => ".py",
             DialogKind::BuildOutput => "folders",
+            DialogKind::BuildKey => ".pem .key",
             DialogKind::PythonInterpreter => "all files",
             _ => ".ron",
         }
@@ -198,6 +201,9 @@ impl FileDialog {
             DialogKind::ImportFont => crate::fonts::is_font_path(Path::new(name)),
             DialogKind::BuildOutput => false,
             DialogKind::PythonInterpreter => true,
+            DialogKind::BuildKey => Path::new(name)
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("pem") || x.eq_ignore_ascii_case("key")),
             DialogKind::NewUiScreen => crate::uidoc::is_ui_doc_path(Path::new(name)),
             DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => {
                 automata_assets::is_material_path(Path::new(name))
@@ -243,6 +249,7 @@ impl FileDialog {
                 | DialogKind::ImportSound(_)
                 | DialogKind::ImportFont
                 | DialogKind::BuildScene
+                | DialogKind::BuildKey
                 | DialogKind::PythonInterpreter
                 | DialogKind::ChooseMaterial(_)
                 | DialogKind::ChooseMaterialMap(_)
@@ -268,6 +275,7 @@ impl FileDialog {
             DialogKind::ImportModel(Some(_))
             | DialogKind::ImportSound(Some(_))
             | DialogKind::BuildScene
+            | DialogKind::BuildKey
             | DialogKind::PythonInterpreter => "Choose",
             DialogKind::BuildOutput => "Use This Folder",
             _ => "Save",
@@ -279,6 +287,7 @@ impl FileDialog {
         match self.kind {
             DialogKind::BuildOutput => "folder",
             DialogKind::PythonInterpreter => "python",
+            DialogKind::BuildKey => "key",
             DialogKind::ImportModel(_) => "model",
             DialogKind::ImportSound(_) => "sound",
             DialogKind::ImportFont => "font",
@@ -552,7 +561,9 @@ impl Ui {
     /// file to start on.
     pub(super) fn open_file_dialog(&mut self, kind: DialogKind, doc: Option<&Document>) {
         let return_to = match kind {
-            DialogKind::BuildScene | DialogKind::BuildOutput => Some(SettingsPage::Build),
+            DialogKind::BuildScene | DialogKind::BuildOutput | DialogKind::BuildKey => {
+                Some(SettingsPage::Build)
+            }
             DialogKind::PythonInterpreter => Some(SettingsPage::Python),
             _ => None,
         };
@@ -649,6 +660,15 @@ impl Ui {
                 let dir = root.join("ui");
                 let _ = std::fs::create_dir_all(&dir);
                 Some("ui")
+            }
+            DialogKind::BuildKey => {
+                let dir = crate::build::suggested_release_key_path("game");
+                return dir
+                    .parent()
+                    .filter(|d| d.is_dir())
+                    .map(Path::to_path_buf)
+                    .or_else(files::home_dir)
+                    .unwrap_or(root);
             }
             DialogKind::PythonInterpreter => {
                 if Path::new("/usr/bin").is_dir() {
@@ -775,6 +795,11 @@ impl Ui {
             }
             DialogKind::PythonInterpreter => {
                 (String::new(), self.prefs.python.clone().map(PathBuf::from))
+            }
+            DialogKind::BuildKey => {
+                let set = self.build_settings().android.key.clone();
+                let root = self.project_root.clone();
+                (String::new(), crate::build::release_key_path(&root, &set))
             }
             _ => (String::new(), None),
         }
@@ -1296,6 +1321,10 @@ impl Ui {
             DialogKind::PythonInterpreter => {
                 self.close_file_dialog();
                 return self.commit_setting(SettingText::Python, &path.display().to_string());
+            }
+            DialogKind::BuildKey => {
+                self.close_file_dialog();
+                return self.commit_setting(SettingText::BuildKey, &path.display().to_string());
             }
             DialogKind::Shortcuts | DialogKind::About => return None,
         };

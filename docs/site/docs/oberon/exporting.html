@@ -61,7 +61,7 @@ Its progress appears in the status bar and the Console. If anything
 fails, the Console opens and lists every problem: a missing script, a
 scene that won't load, or a missing template. <strong>Open build folder</strong> shows
 the result in your file manager.</p>
-<div class="table"><table><thead><tr><th>Setting</th><th>What it does</th></tr></thead><tbody><tr><td>Game name</td><td>Window title, executable name and folder name</td></tr><tr><td>Version</td><td>Used in archive names, e.g. <code>Coin Run-0.1.0-linux-x86_64.zip</code></td></tr><tr><td>Start scene</td><td>The scene the game opens. If empty, the build uses the scene open in Oberon.</td></tr><tr><td>Output folder</td><td>Where builds go, relative to the project (<code>build</code>)</td></tr><tr><td>Android app ID</td><td>The app's unique ID on Android, like <code>com.yourname.coinrun</code>. Empty: <code>com.example.&lt;name&gt;</code>, fine for testing</td></tr><tr><td>Android version code</td><td>A whole number Android compares to decide what's an update. Raise it for each release</td></tr><tr><td>Platforms</td><td>What <strong>Build</strong> / Ctrl+Shift+B exports. <strong>Build ▸ Build for Linux / Windows / Android</strong> exports just one.</td></tr><tr><td>Archive</td><td>Also write a <code>.zip</code> / <code>.tar.gz</code> of each build</td></tr><tr><td>Touch controls</td><td>An on-screen stick and buttons that hold the game's keys on touch screens. Turning it on writes a stick for WASD and a Jump button for Space; change them in <code>build.ron</code> (<a href="../guides/touch-controls.html">Touch controls</a>)</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Setting</th><th>What it does</th></tr></thead><tbody><tr><td>Game name</td><td>Window title, executable name and folder name</td></tr><tr><td>Version</td><td>Used in archive names, e.g. <code>Coin Run-0.1.0-linux-x86_64.zip</code></td></tr><tr><td>Start scene</td><td>The scene the game opens. If empty, the build uses the scene open in Oberon.</td></tr><tr><td>Output folder</td><td>Where builds go, relative to the project (<code>build</code>)</td></tr><tr><td>Android app ID</td><td>The app's unique ID on Android, like <code>com.yourname.coinrun</code>. Empty: <code>com.example.&lt;name&gt;</code>, fine for testing</td></tr><tr><td>Android version code</td><td>A whole number Android compares to decide what's an update. Raise it for each release</td></tr><tr><td>Android release key</td><td>Your signing key for publishing (<a href="#signing">Signing</a> below). <strong>New</strong> makes one; the folder button picks one you have. Empty: this machine's debug key, for testing</td></tr><tr><td>Android processors</td><td>Which processor types the APK holds code for: <code>arm64-v8a</code> (phones and tablets) and <code>x86_64</code> (emulators on PCs). Empty: both. <code>arm64-v8a</code> alone makes a smaller APK for phones</td></tr><tr><td>Platforms</td><td>What <strong>Build</strong> / Ctrl+Shift+B exports. <strong>Build ▸ Build for Linux / Windows / Android</strong> exports just one.</td></tr><tr><td>Archive</td><td>Also write a <code>.zip</code> / <code>.tar.gz</code> of each build</td></tr><tr><td>Touch controls</td><td>An on-screen stick and buttons that hold the game's keys on touch screens. Turning it on writes a stick for WASD and a Jump button for Space; change them in <code>build.ron</code> (<a href="../guides/touch-controls.html">Touch controls</a>)</td></tr></tbody></table></div>
 <p>Settings are saved to <code>build.ron</code> in the project folder, so commit it with
 your project. Each build leaves out <code>.oberon/</code>, <code>__pycache__/</code>, version
 control folders, virtual environments (under any name) and installed
@@ -75,7 +75,12 @@ means a folder:</p>
     targets: [<span class="tok-t">Linux</span>, <span class="tok-t">Windows</span>, <span class="tok-t">Android</span>],
     archive: <span class="tok-k">true</span>,
     exclude: [<span class="tok-s">&quot;tests/&quot;</span>, <span class="tok-s">&quot;art/source/&quot;</span>],
-    android: (package: <span class="tok-s">&quot;com.yourname.coinrun&quot;</span>, version_code: <span class="tok-n">1</span>),
+    android: (
+        package: <span class="tok-s">&quot;com.yourname.coinrun&quot;</span>,
+        version_code: <span class="tok-n">1</span>,
+        key: <span class="tok-s">&quot;~/keys/coinrun-release.pem&quot;</span>,  <span class="tok-c">// optional: your release key</span>
+        abis: [<span class="tok-s">&quot;arm64-v8a&quot;</span>],                <span class="tok-c">// optional: phones only</span>
+    ),
 )</code></pre></div>
 <h2 id="export-templates">Export templates<a class="anchor" href="#export-templates" aria-label="Link to this section">#</a></h2>
 <p>An export doesn't compile anything. It copies a prebuilt <strong>export
@@ -135,16 +140,45 @@ that app first.</p>
 <p>The first time the game starts, it unpacks its files into the app's
 storage, which takes a moment. After that it starts straight away, until an
 update brings different files. Saves and settings stay through updates.</p>
-<p><strong>Signing.</strong> Android only installs signed apps, and only accepts an update
-signed by the same key. The first Android build makes a <em>debug key</em> for
-your machine, like Android Studio does, and every build after that uses
-it. The key is saved as <code>android-debug.key</code> in <code>~/.config/automata/</code>
-(Linux, macOS) or <code>%APPDATA%\automata\</code> (Windows), or wherever
-<code>AUTOMATA_ANDROID_KEY</code> points. Keep this file. If you build on another
-machine, copy the key there too, or that machine's builds won't install
-over yours. Debug signing is fine for your own phones and for testers.
-Publishing on Google Play needs your own release key; support for that is
-coming.</p>
+<h3 id="signing">Signing<a class="anchor" href="#signing" aria-label="Link to this section">#</a></h3>
+<p>Android only installs signed apps, and only accepts an update signed by
+the same key.</p>
+<p><strong>Debug key (testing).</strong> Without a release key, the first Android build
+makes a <em>debug key</em> for your machine, like Android Studio does, and every
+build after that uses it. It's saved as <code>android-debug.key</code> in
+<code>~/.config/automata/</code> (Linux, macOS) or <code>%APPDATA%\automata\</code> (Windows),
+or wherever <code>AUTOMATA_ANDROID_KEY</code> points. Builds on another machine
+won't install over yours unless you copy the key there too. It's fine for
+your own phones and for testers.</p>
+<p><strong>Release key (publishing).</strong> To publish the game, sign it with a key of
+your own. Make one in <strong>Settings ▸ Build ▸ Android release key ▸ New</strong>, or
+on the command line:</p>
+<div class="codeblock" data-lang="bash"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>automata-cli keygen ~/keys/coinrun-release.pem --name &quot;Your Name&quot;</code></pre></div>
+<p>That writes a 2048-bit RSA key and a self-signed certificate with your
+name, valid until 2076, into one PEM file that only you can read. Point
+<code>android.key</code> in <code>build.ron</code> at it (Oberon's <strong>New</strong> does that for you),
+or pass <code>--key FILE</code> to <code>automata-cli build</code>, or set
+<code>AUTOMATA_ANDROID_RELEASE_KEY</code> (handy for a CI secret). Relative paths
+are from the project folder and <code>~/</code> is your home folder. The key must
+live <em>outside</em> the project folder, so it can't end up in the game or in
+version control. A build refuses a key inside it.</p>
+<p>Back the key up somewhere safe. Every update of your game has to be signed
+with it, and a lost key can't be replaced: players would have to uninstall
+and install the game again.</p>
+<p><strong>A key you already have</strong> works too, for example from Android Studio or
+an earlier release. Its certificate comes with it, so updates install over
+the versions you've already published. Convert the keystore to an
+unencrypted PEM file once:</p>
+<div class="codeblock" data-lang="bash"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>keytool -importkeystore -srckeystore release.jks -destkeystore release.p12 -deststoretype PKCS12
+openssl pkcs12 -in release.p12 -nodes -out release.pem</code></pre></div>
+<p>PEM files with <code>BEGIN PRIVATE KEY</code> (PKCS #8) or <code>BEGIN RSA PRIVATE KEY</code>
+(PKCS #1) keys, with or without a certificate, all work. Keys with a
+password don't yet (decrypt them as above), and only RSA keys of 2048
+bits or more are accepted.</p>
+<p><strong>Stores.</strong> The <code>.apk</code> installs directly and suits stores and sites that
+take APKs (itch.io, F-Droid-style repositories, sideloading). Google Play
+wants new apps as an Android App Bundle (<code>.aab</code>), which AUTOMATA can't
+make yet.</p>
 <p><strong>App ID.</strong> Choose it before anyone installs your game. Android treats a
 different ID as a different app. Use letters, digits and <code>_</code>, in at least
 two parts separated by dots (<code>com.yourname.coinrun</code>).</p>
@@ -183,7 +217,7 @@ Signature Scheme v2.</p>
     <footer class="pager"><a class="prev" href="editor-workflow.html"><small>Previous</small>Editor workflow</a><a class="next" href="shortcuts.html"><small>Next</small>Keyboard shortcuts</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/exporting.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#build-from-oberon">Build from Oberon</a></li><li class="l2"><a href="#export-templates">Export templates</a></li><li class="l2"><a href="#build-from-the-command-line">Build from the command line</a></li><li class="l2"><a href="#android">Android</a></li><li class="l2"><a href="#running-an-exported-game">Running an exported game</a></li><li class="l2"><a href="#how-it-works">How it works</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#build-from-oberon">Build from Oberon</a></li><li class="l2"><a href="#export-templates">Export templates</a></li><li class="l2"><a href="#build-from-the-command-line">Build from the command line</a></li><li class="l2"><a href="#android">Android</a></li><li class="l3"><a href="#signing">Signing</a></li><li class="l2"><a href="#running-an-exported-game">Running an exported game</a></li><li class="l2"><a href="#how-it-works">How it works</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

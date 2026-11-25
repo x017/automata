@@ -47,6 +47,8 @@ the result in your file manager.
 | Output folder | Where builds go, relative to the project (`build`) |
 | Android app ID | The app's unique ID on Android, like `com.yourname.coinrun`. Empty: `com.example.<name>`, fine for testing |
 | Android version code | A whole number Android compares to decide what's an update. Raise it for each release |
+| Android release key | Your signing key for publishing ([Signing](#signing) below). **New** makes one; the folder button picks one you have. Empty: this machine's debug key, for testing |
+| Android processors | Which processor types the APK holds code for: `arm64-v8a` (phones and tablets) and `x86_64` (emulators on PCs). Empty: both. `arm64-v8a` alone makes a smaller APK for phones |
 | Platforms | What **Build** / Ctrl+Shift+B exports. **Build ▸ Build for Linux / Windows / Android** exports just one. |
 | Archive | Also write a `.zip` / `.tar.gz` of each build |
 | Touch controls | An on-screen stick and buttons that hold the game's keys on touch screens. Turning it on writes a stick for WASD and a Jump button for Space; change them in `build.ron` ([Touch controls](../guides/touch-controls.md)) |
@@ -66,7 +68,12 @@ BuildConfig(
     targets: [Linux, Windows, Android],
     archive: true,
     exclude: ["tests/", "art/source/"],
-    android: (package: "com.yourname.coinrun", version_code: 1),
+    android: (
+        package: "com.yourname.coinrun",
+        version_code: 1,
+        key: "~/keys/coinrun-release.pem",  // optional: your release key
+        abis: ["arm64-v8a"],                // optional: phones only
+    ),
 )
 ```
 
@@ -159,16 +166,59 @@ The first time the game starts, it unpacks its files into the app's
 storage, which takes a moment. After that it starts straight away, until an
 update brings different files. Saves and settings stay through updates.
 
-**Signing.** Android only installs signed apps, and only accepts an update
-signed by the same key. The first Android build makes a *debug key* for
-your machine, like Android Studio does, and every build after that uses
-it. The key is saved as `android-debug.key` in `~/.config/automata/`
-(Linux, macOS) or `%APPDATA%\automata\` (Windows), or wherever
-`AUTOMATA_ANDROID_KEY` points. Keep this file. If you build on another
-machine, copy the key there too, or that machine's builds won't install
-over yours. Debug signing is fine for your own phones and for testers.
-Publishing on Google Play needs your own release key; support for that is
-coming.
+### Signing
+
+Android only installs signed apps, and only accepts an update signed by
+the same key.
+
+**Debug key (testing).** Without a release key, the first Android build
+makes a *debug key* for your machine, like Android Studio does, and every
+build after that uses it. It's saved as `android-debug.key` in
+`~/.config/automata/` (Linux, macOS) or `%APPDATA%\automata\` (Windows),
+or wherever `AUTOMATA_ANDROID_KEY` points. Builds on another machine
+won't install over yours unless you copy the key there too. It's fine for
+your own phones and for testers.
+
+**Release key (publishing).** To publish the game, sign it with a key of
+your own. Make one in **Settings ▸ Build ▸ Android release key ▸ New**, or
+on the command line:
+
+```bash
+automata-cli keygen ~/keys/coinrun-release.pem --name "Your Name"
+```
+
+That writes a 2048-bit RSA key and a self-signed certificate with your
+name, valid until 2076, into one PEM file that only you can read. Point
+`android.key` in `build.ron` at it (Oberon's **New** does that for you),
+or pass `--key FILE` to `automata-cli build`, or set
+`AUTOMATA_ANDROID_RELEASE_KEY` (handy for a CI secret). Relative paths
+are from the project folder and `~/` is your home folder. The key must
+live *outside* the project folder, so it can't end up in the game or in
+version control. A build refuses a key inside it.
+
+Back the key up somewhere safe. Every update of your game has to be signed
+with it, and a lost key can't be replaced: players would have to uninstall
+and install the game again.
+
+**A key you already have** works too, for example from Android Studio or
+an earlier release. Its certificate comes with it, so updates install over
+the versions you've already published. Convert the keystore to an
+unencrypted PEM file once:
+
+```bash
+keytool -importkeystore -srckeystore release.jks -destkeystore release.p12 -deststoretype PKCS12
+openssl pkcs12 -in release.p12 -nodes -out release.pem
+```
+
+PEM files with `BEGIN PRIVATE KEY` (PKCS #8) or `BEGIN RSA PRIVATE KEY`
+(PKCS #1) keys, with or without a certificate, all work. Keys with a
+password don't yet (decrypt them as above), and only RSA keys of 2048
+bits or more are accepted.
+
+**Stores.** The `.apk` installs directly and suits stores and sites that
+take APKs (itch.io, F-Droid-style repositories, sideloading). Google Play
+wants new apps as an Android App Bundle (`.aab`), which AUTOMATA can't
+make yet.
 
 **App ID.** Choose it before anyone installs your game. Android treats a
 different ID as a different app. Use letters, digits and `_`, in at least

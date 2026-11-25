@@ -71,6 +71,10 @@ pub enum SettingText {
     BuildPackage,
     /// Build: the Android version code.
     BuildVersionCode,
+    /// Build: the Android release key file.
+    BuildKey,
+    /// Build: the Android processor types.
+    BuildAbis,
 }
 
 const ROW: f32 = 52.0;
@@ -115,7 +119,9 @@ impl Ui {
             | SettingText::BuildScene
             | SettingText::BuildOutput
             | SettingText::BuildPackage
-            | SettingText::BuildVersionCode => {
+            | SettingText::BuildVersionCode
+            | SettingText::BuildKey
+            | SettingText::BuildAbis => {
                 self.commit_build_text(which, value);
                 return None;
             }
@@ -563,6 +569,13 @@ impl Ui {
                     "the Android version code must be a whole number from 1 up, not `{v}`"
                 )),
             },
+            (SettingText::BuildAbis, Some(v)) => crate::build::parse_android_abis(v).err(),
+            (SettingText::BuildKey, Some(v)) => {
+                let root = self.project_root.clone();
+                crate::build::release_key_path(&root, v)
+                    .map(|p| crate::build::load_release_key(&p))
+                    .and_then(Result::err)
+            }
             _ => None,
         };
         if let Some(problem) = problem {
@@ -587,9 +600,41 @@ impl Ui {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(defaults.android.version_code);
             }
+            SettingText::BuildKey => cfg.android.key = value.unwrap_or_default(),
+            SettingText::BuildAbis => {
+                cfg.android.abis = value
+                    .and_then(|v| crate::build::parse_android_abis(&v).ok())
+                    .unwrap_or_default();
+            }
             SettingText::Python | SettingText::LanguageServer => return,
         }
         self.save_build_settings();
+    }
+
+    /// Makes a release key for the project in AUTOMATA's settings folder
+    /// and uses it.
+    fn new_release_key(&mut self) {
+        let cfg = self.build_settings().clone();
+        let path = crate::build::suggested_release_key_path(&cfg.android_package());
+        let result = if path.exists() {
+            crate::build::load_release_key(&path).map(|_| "Using the existing")
+        } else {
+            crate::build::create_release_key(&path, cfg.name.trim()).map(|_| "Made a")
+        };
+        match result {
+            Ok(what) => {
+                self.log(
+                    super::LogLevel::Info,
+                    format!(
+                        "{what} release key {}. Back it up and keep it private: every update of the game must be signed with it.",
+                        path.display()
+                    ),
+                );
+                self.build_settings().android.key = path.display().to_string();
+                self.save_build_settings();
+            }
+            Err(e) => self.log(super::LogLevel::Error, format!("Build settings: {e}")),
+        }
     }
 
     fn page_build(&mut self, canvas: &mut Canvas, body: Rect, y: &mut f32) {
@@ -631,6 +676,16 @@ impl Ui {
                 cfg.android.version_code.to_string(),
                 "1",
             ),
+            (
+                "Android release key",
+                SettingText::BuildKey,
+                cfg.android.key.clone(),
+                "Debug key — for testing only",
+                "Android processors",
+                SettingText::BuildAbis,
+                cfg.android.abis.join(", "),
+                "arm64-v8a, x86_64",
+            ),
         ];
         for (l1, w1, v1, p1, l2, w2, v2, p2) in pairs {
             canvas.text(body.x, *y, layout::FONT_SIZE, l1, color::text());
@@ -639,9 +694,17 @@ impl Ui {
                 let browse = match which {
                     SettingText::BuildScene => Some(super::DialogKind::BuildScene),
                     SettingText::BuildOutput => Some(super::DialogKind::BuildOutput),
+                    SettingText::BuildKey => Some(super::DialogKind::BuildKey),
                     _ => None,
                 };
-                let field_w = if browse.is_some() { half - 36.0 } else { half };
+                // The key field also has a New button, when no key is set.
+                let new_key = which == SettingText::BuildKey && value.is_empty();
+                let buttons = match (browse.is_some(), new_key) {
+                    (_, true) => 36.0 + 56.0,
+                    (true, false) => 36.0,
+                    (false, false) => 0.0,
+                };
+                let field_w = half - buttons;
                 self.setting_field(
                     canvas,
                     Rect::new(x, *y + 20.0, field_w, 26.0),
@@ -650,11 +713,14 @@ impl Ui {
                     placeholder,
                 );
                 if let Some(kind) = browse {
-                    self.browse_button(
-                        canvas,
-                        Rect::new(x + half - 32.0, *y + 20.0, 32.0, 26.0),
-                        kind,
-                    );
+                    let bx = x + half - 32.0 - if new_key { 56.0 } else { 0.0 };
+                    self.browse_button(canvas, Rect::new(bx, *y + 20.0, 32.0, 26.0), kind);
+                }
+                if new_key {
+                    let b = Rect::new(x + half - 52.0, *y + 20.0, 52.0, 26.0);
+                    if self.button(canvas, b, "New", ButtonStyle::Normal) {
+                        self.new_release_key();
+                    }
                 }
             }
             *y += 60.0;

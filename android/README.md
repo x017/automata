@@ -177,7 +177,13 @@ The `Android` workflow runs four jobs:
    `arm64-v8a` and `x86_64`. Then it builds *Coin Run* from the template
    the way users do: a copy gets a `build.ron` from `automata-cli init
    --package org.automata.coinrun`, and `automata-cli build --target
-   android` signs it with a fresh debug key.
+   android` signs it with a fresh debug key. It also signs two
+   x86_64-only builds with release keys (one from `automata-cli keygen`,
+   one made by openssl, like a key exported from a keystore) and checks
+   them with Android's `apksigner`. The **android: template size** check
+   (`ci/apk_size.py`) shows what the template is made of next to the
+   published one: the APK's parts, the Python bundle in each
+   `lib/<abi>/libpybundle.so`, and its largest `stdlib.zip` packages.
 3. **emulator smoke test:** runs both on an API 34 emulator. For the spike
    it checks that:
    - it starts and draws (`1-running.png`);
@@ -202,6 +208,11 @@ The `Android` workflow runs four jobs:
      (`coin-3-stick.png`; `Score: 1` in the log);
    - the Jump button lights up while it's held (`coin-4-jump.png`,
      measured in the screenshot).
+
+   The **android: startup** check times the first start (which unpacks
+   the Python bundle and the game) and a later one, from Android starting
+   the process to: the window, Python starting, Python ready, the game
+   unpacked, the GPU ready and the scene running (`startup.txt`).
 
    The touches are injected with `adb shell input motionevent`, placed
    where `touch_controls` lays the controls out on the game's surface.

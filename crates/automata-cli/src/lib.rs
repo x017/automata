@@ -207,6 +207,16 @@ pub struct AndroidConfig {
     /// The version Android compares for updates: raise it with each
     /// release.
     pub version_code: u32,
+    /// Your release signing key: a PEM file (`automata-cli keygen` makes
+    /// one), relative to the project folder, absolute, or under `~/`. Keep
+    /// it outside the project. Empty: this machine's debug key, for
+    /// testing. `$AUTOMATA_ANDROID_RELEASE_KEY` takes precedence.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub key: String,
+    /// The processors to include: `arm64-v8a` (phones and tablets) and
+    /// `x86_64` (emulators on PCs). Empty: every one in the template.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub abis: Vec<String>,
 }
 
 impl Default for AndroidConfig {
@@ -214,8 +224,35 @@ impl Default for AndroidConfig {
         Self {
             package: String::new(),
             version_code: 1,
+            key: String::new(),
+            abis: Vec::new(),
         }
     }
+}
+
+/// The Android processor types (ABIs) builds can include.
+pub const ANDROID_ABIS: [&str; 4] = ["arm64-v8a", "x86_64", "armeabi-v7a", "x86"];
+
+/// Parses a comma-separated list of Android ABIs (empty: all in the
+/// template).
+///
+/// # Errors
+///
+/// When a name isn't an Android ABI.
+pub fn parse_android_abis(list: &str) -> Result<Vec<String>, String> {
+    let mut abis = Vec::new();
+    for abi in list.split(',').map(str::trim).filter(|a| !a.is_empty()) {
+        if !ANDROID_ABIS.contains(&abi) {
+            return Err(format!(
+                "`{abi}` is not an Android processor type (use {})",
+                ANDROID_ABIS.join(", ")
+            ));
+        }
+        if !abis.iter().any(|a| a == abi) {
+            abis.push(abi.to_string());
+        }
+    }
+    Ok(abis)
 }
 
 /// Checks an Android app ID: at least two dot-separated parts, each a
@@ -2012,6 +2049,22 @@ mod tests {
         }
         let old: BuildConfig = ron::from_str("(name: \"Old\")").unwrap();
         assert_eq!(old.android, AndroidConfig::default());
+        assert_eq!(
+            parse_android_abis(" x86_64, arm64-v8a,,x86_64").unwrap(),
+            ["x86_64", "arm64-v8a"]
+        );
+        assert!(parse_android_abis("arm64")
+            .unwrap_err()
+            .contains("arm64-v8a"));
+        assert_eq!(parse_android_abis("").unwrap(), Vec::<String>::new());
+        // The key and ABIs round-trip, and stay out of build.ron when unset.
+        let text = ron::ser::to_string(&old.android).unwrap();
+        assert!(!text.contains("key") && !text.contains("abis"), "{text}");
+        let mut set = old.android.clone();
+        set.key = "~/keys/game.pem".into();
+        set.abis = vec!["arm64-v8a".into()];
+        let back: AndroidConfig = ron::from_str(&ron::ser::to_string(&set).unwrap()).unwrap();
+        assert_eq!(back, set);
         assert_eq!(old.android.version_code, 1);
         assert_eq!(Target::parse("Android"), Some(Target::Android));
         assert_eq!(

@@ -230,7 +230,7 @@ impl Ui {
             Dialog::File(_) => (880.0, 600.0),
             Dialog::Unsaved { .. } => (440.0, 150.0),
             Dialog::ConfirmDelete(_) => (480.0, 160.0),
-            Dialog::Settings(_) => (820.0, 690.0),
+            Dialog::Settings(_) => (820.0, 750.0),
             Dialog::Message { lines, .. } => (640.0, 90.0 + lines.len() as f32 * 19.0),
             Dialog::DuplicateAlong(_) => (420.0, 292.0),
         };

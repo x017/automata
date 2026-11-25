@@ -5,6 +5,9 @@
 //! build of a game installs over the last one (Android only accepts
 //! updates signed by the same certificate). The certificate is derived
 //! from the key, so it stays the same too.
+//!
+//! A release key is the developer's own (see [`super::pem`]): it can come
+//! with its own certificate, which is then used as it is.
 
 use std::path::{Path, PathBuf};
 
@@ -29,6 +32,12 @@ pub struct RsaKey {
     pub e: BigUint,
     /// The private exponent.
     pub d: BigUint,
+    /// The primes `p` and `q`, when known (keys made here or read from a
+    /// PEM file), so the key can be written as a standard key file.
+    pub primes: Option<(BigUint, BigUint)>,
+    /// The certificate that came with the key file, used as it is. `None`:
+    /// a self-signed one derived from the key.
+    pub own_certificate: Option<Vec<u8>>,
 }
 
 impl RsaKey {
@@ -51,7 +60,13 @@ impl RsaKey {
             }
             let phi = (&p - 1u32) * (&q - 1u32);
             if let Some(d) = e.modinv(&phi) {
-                return Ok(Self { n, e, d });
+                return Ok(Self {
+                    n,
+                    e,
+                    d,
+                    primes: Some((p, q)),
+                    own_certificate: None,
+                });
             }
         }
     }
@@ -99,15 +114,26 @@ impl RsaKey {
         der::sequence(&[&algorithm, &der::bit_string(&rsa)])
     }
 
-    /// A self-signed X.509 certificate for the key (DER). It only depends
-    /// on the key, so it's the same every build.
+    /// The certificate APKs are signed with (DER): the key file's own,
+    /// else the debug certificate derived from the key, the same every
+    /// build.
     #[must_use]
     pub fn certificate(&self) -> Vec<u8> {
+        self.own_certificate
+            .clone()
+            .unwrap_or_else(|| self.self_signed("AUTOMATA Android Debug", "AUTOMATA"))
+    }
+
+    /// A self-signed `X.509` certificate for the key (DER), valid from 2026
+    /// to 2076, naming `common` and `organization` (left out when empty).
+    /// It only depends on the key and the names.
+    #[must_use]
+    pub fn self_signed(&self, common: &str, organization: &str) -> Vec<u8> {
         let algorithm = der::sequence(&[&der::SHA256_WITH_RSA, &der::NULL]);
         let mut serial = sha256(&self.n.to_bytes_be())[..8].to_vec();
         serial[0] = (serial[0] & 0x7f) | 0x01;
         let version = der::tlv(0xa0, &der::unsigned(&[2]));
-        let name = der::name("AUTOMATA Android Debug", "AUTOMATA");
+        let name = der::name(common, organization);
         let validity = der::sequence(&[
             &der::tlv(0x17, b"260101000000Z"),
             &der::tlv(0x18, b"20760101000000Z"),
@@ -152,6 +178,8 @@ impl RsaKey {
             n: field("n")?,
             e: field("e")?,
             d: field("d")?,
+            primes: None,
+            own_certificate: None,
         };
         if key.n.bits() < 1024 || key.e.is_zero() || key.d.is_zero() {
             return Err("the key file holds no usable key".into());
@@ -168,6 +196,13 @@ pub fn key_path() -> PathBuf {
     if let Some(p) = std::env::var_os("AUTOMATA_ANDROID_KEY") {
         return PathBuf::from(p);
     }
+    config_dir().join("android-debug.key")
+}
+
+/// AUTOMATA's per-user settings folder: `~/.config/automata`
+/// (`%APPDATA%\automata` on Windows).
+#[must_use]
+pub fn config_dir() -> PathBuf {
     let base = if cfg!(windows) {
         std::env::var_os("APPDATA").map(PathBuf::from)
     } else {
@@ -177,7 +212,7 @@ pub fn key_path() -> PathBuf {
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
     }
     .unwrap_or_else(std::env::temp_dir);
-    base.join("automata").join("android-debug.key")
+    base.join("automata")
 }
 
 /// Loads the key at `path`, making (and saving) a new one when there's
@@ -204,7 +239,7 @@ pub fn load_or_create(path: &Path) -> Result<(RsaKey, bool), String> {
 }
 
 #[cfg(unix)]
-fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+pub(super) fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let mut f = std::fs::OpenOptions::new()
@@ -216,7 +251,7 @@ fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+pub(super) fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
     std::fs::write(path, text)
 }
 
@@ -329,7 +364,7 @@ mod tests {
         assert!(key.verify(b"hello", &sig));
         assert!(!key.verify(b"hellp", &sig));
         let back = RsaKey::from_text(&key.to_text()).unwrap();
-        assert_eq!(back, key);
+        assert_eq!((&back.n, &back.e, &back.d), (&key.n, &key.e, &key.d));
         assert_eq!(key.certificate(), back.certificate());
         assert_eq!(key.certificate()[0], 0x30);
     }
@@ -344,7 +379,7 @@ mod tests {
         assert_eq!(first.n.bits(), 2048);
         let (again, new) = load_or_create(&path).unwrap();
         assert!(!new);
-        assert_eq!(again, first);
+        assert_eq!((&again.n, &again.d), (&first.n, &first.d));
         std::fs::write(&path, "n=zz").unwrap();
         assert!(load_or_create(&path).is_err());
         let _ = std::fs::remove_dir_all(&dir);

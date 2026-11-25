@@ -3,7 +3,9 @@
 //!
 //! ```text
 //! automata-cli build [PROJECT] [--target linux|windows|android|all] [--template DIR]
+//!                    [--key FILE] [--abis arm64-v8a,x86_64]
 //! automata-cli init [PROJECT] [--scene level.ron | --main main.py] [--package ID]
+//! automata-cli keygen FILE [--name NAME]
 //! automata-cli check [PROJECT]
 //! automata-cli stage [PROJECT] [--out DIR]
 //! automata-cli templates path | list
@@ -24,8 +26,10 @@ Android
 
 usage:
   automata-cli build [PROJECT] [--target linux|windows|android|all] [--template DIR]
+                     [--key FILE] [--abis arm64-v8a,x86_64]
   automata-cli init [PROJECT] [--scene SCENE.ron | --main MAIN.py] [--name NAME]
                     [--package com.you.game]
+  automata-cli keygen FILE [--name \"Your Name\"]
   automata-cli check [PROJECT]
   automata-cli stage [PROJECT] [--out DIR]
   automata-cli templates path|list
@@ -35,9 +39,13 @@ usage:
   automata-cli templates pack DIR --target linux|windows --out ARCHIVE
 
 PROJECT defaults to the current folder; settings come from PROJECT/build.ron.
-`--target android` writes PROJECT/<output>/android/NAME-VERSION.apk, signed
-with this machine's debug key: android-debug.key in ~/.config/automata
-(%APPDATA%\\automata on Windows) or $AUTOMATA_ANDROID_KEY, made on first use.
+`--target android` writes PROJECT/<output>/android/NAME-VERSION.apk. It's
+signed with your release key when build.ron's android.key, --key or
+$AUTOMATA_ANDROID_RELEASE_KEY names one (a PEM file; `keygen` makes one), and
+otherwise with this machine's debug key, for testing: android-debug.key in
+~/.config/automata (%APPDATA%\\automata on Windows) or $AUTOMATA_ANDROID_KEY,
+made on first use. `--abis` picks the processors to include (android.abis:
+arm64-v8a for phones, x86_64 for emulators; default: both).
 `--package` sets the Android app ID (build.ron's android.package).
 `stage` writes only the game folder a build ships (game files and game.json),
 by default to PROJECT/<output>/game.";
@@ -127,7 +135,14 @@ pub fn run(args: impl IntoIterator<Item = String>, program: &str) -> Result<(), 
     match cmd.as_str() {
         "build" => {
             let project = absolute(&project(&args, 1));
-            let cfg = BuildConfig::for_project(&project, None);
+            let mut cfg = BuildConfig::for_project(&project, None);
+            if let Some(key) = args.flag("key") {
+                let path = std::path::absolute(key).unwrap_or_else(|_| PathBuf::from(key));
+                cfg.android.key = path.to_string_lossy().into_owned();
+            }
+            if let Some(abis) = args.flag("abis") {
+                cfg.android.abis = crate::parse_android_abis(abis)?;
+            }
             let targets = args.targets(&cfg.targets)?;
             let mut failed = 0;
             for target in targets {
@@ -193,10 +208,37 @@ pub fn run(args: impl IntoIterator<Item = String>, program: &str) -> Result<(), 
             let n = crate::stage_game(&project, &cfg, &out, &mut |m| print(&m))?;
             println!("staged {} ({n} files) in {}", cfg.name, out.display());
         }
+        "keygen" => keygen(&args, program)?,
         "templates" => templates(&args, program)?,
         "help" | "-h" | "--help" => println!("{}", usage(program)),
         other => return Err(format!("unknown command: {other}\n\n{}", usage(program))),
     }
+    Ok(())
+}
+
+fn keygen(args: &Args, program: &str) -> Result<(), String> {
+    let file = args
+        .positional
+        .get(1)
+        .ok_or_else(|| format!("usage: {program} keygen FILE [--name NAME]"))?;
+    let name = args
+        .flag("name")
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or("AUTOMATA developer");
+    println!("making a release key (RSA 2048)…");
+    let key = crate::android::pem::create_release_key(Path::new(file), name.trim())?;
+    println!("made {file}");
+    println!(
+        "  certificate: CN={}, SHA-256 {}",
+        name.trim(),
+        crate::android::sign::certificate_fingerprint(&key)
+    );
+    println!("Keep it private and back it up: every update of your game must be signed");
+    println!("with this key. Keep it outside the project folder and out of version control.");
+    println!(
+        "Use it: android.key in build.ron (or --key FILE, or ${}).",
+        crate::android::pem::RELEASE_KEY_ENV
+    );
     Ok(())
 }
 

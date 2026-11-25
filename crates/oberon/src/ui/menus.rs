@@ -76,6 +76,8 @@ pub enum DialogKind {
     BuildScene,
     /// Settings ▸ Build: pick the output folder.
     BuildOutput,
+    /// Settings ▸ Build: pick the Android release key.
+    BuildKey,
     /// Settings ▸ Python: pick the interpreter.
     PythonInterpreter,
     /// Keyboard shortcut reference.
