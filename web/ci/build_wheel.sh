@@ -38,7 +38,14 @@ else
   curl -fsSL "$target_url" | tar -xj -C "$rustlib" 2>/dev/null \
     || curl -fsSL "$target_url" | tar -xz -C "$rustlib"
 fi
-echo "RUSTFLAGS for the target: $(pyodide config get rustflags)"
+# Export only the module's entry point. rustc exports every `#[no_mangle]`
+# function of every linked crate from a cdylib, and wgpu's GL backend links
+# wasm-bindgen on any wasm32 target (unused under Emscripten): its exports
+# would keep imports from wasm-bindgen's placeholder module, which Pyodide
+# can't provide. The later -sEXPORTED_FUNCTIONS wins over rustc's list.
+CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS="$(pyodide config get rustflags) -C link-arg=-sEXPORTED_FUNCTIONS=_PyInit__core"
+export CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS
+echo "RUSTFLAGS for the target: $CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS"
 
 # The staged copy: no build outputs, the web pyproject at the root.
 rsync -a --exclude target --exclude vendor --exclude .cargo --exclude web/dist \
