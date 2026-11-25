@@ -18,7 +18,7 @@ struct SsaoUniform {
     params: vec4<f32>,  // x: ambient occlusion on
 };
 @group(0) @binding(0) var<uniform> u: SsaoUniform;
-@group(0) @binding(1) var depth_map: texture_depth_2d;
+@group(0) @binding(1) var depth_map: texture_2d<f32>; // depth, as unfilterable float (WebGL2)
 @group(0) @binding(2) var src: texture_2d<f32>;
 
 const AO_SAMPLES: i32 = 12;
@@ -50,7 +50,7 @@ fn full_size() -> vec2<i32> {
 
 // View depth at a full-resolution pixel (clamped to the screen).
 fn depth_at(px: vec2<i32>) -> f32 {
-    let d = textureLoad(depth_map, clamp(px, vec2<i32>(0), full_size() - 1), 0);
+    let d = textureLoad(depth_map, clamp(px, vec2<i32>(0), full_size() - 1), 0).x;
     if d >= 1.0 {
         return SKY_DEPTH;
     }

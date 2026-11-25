@@ -2770,12 +2770,16 @@ impl DepthArray {
     fn for_point_shadows(device: &wgpu::Device, quality: GraphicsQuality) -> Self {
         let size = quality.point_shadow_size().max(1);
         let layers = u32::try_from(Self::point_layers(quality)).unwrap_or(1);
+        // wgpu's GL backend makes any square texture with a multiple of six
+        // layers a cube (array) texture, and WebGL2 has no cube arrays: an
+        // unused extra layer keeps it a plain 2D array there.
+        let allocated = layers + u32::from(cfg!(target_arch = "wasm32") && layers % 6 == 0);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("point shadow maps"),
             size: wgpu::Extent3d {
                 width: size,
                 height: size,
-                depth_or_array_layers: layers,
+                depth_or_array_layers: allocated,
             },
             mip_level_count: 1,
             sample_count: 1,

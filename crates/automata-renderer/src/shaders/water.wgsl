@@ -38,7 +38,7 @@ struct WaterUniform {
 @group(1) @binding(3) var ripple_field: texture_2d<f32>;
 
 @group(2) @binding(0) var scene_color: texture_2d<f32>;
-@group(2) @binding(1) var scene_depth: texture_depth_2d;
+@group(2) @binding(1) var scene_depth: texture_2d<f32>; // depth, as unfilterable float (WebGL2)
 @group(2) @binding(2) var scene_sampler: sampler;
 
 struct VertexInput {
@@ -391,13 +391,13 @@ fn fs_refract(in: VertexOutput) -> @location(0) vec4<f32> {
     let size = light.screen.xy;
     let px = vec2<i32>(in.clip_position.xy);
     let water_depth = linear_depth(in.clip_position.z);
-    let ground0 = linear_depth(textureLoad(scene_depth, px, 0));
+    let ground0 = linear_depth(textureLoad(scene_depth, px, 0).x);
     let column0 = max(ground0 - water_depth, 0.0);
     // Distort less in the shallows (and never pull in foreground objects).
     var uv = in.clip_position.xy / size;
     let distorted = uv + n.xz * 0.035 * clamp(column0, 0.0, 1.0);
     let dpx = vec2<i32>(clamp(distorted * size, vec2<f32>(0.0), size - 1.0));
-    let ground1 = linear_depth(textureLoad(scene_depth, dpx, 0));
+    let ground1 = linear_depth(textureLoad(scene_depth, dpx, 0).x);
     var ground = ground0;
     if ground1 > water_depth {
         uv = distorted;

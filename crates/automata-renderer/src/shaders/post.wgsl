@@ -49,7 +49,9 @@ struct PostUniform {
 @group(0) @binding(4) var extra2: texture_2d<f32>; // resolve: sun visibility (1x1)
 @group(0) @binding(5) var extra3: texture_2d<f32>; // resolve: god rays
 @group(0) @binding(6) var extra4: texture_2d<f32>; // resolve: depth of field
-@group(0) @binding(7) var scene_depth: texture_depth_2d; // the scene's depth (full size)
+// The scene's depth (full size), bound as unfilterable float: depth
+// textures can't be read with textureLoad in GLSL (WebGL2).
+@group(0) @binding(7) var scene_depth: texture_2d<f32>;
 
 struct FullscreenOut {
     @builtin(position) position: vec4<f32>,
@@ -281,7 +283,7 @@ fn fringed(uv: vec2<f32>) -> vec3<f32> {
 // across a flat surface on screen, so it's what edge detection compares.
 fn inv_depth_at(p: vec2<i32>) -> f32 {
     let size = vec2<i32>(textureDimensions(scene_depth));
-    let d = textureLoad(scene_depth, clamp(p, vec2<i32>(0), size - vec2<i32>(1)), 0);
+    let d = textureLoad(scene_depth, clamp(p, vec2<i32>(0), size - vec2<i32>(1)), 0).x;
     return 1.0 / view_depth(d);
 }
 
@@ -359,7 +361,7 @@ fn quantize(c: vec3<f32>, frag: vec2<f32>) -> vec3<f32> {
 fn depth_at(uv: vec2<f32>) -> f32 {
     let size = vec2<i32>(textureDimensions(scene_depth));
     let p = clamp(vec2<i32>(uv * vec2<f32>(size)), vec2<i32>(0), size - vec2<i32>(1));
-    return textureLoad(scene_depth, p, 0);
+    return textureLoad(scene_depth, p, 0).x;
 }
 
 @fragment

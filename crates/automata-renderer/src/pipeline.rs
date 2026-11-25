@@ -298,7 +298,9 @@ impl PipelineShared {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
+                        // Depth read with textureLoad: unfilterable float, since GLSL
+                        // (WebGL2) can't textureLoad a depth texture.
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },

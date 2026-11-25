@@ -14,7 +14,7 @@ struct ParticleUniform {
 @group(1) @binding(0) var<uniform> particles: ParticleUniform;
 @group(1) @binding(1) var sprite: texture_2d<f32>;
 @group(1) @binding(2) var sprite_sampler: sampler;
-@group(1) @binding(3) var scene_depth: texture_depth_2d;
+@group(1) @binding(3) var scene_depth: texture_2d<f32>; // depth, as unfilterable float (WebGL2)
 
 struct Instance {
     @location(0) position_size: vec4<f32>,   // xyz: centre, w: size (m)
@@ -147,7 +147,7 @@ fn particle_color(in: VertexOutput) -> vec4<f32> {
     c.a = c.a * clamp((mine - 0.15) * 2.5, 0.0, 1.0);
     let soft = particles.right_soft.w;
     if soft > 0.0 {
-        let depth = textureLoad(scene_depth, vec2<i32>(in.clip.xy), 0);
+        let depth = textureLoad(scene_depth, vec2<i32>(in.clip.xy), 0).x;
         if depth < 1.0 {
             c.a = c.a * clamp((view_depth(depth) - mine) / soft, 0.0, 1.0);
         }
