@@ -148,3 +148,80 @@ def test_turn_towards_takes_the_short_way_round():
     yaw = player.turn_towards(math.radians(170), math.radians(-170), 1.0, 0.5)
     assert math.degrees(yaw) == pytest.approx(180.0)
     assert player.turn_towards(0.0, 1.0, 100.0, 1.0) == pytest.approx(1.0)
+
+
+def test_the_hat_stays_on_the_robots_head():
+    seen = []
+
+    def after(ctx):
+        robot, brim = ctx.scene["Robot"], ctx.scene["Hat Brim"]
+        seen.append((robot.transform.position, brim.transform.position, brim.attached_to))
+
+    at.run_scene(LEVEL, headless=True, max_frames=30, update=after, fixed_delta=1 / 60)
+    (rx, ry, rz), (hx, hy, hz), attached = seen[-1]
+    assert attached == ("Robot", "Head")
+    assert math.hypot(hx - rx, hz - rz) < 0.3, "above the robot"
+    assert 0.5 < hy - ry < 1.2, "at head height (the robot is 1.9 m tall at scale 0.4)"
+
+
+def test_feet_follow_the_ground_on_the_player_and_the_stepper():
+    seen = {}
+
+    def after(ctx):
+        for name in ("Robot", "Stepper", "Dancer"):
+            seen[name] = ctx.scene[name].animation.foot_ik
+
+    at.run_scene(LEVEL, headless=True, max_frames=3, update=after)
+    assert seen == {"Robot": True, "Stepper": True, "Dancer": False}
+
+
+def test_the_greeter_watches_the_player_when_near(tmp_path):
+    for folder in ("models", "anims", "scripts"):
+        shutil.copytree(os.path.join(GAME, folder), tmp_path / folder)
+    original = list(build_level.CROWD)
+    # 5 m away: close enough to watch, too far to wave.
+    build_level.CROWD[0] = ("Greeter", (5.0, 0.0, 3.0), -90, at.Animation("Idle"))
+    try:
+        build_level.build().save(str(tmp_path / "level.ron"))
+    finally:
+        build_level.CROWD[:] = original
+    looking = []
+    at.run_scene(
+        str(tmp_path / "level.ron"),
+        headless=True,
+        max_frames=20,
+        update=lambda ctx: looking.append(ctx.scene["Greeter"].animation.looking),
+    )
+    assert not looking[0] and looking[-1], "looks at the player"
+
+
+def test_a_script_picks_up_and_drops_a_hat(tmp_path):
+    for folder in ("models", "anims", "scripts"):
+        shutil.copytree(os.path.join(GAME, folder), tmp_path / folder)
+    (tmp_path / "scripts" / "greeter.py").write_text(
+        "def update(entity, ctx):\n"
+        "    hat, f = ctx.scene.find('Hat Crown'), ctx.time.frame\n"
+        "    if f == 2:\n"
+        "        hat.attach('Greeter', 'Palm2.R', at.Transform(position=(0, 0.1, 0)))\n"
+        "    if f == 6:\n"
+        "        entity.attributes['held'] = ','.join(hat.attached_to)\n"
+        "        hat.detach()\n"
+        "    if f == 10:\n"
+        "        entity.attributes['after'] = str(hat.attached_to)\n"
+        "        entity.attributes['y'] = hat.transform.position[1]\n"
+        "    if f == 14:\n"
+        "        entity.attributes['still'] = hat.transform.position[1]\n"
+        "import automata as at\n"
+    )
+    build_level.build().save(str(tmp_path / "level.ron"))
+    seen = {}
+    at.run_scene(
+        str(tmp_path / "level.ron"),
+        headless=True,
+        max_frames=16,
+        fixed_delta=1 / 60,
+        update=lambda ctx: seen.update(ctx.scene["Greeter"].attributes),
+    )
+    assert seen["held"] == "Greeter,Palm2.R"
+    assert seen["after"] == "None", "dropped"
+    assert seen["still"] == pytest.approx(seen["y"]), "and it stays where it was let go"

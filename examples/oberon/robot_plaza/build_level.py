@@ -9,8 +9,13 @@ of them; the others each show a different way to use an Animation:
 
 - **Robot** (yours): an animation graph, ``anims/robot.anim.ron``, blends
   Idle, Walking and Running by speed, plays Jump, and waves with the upper
-  body only. ``scripts/player.py`` just sets the graph's parameters.
-- **Greeter**: ``scripts/greeter.py`` plays Wave once when you walk up.
+  body only. ``scripts/player.py`` just sets the graph's parameters. Its
+  feet follow the ground (Feet On Ground) and it wears a hat: two blocks
+  attached to its Head bone.
+- **Greeter**: ``scripts/greeter.py`` turns its head to watch you and plays
+  Wave once when you walk up.
+- **Stepper**: stands with one foot on the steps. Feet On Ground plants
+  each foot on what's under it.
 - **Dancer**: just an Animation set to Dance. No script needed.
 - **Sitter**: Sitting with Loop off. One-shot clips hold their last frame.
 - **Slowpoke**: Walking at Speed 0.35, on the spot.
@@ -33,6 +38,9 @@ DARK_STONE = (0.26, 0.24, 0.23, 1.0)
 GRASS = (0.17, 0.32, 0.12, 1.0)
 LEAVES = (0.12, 0.3, 0.1, 1.0)
 WOOD = (0.36, 0.2, 0.1, 1.0)
+HAT = (0.13, 0.12, 0.16, 1.0)
+HAT_BAND = (0.75, 0.12, 0.1, 1.0)
+STEP = 0.18  # each step's rise
 
 # The robots that aren't you: name, position, yaw (degrees), Animation.
 CROWD = [
@@ -40,6 +48,8 @@ CROWD = [
     ("Dancer", (-4.5, 0.0, -5.0), 30, at.Animation("Dance")),
     ("Sitter", (5.2, 0.0, -6.8), -30, at.Animation("Sitting", looping=False)),
     ("Slowpoke", (-3.5, 0.0, 1.5), 110, at.Animation("Walking", speed=0.35)),
+    # Its left foot is on the bottom step, its right on the paving.
+    ("Stepper", (4.2, 0.0, 2.6), 0, at.Animation("Idle", foot_ik=True)),
 ]
 SCRIPTS = {"Greeter": "scripts/greeter.py"}
 
@@ -124,9 +134,30 @@ def build():
             .add(at.MeshRenderer.sphere(0.5, color=LEAVES, roughness=0.9))
         )
 
+    # Steps up to a stage, and a ramp down the other side.
+    for i in range(3):
+        rise = STEP * (i + 1)
+        scene.add(block(f"Step {i + 1}", (5.25 + 0.4 * i, rise / 2, 2.6), (2.0 - 0.8 * i, rise, 2.0),
+                        STONE))
+    scene.add(block("Stage", (7.0, STEP * 1.5, 2.6), (1.6, STEP * 3, 2.0), DARK_STONE))
+    # The ramp's top runs from the stage's edge (z 3.6) down to the paving
+    # (z 6.2): a slab tilted about x, pushed down by half its thickness.
+    rise, run, thick = STEP * 3, 2.6, 0.16
+    tilt = math.atan2(rise, run)
+    size = (1.6, thick, math.hypot(rise, run) + 0.04)
+    centre = (7.0, rise / 2 - thick / 2 * math.cos(tilt), 3.6 + run / 2 - thick / 2 * math.sin(tilt))
+    scene.add(
+        at.Entity("Ramp")
+        .add(at.Transform(position=centre, rotation_euler=(tilt, 0, 0), scale=size))
+        .add(at.MeshRenderer.cube(size=1.0, color=STONE, roughness=0.85))
+        .add(at.RigidBody.fixed())
+        .add(at.Collider3D.cuboid(*size))
+    )
+
     # You.
     player = (
-        robot("Robot", (0, 0, 3), 180, at.Animation("Idle", graph="anims/robot.anim.ron"))
+        robot("Robot", (0, 0, 3), 180,
+              at.Animation("Idle", graph="anims/robot.anim.ron", foot_ik=True))
         .add(at.RigidBody.kinematic_position())
         .add(at.Collider3D.capsule(0.55, 0.32))
         .add(at.CharacterController(snap_to_ground=0.3))
@@ -134,6 +165,19 @@ def build():
     )
     player.script = "scripts/player.py"
     scene.add(player)
+    # Its hat: two blocks following the Head bone. Each Transform is an
+    # offset in the bone's space.
+    for name, offset, size, color in [
+        ("Hat Brim", (0, 0.56, 0), (0.66, 0.035, 0.66), HAT),
+        ("Hat Crown", (0, 0.73, 0), (0.42, 0.32, 0.42), HAT),
+        ("Hat Band", (0, 0.62, 0), (0.43, 0.07, 0.43), HAT_BAND),
+    ]:
+        scene.add(
+            at.Entity(name)
+            .add(at.Transform(position=offset, scale=size))
+            .add(at.MeshRenderer.cube(size=1.0, color=color, roughness=0.7))
+            .add(at.Attach("Robot", "Head"))
+        )
 
     for name, position, yaw, animation in CROWD:
         bot = robot(name, position, yaw, animation)

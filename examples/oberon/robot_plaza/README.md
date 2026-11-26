@@ -5,11 +5,12 @@ them. The others each show a different way to set up an Animation:
 
 | Robot | What it shows |
 | --- | --- |
-| **Robot** (you) | An [animation graph](../../../docs/wiki/oberon/animation-graphs.md), `anims/robot.anim.ron`, blends Idle, Walking and Running by speed, plays Jump, and waves with the upper body only, even mid-stride. `scripts/player.py` just sets its parameters. |
-| **Greeter** | `scripts/greeter.py` plays Wave once when you walk up, then blends back to Idle. |
+| **Robot** (you) | An [animation graph](../../../docs/wiki/oberon/animation-graphs.md), `anims/robot.anim.ron`, blends Idle, Walking and Running by speed, plays Jump, and waves with the upper body only, even mid-stride. `scripts/player.py` just sets its parameters. It wears a top hat (three blocks with **Attach To Bone** on its Head) and has **Feet On Ground** on, so walk it up the steps and down the ramp. |
+| **Greeter** | `scripts/greeter.py` turns its head to watch you once you're within 8 m (`animation.look_at`), plays Wave once when you walk up, then blends back to Idle. |
 | **Dancer** | An Animation set to Dance. No script needed. |
 | **Sitter** | Sitting with **Loop** off. One-shot clips hold their last frame. |
 | **Slowpoke** | Walking at **Speed** 0.35, on the spot. |
+| **Stepper** | Idle, with one foot on the bottom step and **Feet On Ground** on: that foot stands on the step and its knee bends. Untick it to see the foot sink in. |
 
 | Key | Action |
 | --- | --- |
@@ -45,6 +46,10 @@ Things to try in Oberon:
 - Set **Slowpoke**'s **Speed** to -1 to make it walk backwards.
 - Drop `models/robot.glb` into the scene from the Assets panel. Oberon adds an
   Animation set to its Idle clip.
+- Select **Hat Crown** and drag it with the gizmo: it stays on the head, and
+  its Transform shows the offset from the Head bone. Pick another **Bone**
+  (`Palm2.R`) and the hat moves to the hand. Press the play button next to
+  the Robot's **Preview** and the hat bobs along with it.
 - Open `anims/robot.anim.ron` (double-click it in Files, or **Edit** next to
   the Robot's **Graph**). Change the Arms layer's mask from `["Torso"]` to
   `["Shoulder.R"]` and only the right arm waves; set the fades to 0 and see
@@ -56,4 +61,4 @@ to the middle, so it fits the Character Controller's capsule.
 The robot is RobotExpressive by Tomás Laulhé (Quaternius), CC0. See
 [CREDITS.md](CREDITS.md).
 
-Guides: [Models & Animation](../../../docs/wiki/oberon/models.md) and [Animation graphs](../../../docs/wiki/oberon/animation-graphs.md).
+Guides: [Models & Animation](../../../docs/wiki/oberon/models.md), [Animation graphs](../../../docs/wiki/oberon/animation-graphs.md) and [Attachments & IK](../../../docs/wiki/oberon/attachments-and-ik.md).

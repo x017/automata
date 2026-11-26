@@ -354,6 +354,8 @@ pub enum Flag {
     AnimPlayOnStart,
     /// The clip's travel moves the entity (root motion).
     AnimRootMotion,
+    /// The feet follow the ground (foot IK).
+    AnimFootIk,
     /// The joint holds.
     JointEnabled,
     /// The two joined bodies still bump into each other.
@@ -1323,6 +1325,7 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::AnimLoop => data.animation.as_ref()?.looping,
         Flag::AnimPlayOnStart => data.animation.as_ref()?.play_on_start,
         Flag::AnimRootMotion => data.animation.as_ref()?.root_motion,
+        Flag::AnimFootIk => data.animation.as_ref()?.foot_ik,
         Flag::JointEnabled => data.joint.as_ref()?.enabled,
         Flag::JointCollide => data.joint.as_ref()?.collide_connected,
         Flag::JointLimits => data.joint.as_ref()?.limits.is_some(),
@@ -1408,12 +1411,13 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
                 None => return false,
             }
         }
-        Flag::AnimLoop | Flag::AnimPlayOnStart | Flag::AnimRootMotion => {
+        Flag::AnimLoop | Flag::AnimPlayOnStart | Flag::AnimRootMotion | Flag::AnimFootIk => {
             match &mut data.animation {
                 Some(a) => {
                     let slot = match flag {
                         Flag::AnimLoop => &mut a.looping,
                         Flag::AnimPlayOnStart => &mut a.play_on_start,
+                        Flag::AnimFootIk => &mut a.foot_ik,
                         _ => &mut a.root_motion,
                     };
                     *slot = !*slot;

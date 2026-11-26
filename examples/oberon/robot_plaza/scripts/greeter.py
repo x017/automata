@@ -1,12 +1,16 @@
-"""greeter: waves once when the player walks up, then goes back to idling.
+"""greeter: watches the player, and waves once when they walk up.
 
-``play(..., loop=False)`` runs a clip once; ``animation.playing`` turns
-False when it's done, and the next ``play`` blends back to the idle clip.
+``animation.look_at(player)`` turns the head (and a little of the neck)
+towards the player, as far as it can without looking over its shoulder;
+``look_at(None)`` eases it back. ``play(..., loop=False)`` runs a clip once;
+``animation.playing`` turns False when it's done, and the next ``play``
+blends back to the idle clip.
 """
 
 import math
 
 REACH = 3.0  # metres
+WATCH = 8.0  # metres
 
 
 def start(entity, ctx):
@@ -17,8 +21,12 @@ def update(entity, ctx):
     player = ctx.scene.find("Robot")
     if player is None:
         return
-    near = math.dist(player.transform.position, entity.transform.position) < REACH
+    distance = math.dist(player.transform.position, entity.transform.position)
+    near = distance < REACH
     anim = entity.animation
+    watching = distance < WATCH
+    if watching != anim.looking:
+        anim.look_at(player if watching else None)
     if near and not entity.state["near"]:
         # Turn to the player and wave.
         (px, _, pz), (ex, _, ez) = player.transform.position, entity.transform.position

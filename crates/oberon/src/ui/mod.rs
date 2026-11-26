@@ -415,6 +415,16 @@ pub enum Intent {
         /// The `.anim.ron` file.
         path: Option<PathBuf>,
     },
+    /// Point an entity's Attach To Bone at another entity (by name) and/or
+    /// one of its bones; `None` leaves that part as it is.
+    SetAttach {
+        /// Entity id.
+        id: u64,
+        /// The entity to follow.
+        to: Option<String>,
+        /// The bone to follow ("" for the entity itself).
+        bone: Option<String>,
+    },
     /// Point an entity's Joint at another entity by name (`None`: the world).
     SetJointTarget {
         /// Entity id.
@@ -627,6 +637,7 @@ impl Intent {
             | Self::SetAnimationClip { id, .. }
             | Self::SetAnimGraph { id, .. }
             | Self::SetJointTarget { id, .. }
+            | Self::SetAttach { id, .. }
             | Self::PasteComponent { id, .. }
             | Self::SetAttribute { id, .. }
             | Self::RemoveAttribute { id, .. }
@@ -661,6 +672,7 @@ impl Intent {
             | Self::SetAnimationClip { id, .. }
             | Self::SetAnimGraph { id, .. }
             | Self::SetJointTarget { id, .. }
+            | Self::SetAttach { id, .. }
             | Self::PasteComponent { id, .. }
             | Self::SetAttribute { id, .. }
             | Self::RemoveAttribute { id, .. }
@@ -2987,6 +2999,16 @@ impl Ui {
             }
         }
 
+        if d.attach.is_some() {
+            let kind = ComponentKind::Attach;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                y = self.attach_rows(canvas, doc, x, y, w, e);
+                y += 6.0;
+            }
+        }
+
         if d.audio_source.is_some() {
             let kind = ComponentKind::AudioSource;
             let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
@@ -3398,6 +3420,163 @@ impl Ui {
         y + 16.0
     }
 
+    /// Attach To Bone: the entity followed and which of its bones.
+    fn attach_rows(
+        &mut self,
+        canvas: &mut Canvas,
+        doc: &Document,
+        x: f32,
+        mut y: f32,
+        w: f32,
+        e: &EntityEntry,
+    ) -> f32 {
+        let Some(attach) = e.data.attach.clone() else {
+            return y;
+        };
+        let target = doc
+            .entities
+            .iter()
+            .find(|o| o.id != e.id && !attach.to.is_empty() && o.name() == attach.to);
+        // Follow: every other named entity.
+        let (text, warn) = match target {
+            _ if attach.to.is_empty() => ("Pick an entity".to_string(), true),
+            None => (format!("{} (missing)", attach.to), true),
+            Some(_) => (attach.to.clone(), false),
+        };
+        let items = || {
+            let mut names: Vec<&str> = doc
+                .entities
+                .iter()
+                .filter(|o| o.id != e.id && o.data.name.is_some())
+                .map(EntityEntry::name)
+                .collect();
+            names.sort_unstable();
+            names.dedup();
+            names
+                .into_iter()
+                .map(|n| menus::MenuItem {
+                    label: if n == attach.to {
+                        format!("✓ {n}")
+                    } else {
+                        format!("   {n}")
+                    },
+                    shortcut: "",
+                    action: Some(menus::Action::Intent(Intent::SetAttach {
+                        id: e.id,
+                        to: Some(n.to_string()),
+                        bone: None,
+                    })),
+                    enabled: true,
+                })
+                .collect()
+        };
+        y = self.menu_row(canvas, x, y, w, "Follow", (&text, warn), items);
+        // Bone: the followed model's bones, nested.
+        let rig = target.and_then(|t| crate::doc::model_rig(&t.data));
+        let known =
+            attach.bone.is_empty() || rig.as_ref().is_some_and(|r| r.node(&attach.bone).is_some());
+        let text = match (&rig, attach.bone.is_empty()) {
+            (_, true) => "None (its origin)".to_string(),
+            (Some(_), false) if known => attach.bone.clone(),
+            (_, false) => format!("{} (missing)", attach.bone),
+        };
+        let items = || {
+            let Some(rig) = &rig else {
+                return Vec::new();
+            };
+            let depth = |mut i: usize| {
+                let mut d = 0;
+                while let Some(p) = rig.nodes[i].parent {
+                    d += 1;
+                    i = p;
+                }
+                d
+            };
+            let item = |label: String, bone: &str| menus::MenuItem {
+                label: if bone == attach.bone {
+                    format!("✓ {label}")
+                } else {
+                    format!("   {label}")
+                },
+                shortcut: "",
+                action: Some(menus::Action::Intent(Intent::SetAttach {
+                    id: e.id,
+                    to: None,
+                    bone: Some(bone.to_string()),
+                })),
+                enabled: true,
+            };
+            let mut out = vec![
+                item("None (its origin)".into(), ""),
+                menus::MenuItem::separator(),
+            ];
+            out.extend(rig.nodes.iter().enumerate().map(|(i, n)| {
+                let indent = "  ".repeat(depth(i).min(12));
+                item(format!("{indent}{}", n.name), &n.name)
+            }));
+            out
+        };
+        y = self.menu_row(canvas, x, y, w, "Bone", (&text, !known), items);
+        let hint = "Its Transform is now its offset from the bone";
+        if self.row_visible(Rect::new(x, y, w, 16.0)) {
+            canvas.text(x, y, layout::SMALL_SIZE, hint, color::text_dim());
+        }
+        y + 16.0
+    }
+
+    /// A row showing `text` (in the warning colour when `warn`) that opens
+    /// the menu `items` makes when clicked.
+    #[allow(clippy::too_many_arguments)]
+    fn menu_row(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        y: f32,
+        w: f32,
+        label: &str,
+        (text, warn): (&str, bool),
+        items: impl FnOnce() -> Vec<menus::MenuItem>,
+    ) -> f32 {
+        let r = Rect::new(x, y, w, layout::FIELD_H);
+        if self.row_visible(r) {
+            self.row_label(canvas, x, y, label);
+            let b = Rect::new(x + layout::LABEL_W, y, w - layout::LABEL_W, layout::FIELD_H);
+            let hot = self.hot(b);
+            canvas.fill_rounded(
+                b.x,
+                b.y,
+                b.w,
+                b.h,
+                3.0,
+                if hot { color::hover() } else { color::raised() },
+            );
+            let tint = if warn { color::warn() } else { color::text() };
+            canvas.text_clipped(
+                b.x + 6.0,
+                b.y + 3.0,
+                layout::FONT_SIZE,
+                text,
+                tint,
+                b.w - 24.0,
+            );
+            let (cx, cy) = (b.x + b.w - 11.0, b.y + b.h / 2.0);
+            canvas.fill_polygon(
+                &[(cx - 4.0, cy - 2.0), (cx + 4.0, cy - 2.0), (cx, cy + 3.0)],
+                color::text_dim(),
+            );
+            if hot {
+                self.cursor = CursorHint::Pointer;
+                if self.p.pressed && self.play == PlayState::Editing {
+                    let items = items();
+                    if !items.is_empty() {
+                        self.open_menu(b.x, b.y + b.h + 2.0, items);
+                    }
+                }
+            }
+        }
+        y + layout::ROW_STEP
+    }
+
     /// "Connected To": a menu of World and every other named entity.
     fn joint_target_row(
         &mut self,
@@ -3655,6 +3834,14 @@ impl Ui {
             self.tip(
                 root,
                 "Let the clip's own steps move the entity (through its Character Controller, if it has one)",
+            );
+        }
+        let feet = Rect::new(x, y, w, layout::FIELD_H);
+        y = self.flag_row(canvas, x, y, w, e, "Feet On Ground", Flag::AnimFootIk);
+        if self.row_visible(feet) {
+            self.tip(
+                feet,
+                "Plant each foot on what's under it (slopes, stairs), dropping the hips for the lower one",
             );
         }
         y = self.anim_graph_row(canvas, doc, x, y, w, e);
@@ -4592,7 +4779,7 @@ impl Ui {
         let brushing = self.brush_target(doc);
         let gizmo = if editing && brushing.is_none() {
             selected
-                .and_then(|e| e.data.transform)
+                .and_then(|e| doc.world_transform(e))
                 .and_then(|t| Gizmo::build(self.gizmo, &t, &proj))
         } else {
             None
@@ -4679,10 +4866,11 @@ impl Ui {
             } => {
                 if raw.down {
                     let delta = (raw.x - last.0, raw.y - last.1);
-                    let t = doc
-                        .index_of(id)
-                        .and_then(|i| doc.entities[i].data.transform);
-                    if let Some(t) = t {
+                    // The gizmo works in the world; an attached entity
+                    // stores its offset from the bone it follows.
+                    let entry = doc.index_of(id).map(|i| &doc.entities[i]);
+                    let t = entry.and_then(|e| e.data.transform);
+                    if let (Some(t), Some(entry)) = (t, entry) {
                         if delta != (0.0, 0.0) {
                             if let Some(g) = Gizmo::build(self.gizmo, &free, &proj) {
                                 free = g.drag(axis, &free, (raw.x, raw.y), delta);
@@ -4695,6 +4883,7 @@ impl Ui {
                         } else {
                             free
                         };
+                        let transform = doc.local_from_world(entry, transform);
                         if transform != t {
                             self.out.push(Intent::SetTransform { id, transform });
                         }
@@ -4782,7 +4971,7 @@ impl Ui {
                 } else {
                     gizmo.as_ref().and_then(|g| g.hit(p.x, p.y))
                 };
-                let held = selected.and_then(|e| Some((e.id, e.data.transform?)));
+                let held = selected.and_then(|e| Some((e.id, doc.world_transform(e)?)));
                 self.drag = match (handle, held) {
                     (Some(axis), Some((id, t))) => Drag::Gizmo {
                         id,
@@ -4820,7 +5009,8 @@ impl Ui {
             for id in doc.selection() {
                 if let Some(i) = doc.index_of(id) {
                     let lead = Some(id) == doc.selected;
-                    draw_selection(canvas, &doc.entities[i].data, &proj, lead);
+                    let frame = doc.attach_frame(&doc.entities[i]);
+                    draw_selection(canvas, &doc.entities[i].data, frame, &proj, lead);
                 }
             }
             if let Drag::ViewPress {
@@ -5544,11 +5734,11 @@ fn world_circle(center: Vec3, u: Vec3, v: Vec3, radius: f32) -> Vec<Vec3> {
 
 /// A placed light's reach: a point light's range as three rings, a
 /// spotlight's cone out to its range (edge solid, core fainter).
-fn draw_light_reach(canvas: &mut Canvas, d: &EntityData, proj: &Projector) {
+fn draw_light_reach(canvas: &mut Canvas, d: &EntityData, frame: glam::Mat4, proj: &Projector) {
     let Some(t) = d.transform else {
         return;
     };
-    let model = view::model_matrix(&t);
+    let model = frame * view::model_matrix(&t);
     let at = model.w_axis.truncate();
     if let Some(point) = d.point_light {
         let range = point.to_light(at).effective_range();
@@ -5587,9 +5777,15 @@ fn draw_light_reach(canvas: &mut Canvas, d: &EntityData, proj: &Projector) {
 
 /// The selection outline (oriented box), plus a light's direction arrow
 /// or reach.
-fn draw_selection(canvas: &mut Canvas, d: &EntityData, proj: &Projector, lead: bool) {
+fn draw_selection(
+    canvas: &mut Canvas,
+    d: &EntityData,
+    frame: glam::Mat4,
+    proj: &Projector,
+    lead: bool,
+) {
     if lead {
-        draw_light_reach(canvas, d, proj);
+        draw_light_reach(canvas, d, frame, proj);
     }
     // The lead's box is bright; the rest of a multi-selection is softer.
     let mut edge = color::gizmo_hot();
@@ -5597,7 +5793,7 @@ fn draw_selection(canvas: &mut Canvas, d: &EntityData, proj: &Projector, lead: b
         edge.apply_opacity(0.6);
     }
     if d.mesh_visual.is_some() {
-        if let Some(corners) = view::box_corners(d) {
+        if let Some(corners) = view::box_corners(d, frame) {
             let screen: Vec<Option<(f32, f32)>> =
                 corners.iter().map(|c| proj.project(*c)).collect();
             for i in 0..8 {
@@ -6589,6 +6785,91 @@ mod tests {
     }
 
     #[test]
+    fn the_attach_section_picks_an_entity_and_its_bones() {
+        let mut c = canvas();
+        let mut doc = Document::new();
+        doc.create_model(crate::play::tests::ROBOT, "Robot", [0.0; 3]);
+        let i = doc.add_entity_named("Hat");
+        let hat = doc.entities[i].id;
+        doc.modify(hat, false, |d| ComponentKind::Attach.add_to(d));
+        doc.select(Some(hat));
+        let mut ui = Ui::new();
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        let insp = lay().inspector;
+        let value_x = insp.x + layout::PAD + layout::LABEL_W;
+        // Find the Follow menu: it offers the robot.
+        let mut follow_y = None;
+        for y in (insp.y as i32..(insp.y + insp.h) as i32).step_by(4) {
+            ui.menu = None;
+            click(&mut ui, &mut c, &doc, value_x + 40.0, y as f32);
+            let robot = ui
+                .menu
+                .as_ref()
+                .and_then(|m| m.items.iter().find(|i| i.label.trim() == "Robot").cloned());
+            if let Some(item) = robot {
+                assert_eq!(
+                    item.action,
+                    Some(menus::Action::Intent(Intent::SetAttach {
+                        id: hat,
+                        to: Some("Robot".into()),
+                        bone: None
+                    }))
+                );
+                follow_y = Some(y as f32);
+                break;
+            }
+        }
+        let follow_y = follow_y.expect("the Follow menu");
+        // Following the robot, the Bone menu (a row down) lists its bones.
+        doc.modify(hat, false, |d| {
+            d.attach.as_mut().unwrap().to = "Robot".into();
+        });
+        ui.menu = None;
+        click(
+            &mut ui,
+            &mut c,
+            &doc,
+            value_x + 40.0,
+            follow_y + layout::ROW_STEP,
+        );
+        let menu = ui.menu.as_ref().expect("the Bone menu");
+        let head = menu
+            .items
+            .iter()
+            .find(|i| i.label.trim() == "Head")
+            .expect("the robot's head");
+        assert_eq!(
+            head.action,
+            Some(menus::Action::Intent(Intent::SetAttach {
+                id: hat,
+                to: None,
+                bone: Some("Head".into())
+            }))
+        );
+        assert!(menu.items.len() > 40, "every bone: {}", menu.items.len());
+        // Its transform is an offset from the bone's frame.
+        let frame = glam::Mat4::from_rotation_translation(
+            glam::Quat::from_rotation_y(1.0),
+            glam::Vec3::new(1.0, 2.0, 3.0),
+        );
+        doc.set_attach_frames(std::iter::once((hat, frame)).collect());
+        let e = &doc.entities[doc.index_of(hat).unwrap()];
+        let world = doc.world_transform(e).unwrap();
+        assert!(
+            (glam::Vec3::from(world.position) - glam::Vec3::new(1.0, 2.0, 3.0)).length() < 1e-4
+        );
+        let moved = TransformData {
+            position: [1.0, 3.0, 3.0],
+            ..world
+        };
+        let local = doc.local_from_world(e, moved);
+        assert!(
+            (glam::Vec3::from(local.position) - glam::Vec3::Y).length() < 1e-4,
+            "{local:?}"
+        );
+    }
+
+    #[test]
     fn the_animation_section_picks_clips_and_previews_them() {
         let mut c = canvas();
         let mut doc = Document::new();
@@ -6636,14 +6917,14 @@ mod tests {
         assert!(ui.file_dialog_open(), "the graph picker");
         assert_eq!(ui.file_dialog_name(), Some("robot.anim.ron"));
         ui.close_file_dialog();
-        // Six rows up (past Graph, Root Motion, Play On Start, Loop and
-        // Speed), the clip menu lists the model's clips.
+        // Seven rows up (past Graph, Feet On Ground, Root Motion, Play On
+        // Start, Loop and Speed), the clip menu lists the model's clips.
         click(
             &mut ui,
             &mut c,
             &doc,
             value_x + 40.0,
-            button_y - 6.0 * layout::ROW_STEP,
+            button_y - 7.0 * layout::ROW_STEP,
         );
         let menu = ui.menu.as_ref().expect("the clip menu");
         let labels: Vec<&str> = menu.items.iter().map(|i| i.label.trim()).collect();

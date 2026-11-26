@@ -117,6 +117,10 @@ pub struct EntityData {
     /// A joint holding this entity's body to another's (or to the world).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub joint: Option<automata_physics::Joint>,
+    /// Follows a bone of another entity's model (a sword in a hand); the
+    /// entity's `transform` is then its offset in the bone's space.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attach: Option<AttachData>,
     /// Custom named gameplay values (`health: Int(100)`, `team: Text("red")`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub attributes: BTreeMap<String, AttributeValue>,
@@ -131,6 +135,17 @@ pub struct EntityData {
     /// overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefab: Option<crate::prefab::PrefabLink>,
+}
+
+/// What an entity is attached to (see [`automata_scene::Attachment`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AttachData {
+    /// The name of the entity followed.
+    pub to: String,
+    /// The bone followed (empty: the entity's origin).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub bone: String,
 }
 
 /// A custom attribute value: the small set of types an editor can show and
@@ -334,6 +349,14 @@ impl SceneFile {
             if let Some(transform) = eref.get::<&Transform>() {
                 data.transform = Some(TransformData::from(*transform));
             }
+            if let Some(attachment) = eref.get::<&automata_scene::Attachment>() {
+                // Saved as its offset: the transform is wherever the bone was.
+                data.transform = Some(TransformData::from(attachment.offset));
+                data.attach = Some(AttachData {
+                    to: attachment.to.clone(),
+                    bone: attachment.bone.clone(),
+                });
+            }
             if let Some(camera) = eref.get::<&Camera3D>() {
                 data.camera_3d = Some(*camera);
             }
@@ -480,6 +503,13 @@ impl SceneFile {
             }
             if let Some(joint) = &data.joint {
                 let _ = world.insert_one(entity, joint.clone());
+            }
+            if let Some(attach) = &data.attach {
+                let offset = data.transform.map(Transform::from).unwrap_or_default();
+                let _ = world.insert_one(
+                    entity,
+                    automata_scene::Attachment::new(&attach.to, &attach.bone, offset),
+                );
             }
             if !data.attributes.is_empty() {
                 let _ = world.insert_one(entity, Attributes(data.attributes.clone()));
@@ -874,6 +904,42 @@ mod tests {
         assert_eq!(rope.kind, JointKind::Rope);
         assert_eq!(rope.connected.as_deref(), Some("Hook"));
         assert!(rope.enabled && rope.motor.is_none());
+    }
+
+    #[test]
+    fn attachments_save_their_offset() {
+        let mut world = SceneWorld::new();
+        let offset = Transform::from_position(glam::Vec3::new(0.0, 0.1, 0.0));
+        world.spawn((
+            Name::new("Hat"),
+            // Where the head was last frame: not saved.
+            Transform::from_position(glam::Vec3::new(5.0, 2.0, 0.0)),
+            automata_scene::Attachment::new("Robot", "Head", offset),
+        ));
+        let file = SceneFile::from_world(&world);
+        let hat = &file.entities[0];
+        assert_eq!(hat.transform, Some(TransformData::from(offset)));
+        assert_eq!(
+            hat.attach,
+            Some(AttachData {
+                to: "Robot".into(),
+                bone: "Head".into()
+            })
+        );
+        let back = SceneFile::from_ron(&file.to_ron().unwrap()).unwrap();
+        assert_eq!(back, file);
+        let mut loaded = SceneWorld::new();
+        back.apply_to_world(&mut loaded);
+        let mut q = loaded.query::<&automata_scene::Attachment>();
+        let a = q.iter().next().unwrap();
+        assert_eq!(
+            (a.to.as_str(), a.bone.as_str(), a.offset),
+            ("Robot", "Head", offset)
+        );
+        let short =
+            SceneFile::from_ron("(version: 1, entities: [(attach: Some((to: \"Robot\")))])")
+                .unwrap();
+        assert_eq!(short.entities[0].attach.as_ref().unwrap().bone, "");
     }
 
     #[test]

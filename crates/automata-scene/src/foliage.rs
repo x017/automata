@@ -659,11 +659,22 @@ pub fn raycast_surfaces(
     dir: Vec3,
     max_distance: f32,
 ) -> Option<SurfaceHit> {
+    raycast_surfaces_except(world, origin, dir, max_distance, &|_| false)
+}
+
+/// [`raycast_surfaces`], passing through the entities `skip` picks.
+pub(crate) fn raycast_surfaces_except(
+    world: &SceneWorld,
+    origin: Vec3,
+    dir: Vec3,
+    max_distance: f32,
+    skip: &dyn Fn(Entity) -> bool,
+) -> Option<SurfaceHit> {
     let dir = dir.try_normalize()?;
     let mut best: Option<SurfaceHit> = None;
     let mut query = world.query::<(Entity, &MeshVisual, &GlobalTransform, Option<&Scatter>)>();
     for (entity, visual, global, scatter) in &mut query {
-        if scatter.is_some() {
+        if scatter.is_some() || skip(entity) {
             continue;
         }
         let model = global.matrix();

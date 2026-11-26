@@ -26,6 +26,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use automata_core::scene_file::TransformData;
 use automata_core::AttributeValue;
 
 use crate::json::Json;
@@ -84,6 +85,8 @@ pub struct EntityState {
     pub anim: Option<automata_scene::AnimationState>,
     /// The entity's joint and how it's holding, if it has one.
     pub joint: Option<(automata_physics::Joint, automata_physics::JointState)>,
+    /// What the entity follows, `(entity name, bone)`, if it's attached.
+    pub attached: Option<(String, String)>,
 }
 
 /// A collider as the runner sees it (for `ctx.physics.raycast`).
@@ -346,8 +349,27 @@ pub struct EntityWrite {
     pub anim: Vec<automata_scene::AnimationCommand>,
     /// Changes to the entity's joint.
     pub joint: Option<automata_physics::JointEdit>,
+    /// Attach the entity to a bone, or detach it.
+    pub attach: Option<AttachWrite>,
     /// Remove the entity from the running scene.
     pub despawn: bool,
+}
+
+/// A script attaching an entity to a bone (`entity.attach`) or detaching
+/// it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AttachWrite {
+    /// Follow `bone` of the entity named `to`, at `offset` in its space.
+    To {
+        /// The name of the entity followed.
+        to: String,
+        /// The bone ("" for the entity's origin).
+        bone: String,
+        /// Where it sits in the bone's space.
+        offset: TransformData,
+    },
+    /// Stop following, staying put.
+    Detach,
 }
 
 /// A message from the runner.
@@ -859,6 +881,12 @@ fn state_json(e: &EntityState) -> Json {
     if e.has_audio {
         obj.set("snd", Json::Bool(true));
     }
+    if let Some((to, bone)) = &e.attached {
+        obj.set(
+            "att",
+            Json::Arr(vec![Json::from(to.as_str()), Json::from(bone.as_str())]),
+        );
+    }
     if let Some(a) = &e.anim {
         obj.set("anim", anim_json(a));
     }
@@ -940,6 +968,14 @@ fn anim_json(a: &automata_scene::AnimationState) -> Json {
         ("rm", Json::Bool(a.root_motion)),
         // The latest events passed: [seq, clip, name], oldest first.
         ("ev", Json::Arr(events.collect())),
+        // Inverse kinematics: feet on the ground, the head looking, the
+        // bones reaching.
+        ("fik", Json::Bool(a.foot_ik)),
+        ("look", Json::Bool(a.looking)),
+        (
+            "reach",
+            Json::Arr(a.reaching.iter().map(|b| Json::from(b.as_str())).collect()),
+        ),
     ]);
     if let (Some(path), Some(graph)) = (&a.graph_path, &a.graph) {
         out.set("graph", Json::from(path.as_str()));
@@ -978,7 +1014,10 @@ fn graph_layers_json(graph: &automata_scene::GraphState) -> Json {
 /// `["reset_springs"]`, `["root_motion", on]`, or for animation graphs
 /// `["graph", path]`, `["set", name, value]`, `["trigger", name]`,
 /// `["reset_trigger", name]`, `["layer_weight", layer, weight]` and
-/// `["play_state", layer, state, fade]`.
+/// `["play_state", layer, state, fade]`, and for inverse kinematics
+/// `["look_at", target, weight]`, `["reach", bone, target, weight]` and
+/// `["foot_ik", on]`, a target being null (stop), an entity's name or a
+/// point `[x, y, z]`.
 fn parse_anim(v: &Json) -> Option<automata_scene::AnimationCommand> {
     use automata_scene::{AnimationCommand as C, PlayOptions};
     let a = v.as_arr()?;
@@ -1015,7 +1054,59 @@ fn parse_anim(v: &Json) -> Option<automata_scene::AnimationCommand> {
             state: text(2)?,
             fade: n(3).unwrap_or(0.0).max(0.0),
         },
+        "look_at" => C::LookAt {
+            target: ik_target(a.get(1)?)?,
+            weight: n(2).unwrap_or(1.0).clamp(0.0, 1.0),
+        },
+        "reach" => C::Reach {
+            bone: text(1)?,
+            target: ik_target(a.get(2)?)?,
+            weight: n(3).unwrap_or(1.0).clamp(0.0, 1.0),
+        },
+        "foot_ik" => C::FootIk(a.get(1)?.as_bool()?),
         _ => return None,
+    })
+}
+
+/// An IK target on the wire: `Some(None)` for null (stop), else an
+/// entity's name or a point; `None` when it's neither.
+#[allow(clippy::option_option)]
+fn ik_target(v: &Json) -> Option<Option<automata_scene::ik::IkTarget>> {
+    use automata_scene::ik::IkTarget;
+    match v {
+        Json::Null => Some(None),
+        Json::Str(name) => Some(Some(IkTarget::Entity(name.clone()))),
+        _ => v
+            .as_floats::<3>()
+            .filter(|p| p.iter().all(|x| x.is_finite()))
+            .map(|p| Some(IkTarget::Point(glam::Vec3::from(p)))),
+    }
+}
+
+/// `entity.attach`: `[to, bone, position, rotation, scale]`, or `false`
+/// to detach.
+fn parse_attach(v: &Json) -> Option<AttachWrite> {
+    if matches!(v, Json::Bool(false) | Json::Null) {
+        return Some(AttachWrite::Detach);
+    }
+    let a = v.as_arr()?;
+    let finite = |f: [f32; 3]| f.iter().all(|x| x.is_finite()).then_some(f);
+    let three = |i: usize, or: [f32; 3]| match a.get(i) {
+        None => Some(or),
+        Some(j) => j.as_floats::<3>().and_then(finite),
+    };
+    Some(AttachWrite::To {
+        to: a.first()?.as_str()?.to_string(),
+        bone: a
+            .get(1)
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        offset: TransformData {
+            position: three(2, [0.0; 3])?,
+            rotation_euler: three(3, [0.0; 3])?,
+            scale: three(4, [1.0; 3])?,
+        },
     })
 }
 
@@ -1047,6 +1138,7 @@ fn parse_write(w: &Json) -> Option<EntityWrite> {
             .filter_map(parse_anim)
             .collect(),
         joint: w.get("joint").and_then(parse_joint),
+        attach: w.get("att").and_then(parse_attach),
         despawn: matches!(w.get("despawn"), Some(Json::Bool(true))),
     })
 }
@@ -1483,6 +1575,9 @@ mod tests {
                 }],
                 graph_path: None,
                 graph: None,
+                foot_ik: true,
+                looking: false,
+                reaching: vec!["Palm2.R".into()],
             }),
             ..EntityState::default()
         };
@@ -1490,10 +1585,104 @@ mod tests {
         assert!(
             json.contains(r#""anim":{"clip":"Idle","time":0.5,"len":2.0,"playing":true"#)
                 && json.contains(r#""clips":["Idle","Wave"],"lens":[2.0,1.5]"#)
-                && json.contains(r#""rm":true,"ev":[[7,"Idle","blink"]]"#),
+                && json.contains(r#""rm":true,"ev":[[7,"Idle","blink"]]"#)
+                && json.contains(r#""fik":true,"look":false,"reach":["Palm2.R"]"#),
             "{json}"
         );
         assert!(!state_json(&EntityState::default()).dump().contains("anim"));
+    }
+
+    #[test]
+    fn ik_requests_cross_the_bridge() {
+        use automata_scene::ik::IkTarget;
+        use automata_scene::AnimationCommand as C;
+        let msg = parse_msg(concat!(
+            r#"{"op":"frame","frame":1,"writes":[{"id":3,"anim":["#,
+            r#"["look_at","Player",0.5],["look_at",[1,2,3]],["look_at",null],"#,
+            r#"["reach","Palm2.R",[0,1,2],2],["reach","Palm2.R",null],"#,
+            r#"["foot_ik",true],["look_at",7],["reach",null,null],["foot_ik"]]}]}"#
+        ));
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(
+            writes[0].anim,
+            vec![
+                C::LookAt {
+                    target: Some(IkTarget::Entity("Player".into())),
+                    weight: 0.5
+                },
+                C::LookAt {
+                    target: Some(IkTarget::Point(glam::Vec3::new(1.0, 2.0, 3.0))),
+                    weight: 1.0
+                },
+                C::LookAt {
+                    target: None,
+                    weight: 1.0
+                },
+                C::Reach {
+                    bone: "Palm2.R".into(),
+                    target: Some(IkTarget::Point(glam::Vec3::new(0.0, 1.0, 2.0))),
+                    weight: 1.0
+                },
+                C::Reach {
+                    bone: "Palm2.R".into(),
+                    target: None,
+                    weight: 1.0
+                },
+                C::FootIk(true),
+            ]
+        );
+    }
+
+    #[test]
+    fn attachments_cross_the_bridge() {
+        let msg = parse_msg(concat!(
+            r#"{"op":"frame","frame":1,"writes":["#,
+            r#"{"id":1,"att":["Robot","Head",[0,0.4,0],[0,90,0],[1,1,1]]},"#,
+            r#"{"id":2,"att":["Robot"]},{"id":3,"att":null},{"id":4,"att":false},"#,
+            r#"{"id":5,"att":[7]},{"id":6}]}"#
+        ));
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(
+            writes[0].attach,
+            Some(AttachWrite::To {
+                to: "Robot".into(),
+                bone: "Head".into(),
+                offset: TransformData {
+                    position: [0.0, 0.4, 0.0],
+                    rotation_euler: [0.0, 90.0, 0.0],
+                    scale: [1.0; 3],
+                },
+            })
+        );
+        assert_eq!(
+            writes[1].attach,
+            Some(AttachWrite::To {
+                to: "Robot".into(),
+                bone: String::new(),
+                offset: TransformData {
+                    position: [0.0; 3],
+                    rotation_euler: [0.0; 3],
+                    scale: [1.0; 3],
+                },
+            })
+        );
+        assert_eq!(writes[2].attach, Some(AttachWrite::Detach));
+        assert_eq!(writes[3].attach, Some(AttachWrite::Detach));
+        assert_eq!(writes[4].attach, None, "a name is needed");
+        assert_eq!(writes[5].attach, None);
+        let state = EntityState {
+            attached: Some(("Robot".into(), "Palm2.R".into())),
+            ..EntityState::default()
+        };
+        let json = state_json(&state).dump();
+        assert!(json.contains(r#""att":["Robot","Palm2.R"]"#), "{json}");
+        assert!(!state_json(&EntityState::default())
+            .dump()
+            .contains("\"att\""));
     }
 
     #[test]
@@ -1564,6 +1753,9 @@ mod tests {
                 events: Vec::new(),
                 graph_path: Some("anims/robot.anim.ron".into()),
                 graph: Some(graph),
+                foot_ik: false,
+                looking: true,
+                reaching: Vec::new(),
             }),
             ..EntityState::default()
         };

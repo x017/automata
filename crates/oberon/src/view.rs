@@ -253,11 +253,12 @@ pub fn rotation_of(t: &TransformData) -> Quat {
 }
 
 /// The world-space corners of an entity's bounding box (for the selection
-/// outline). Index bits: x = bit 0, y = bit 1, z = bit 2.
+/// outline), its transform taken in `frame` (the bone it follows, or
+/// identity). Index bits: x = bit 0, y = bit 1, z = bit 2.
 #[must_use]
-pub fn box_corners(data: &EntityData) -> Option<[Vec3; 8]> {
+pub fn box_corners(data: &EntityData, frame: Mat4) -> Option<[Vec3; 8]> {
     let t = data.transform?;
-    let model = model_matrix(&t);
+    let model = frame * model_matrix(&t);
     let (c, h) = local_bounds(data);
     let mut out = [Vec3::ZERO; 8];
     for (i, corner) in out.iter_mut().enumerate() {
@@ -317,14 +318,14 @@ pub fn pick_box(doc: &Document, proj: &Projector, a: (f32, f32), b: (f32, f32)) 
     doc.entities
         .iter()
         .filter(|e| {
-            let Some(t) = e.data.transform else {
+            let Some(model) = doc.world_matrix(e) else {
                 return false;
             };
             let centre = if e.data.mesh_visual.is_some() {
                 let (c, _) = local_bounds(&e.data);
-                model_matrix(&t).transform_point3(c)
+                model.transform_point3(c)
             } else {
-                Vec3::from(t.position)
+                model.w_axis.truncate()
             };
             proj.project(centre)
                 .is_some_and(|(x, y)| (x0..=x1).contains(&x) && (y0..=y1).contains(&y))
@@ -339,17 +340,17 @@ pub fn pick(doc: &Document, proj: &Projector, sx: f32, sy: f32) -> Option<u64> {
     let (origin, dir) = proj.ray(sx, sy);
     let mut best: Option<(f32, u64)> = None;
     for entity in &doc.entities {
-        let Some(t) = entity.data.transform else {
+        let Some(world) = doc.world_matrix(entity) else {
             continue;
         };
         let (model, half) = if entity.data.mesh_visual.is_some() {
             let (center, half) = local_bounds(&entity.data);
-            (model_matrix(&t) * Mat4::from_translation(center), half)
+            (world * Mat4::from_translation(center), half)
         } else {
             // Mesh-less entities (lights, cameras, empties) get a fixed-size
             // marker box, unaffected by scale and rotation.
             (
-                Mat4::from_translation(Vec3::from(t.position)),
+                Mat4::from_translation(world.w_axis.truncate()),
                 Vec3::splat(0.3),
             )
         };

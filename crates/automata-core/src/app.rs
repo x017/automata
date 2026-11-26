@@ -152,6 +152,29 @@ impl WorldState {
         &self.physics3d
     }
 
+    /// Advances the scene's animations by `dt` seconds (see
+    /// [`automata_scene::animate`]), feet standing on the physics
+    /// colliders (or, in a world without any, on the meshes).
+    pub fn animate(&mut self, dt: f32) {
+        let world = self.scene.world_mut();
+        if self.physics3d.collider_count() == 0 {
+            automata_scene::animate(world, dt);
+            return;
+        }
+        let physics = &self.physics3d;
+        let ground = |entity: automata_scene::Entity, from: glam::Vec3, max: f32| {
+            let filter = automata_physics::RayFilter {
+                exclude_sensors: true,
+                exclude_entity: Some(entity),
+                ..automata_physics::RayFilter::default()
+            };
+            physics
+                .cast_ray(from, glam::Vec3::NEG_Y, max, &filter)
+                .map(|hit| (hit.point, hit.normal))
+        };
+        automata_scene::animate_on(world, dt, Some(&ground));
+    }
+
     /// The 2D physics world, read-only.
     #[must_use]
     pub fn physics2d_ref(&self) -> &automata_physics::PhysicsWorld2D {
@@ -660,7 +683,7 @@ impl Application {
                 &mut self.quit_requested,
             ));
             self.world.scene.update();
-            automata_scene::animate(self.world.scene.world_mut(), delta.as_secs_f32());
+            self.world.animate(delta.as_secs_f32());
             automata_scene::simulate_particles(self.world.scene.world_mut(), delta.as_secs_f32());
             // Record the scene into the throwaway draw list: headless frames
             // exercise the same scene-to-renderer bridge as windowed ones.

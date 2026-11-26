@@ -201,7 +201,7 @@ impl<'a, F: FnMut(&mut AppContext<'_>)> Runtime<'a, F> {
             automata_scene::materialize_visuals(self.world.scene_mut().world_mut(), renderer);
             automata_scene::load_particle_textures(self.world.scene_mut().world_mut(), renderer);
         }
-        automata_scene::animate(self.world.scene_mut().world_mut(), delta.as_secs_f32());
+        self.world.animate(delta.as_secs_f32());
         automata_scene::simulate_particles(self.world.scene_mut().world_mut(), delta.as_secs_f32());
         automata_scene::record_draw_list(self.world.scene().world(), &mut self.state.draw);
         automata_physics::record_grass_pushers(self.world.scene().world(), &mut self.state.draw);

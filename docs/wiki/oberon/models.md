@@ -129,6 +129,7 @@ Add a model that has animations and Oberon gives the entity an
 | **Loop** | Off plays the clip once and holds its last frame (a character that sits down stays seated). |
 | **Play On Start** | Off holds the first frame until a script calls `play`. |
 | **Root Motion** | The clip's own travel across the ground moves the entity. See [Root motion](#root-motion). |
+| **Feet On Ground** | Plants each foot on what's under it (slopes, stairs). See [Attachments & IK](attachments-and-ik.md#feet-on-ground). |
 | **Preview** | Plays the clip in the scene view without pressing Play. The button plays and pauses it. Drag the time bar to scrub, which pauses it on that frame. Yellow ticks on the bar mark the clip's [events](#animation-events); hover one for its name. The preview follows Speed and Loop, and stops when you select something else. |
 
 While you edit, an animated model holds its clip's first frame, so you place
@@ -138,6 +139,9 @@ with **Play On Start** starts.
 For a character with many clips, an [animation graph](animation-graphs.md)
 picks them for you from a few values your script sets (speed, grounded,
 jump).
+
+To put a sword in its hand or a hat on its head, keep its feet on stairs,
+or turn its head towards the player, see [Attachments & IK](attachments-and-ik.md).
 
 ### From a script
 
@@ -540,10 +544,11 @@ yourself. A missing file raises `FileNotFoundError`. See the
 
 ## Try it
 
-`examples/oberon/robot_plaza/` is a town square with five copies of an
-animated CC0 robot. You walk one of them around, and its script blends
-between Idle, Walking, Running, Jump and Wave. The others dance, sit, wave
-when you come near, and walk in slow motion. Open it and pick clips for
+`examples/oberon/robot_plaza/` is a town square with six copies of an
+animated CC0 robot. You walk one of them around (in a top hat attached to
+its head), and its graph blends between Idle, Walking, Running, Jump and
+Wave. The others dance, sit, watch you and wave when you come near, walk in
+slow motion, and stand with one foot on a step. Open it and pick clips for
 them in the Inspector:
 
 ```console

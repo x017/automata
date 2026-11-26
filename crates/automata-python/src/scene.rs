@@ -233,6 +233,9 @@ impl PyEntity {
                     StagedComponent::Joint(v) => {
                         Py::new(py, crate::joints::PyJoint::from_inner(v.clone()))?.into_any()
                     }
+                    StagedComponent::Attach(v) => {
+                        Py::new(py, crate::animation::PyAttach { inner: v.clone() })?.into_any()
+                    }
                 })
             })
             .collect()
@@ -493,6 +496,18 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
             StagedComponent::Joint(c) => {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }
+            StagedComponent::Attach(a) => {
+                let offset = staged
+                    .components
+                    .iter()
+                    .find_map(|c| match c {
+                        StagedComponent::Transform(t) => Some(*t),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let attachment = automata_scene::Attachment::new(&a.to, &a.bone, offset);
+                let _ = scene.world_mut().insert_one(id, attachment);
+            }
         }
     }
     if !staged.attributes.is_empty() {
@@ -545,6 +560,8 @@ pub struct FrameWrites {
     pub animations: Vec<(u64, automata_scene::AnimationCommand)>,
     /// Changes to entities' joints, in call order.
     pub joints: Vec<(u64, automata_physics::JointEdit)>,
+    /// Attaching entities to bones (`None` detaches), in call order.
+    pub attachments: Vec<(u64, Option<automata_scene::Attachment>)>,
 }
 
 /// Shared write buffer between the per-frame views and the game loop.
@@ -611,6 +628,23 @@ pub fn apply_writes(scene: &mut Scene, writes: &WriteQueue) {
             }
         }
     }
+    for (bits, attachment) in drained.attachments {
+        if let Some(entity) = EntityId::from_bits(bits) {
+            let world = scene.world_mut();
+            match attachment {
+                Some(a) if world.contains(entity) => {
+                    if world.get::<&Transform>(entity).is_err() {
+                        let _ = world.insert_one(entity, Transform::IDENTITY);
+                    }
+                    let _ = world.insert_one(entity, a);
+                }
+                Some(_) => {}
+                None => {
+                    let _ = world.remove_one::<automata_scene::Attachment>(entity);
+                }
+            }
+        }
+    }
     for entity in drained.despawns {
         if scene.world().contains(entity) {
             scene.despawn_recursive(entity);
@@ -631,6 +665,7 @@ struct EntitySnapshot {
     audio_source: Option<automata_core::AudioSource>,
     animation: Option<automata_scene::AnimationState>,
     joint: Option<(automata_physics::Joint, automata_physics::JointState)>,
+    attached: Option<(String, String)>,
 }
 
 /// Read access to the scene during the update callback.
@@ -681,6 +716,10 @@ impl SceneView {
                                 .unwrap_or_default();
                             ((*j).clone(), state)
                         }),
+                        attached: world
+                            .get::<&automata_scene::Attachment>(id)
+                            .ok()
+                            .map(|a| (a.to.clone(), a.bone.clone())),
                     }
                 },
             )
@@ -806,6 +845,7 @@ pub struct EntityView {
     audio_source: Option<automata_core::AudioSource>,
     animation: Option<automata_scene::AnimationState>,
     joint: Option<(automata_physics::Joint, automata_physics::JointState)>,
+    attached: Option<(String, String)>,
     writes: WriteQueue,
 }
 
@@ -822,6 +862,7 @@ impl EntityView {
             audio_source: snapshot.audio_source.clone(),
             animation: snapshot.animation.clone(),
             joint: snapshot.joint.clone(),
+            attached: snapshot.attached.clone(),
             writes,
         }
     }
@@ -971,6 +1012,35 @@ impl EntityView {
         self.animation.clone().map(|state| {
             crate::animation::PyAnimationRef::new(self.id, state, Rc::clone(&self.writes))
         })
+    }
+
+    /// Attaches the entity to `bone` of the entity named `to` (no bone:
+    /// the entity itself), sitting at `offset` (a `Transform`, default
+    /// none) in the bone's space: a sword picked up into a hand. Applied
+    /// after the callback returns; from then on it follows the bone.
+    #[pyo3(signature = (to, bone="", offset=None))]
+    fn attach(&self, to: &str, bone: &str, offset: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
+        let offset = offset
+            .map(extract_transform)
+            .transpose()?
+            .unwrap_or_default();
+        self.writes.borrow_mut().attachments.push((
+            self.id,
+            Some(automata_scene::Attachment::new(to, bone, offset)),
+        ));
+        Ok(())
+    }
+
+    /// Stops following a bone, staying where it is (applied after the
+    /// callback returns).
+    fn detach(&self) {
+        self.writes.borrow_mut().attachments.push((self.id, None));
+    }
+
+    /// What the entity follows: `(entity name, bone)`, or `None`.
+    #[getter]
+    fn attached_to(&self) -> Option<(String, String)> {
+        self.attached.clone()
     }
 
     /// Queues the entity (and its children) for despawn after the callback.

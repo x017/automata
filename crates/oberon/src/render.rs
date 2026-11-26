@@ -514,6 +514,7 @@ impl ViewportRenderer {
                     .map(|a| a.clip.clone())
                     .unwrap_or_default();
                 pose_model(world, previous, &clip, 0.0);
+                automata_scene::attach_to_bones(world);
             }
         }
         let Some((entity, anim, p)) = target else {
@@ -528,7 +529,25 @@ impl ViewportRenderer {
         };
         step_preview(p, &anim, duration, dt);
         pose_model(world, entity, &anim.clip, p.time);
+        // What's attached to it follows.
+        automata_scene::attach_to_bones(world);
         self.previewed = Some(entity);
+    }
+
+    /// Where the bones the document's attached entities follow are in the
+    /// edit-time world, by entity id (see [`Document::attach_frame`]).
+    #[must_use]
+    pub fn attach_frames(&self, doc: &Document) -> std::collections::HashMap<u64, glam::Mat4> {
+        let world = self.scene.world();
+        doc.entities
+            .iter()
+            .zip(&self.entities)
+            .filter(|(e, _)| e.data.attach.is_some())
+            .filter_map(|(e, &entity)| {
+                let a = world.get::<&automata_scene::Attachment>(entity).ok()?;
+                Some((e.id, automata_scene::bone_world(world, &a)))
+            })
+            .collect()
     }
 
     /// Live particles in the edit-time world.
@@ -827,7 +846,7 @@ pub mod render_wireframe {
                 .data
                 .mesh_visual
                 .as_ref()
-                .and_then(|_| view::box_corners(&entity.data));
+                .and_then(|_| view::box_corners(&entity.data, doc.attach_frame(entity)));
             if let Some(corners) = corners {
                 let col = entity
                     .data

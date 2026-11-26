@@ -116,6 +116,8 @@ for `entity` and `ctx`.
 | `entity.animation.clip` / `.time` / `.playing` / `.clips` | The current clip, seconds into it (assign to jump), whether it's playing (False once a one-shot ends), and every clip name. `.speed` and `.root_motion` can be set too |
 | `entity.animation.set("speed", 3.0)` / `.trigger("jump")` | Steer the entity's [animation graph](animation-graphs.md): set a parameter, or fire a trigger. Unknown names raise `KeyError`, the wrong kind `TypeError` |
 | `entity.animation.state` / `.layer_state("Arms")` / `.get("speed")` | Where the graph is (its first layer's state, or another layer's) and a parameter's value. Also `.parameters`, `.layers`, `.in_transition`, `.state_time`, `.graph` (assign a path to switch graphs) and `.play_state("Dance", layer=None, fade=0.2)` |
+| `entity.animation.look_at(target)` / `.reach("Palm2.R", target)` | Turn the head towards, or reach a hand for, an entity, a name or a point; `None` stops. `.foot_ik` plants the feet on the ground ([Attachments & IK](attachments-and-ik.md)) |
+| `entity.attach("Robot", "Head", position=…)` / `.detach()` / `.attached_to` | Follow a bone of another entity (a sword picked up into a hand), or let go ([Attachments & IK](attachments-and-ik.md#picking-things-up-from-a-script)) |
 | `entity.joint` | The entity's Joint while it runs, or `None`: `.angle`, `.value`, `.force`, `.attached`, `.broken`; set `.motor_target`, `.motor_speed`, `.limits`, `.enabled`, `.connected`. `on_joint_broken(entity, ctx)` runs when it snaps ([Physics → Joints](../guides/physics.md#joints)) |
 | `entity.despawn()` | Remove the entity until Play stops |
 | `entity.state` | A dict of your own that persists between frames (not saved) |

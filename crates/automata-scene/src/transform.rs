@@ -64,6 +64,17 @@ impl Transform {
     pub fn to_matrix(&self) -> Mat4 {
         Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.position)
     }
+
+    /// The transform of a matrix (any shear is lost).
+    #[must_use]
+    pub fn from_matrix_lossy(m: Mat4) -> Self {
+        let (scale, rotation, position) = m.to_scale_rotation_translation();
+        Self {
+            position,
+            rotation: rotation.normalize(),
+            scale,
+        }
+    }
 }
 
 impl Default for Transform {

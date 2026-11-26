@@ -343,7 +343,8 @@ files. Guide: [Rendering & Lights](guides/rendering-and-lights.md#particles).
 ### Animation
 
 ```python
-at.Animation(clip="", speed=1.0, looping=True, play_on_start=True, root_motion=False)
+at.Animation(clip="", speed=1.0, looping=True, play_on_start=True, root_motion=False,
+             graph="", foot_ik=False)
 ```
 
 Plays a clip of the entity's animated model (a glTF with a skeleton or
@@ -376,6 +377,19 @@ played once also fires `"end"`. `view.animation.recent_events` lists the
 latest as `(seq, clip, name)`, with `seq` counting up per entity. Behaviour
 scripts get them as `on_animation_event` calls and channel messages
 (below). Guide: [Models → Animation events](oberon/models.md#animation-events).
+
+`foot_ik=True` plants each foot on what's under it (slopes, stairs). It
+stands on colliders while the game runs, and on meshes in a game without
+physics.
+
+```python
+at.Attach(to, bone="")
+```
+
+Makes the entity follow `bone` of the entity named `to` (no bone: that
+entity's origin). Its `Transform` becomes its offset in the bone's space,
+and it keeps its own size. `to` and `bone` are readable. Saved in scene
+files. Guide: [Attachments & IK](oberon/attachments-and-ik.md).
 
 ### Physics components
 
@@ -467,6 +481,9 @@ view.transform.set(transform); view.transform.copy()
 view.character_velocity  # (vx, vy, vz) | None; assign to drive characters
 view.camera_3d           # Camera3D copy | None; assign to move the camera
 view.animation           # AnimationRef | None (entities with an Animation and an animated model)
+view.attach(to, bone="", offset=None)   # follow a bone from next frame (offset: Transform)
+view.detach()            # stop following, staying put
+view.attached_to         # (name, bone) | None
 view.despawn()           # queues removal (children too)
 ```
 
@@ -481,6 +498,11 @@ anim.duration            # the clip's length; anim.length("Jump") for any clip
 anim.playing             # False once a one-shot ends or after stop()
 anim.speed               # get/set; anim.looping
 anim.clips               # every clip in the model, in file order, then borrowed ones
+anim.look_at(target, weight=1.0)        # turn the head: a name, an EntityView or (x, y, z);
+                                        # None eases back
+anim.reach(bone, target, weight=1.0)    # bend the limb ending at `bone` to reach target
+anim.foot_ik             # get/set: feet on the ground
+anim.looking; anim.reaching             # whether looking; the bones reaching
 ```
 
 Reads show the start of the frame. `play`, `stop` and setting `time` or

@@ -969,6 +969,10 @@ class EntityView:
     @property
     def joint(self) -> Optional[JointRef]:
         """The entity's joint (``angle``, ``broken``, ``motor_target``...), or None."""
+    def attach(self, to: str, bone: str = "", offset: Optional[Transform] = None) -> None: ...
+    def detach(self) -> None: ...
+    @property
+    def attached_to(self) -> Optional[tuple[str, str]]: ...
     def despawn(self) -> None: ...
 
 class SceneView:
@@ -1064,9 +1068,13 @@ class Animation:
         play_on_start: bool = True,
         root_motion: bool = False,
         graph: str = "",
+        foot_ik: bool = False,
     ) -> None: ...
     @property
     def clip(self) -> str: ...
+    @property
+    def foot_ik(self) -> bool:
+        """Whether the feet follow the ground (slopes, stairs)."""
     @property
     def graph(self) -> str:
         """The animation graph (``.anim.ron``) picking the clips; empty
@@ -1079,6 +1087,17 @@ class Animation:
     def play_on_start(self) -> bool: ...
     @property
     def root_motion(self) -> bool: ...
+
+class Attach:
+    """Follows a bone of another entity's animated model: a sword in a
+    hand, a hat on a head. The entity's ``Transform`` is its offset in the
+    bone's space."""
+
+    def __init__(self, to: str, bone: str = "") -> None: ...
+    @property
+    def to(self) -> str: ...
+    @property
+    def bone(self) -> str: ...
 
 class AnimationRef:
     """A running entity's animation (``view.animation``)."""
@@ -1145,6 +1164,26 @@ class AnimationRef:
     def play_state(
         self, state: str, layer: Optional[str] = None, fade: float = 0.0
     ) -> None: ...
+    # Inverse kinematics (see the Attachments and IK manual).
+    def look_at(
+        self,
+        target: Optional[str | EntityView | tuple[float, float, float]] = None,
+        weight: float = 1.0,
+    ) -> None: ...
+    def reach(
+        self,
+        bone: str,
+        target: Optional[str | EntityView | tuple[float, float, float]] = None,
+        weight: float = 1.0,
+    ) -> None: ...
+    @property
+    def foot_ik(self) -> bool: ...
+    @foot_ik.setter
+    def foot_ik(self, on: bool) -> None: ...
+    @property
+    def looking(self) -> bool: ...
+    @property
+    def reaching(self) -> List[str]: ...
 
 class Audio:
     """Sound playback for the current frame (ctx.audio)."""

@@ -717,6 +717,25 @@ impl EditorApp {
                     p.time = 0.0;
                 }
             }
+            Intent::SetAttach { id, to, bone } => {
+                doc.modify(id, false, |d| {
+                    let Some(a) = &mut d.attach else {
+                        return;
+                    };
+                    if let Some(to) = to {
+                        // Attaching for the first time puts it on the bone.
+                        if a.to.is_empty() {
+                            if let Some(t) = &mut d.transform {
+                                t.position = [0.0; 3];
+                            }
+                        }
+                        a.to = to;
+                    }
+                    if let Some(bone) = bone {
+                        a.bone = bone;
+                    }
+                });
+            }
             Intent::SetJointTarget { id, target } => {
                 doc.modify(id, false, |d| {
                     if let Some(j) = &mut d.joint {
@@ -2705,6 +2724,10 @@ impl EditorApp {
                     if let Some(r) = renderer.as_mut() {
                         viewport.sync(r, doc);
                         viewport.preview_animation(doc, ui.anim_preview.as_mut(), dt);
+                        // Attached entities are picked and moved where
+                        // their bones hold them.
+                        let frames = viewport.attach_frames(doc);
+                        doc.set_attach_frames(frames);
                     }
                     // The foliage brush paints on what's under the cursor.
                     let hit = ui.brush_target(doc).and_then(|_| {

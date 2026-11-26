@@ -122,6 +122,30 @@ def _tuple(v):
     return tuple(v) if isinstance(v, list) else v
 
 
+def _unit(x) -> float:
+    x = float(x)
+    if x != x:
+        raise ValueError("weight must be a number")
+    return min(max(x, 0.0), 1.0)
+
+
+def _ik_target(target):
+    """An IK target on the wire: None, an entity's name, or a point."""
+    if target is None or isinstance(target, str):
+        return target
+    name = getattr(target, "name", None)
+    if isinstance(name, str) and hasattr(target, "id"):
+        if not name:
+            raise ValueError("only named entities can be IK targets; give it a name")
+        return name
+    try:
+        return list(_vec(target, 3))
+    except (TypeError, ValueError):
+        raise TypeError(
+            "the target must be an entity, an entity's name, a point (x, y, z), or None"
+        ) from None
+
+
 KEY_ALIASES = {
     "shift": ("shift_left", "shift_right"),
     "ctrl": ("ctrl_left", "ctrl_right"),
@@ -476,6 +500,51 @@ class EntityAnimation:
     def root_motion(self, on: bool) -> None:
         self._e._anim_cmd(["root_motion", bool(on)])
         self._st()["rm"] = bool(on)
+
+    # --- Inverse kinematics ----------------------------------------------
+
+    def look_at(self, target=None, weight: float = 1.0) -> None:
+        """Turns the head (and neck) towards ``target``: an entity, an
+        entity's name, or a point ``(x, y, z)``; None stops. ``weight``
+        (0 to 1) says how far. It eases in and out, and stops turning
+        past a natural limit. An animated entity is looked in the eye."""
+        self._e._anim_cmd(["look_at", _ik_target(target), _unit(weight)])
+        st = self._st()
+        if st is not None:
+            st["look"] = target is not None
+
+    def reach(self, bone: str, target=None, weight: float = 1.0) -> None:
+        """Bends the limb ending at ``bone`` (a hand, a foot) so it
+        reaches ``target``: an entity, an entity's name, or a point; None
+        stops. ``weight`` (0 to 1) says how far. Eases in and out."""
+        bone = str(bone)
+        self._e._anim_cmd(["reach", bone, _ik_target(target), _unit(weight)])
+        st = self._st()
+        if st is not None:
+            bones = [b for b in st.get("reach") or () if b != bone]
+            st["reach"] = bones + [bone] if target is not None else bones
+
+    @property
+    def foot_ik(self) -> bool:
+        """Whether the feet follow the ground: on slopes and stairs each
+        foot stands on what's under it and the hips drop for the lower
+        one. Settable (also the Animation component's Feet On Ground)."""
+        return bool(self._st().get("fik"))
+
+    @foot_ik.setter
+    def foot_ik(self, on: bool) -> None:
+        self._e._anim_cmd(["foot_ik", bool(on)])
+        self._st()["fik"] = bool(on)
+
+    @property
+    def looking(self) -> bool:
+        """Whether the head is set to look at something."""
+        return bool(self._st().get("look"))
+
+    @property
+    def reaching(self) -> tuple:
+        """The bones set to reach for something."""
+        return tuple(self._st().get("reach") or ())
 
     def length(self, clip: str | None = None) -> float:
         """A clip's length in seconds (default: the current clip's)."""
@@ -981,6 +1050,42 @@ class Entity:
         """The engine's own handle for the entity (``run_scene`` only)."""
         return self._record.get("view")
 
+    def attach(
+        self,
+        to: Any,
+        bone: str = "",
+        position: Iterable[float] = (0.0, 0.0, 0.0),
+        rotation_euler: Iterable[float] = (0.0, 0.0, 0.0),
+        scale: Iterable[float] = (1.0, 1.0, 1.0),
+    ) -> None:
+        """Follows ``bone`` of ``to`` (an entity or its name; no bone: the
+        entity itself) from the next frame on, sitting at ``position`` /
+        ``rotation_euler`` (radians) / ``scale`` in the bone's space: a
+        sword picked up into a hand, a hat put on a head. It keeps its own
+        size, whatever the model's. A ``Transform`` can stand in for all
+        three: ``hat.attach("Robot", "Head", at.Transform(position=...))``."""
+        if hasattr(position, "rotation_euler"):
+            t = position
+            position, rotation_euler = t.position, t.rotation_euler
+            scale = getattr(t, "scale", scale)
+        name = to if isinstance(to, str) else getattr(to, "name", None)
+        if not name or not isinstance(name, str):
+            raise ValueError("attach() needs a named entity (or a name) to follow")
+        self._write("att", [name, str(bone), list(_vec(position, 3)),
+                            list(_vec(rotation_euler, 3)), list(_vec(scale, 3))])
+
+    def detach(self) -> None:
+        """Stops following a bone, staying where it is (from the next frame)."""
+        self._write("att", False)
+
+    @property
+    def attached_to(self) -> tuple[str, str] | None:
+        """What the entity follows, ``(entity name, bone)``, or None."""
+        v = self._read("att", None)
+        if not v:
+            return None
+        return (v[0], v[1])
+
     def despawn(self) -> None:
         """Removes the entity from the running scene (after this frame)."""
         self._despawn = True
@@ -1004,6 +1109,8 @@ class Entity:
                 w[key] = self._vals[key]
         if "attrs" in d and self._attrs is not None:
             w["attrs"] = dict(self._attrs)
+        if "att" in d:
+            w["att"] = self._vals.get("att")
         return w
 
     def __repr__(self):

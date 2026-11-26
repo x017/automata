@@ -63,6 +63,7 @@ hours.
 | Lay out game menus and HUDs in Oberon | [The UI editor](oberon/ui-editor.md) |
 | Share textured looks between objects | [Materials](oberon/materials.md) |
 | Let a graph pick a character's clips (blend spaces, transitions, layers) | [Animation graphs](oberon/animation-graphs.md) |
+| Put a sword in a hand, keep feet on stairs, turn heads | [Attachments & IK](oberon/attachments-and-ik.md) |
 | Reuse objects and add custom data | [Prefabs & attributes](oberon/prefabs-and-attributes.md) |
 | Edit many objects at once, snap to a grid, see frame timings | [Editor workflow](oberon/editor-workflow.md) |
 | Ship your game for Windows, Linux and Android | [Exporting your game](oberon/exporting.md) |

@@ -627,8 +627,9 @@ localization** ✅: `lang/*.csv` string tables read with `ctx.tr`, a saved
 translate their keys, a per-language fallback font, and right-to-left text
 with Persian/Arabic letter joining (demo: Shape Signal in English, Spanish,
 Japanese and Persian). Before it, D6 editor workflow ✅.
-E1 Android export ✅ followed, then E3 web export phase 1 (#7) and B4
-animation graphs ✅ (state machines with an Oberon graph editor).
+E1 Android export ✅ followed, then E3 web export phase 1 (#7), B4
+animation graphs ✅ (state machines with an Oberon graph editor) and B5
+attachments and IK ✅ (Attach To Bone, Feet On Ground, reach and look-at).
 
 ## Process note
 

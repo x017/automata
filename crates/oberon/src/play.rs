@@ -24,7 +24,8 @@ use automata_scene::{Entity, Name, Scene, Transform};
 use glam::Vec3;
 
 use crate::bridge::{
-    AudioWrite, ColliderShape, EntityState, EntityWrite, FrameInput, FrameReply, HudItem, MeshTris,
+    AttachWrite, AudioWrite, ColliderShape, EntityState, EntityWrite, FrameInput, FrameReply,
+    HudItem, MeshTris,
 };
 use crate::doc::Document;
 
@@ -467,6 +468,10 @@ impl PlaySession {
                             .unwrap_or_default();
                         ((*j).clone(), state)
                     }),
+                    attached: world
+                        .get::<&automata_scene::Attachment>(entity)
+                        .ok()
+                        .map(|a| (a.to.clone(), a.bone.clone())),
                 })
             })
             .collect()
@@ -525,6 +530,16 @@ impl PlaySession {
                 if let Ok(mut joint) = world.get::<&mut automata_physics::Joint>(entity) {
                     edit.apply(&mut joint);
                 }
+            }
+            match &w.attach {
+                Some(AttachWrite::To { to, bone, offset }) => {
+                    let a = automata_scene::Attachment::new(to, bone, Transform::from(*offset));
+                    let _ = world.insert_one(entity, a);
+                }
+                Some(AttachWrite::Detach) => {
+                    let _ = world.remove_one::<automata_scene::Attachment>(entity);
+                }
+                None => {}
             }
             if w.position.is_some() || w.rotation.is_some() || w.scale.is_some() {
                 if let Ok(mut t) = world.get::<&mut Transform>(entity) {
@@ -640,8 +655,19 @@ impl PlaySession {
             return;
         }
         // Animation runs on real time, so it stays smooth between physics
-        // steps.
-        automata_scene::animate(self.scene.world_mut(), dt.clamp(0.0, 0.25));
+        // steps. Feet stand on the colliders.
+        let physics = &self.physics;
+        let ground = |entity: Entity, from: Vec3, max: f32| {
+            let filter = automata_physics::RayFilter {
+                exclude_sensors: true,
+                exclude_entity: Some(entity),
+                ..automata_physics::RayFilter::default()
+            };
+            physics
+                .cast_ray(from, Vec3::NEG_Y, max, &filter)
+                .map(|hit| (hit.point, hit.normal))
+        };
+        automata_scene::animate_on(self.scene.world_mut(), dt.clamp(0.0, 0.25), Some(&ground));
         self.accumulator += dt.clamp(0.0, 0.25);
         let mut steps = 0;
         while self.accumulator >= TIMESTEP && steps < MAX_STEPS {
@@ -656,6 +682,8 @@ impl PlaySession {
             self.write_back();
             #[allow(clippy::cast_precision_loss)] // a handful of steps
             automata_scene::simulate_particles(self.scene.world_mut(), steps as f32 * TIMESTEP);
+            // The models moved: what's attached to them follows.
+            automata_scene::attach_to_bones(self.scene.world_mut());
         }
     }
 

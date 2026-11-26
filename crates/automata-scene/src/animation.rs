@@ -33,6 +33,7 @@ use hecs::Entity;
 use serde::{Deserialize, Serialize};
 
 use crate::anim_graph::{GraphPlayer, GraphState, Sampler};
+use crate::ik::{GroundProbe, Ik, IkTarget, IkWorld};
 use crate::render::{MeshRenderer, MeshVisual};
 use crate::scene::SceneWorld;
 use crate::springs::SpringSim;
@@ -48,6 +49,7 @@ pub const END_EVENT: &str = "end";
 /// scene files). The model itself comes from the entity's mesh.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[allow(clippy::struct_excessive_bools)] // independent switches, saved by name
 pub struct Animation {
     /// The clip shown when the scene starts (empty: the rest pose).
     pub clip: String,
@@ -68,6 +70,11 @@ pub struct Animation {
     /// graph, `speed` scales the graph's own speeds.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub graph: String,
+    /// Feet follow the ground: on slopes and stairs each foot stands on
+    /// what's under it and the hips drop for the lower one (see
+    /// [`crate::ik`]).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub foot_ik: bool,
 }
 
 impl Default for Animation {
@@ -79,6 +86,7 @@ impl Default for Animation {
             play_on_start: true,
             root_motion: false,
             graph: String::new(),
+            foot_ik: false,
         }
     }
 }
@@ -304,6 +312,9 @@ pub struct Animator {
     /// [`automata_assets::anim_graph_generation`] when the graph was last
     /// loaded: when it moves, an edited graph is picked up.
     graph_gen: u64,
+    /// Inverse kinematics bending the pose after the clips: hands
+    /// reaching, the head looking, the feet on the ground.
+    pub ik: Ik,
 }
 
 impl Animator {
@@ -331,6 +342,7 @@ impl Animator {
             fresh: false,
             graph: None,
             graph_gen: 0,
+            ik: Ik::default(),
         }
     }
 
@@ -353,6 +365,7 @@ impl Animator {
         a.speed = animation.speed;
         a.looping = animation.looping;
         a.root_motion = animation.root_motion;
+        a.ik.feet = animation.foot_ik;
         if !animation.graph.is_empty() {
             match automata_assets::load_anim_graph(&animation.graph) {
                 Ok(graph) => {
@@ -779,6 +792,24 @@ impl Animator {
         &self.pose
     }
 
+    /// Where the bone (or any node) named `name` is in the model: the
+    /// matrix taking the bone's space to the entity's (import settings
+    /// included). Times the entity's [`GlobalTransform`], it's the bone in
+    /// the world.
+    #[must_use]
+    pub fn bone_matrix(&self, name: &str) -> Option<Mat4> {
+        let node = self.rig.node(name)?;
+        Some(self.rig.import * self.rig.globals(&self.pose)[node])
+    }
+
+    /// Bends the pose with the animator's [`Ik`] for this frame.
+    pub fn apply_ik(&mut self, world: &IkWorld<'_>) {
+        if self.ik.active() {
+            let rig = Arc::clone(&self.rig);
+            self.ik.apply(&rig, &mut self.pose, world);
+        }
+    }
+
     /// The joint matrices for the current pose.
     #[must_use]
     pub fn palette(&self) -> Arc<[Mat4]> {
@@ -804,6 +835,9 @@ impl Animator {
             events: self.events.clone(),
             graph_path: self.graph.as_ref().map(|(p, _)| p.clone()),
             graph: self.graph.as_ref().map(|(_, g)| g.state()),
+            foot_ik: self.ik.feet,
+            looking: self.ik.looking(),
+            reaching: self.ik.reaching().into_iter().map(str::to_string).collect(),
         }
     }
 }
@@ -874,6 +908,12 @@ pub struct AnimationState {
     pub graph_path: Option<String>,
     /// The graph's states and parameters, when one runs.
     pub graph: Option<GraphState>,
+    /// Whether the feet follow the ground.
+    pub foot_ik: bool,
+    /// Whether the head is looking at something.
+    pub looking: bool,
+    /// The bones reaching for something.
+    pub reaching: Vec<String>,
 }
 
 /// A script's request to an entity's animation.
@@ -915,6 +955,25 @@ pub enum AnimationCommand {
         /// Seconds to crossfade.
         fade: f32,
     },
+    /// Turn the head to look at a target (`None` stops, easing back).
+    LookAt {
+        /// What to look at.
+        target: Option<IkTarget>,
+        /// How far to turn towards it, 0 to 1.
+        weight: f32,
+    },
+    /// Reach a limb's end bone (a hand, a foot) for a target (`None`
+    /// stops, easing back).
+    Reach {
+        /// The bone that reaches.
+        bone: String,
+        /// What it reaches for.
+        target: Option<IkTarget>,
+        /// How far to reach towards it, 0 to 1.
+        weight: f32,
+    },
+    /// Turn feet following the ground on or off.
+    FootIk(bool),
 }
 
 /// A new animator for `entity`'s rigged model (set up from its
@@ -1032,6 +1091,28 @@ pub fn command_animation(
                 .graph_mut()
                 .is_some_and(|g| g.play_state(layer, state, *fade))
         }
+        AnimationCommand::LookAt { target, weight } => {
+            animator.ik.set_look(target.clone(), *weight);
+            crate::ik::find_head(animator.rig()).is_some()
+        }
+        AnimationCommand::Reach {
+            bone,
+            target,
+            weight,
+        } => {
+            let rig = Arc::clone(animator.rig());
+            let ok = rig
+                .node(bone)
+                .is_some_and(|b| crate::ik::Limb::ending_at(&rig, b).is_some());
+            if ok || target.is_none() {
+                animator.ik.set_reach(bone, target.clone(), *weight);
+            }
+            ok
+        }
+        AnimationCommand::FootIk(on) => {
+            animator.ik.feet = *on;
+            !crate::ik::find_legs(animator.rig()).is_empty()
+        }
     }
 }
 
@@ -1053,7 +1134,24 @@ pub fn animation_state(world: &SceneWorld, entity: Entity) -> Option<AnimationSt
 /// Root motion moves its entity by the clip's travel (turned and scaled
 /// like the entity, kept level): into [`CharacterMotion`] for characters,
 /// onto the [`Transform`] otherwise.
+///
+/// Feet following the ground ([`crate::ik`]) stand on the scene's meshes
+/// here; [`animate_on`] gives them other ground (physics colliders).
+/// Entities attached to bones follow them afterwards
+/// ([`crate::attach_to_bones`]).
 pub fn animate(world: &mut SceneWorld, dt: f32) {
+    animate_on(world, dt, None);
+}
+
+/// The ground under a point for an entity's feet: `(entity, from,
+/// max_distance)` → the point hit straight down from `from` and its
+/// normal, not counting the entity itself.
+pub type Ground<'a> = &'a dyn Fn(Entity, Vec3, f32) -> Option<(Vec3, Vec3)>;
+
+/// [`animate`], with feet standing on `ground` (`None`: the scene's
+/// meshes).
+#[allow(clippy::too_many_lines)]
+pub fn animate_on(world: &mut SceneWorld, dt: f32, ground: Option<Ground<'_>>) {
     attach_animators(world, true);
     // Spring bones blow in the scene's wind.
     let wind = (&mut world.query::<&automata_renderer::Environment>())
@@ -1061,6 +1159,8 @@ pub fn animate(world: &mut SceneWorld, dt: f32) {
         .next()
         .map_or(Vec3::ZERO, automata_renderer::Environment::wind_vector);
     let mut moves: Vec<(Entity, Vec3)> = Vec::new();
+    let mut bending: Vec<(Entity, Mat4)> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
     for (entity, animator, renderer, place) in world.query_mut::<(
         Entity,
         &mut Animator,
@@ -1070,7 +1170,12 @@ pub fn animate(world: &mut SceneWorld, dt: f32) {
         let place = place.map_or(Mat4::IDENTITY, |g| g.0);
         animator.set_wind(wind);
         animator.advance_in(dt, place);
-        if let Some(renderer) = renderer {
+        if animator.ik.active() {
+            bending.push((entity, place));
+            if animator.ik.follows_entities() {
+                animator.ik.target_names(&mut names);
+            }
+        } else if let Some(renderer) = renderer {
             renderer.joints = Some(animator.palette());
         }
         let travel = animator.travel();
@@ -1080,6 +1185,39 @@ pub fn animate(world: &mut SceneWorld, dt: f32) {
             moves.push((entity, step));
         }
     }
+    if !bending.is_empty() {
+        let found = target_points(world, &names);
+        let find = |name: &str| found.iter().find(|(n, _)| n == name).map(|(_, p)| *p);
+        for (entity, place) in bending {
+            let skip = |e: Entity| e == entity || attached_to(world, e) == Some(entity);
+            let on_meshes = |from: Vec3, max: f32| {
+                crate::foliage::raycast_surfaces_except(world, from, Vec3::NEG_Y, max, &skip)
+                    .map(|hit| (hit.point, hit.normal))
+            };
+            let on_ground = |from: Vec3, max: f32| ground.and_then(|g| g(entity, from, max));
+            let probe: GroundProbe<'_> = if ground.is_some() {
+                &on_ground
+            } else {
+                &on_meshes
+            };
+            let palette = {
+                let Ok(mut animator) = world.get::<&mut Animator>(entity) else {
+                    continue;
+                };
+                let ik_world = IkWorld {
+                    model: place * animator.rig().import,
+                    dt,
+                    find: &find,
+                    ground: Some(probe),
+                };
+                animator.apply_ik(&ik_world);
+                animator.palette()
+            };
+            if let Ok(mut renderer) = world.get::<&mut MeshRenderer>(entity) {
+                renderer.joints = Some(palette);
+            }
+        }
+    }
     for (entity, step) in moves {
         if let Ok(mut motion) = world.get::<&mut CharacterMotion>(entity) {
             motion.pending += step;
@@ -1087,6 +1225,37 @@ pub fn animate(world: &mut SceneWorld, dt: f32) {
             transform.position += step;
         }
     }
+    crate::attach::attach_to_bones(world);
+}
+
+/// What an entity attaches to, if anything.
+fn attached_to(world: &SceneWorld, entity: Entity) -> Option<Entity> {
+    world
+        .get::<&crate::attach::Attachment>(entity)
+        .ok()
+        .and_then(|a| a.resolved())
+}
+
+/// Where each named entity is, for IK targets: its head when it has an
+/// animated one, else its origin.
+fn target_points(world: &SceneWorld, names: &[String]) -> Vec<(String, Vec3)> {
+    let mut out = Vec::new();
+    if names.is_empty() {
+        return out;
+    }
+    let mut query = world.query::<(&crate::scene::Name, &GlobalTransform, Option<&Animator>)>();
+    for (name, global, animator) in &mut query {
+        if !names.contains(&name.0) || out.iter().any(|(n, _)| *n == name.0) {
+            continue;
+        }
+        let head = animator.and_then(|a| {
+            let (head, _) = crate::ik::find_head(a.rig())?;
+            let at = a.rig().import * a.rig().globals(a.pose())[head];
+            Some(global.0.transform_point3(at.w_axis.truncate()))
+        });
+        out.push((name.0.clone(), head.unwrap_or_else(|| global.position())));
+    }
+    out
 }
 
 #[cfg(test)]

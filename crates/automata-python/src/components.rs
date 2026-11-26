@@ -1885,6 +1885,8 @@ pub enum StagedComponent {
     Scatter(automata_scene::Scatter),
     /// Holds the entity's body to another's (or the world).
     Joint(automata_physics::Joint),
+    /// Follows a bone of another entity (the transform is its offset).
+    Attach(automata_core::scene_file::AttachData),
 }
 
 /// Extracts a staged component from an arbitrary Python object, raising a
@@ -1950,12 +1952,15 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(j) = obj.cast::<crate::joints::PyJoint>() {
         return Ok(StagedComponent::Joint(j.get().inner()));
     }
+    if let Ok(a) = obj.cast::<crate::animation::PyAttach>() {
+        return Ok(StagedComponent::Attach(a.get().inner.clone()));
+    }
     let typename = obj.get_type().name()?.to_string();
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
          MeshRenderer, DirectionalLight, PointLight, SpotLight, Environment, Water, \
-         AudioSource, ParticleEmitter, Animation, Grass, Scatter, or Joint"
+         AudioSource, ParticleEmitter, Animation, Grass, Scatter, Joint, or Attach"
     )))
 }
 

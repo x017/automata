@@ -24,9 +24,11 @@
 
 pub mod anim_graph;
 mod animation;
+mod attach;
 mod events;
 mod foliage;
 mod handle;
+pub mod ik;
 mod particles;
 mod render;
 mod resources;
@@ -36,9 +38,11 @@ mod transform;
 
 pub use anim_graph::{GraphLayerState, GraphParam, GraphPlayer, GraphState};
 pub use animation::{
-    animate, animation_state, attach_animators, command_animation, Animation, AnimationCommand,
-    AnimationState, Animator, CharacterMotion, FiredEvent, PlayOptions, END_EVENT,
+    animate, animate_on, animation_state, attach_animators, command_animation, Animation,
+    AnimationCommand, AnimationState, Animator, CharacterMotion, FiredEvent, Ground, PlayOptions,
+    END_EVENT,
 };
+pub use attach::{attach_to_bones, bone_frame, bone_world, offset_for, Attachment};
 pub use automata_renderer::{ParticleBlend, ParticleSprite};
 pub use events::Events;
 pub use foliage::{

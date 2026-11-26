@@ -760,6 +760,176 @@
             )),
         ),
         (
+            name: Some("Step 1"),
+            transform: Some((
+                position: (5.25, 0.09, 2.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (2.0, 0.18, 2.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.42, 0.38, 0.34, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (2.0, 0.18, 2.0),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Step 2"),
+            transform: Some((
+                position: (5.65, 0.18, 2.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.2, 0.36, 2.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.42, 0.38, 0.34, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (1.2, 0.36, 2.0),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Step 3"),
+            transform: Some((
+                position: (6.05, 0.27, 2.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.4, 0.54, 2.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.42, 0.38, 0.34, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (0.4, 0.54, 2.0),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Stage"),
+            transform: Some((
+                position: (7.0, 0.27, 2.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.6, 0.54, 2.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.26, 0.24, 0.23, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (1.6, 0.54, 2.0),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Ramp"),
+            transform: Some((
+                position: (7.0, 0.19167155, 4.883732),
+                rotation_euler: (0.20478095, 0.0, 0.0),
+                scale: (1.6, 0.16, 2.6954849),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.42, 0.38, 0.34, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (1.6, 0.16, 2.6954849),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
             name: Some("Robot"),
             transform: Some((
                 position: (0.0, 0.89, 3.0),
@@ -778,6 +948,7 @@
                 looping: true,
                 play_on_start: true,
                 graph: "anims/robot.anim.ron",
+                foot_ik: true,
             )),
             rigid_body: Some((
                 body_type: KinematicPosition,
@@ -811,6 +982,69 @@
             )),
             script: Some((
                 path: "scripts/player.py",
+            )),
+        ),
+        (
+            name: Some("Hat Brim"),
+            transform: Some((
+                position: (0.0, 0.56, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.66, 0.035, 0.66),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.13, 0.12, 0.16, 1.0),
+                surface: (
+                    roughness: Some(0.7),
+                ),
+            )),
+            attach: Some((
+                to: "Robot",
+                bone: "Head",
+            )),
+        ),
+        (
+            name: Some("Hat Crown"),
+            transform: Some((
+                position: (0.0, 0.73, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.42, 0.32, 0.42),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.13, 0.12, 0.16, 1.0),
+                surface: (
+                    roughness: Some(0.7),
+                ),
+            )),
+            attach: Some((
+                to: "Robot",
+                bone: "Head",
+            )),
+        ),
+        (
+            name: Some("Hat Band"),
+            transform: Some((
+                position: (0.0, 0.62, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.43, 0.07, 0.43),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.75, 0.12, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.7),
+                ),
+            )),
+            attach: Some((
+                to: "Robot",
+                bone: "Head",
             )),
         ),
         (
@@ -894,6 +1128,27 @@
                 speed: 0.35,
                 looping: true,
                 play_on_start: true,
+            )),
+        ),
+        (
+            name: Some("Stepper"),
+            transform: Some((
+                position: (4.2, 0.89, 2.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/robot.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            animation: Some((
+                clip: "Idle",
+                speed: 1.0,
+                looping: true,
+                play_on_start: true,
+                foot_ik: true,
             )),
         ),
         (

@@ -102,6 +102,11 @@ def _pad_keys(gamepads: Any) -> frozenset[str]:
     return frozenset(held)
 
 
+def _ik_target(target: Any) -> Any:
+    """An IK target from the script API: None, a name, or a point."""
+    return tuple(target) if isinstance(target, (list, tuple)) else target
+
+
 def _graph_cmd(anim: Any, cmd: list) -> None:
     """Applies one animation graph request from the script API (which
     already checked it) to an engine ``AnimationRef``."""
@@ -229,6 +234,7 @@ class _ViewRecord:
                 "speed": a.speed, "loop": a.looping, "clips": clips,
                 "lens": [a.length(c) for c in clips], "springs": a.springs,
                 "rm": a.root_motion, "ev": a.recent_events,
+                "fik": a.foot_ik, "look": a.looking, "reach": list(a.reaching),
             }
             if a.graph is not None:
                 rec["graph"] = a.graph
@@ -248,6 +254,9 @@ class _ViewRecord:
                 "limits": None if j.limits is None else list(j.limits),
                 "bf": j.break_force,
             }
+        if key == "att":
+            a = v.attached_to
+            return None if a is None else list(a)
         if key == "view":
             return v
         return None
@@ -342,6 +351,21 @@ class _EngineBackend(api.Backend):
                     anim.graph = cmd[1] or None
                 elif cmd[0] in ("set", "trigger", "reset_trigger", "layer_weight", "play_state"):
                     _graph_cmd(anim, cmd)
+                elif cmd[0] == "look_at":
+                    anim.look_at(_ik_target(cmd[1]), cmd[2])
+                elif cmd[0] == "reach":
+                    anim.reach(cmd[1], _ik_target(cmd[2]), cmd[3])
+                elif cmd[0] == "foot_ik":
+                    anim.foot_ik = cmd[1]
+            if "att" in w:
+                att = w["att"]
+                if att:
+                    to, bone, p, r, s = att
+                    offset = _core.Transform(position=tuple(p), rotation_euler=tuple(r),
+                                             scale=tuple(s))
+                    view.attach(to, bone, offset)
+                else:
+                    view.detach()
             if w.get("despawn"):
                 view.despawn()
         for path, volume, pitch, pos in out.sounds:

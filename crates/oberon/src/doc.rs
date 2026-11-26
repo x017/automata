@@ -64,6 +64,10 @@ pub struct Document {
     prefab_bases: HashMap<(String, u32), EntityData>,
     /// Prefab problems (unreadable files) for the app to show, once each.
     pub notes: Vec<String>,
+    /// Where the bones attached entities follow are in the world (position
+    /// and rotation), by entity id, as the viewport last posed them: an
+    /// attached entity's transform is its offset from that.
+    attach_frames: HashMap<u64, glam::Mat4>,
 }
 
 /// The local bounding box `(center, size)` of an entity's mesh, before the
@@ -288,11 +292,13 @@ pub enum ComponentKind {
     Joint,
     /// A sound the entity plays.
     AudioSource,
+    /// Follows a bone of another entity's model (a sword in a hand).
+    Attach,
 }
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Mesh,
         Self::Animation,
         Self::Light,
@@ -309,6 +315,7 @@ impl ComponentKind {
         Self::Character,
         Self::Joint,
         Self::AudioSource,
+        Self::Attach,
     ];
 
     /// The display name.
@@ -331,6 +338,7 @@ impl ComponentKind {
             Self::Character => "Character Controller",
             Self::Joint => "Joint",
             Self::AudioSource => "Audio Source",
+            Self::Attach => "Attach To Bone",
         }
     }
 
@@ -354,6 +362,7 @@ impl ComponentKind {
             Self::Character => data.character_controller.is_some(),
             Self::Joint => data.joint.is_some(),
             Self::AudioSource => data.audio_source.is_some(),
+            Self::Attach => data.attach.is_some(),
         }
     }
 
@@ -453,6 +462,10 @@ impl ComponentKind {
                 data.audio_source
                     .get_or_insert_with(automata_core::AudioSource::default);
             }
+            Self::Attach => {
+                data.attach
+                    .get_or_insert_with(automata_core::scene_file::AttachData::default);
+            }
         }
     }
 
@@ -480,6 +493,7 @@ impl ComponentKind {
             }
             Self::Joint => dst.joint.clone_from(&src.joint),
             Self::AudioSource => dst.audio_source.clone_from(&src.audio_source),
+            Self::Attach => dst.attach.clone_from(&src.attach),
         }
     }
 
@@ -505,6 +519,7 @@ impl ComponentKind {
             }
             Self::Joint => data.joint = None,
             Self::AudioSource => data.audio_source = None,
+            Self::Attach => data.attach = None,
         }
     }
 }
@@ -730,6 +745,7 @@ impl Document {
             batch: None,
             prefab_bases: HashMap::new(),
             notes: Vec::new(),
+            attach_frames: HashMap::new(),
         }
     }
 
@@ -837,6 +853,59 @@ impl Document {
     fn touch(&mut self) {
         self.change_counter += 1;
         self.dirty = true;
+    }
+
+    /// Notes where the bones attached entities follow are (see
+    /// [`Self::attach_frame`]); the viewport calls this after posing.
+    pub fn set_attach_frames(&mut self, frames: HashMap<u64, glam::Mat4>) {
+        self.attach_frames = frames;
+    }
+
+    /// The world frame an entity's transform is relative to: the bone it
+    /// follows when attached (identity until the viewport has posed it),
+    /// else the world.
+    #[must_use]
+    pub fn attach_frame(&self, e: &EntityEntry) -> glam::Mat4 {
+        if e.data.attach.is_none() {
+            return glam::Mat4::IDENTITY;
+        }
+        self.attach_frames
+            .get(&e.id)
+            .copied()
+            .unwrap_or(glam::Mat4::IDENTITY)
+    }
+
+    /// An entity's model matrix in the world (its transform, through the
+    /// bone it follows when attached).
+    #[must_use]
+    pub fn world_matrix(&self, e: &EntityEntry) -> Option<glam::Mat4> {
+        let t = e.data.transform?;
+        Some(self.attach_frame(e) * crate::view::model_matrix(&t))
+    }
+
+    /// An entity's transform in the world (see [`Self::world_matrix`]).
+    #[must_use]
+    pub fn world_transform(&self, e: &EntityEntry) -> Option<TransformData> {
+        let t = e.data.transform?;
+        if e.data.attach.is_none() {
+            return Some(t);
+        }
+        let m = self.world_matrix(e)?;
+        Some(TransformData::from(
+            automata_scene::Transform::from_matrix_lossy(m),
+        ))
+    }
+
+    /// The transform that puts entity `e` at `world` (undoes
+    /// [`Self::world_transform`]).
+    #[must_use]
+    pub fn local_from_world(&self, e: &EntityEntry, world: TransformData) -> TransformData {
+        if e.data.attach.is_none() {
+            return world;
+        }
+        let frame = self.attach_frame(e);
+        let m = crate::view::model_matrix(&world);
+        TransformData::from(automata_scene::offset_for(frame, m))
     }
 
     /// Finds an entity's index by id.
@@ -969,6 +1038,7 @@ impl Document {
             batch: None,
             prefab_bases: self.prefab_bases.clone(),
             notes: Vec::new(),
+            attach_frames: HashMap::new(),
         }
     }
 
@@ -1067,6 +1137,12 @@ impl Document {
                 if let Some(j) = &mut entry.data.joint {
                     if j.connected.as_deref() == Some(old.as_str()) {
                         j.connected = Some(name.to_string());
+                    }
+                }
+                // So do attachments.
+                if let Some(a) = &mut entry.data.attach {
+                    if a.to == old {
+                        a.to = name.to_string();
                     }
                 }
             }

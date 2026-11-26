@@ -521,10 +521,27 @@ layers with bone masks).
   [Animation graphs](docs/wiki/oberon/animation-graphs.md) page (format,
   scripts, the editor) and Robot Plaza's graph-driven player.
 
-### B5. Attachments and IK ⬜ M
-- Attach any entity to a bone (a sword in the hand, a hat on the head).
-- Two-bone IK for feet on slopes and stairs and for hands reaching a
-  target, plus look-at for heads and eyes.
+### B5. Attachments and IK ✅ M
+- ✅ Attach any entity to a bone: the `Attachment` component
+  (`automata_scene::attach`) places it by an offset in the bone's space,
+  keeping its own size, chaining (a gem on a sword in a hand) and
+  surviving loops. Scene files' `attach: (to, bone)`, `at.Attach`,
+  `entity.attach` / `detach` / `attached_to` in scripts (and on
+  `view`), and Oberon's **Attach To Bone** component (Follow and Bone
+  menus, the gizmo moving it in the world and storing the offset, shown
+  on the edit-time pose and the animation preview).
+- ✅ Two-bone IK (`automata_scene::ik`): legs and heads found by bone
+  names (Blender, Mixamo, Quaternius, Unreal styles, IK-control rigs with
+  feet off the shins and helper bones). **Feet On Ground** plants each
+  foot on colliders while running (meshes in the editor and games without
+  physics), drops the hips and tilts the foot to the slope.
+  `animation.reach(bone, target)` bends an arm or leg to a point or an
+  entity, and `animation.look_at(target)` turns the head and neck within
+  limits, all easing in and out over the playing clip or graph.
+- ✅ Docs and an example: the manual's
+  [Attachments & IK](docs/wiki/oberon/attachments-and-ik.md) page, and
+  Robot Plaza's top hat, steps and ramp, a Stepper standing on a step and
+  a Greeter that watches you.
 
 ### B6. Ragdolls ⬜ M
 Needs C1 (joints).
@@ -1149,7 +1166,7 @@ per effort. Reorder any time by telling me.
 | 26 | D2 Custom fonts | S | ✅ |
 | 27 | D3 UI layout, focus, screens | M | ✅ |
 | 28 | B4 Animation state machine | L | ✅ |
-| 29 | B5 Attachments and IK | M | ⬜ |
+| 29 | B5 Attachments and IK | M | ✅ |
 | 30 | C4 Navigation | L | ⬜ |
 | 31 | C5 AI helpers | S | ⬜ |
 | 32 | D5 Material assets and editor | M | ✅ |

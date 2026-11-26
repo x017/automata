@@ -39,8 +39,10 @@ impl PyAnimation {
     /// Creates an animation component.
     #[new]
     #[pyo3(signature = (
-        clip="", speed=1.0, looping=true, play_on_start=true, root_motion=false, graph=""
+        clip="", speed=1.0, looping=true, play_on_start=true, root_motion=false, graph="",
+        foot_ik=false
     ))]
+    #[allow(clippy::fn_params_excessive_bools)] // Python keyword arguments
     fn new(
         clip: &str,
         speed: f32,
@@ -48,6 +50,7 @@ impl PyAnimation {
         play_on_start: bool,
         root_motion: bool,
         graph: &str,
+        foot_ik: bool,
     ) -> PyResult<Self> {
         if !speed.is_finite() {
             return Err(PyValueError::new_err("speed must be a finite number"));
@@ -60,8 +63,15 @@ impl PyAnimation {
                 play_on_start,
                 root_motion,
                 graph: graph.to_string(),
+                foot_ik,
             },
         })
+    }
+
+    /// Whether the feet follow the ground (slopes, stairs).
+    #[getter]
+    fn foot_ik(&self) -> bool {
+        self.inner.foot_ik
     }
 
     /// The animation graph (`.anim.ron` path) picking the clips ("" for
@@ -110,7 +120,7 @@ impl PyAnimation {
     fn __repr__(&self) -> String {
         let py_bool = |b: bool| if b { "True" } else { "False" };
         format!(
-            "Animation({:?}, speed={}, looping={}, play_on_start={}{}{})",
+            "Animation({:?}, speed={}, looping={}, play_on_start={}{}{}{})",
             self.inner.clip,
             self.inner.speed,
             py_bool(self.inner.looping),
@@ -124,6 +134,11 @@ impl PyAnimation {
                 String::new()
             } else {
                 format!(", graph={:?}", self.inner.graph)
+            },
+            if self.inner.foot_ik {
+                ", foot_ik=True"
+            } else {
+                ""
             },
         )
     }
@@ -140,6 +155,61 @@ impl PyAnimation {
     #[must_use]
     pub fn inner(&self) -> Animation {
         self.inner.clone()
+    }
+}
+
+/// Follows a bone of another entity's animated model: a sword in a hand,
+/// a hat on a head. The entity's `Transform` is then where it sits in the
+/// bone's space; it keeps its own size.
+///
+/// ```python
+/// sword = at.Entity("Sword").add(at.Transform(rotation=...)).add(
+///     at.MeshRenderer.model("models/sword.glb")).add(at.Attach("Robot", "Palm2.R"))
+/// ```
+#[pyclass(name = "Attach", module = "automata._core", frozen)]
+#[derive(Debug, Clone)]
+pub struct PyAttach {
+    pub(crate) inner: automata_core::scene_file::AttachData,
+}
+
+#[pymethods]
+impl PyAttach {
+    /// Follows `bone` of the entity named `to` (no bone: the entity itself).
+    #[new]
+    #[pyo3(signature = (to, bone=""))]
+    fn new(to: &str, bone: &str) -> Self {
+        Self {
+            inner: automata_core::scene_file::AttachData {
+                to: to.to_string(),
+                bone: bone.to_string(),
+            },
+        }
+    }
+
+    /// The name of the entity followed.
+    #[getter]
+    fn to(&self) -> String {
+        self.inner.to.clone()
+    }
+
+    /// The bone followed ("" for the entity's origin).
+    #[getter]
+    fn bone(&self) -> String {
+        self.inner.bone.clone()
+    }
+
+    fn __eq__(&self, other: &Bound<'_, PyAny>) -> bool {
+        other
+            .cast::<Self>()
+            .is_ok_and(|o| o.get().inner == self.inner)
+    }
+
+    fn __repr__(&self) -> String {
+        if self.inner.bone.is_empty() {
+            format!("Attach({:?})", self.inner.to)
+        } else {
+            format!("Attach({:?}, {:?})", self.inner.to, self.inner.bone)
+        }
     }
 }
 
@@ -219,6 +289,30 @@ impl PyAnimationRef {
     }
 }
 
+/// An IK target from Python: `None`, an entity's name, something with a
+/// `name` (an entity view), or a point (three numbers).
+fn ik_target(target: Option<&Bound<'_, PyAny>>) -> PyResult<Option<automata_scene::ik::IkTarget>> {
+    use automata_scene::ik::IkTarget;
+    let Some(target) = target.filter(|t| !t.is_none()) else {
+        return Ok(None);
+    };
+    if let Ok(name) = target.extract::<String>() {
+        return Ok(Some(IkTarget::Entity(name)));
+    }
+    if let Ok((x, y, z)) = target.extract::<(f32, f32, f32)>() {
+        if !(x.is_finite() && y.is_finite() && z.is_finite()) {
+            return Err(PyValueError::new_err("the target must be finite"));
+        }
+        return Ok(Some(IkTarget::Point(glam::Vec3::new(x, y, z))));
+    }
+    if let Ok(name) = target.getattr("name").and_then(|n| n.extract::<String>()) {
+        return Ok(Some(IkTarget::Entity(name)));
+    }
+    Err(PyTypeError::new_err(
+        "the target must be an entity, an entity's name, a point (x, y, z), or None",
+    ))
+}
+
 fn names<'a>(it: impl Iterator<Item = &'a str>) -> String {
     let all: Vec<&str> = it.collect();
     if all.is_empty() {
@@ -262,6 +356,54 @@ impl PyAnimationRef {
             },
         });
         Ok(())
+    }
+
+    /// Turns the head to look at `target` (an entity, its name, or a point;
+    /// `None` stops), as far as `weight` (0 to 1). It eases in and out.
+    #[pyo3(signature = (target=None, weight=1.0))]
+    fn look_at(&self, target: Option<&Bound<'_, PyAny>>, weight: f32) -> PyResult<()> {
+        let target = ik_target(target)?;
+        self.push(AnimationCommand::LookAt {
+            target,
+            weight: weight.clamp(0.0, 1.0),
+        });
+        Ok(())
+    }
+
+    /// Reaches the limb ending at `bone` (a hand, a foot) for `target` (an
+    /// entity, its name, or a point; `None` stops), as far as `weight`.
+    #[pyo3(signature = (bone, target=None, weight=1.0))]
+    fn reach(&self, bone: &str, target: Option<&Bound<'_, PyAny>>, weight: f32) -> PyResult<()> {
+        let target = ik_target(target)?;
+        self.push(AnimationCommand::Reach {
+            bone: bone.to_string(),
+            target,
+            weight: weight.clamp(0.0, 1.0),
+        });
+        Ok(())
+    }
+
+    /// Whether the feet follow the ground (slopes, stairs).
+    #[getter]
+    fn foot_ik(&self) -> bool {
+        self.state.foot_ik
+    }
+
+    #[setter]
+    fn set_foot_ik(&self, on: bool) {
+        self.push(AnimationCommand::FootIk(on));
+    }
+
+    /// Whether the head is looking at something.
+    #[getter]
+    fn looking(&self) -> bool {
+        self.state.looking
+    }
+
+    /// The bones reaching for something.
+    #[getter]
+    fn reaching(&self) -> Vec<String> {
+        self.state.reaching.clone()
     }
 
     /// Stops, fading back to the rest pose over `fade` seconds.

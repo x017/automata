@@ -102,6 +102,7 @@ pub fn init_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<physics_components::PyCharacterController>()?;
     m.add_class::<physics_components::PyCharacterVelocity>()?;
     m.add_class::<joints::PyJoint>()?;
+    m.add_class::<animation::PyAttach>()?;
     m.add_class::<joints::PyJointMotor>()?;
     m.add_class::<joints::PyJointRef>()?;
     m.add_class::<components::PyMeshRenderer>()?;
@@ -115,6 +116,7 @@ pub fn init_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<foliage::PyScatter>()?;
     m.add_class::<components::PyAudioSource>()?;
     m.add_class::<animation::PyAnimation>()?;
+    m.add_class::<animation::PyAttach>()?;
     m.add_class::<animation::PyAnimationRef>()?;
     m.add_function(wrap_pyfunction!(components::set_asset_root, m)?)?;
     m.add_function(wrap_pyfunction!(components::asset_root, m)?)?;

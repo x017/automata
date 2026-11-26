@@ -248,6 +248,26 @@ pub struct Menu {
 const SEP_H: f32 = 9.0;
 
 impl Menu {
+    /// How many columns the menu needs to fit a window `h` tall.
+    fn columns(&self, h: f32) -> usize {
+        let room = (h - 16.0).max(layout::ROW_H * 4.0);
+        let mut columns = 1;
+        let mut y = 0.0;
+        for i in &self.items {
+            let ih = if i.is_separator() {
+                SEP_H
+            } else {
+                layout::ROW_H
+            };
+            if y + ih > room {
+                columns += 1;
+                y = 0.0;
+            }
+            y += ih;
+        }
+        columns
+    }
+
     fn height(&self) -> f32 {
         self.items
             .iter()
@@ -273,8 +293,15 @@ impl Menu {
                     + canvas.measure_text(layout::SMALL_SIZE, i.shortcut)
             })
             .fold(0.0f32, f32::max);
-        let mw = (widest + 64.0).max(layout::MENU_W).min(w - 8.0);
-        let mh = self.height().min(h - 8.0);
+        // Too tall for the window: the items flow into more columns.
+        let columns = self.columns(h);
+        #[allow(clippy::cast_precision_loss)] // a few columns
+        let mw = ((widest + 64.0).max(layout::MENU_W) * columns as f32).min(w - 8.0);
+        let mh = if columns > 1 {
+            h - 8.0
+        } else {
+            self.height().min(h - 8.0)
+        };
         let x = self.x.min(w - mw - 4.0).max(0.0);
         let y = if self.y + mh > h {
             (h - mh - 4.0).max(0.0)
@@ -957,13 +984,26 @@ impl Ui {
         let raw = self.raw;
         let mut chosen = None;
         let mut y = r.y + 4.0;
+        #[allow(clippy::cast_precision_loss)] // a few columns
+        let cw = r.w / menu.columns(h) as f32;
+        let room = (h - 16.0).max(layout::ROW_H * 4.0);
+        let mut cx = r.x;
         for item in &menu.items {
+            let ih = if item.is_separator() {
+                SEP_H
+            } else {
+                layout::ROW_H
+            };
+            if y + ih > r.y + 4.0 + room {
+                cx += cw;
+                y = r.y + 4.0;
+            }
             if item.is_separator() {
-                canvas.fill_rect(r.x + 8.0, y + SEP_H / 2.0, r.w - 16.0, 1.0, color::border());
+                canvas.fill_rect(cx + 8.0, y + SEP_H / 2.0, cw - 16.0, 1.0, color::border());
                 y += SEP_H;
                 continue;
             }
-            let row = Rect::new(r.x + 4.0, y, r.w - 8.0, layout::ROW_H);
+            let row = Rect::new(cx + 4.0, y, cw - 8.0, layout::ROW_H);
             let hot = item.enabled && row.contains(raw.x, raw.y);
             if hot {
                 canvas.fill_rounded(row.x, row.y, row.w, row.h, 4.0, color::select());
