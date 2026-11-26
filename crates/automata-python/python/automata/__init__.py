@@ -101,6 +101,9 @@ from ._core import (
     JointRef,
     MeshRenderer,
     Modifiers,
+    NavAgent,
+    NavLink,
+    Navigation,
     ParticleEmitter,
     Physics,
     Physics2D,
@@ -144,6 +147,10 @@ Component = Union[
     Grass,
     Scatter,
     Joint,
+    Attach,
+    NavAgent,
+    Navigation,
+    NavLink,
 ]
 
 #: A per-frame update callback.
@@ -260,6 +267,9 @@ __all__ = [
     "JointRef",
     "Key",
     "MeshRenderer",
+    "NavAgent",
+    "NavLink",
+    "Navigation",
     "MouseButton",
     "Modifiers",
     "ParticleEmitter",

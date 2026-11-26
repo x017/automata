@@ -1887,6 +1887,12 @@ pub enum StagedComponent {
     Joint(automata_physics::Joint),
     /// Follows a bone of another entity (the transform is its offset).
     Attach(automata_core::scene_file::AttachData),
+    /// Finds its own way around the navigation mesh.
+    NavAgent(automata_nav::NavAgent),
+    /// The scene's navigation mesh settings.
+    Navigation(automata_nav::Navigation),
+    /// A hand-placed shortcut for nav agents.
+    NavLink(automata_nav::NavLink),
 }
 
 /// Extracts a staged component from an arbitrary Python object, raising a
@@ -1955,12 +1961,22 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(a) = obj.cast::<crate::animation::PyAttach>() {
         return Ok(StagedComponent::Attach(a.get().inner.clone()));
     }
+    if let Ok(a) = obj.cast::<crate::nav::PyNavAgent>() {
+        return Ok(StagedComponent::NavAgent(a.get().inner.clone()));
+    }
+    if let Ok(n) = obj.cast::<crate::nav::PyNavigation>() {
+        return Ok(StagedComponent::Navigation(n.get().inner.clone()));
+    }
+    if let Ok(l) = obj.cast::<crate::nav::PyNavLink>() {
+        return Ok(StagedComponent::NavLink(l.get().inner.clone()));
+    }
     let typename = obj.get_type().name()?.to_string();
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
          MeshRenderer, DirectionalLight, PointLight, SpotLight, Environment, Water, \
-         AudioSource, ParticleEmitter, Animation, Grass, Scatter, Joint, or Attach"
+         AudioSource, ParticleEmitter, Animation, Grass, Scatter, Joint, Attach, \
+         NavAgent, Navigation, or NavLink"
     )))
 }
 

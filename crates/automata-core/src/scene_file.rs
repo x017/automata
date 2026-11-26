@@ -121,6 +121,16 @@ pub struct EntityData {
     /// entity's `transform` is then its offset in the bone's space.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attach: Option<AttachData>,
+    /// The scene's navigation mesh: how it's baked and where it's saved
+    /// (one per scene, usually on an entity called "Navigation").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub navigation: Option<automata_nav::Navigation>,
+    /// Finds its own way around the navigation mesh to a target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nav_agent: Option<automata_nav::NavAgent>,
+    /// A hand-placed shortcut for agents from here to another entity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nav_link: Option<automata_nav::NavLink>,
     /// Custom named gameplay values (`health: Int(100)`, `team: Text("red")`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub attributes: BTreeMap<String, AttributeValue>,
@@ -411,6 +421,20 @@ impl SceneFile {
             if let Some(joint) = eref.get::<&automata_physics::Joint>() {
                 data.joint = Some((*joint).clone());
             }
+            if let Some(n) = eref.get::<&automata_nav::Navigation>() {
+                data.navigation = Some((*n).clone());
+            }
+            if let Some(a) = eref.get::<&automata_nav::NavAgent>() {
+                // The settings only: where it's going is the game's.
+                data.nav_agent = Some(automata_nav::NavAgent {
+                    target: None,
+                    state: automata_nav::AgentState::default(),
+                    ..(*a).clone()
+                });
+            }
+            if let Some(l) = eref.get::<&automata_nav::NavLink>() {
+                data.nav_link = Some((*l).clone());
+            }
             if let Some(attributes) = eref.get::<&Attributes>() {
                 data.attributes = attributes.0.clone();
             }
@@ -503,6 +527,15 @@ impl SceneFile {
             }
             if let Some(joint) = &data.joint {
                 let _ = world.insert_one(entity, joint.clone());
+            }
+            if let Some(n) = &data.navigation {
+                let _ = world.insert_one(entity, n.clone());
+            }
+            if let Some(a) = &data.nav_agent {
+                let _ = world.insert_one(entity, a.clone());
+            }
+            if let Some(l) = &data.nav_link {
+                let _ = world.insert_one(entity, l.clone());
             }
             if let Some(attach) = &data.attach {
                 let offset = data.transform.map(Transform::from).unwrap_or_default();

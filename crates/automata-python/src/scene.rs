@@ -236,6 +236,15 @@ impl PyEntity {
                     StagedComponent::Attach(v) => {
                         Py::new(py, crate::animation::PyAttach { inner: v.clone() })?.into_any()
                     }
+                    StagedComponent::NavAgent(v) => {
+                        Py::new(py, crate::nav::PyNavAgent { inner: v.clone() })?.into_any()
+                    }
+                    StagedComponent::Navigation(v) => {
+                        Py::new(py, crate::nav::PyNavigation { inner: v.clone() })?.into_any()
+                    }
+                    StagedComponent::NavLink(v) => {
+                        Py::new(py, crate::nav::PyNavLink { inner: v.clone() })?.into_any()
+                    }
                 })
             })
             .collect()
@@ -508,6 +517,15 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
                 let attachment = automata_scene::Attachment::new(&a.to, &a.bone, offset);
                 let _ = scene.world_mut().insert_one(id, attachment);
             }
+            StagedComponent::NavAgent(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
+            StagedComponent::Navigation(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
+            StagedComponent::NavLink(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
         }
     }
     if !staged.attributes.is_empty() {
@@ -562,6 +580,8 @@ pub struct FrameWrites {
     pub joints: Vec<(u64, automata_physics::JointEdit)>,
     /// Attaching entities to bones (`None` detaches), in call order.
     pub attachments: Vec<(u64, Option<automata_scene::Attachment>)>,
+    /// Changes to nav agents (targets, speeds), in call order.
+    pub navs: Vec<(u64, automata_nav::NavEdit)>,
 }
 
 /// Shared write buffer between the per-frame views and the game loop.
@@ -645,6 +665,13 @@ pub fn apply_writes(scene: &mut Scene, writes: &WriteQueue) {
             }
         }
     }
+    for (bits, edit) in drained.navs {
+        if let Some(entity) = EntityId::from_bits(bits) {
+            if let Ok(mut agent) = scene.world_mut().get::<&mut automata_nav::NavAgent>(entity) {
+                edit.apply(&mut agent);
+            }
+        }
+    }
     for entity in drained.despawns {
         if scene.world().contains(entity) {
             scene.despawn_recursive(entity);
@@ -666,6 +693,7 @@ struct EntitySnapshot {
     animation: Option<automata_scene::AnimationState>,
     joint: Option<(automata_physics::Joint, automata_physics::JointState)>,
     attached: Option<(String, String)>,
+    nav_agent: Option<automata_nav::NavAgent>,
 }
 
 /// Read access to the scene during the update callback.
@@ -720,6 +748,10 @@ impl SceneView {
                             .get::<&automata_scene::Attachment>(id)
                             .ok()
                             .map(|a| (a.to.clone(), a.bone.clone())),
+                        nav_agent: world
+                            .get::<&automata_nav::NavAgent>(id)
+                            .ok()
+                            .map(|a| (*a).clone()),
                     }
                 },
             )
@@ -846,6 +878,7 @@ pub struct EntityView {
     animation: Option<automata_scene::AnimationState>,
     joint: Option<(automata_physics::Joint, automata_physics::JointState)>,
     attached: Option<(String, String)>,
+    nav_agent: Option<automata_nav::NavAgent>,
     writes: WriteQueue,
 }
 
@@ -863,6 +896,7 @@ impl EntityView {
             animation: snapshot.animation.clone(),
             joint: snapshot.joint.clone(),
             attached: snapshot.attached.clone(),
+            nav_agent: snapshot.nav_agent.clone(),
             writes,
         }
     }
@@ -1041,6 +1075,44 @@ impl EntityView {
     #[getter]
     fn attached_to(&self) -> Option<(String, String)> {
         self.attached.clone()
+    }
+
+    /// The nav agent's start-of-frame state as a dict (`t` target, `spd`
+    /// speed, `stop` stop distance, `arr` arrived, `jmp` jumping, `vel`
+    /// velocity, `path` the corners still ahead), or `None` without a
+    /// `NavAgent`. Behaviour scripts read it through `entity.nav`.
+    #[getter]
+    fn nav_state<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, pyo3::types::PyDict>>> {
+        self.nav_agent
+            .as_ref()
+            .map(|a| crate::nav::agent_state(py, a))
+            .transpose()
+    }
+
+    /// Changes the nav agent (applied after the callback returns):
+    /// `go` sends it to a point, an entity's name, or (`None`) nowhere;
+    /// `speed`, `stop_distance` and `hover` change those. Arguments left out stay
+    /// as they are. Behaviour scripts use `entity.nav.go(...)`.
+    #[pyo3(signature = (**changes))]
+    fn nav_edit(&self, changes: Option<&Bound<'_, pyo3::types::PyDict>>) -> PyResult<()> {
+        let mut edit = automata_nav::NavEdit::default();
+        if let Some(changes) = changes {
+            for (key, value) in changes.iter() {
+                match key.extract::<String>()?.as_str() {
+                    "go" => edit.target = Some(crate::nav::extract_target(&value)?),
+                    "speed" => edit.speed = Some(value.extract()?),
+                    "stop_distance" => edit.stop_distance = Some(value.extract()?),
+                    "hover" => edit.hover = Some(value.extract()?),
+                    other => {
+                        return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                            "nav_edit() got an unexpected keyword {other:?}"
+                        )))
+                    }
+                }
+            }
+        }
+        self.writes.borrow_mut().navs.push((self.id, edit));
+        Ok(())
     }
 
     /// Queues the entity (and its children) for despawn after the callback.

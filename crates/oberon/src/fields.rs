@@ -305,6 +305,112 @@ pub enum Field {
     ParticleStretch,
     /// Fades particles where they meet the scene (metres; 0 = hard).
     ParticleSoft,
+    /// A nav agent's setting.
+    Nav(NavField),
+    /// How the navigation mesh is baked.
+    NavBake(NavBakeField),
+}
+
+/// A Nav Agent's numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NavField {
+    /// Top speed (m/s).
+    Speed,
+    /// How quickly it speeds up and turns (m/s²).
+    Acceleration,
+    /// Room it takes among other agents (m).
+    Radius,
+    /// How high a non-character floats above the mesh (m).
+    Hover,
+    /// How near counts as arrived (m).
+    StopDistance,
+}
+
+/// The Navigation component's bake settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NavBakeField {
+    /// How far the mesh keeps from walls (m).
+    Radius,
+    /// Headroom needed (m).
+    Height,
+    /// Highest step walked up (m).
+    Climb,
+    /// Steepest walkable slope (degrees).
+    Slope,
+    /// Widest gap jumped (m; 0 = none).
+    Jump,
+    /// Highest ledge jumped up to (m).
+    JumpHeight,
+    /// Deepest drop jumped down (m).
+    Drop,
+    /// Detail: the cell size (m).
+    Cell,
+}
+
+fn nav_get(data: &EntityData, field: Field) -> Option<f32> {
+    Some(match field {
+        Field::Nav(f) => {
+            let a = data.nav_agent.as_ref()?;
+            match f {
+                NavField::Speed => a.speed,
+                NavField::Acceleration => a.acceleration,
+                NavField::Radius => a.radius,
+                NavField::Hover => a.hover,
+                NavField::StopDistance => a.stop_distance,
+            }
+        }
+        Field::NavBake(f) => {
+            let s = &data.navigation.as_ref()?.settings;
+            match f {
+                NavBakeField::Radius => s.agent_radius,
+                NavBakeField::Height => s.agent_height,
+                NavBakeField::Climb => s.max_climb,
+                NavBakeField::Slope => s.max_slope,
+                NavBakeField::Jump => s.jump_distance,
+                NavBakeField::JumpHeight => s.jump_height,
+                NavBakeField::Drop => s.drop_height,
+                NavBakeField::Cell => s.cell_size,
+            }
+        }
+        _ => return None,
+    })
+}
+
+fn nav_set(data: &mut EntityData, field: Field, v: f32) -> bool {
+    match field {
+        Field::Nav(f) => {
+            let Some(a) = data.nav_agent.as_mut() else {
+                return false;
+            };
+            let slot = match f {
+                NavField::Speed => &mut a.speed,
+                NavField::Acceleration => &mut a.acceleration,
+                NavField::Radius => &mut a.radius,
+                NavField::Hover => &mut a.hover,
+                NavField::StopDistance => &mut a.stop_distance,
+            };
+            *slot = v;
+        }
+        Field::NavBake(f) => {
+            let Some(n) = data.navigation.as_mut() else {
+                return false;
+            };
+            let s = &mut n.settings;
+            let slot = match f {
+                NavBakeField::Radius => &mut s.agent_radius,
+                NavBakeField::Height => &mut s.agent_height,
+                NavBakeField::Climb => &mut s.max_climb,
+                NavBakeField::Slope => &mut s.max_slope,
+                NavBakeField::Jump => &mut s.jump_distance,
+                NavBakeField::JumpHeight => &mut s.jump_height,
+                NavBakeField::Drop => &mut s.drop_height,
+                NavBakeField::Cell => &mut s.cell_size,
+            };
+            *slot = v;
+        }
+        _ => return false,
+    }
+    true
 }
 
 /// A boolean property of an entity (toggled by a checkbox).
@@ -366,6 +472,12 @@ pub enum Flag {
     JointMotor,
     /// The motor pulls to a target (rather than just turning).
     JointMotorTarget,
+    /// The nav agent steers clear of other agents.
+    NavAvoid,
+    /// The nav agent turns to face where it's going.
+    NavTurn,
+    /// Agents may take the nav link both ways.
+    NavLinkTwoWay,
 }
 
 /// An enumerated property of an entity (cycled by a dropdown-style button).
@@ -560,6 +672,7 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::AudioPitch => data.audio_source.as_ref()?.pitch,
         F::AudioRange => data.audio_source.as_ref()?.range,
         F::AnimSpeed => data.animation.as_ref()?.speed,
+        F::Nav(_) | F::NavBake(_) => return nav_get(data, field),
         F::JointAnchor(_)
         | F::JointAxis(_)
         | F::JointLimitMin
@@ -778,7 +891,12 @@ pub fn range(field: Field) -> (f32, f32) {
         F::ParticleConeAngle => (0.0, 180.0),
         F::ParticleSpeed(_) | F::ParticleGravity | F::ParticleSpin => (-1_000.0, 1_000.0),
         F::ParticleMax => (1.0, 100_000.0),
-        F::WaterDensity
+        F::NavBake(NavBakeField::Cell) => (0.05, 2.0),
+        F::Nav(NavField::Hover) => (-100.0, 100.0),
+        F::CharacterSlope | F::NavBake(NavBakeField::Slope) => (0.0, 89.0),
+        F::Nav(_)
+        | F::NavBake(_)
+        | F::WaterDensity
         | F::WaterDrag
         | F::GrassDensity
         | F::PointIntensity
@@ -806,7 +924,6 @@ pub fn range(field: Field) -> (f32, f32) {
             (0.001, 10_000.0)
         }
         F::CameraFov => (1.0, 179.0),
-        F::CharacterSlope => (0.0, 89.0),
         F::AudioVolume
         | F::EnvToonBands
         | F::EnvOutline
@@ -1295,6 +1412,7 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
             Some(a) => a.speed = v,
             None => return false,
         },
+        F::Nav(_) | F::NavBake(_) => return nav_set(data, field, v),
     }
     true
 }
@@ -1331,6 +1449,9 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::JointLimits => data.joint.as_ref()?.limits.is_some(),
         Flag::JointMotor => data.joint.as_ref()?.motor.is_some(),
         Flag::JointMotorTarget => data.joint.as_ref()?.motor?.target.is_some(),
+        Flag::NavAvoid => data.nav_agent.as_ref()?.avoid,
+        Flag::NavTurn => data.nav_agent.as_ref()?.turn,
+        Flag::NavLinkTwoWay => data.nav_link.as_ref()?.two_way,
     })
 }
 
@@ -1425,6 +1546,21 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
                 None => return false,
             }
         }
+        Flag::NavAvoid | Flag::NavTurn => match &mut data.nav_agent {
+            Some(a) => {
+                let slot = if flag == Flag::NavAvoid {
+                    &mut a.avoid
+                } else {
+                    &mut a.turn
+                };
+                *slot = !*slot;
+            }
+            None => return false,
+        },
+        Flag::NavLinkTwoWay => match &mut data.nav_link {
+            Some(l) => l.two_way = !l.two_way,
+            None => return false,
+        },
         Flag::JointEnabled
         | Flag::JointCollide
         | Flag::JointLimits

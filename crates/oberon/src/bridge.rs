@@ -87,6 +87,8 @@ pub struct EntityState {
     pub joint: Option<(automata_physics::Joint, automata_physics::JointState)>,
     /// What the entity follows, `(entity name, bone)`, if it's attached.
     pub attached: Option<(String, String)>,
+    /// The entity's Nav Agent and how it's getting on, if it has one.
+    pub nav: Option<automata_nav::NavAgent>,
 }
 
 /// A collider as the runner sees it (for `ctx.physics.raycast`).
@@ -175,6 +177,9 @@ pub struct FrameInput {
     /// The graphics preset Play renders at (`"high"`), for
     /// `ctx.settings.graphics`; empty when unknown.
     pub graphics: &'static str,
+    /// The scene's navigation mesh, for `ctx.nav`. The bridge sends it
+    /// when it changes.
+    pub nav: Option<Arc<automata_nav::NavMesh>>,
 }
 
 /// What a script asked of an entity's Audio Source.
@@ -351,6 +356,8 @@ pub struct EntityWrite {
     pub joint: Option<automata_physics::JointEdit>,
     /// Attach the entity to a bone, or detach it.
     pub attach: Option<AttachWrite>,
+    /// Changes to the entity's Nav Agent (`entity.nav.go`, `speed`).
+    pub nav: Option<automata_nav::NavEdit>,
     /// Remove the entity from the running scene.
     pub despawn: bool,
 }
@@ -424,6 +431,8 @@ pub struct ScriptBridge {
     exited: bool,
     /// Mesh keys whose triangles the runner already has.
     sent_meshes: HashSet<u64>,
+    /// The navigation mesh last sent (by address; 0 for none).
+    sent_nav: usize,
     /// Frames answered (for the status readout).
     pub answered: u64,
 }
@@ -502,6 +511,7 @@ impl ScriptBridge {
             frame: 0,
             exited: false,
             sent_meshes: HashSet::new(),
+            sent_nav: 0,
             answered: 0,
         })
     }
@@ -586,6 +596,11 @@ impl ScriptBridge {
             .collect();
         if !new_meshes.is_empty() {
             msg.set("meshes", Json::Arr(new_meshes));
+        }
+        let nav = input.nav.as_ref().map_or(0, |n| Arc::as_ptr(n) as usize);
+        if nav != self.sent_nav {
+            self.sent_nav = nav;
+            msg.set("navmesh", input.nav.as_deref().map_or(Json::Null, nav_json));
         }
         if self.send(&msg) {
             self.in_flight = Some(Instant::now());
@@ -893,7 +908,95 @@ fn state_json(e: &EntityState) -> Json {
     if let Some((joint, state)) = &e.joint {
         obj.set("joint", joint_json(joint, state));
     }
+    if let Some(agent) = &e.nav {
+        obj.set("nav", nav_state_json(agent));
+    }
     obj
+}
+
+/// A Nav Agent's state: `{"spd", "stop", "hov", "t", "arr", "jmp", "vel",
+/// "path"}` (see the script API's `EntityNav`).
+fn nav_state_json(agent: &automata_nav::NavAgent) -> Json {
+    let s = &agent.state;
+    let target = match &agent.target {
+        Some(automata_nav::NavTarget::Point(p)) => Json::floats(&p.to_array()),
+        Some(automata_nav::NavTarget::Entity(n)) => Json::from(n.as_str()),
+        None => Json::Null,
+    };
+    let path = s
+        .path
+        .get(s.next..)
+        .unwrap_or_default()
+        .iter()
+        .map(|p| Json::floats(&p.position.to_array()))
+        .collect();
+    Json::obj([
+        ("spd", Json::Float(f64::from(agent.speed))),
+        ("stop", Json::Float(f64::from(agent.stop_distance))),
+        ("hov", Json::Float(f64::from(agent.hover))),
+        ("t", target),
+        ("arr", Json::Bool(s.arrived)),
+        ("jmp", Json::Bool(s.jumping)),
+        ("vel", Json::floats(&s.velocity.to_array())),
+        ("path", Json::Arr(path)),
+    ])
+}
+
+/// The navigation mesh for the runner's `NavGraph`: `{"polys": [[x0, z0,
+/// x1, z1, y0, dx, dz], ...], "edges": [[[to, a xyz, b xyz, link], ...],
+/// ...]}`.
+fn nav_json(mesh: &automata_nav::NavMesh) -> Json {
+    let (polys, edges) = mesh.export();
+    Json::obj([
+        (
+            "polys",
+            Json::Arr(polys.iter().map(|p| Json::floats(p)).collect()),
+        ),
+        (
+            "edges",
+            Json::Arr(
+                edges
+                    .iter()
+                    .map(|es| {
+                        Json::Arr(
+                            es.iter()
+                                .map(|(to, a, b, link)| {
+                                    let mut v = vec![Json::Int(i64::from(*to))];
+                                    v.extend(a.to_array().map(|x| Json::Float(f64::from(x))));
+                                    v.extend(b.to_array().map(|x| Json::Float(f64::from(x))));
+                                    v.push(Json::Bool(*link));
+                                    Json::Arr(v)
+                                })
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+            ),
+        ),
+    ])
+}
+
+/// `entity.nav` changes: `{"go": point | name | null, "speed",
+/// "stop_distance"}`.
+fn parse_nav(v: &Json) -> Option<automata_nav::NavEdit> {
+    let mut edit = automata_nav::NavEdit::default();
+    if let Some(go) = v.get("go") {
+        edit.target = Some(match go {
+            Json::Null => None,
+            Json::Str(name) => Some(automata_nav::NavTarget::Entity(name.clone())),
+            other => {
+                let p = other.as_floats::<3>()?;
+                if !p.iter().all(|x| x.is_finite()) {
+                    return None;
+                }
+                Some(automata_nav::NavTarget::Point(glam::Vec3::from(p)))
+            }
+        });
+    }
+    edit.speed = v.get("speed").and_then(num);
+    edit.stop_distance = v.get("stop_distance").and_then(num);
+    edit.hover = v.get("hover").and_then(num);
+    Some(edit)
 }
 
 /// `{"kind", "to", "on", "value", "attached", "broken", "force", "motor",
@@ -1139,6 +1242,7 @@ fn parse_write(w: &Json) -> Option<EntityWrite> {
             .collect(),
         joint: w.get("joint").and_then(parse_joint),
         attach: w.get("att").and_then(parse_attach),
+        nav: w.get("nav").and_then(parse_nav),
         despawn: matches!(w.get("despawn"), Some(Json::Bool(true))),
     })
 }
@@ -1908,6 +2012,107 @@ mod tests {
         drop(bridge.stop());
         let _ = std::fs::remove_dir_all(&runtime);
         let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    /// `ctx.nav` answers from the mesh sent once; `entity.nav` reads the
+    /// agent's state and its writes come back as a `NavEdit`.
+    #[test]
+    fn scripts_find_paths_and_steer_nav_agents_through_the_bridge() {
+        use glam::Vec3;
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("oberon_bridge_nav_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("guard.py");
+        std::fs::write(
+            &script,
+            "def update(entity, ctx):\n    \
+             path = ctx.nav.path((-3, 0, -3), (3, 0, -3))\n    \
+             entity.attributes['ready'] = ctx.nav.ready\n    \
+             entity.attributes['corners'] = len(path) if path else 0\n    \
+             entity.attributes['speed'] = entity.nav.speed\n    \
+             entity.nav.go('Intruder')\n    \
+             entity.nav.speed = 2.0\n",
+        )
+        .unwrap();
+        // A floor with a wall across it: the way round has corners.
+        let (mut v, mut t) = (Vec::new(), Vec::new());
+        let mut add_box = |lo: Vec3, hi: Vec3| {
+            let base = u32::try_from(v.len()).unwrap();
+            for i in 0..8u8 {
+                v.push(Vec3::new(
+                    if i & 1 == 0 { lo.x } else { hi.x },
+                    if i & 2 == 0 { lo.y } else { hi.y },
+                    if i & 4 == 0 { lo.z } else { hi.z },
+                ));
+            }
+            for f in [
+                [0, 2, 1],
+                [1, 2, 3],
+                [4, 5, 6],
+                [5, 7, 6],
+                [0, 1, 4],
+                [1, 5, 4],
+                [2, 6, 3],
+                [3, 6, 7],
+                [0, 4, 2],
+                [2, 4, 6],
+                [1, 3, 5],
+                [3, 7, 5],
+            ] {
+                t.push(f.map(|k: u32| base + k));
+            }
+        };
+        add_box(Vec3::new(-6.0, -1.0, -6.0), Vec3::new(6.0, 0.0, 6.0));
+        add_box(Vec3::new(-0.5, 0.0, -6.0), Vec3::new(0.5, 2.0, 3.0));
+        let mesh = automata_nav::bake(&v, &t, &[], automata_nav::NavSettings::default()).unwrap();
+        let input = FrameInput {
+            nav: Some(Arc::new(mesh)),
+            ..FrameInput::default()
+        };
+        let entities = vec![EntityState {
+            id: 1,
+            name: "Guard".into(),
+            script: Some(script.clone()),
+            scale: [1.0; 3],
+            nav: Some(automata_nav::NavAgent::default()),
+            ..EntityState::default()
+        }];
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+        for frame in 0..2 {
+            assert!(bridge.send_frame_with(0.016, 0.016, &[], &entities, &input));
+            let msgs = pump(&mut bridge, |m| {
+                matches!(m, BridgeMsg::Frame(_) | BridgeMsg::Error { .. })
+            });
+            let reply = msgs
+                .iter()
+                .find_map(|m| match m {
+                    BridgeMsg::Frame(r) => Some(r.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{msgs:?}"));
+            let w = reply.writes.iter().find(|w| w.id == 1).unwrap();
+            let attrs = w.attributes.as_ref().unwrap();
+            assert_eq!(attrs["ready"], AttributeValue::Bool(true), "frame {frame}");
+            let AttributeValue::Int(corners) = attrs["corners"] else {
+                panic!("{attrs:?}");
+            };
+            // Sent on the first frame only, and still known on the second.
+            assert!(corners >= 3, "round the wall on frame {frame}: {corners}");
+            assert_eq!(attrs["speed"], AttributeValue::Float(3.5));
+            let edit = w.nav.as_ref().unwrap();
+            assert_eq!(
+                edit.target,
+                Some(Some(automata_nav::NavTarget::Entity("Intruder".into())))
+            );
+            assert_eq!(edit.speed, Some(2.0));
+        }
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

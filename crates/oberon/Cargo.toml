@@ -29,6 +29,7 @@ automata-audio = { path = "../automata-audio" }
 automata-core = { path = "../automata-core" }
 automata-cli = { path = "../automata-cli" }
 automata-input = { path = "../automata-input" }
+automata-nav = { path = "../automata-nav" }
 automata-physics = { path = "../automata-physics" }
 automata-renderer = { path = "../automata-renderer" }
 automata-scene = { path = "../automata-scene" }

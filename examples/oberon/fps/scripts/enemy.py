@@ -1,5 +1,7 @@
 """enemy: a flying drone that bobs in place, keeps its eyes on the player
-and fires when the player comes close and in sight.
+and fires when the player comes close and in sight. Once it notices the
+player (they come near, or shoot it) its Nav Agent chases them around the
+walls, holding back at firing range, until they get far away.
 
 Attributes (Inspector): health (Int), 100 at the start.
 
@@ -16,6 +18,8 @@ DAMAGE = 5
 BOB = 1.0  # bob speed scale (Kenney's kit: y += cos(t * 5) * dt)
 CENTER = 0.45  # the drone's middle, above its origin
 VOLUME = 0.45
+NOTICE = 6.5  # how close the player must come to be noticed
+GIVE_UP = 20.0  # how far away they must get to be forgotten
 
 
 def yaw_pitch_euler(yaw, pitch):
@@ -39,11 +43,16 @@ def start(entity, ctx):
     if entity.attributes.get("health") is None:
         entity.attributes["health"] = 100
     s["health"] = entity.attributes.get("health")
+    s["chasing"] = False
+    if entity.nav is not None:
+        s["hover"] = entity.nav.hover
 
 
 def update(entity, ctx):
     s = entity.state
     dt = ctx.time.delta
+    if entity.attributes.get("health", 100) < s["health"]:
+        s["chasing"] = True  # shot: come after the shooter
 
     health = entity.attributes.get("health", 100)
     position = entity.transform.position
@@ -58,14 +67,34 @@ def update(entity, ctx):
     # Bob up and down around the starting height.
     s["t"] += dt
     s["y"] += math.cos(s["t"] * 5.0) * BOB * dt
-    hx, _, hz = s["home"]
-    entity.transform.position = (hx, s["y"], hz)
-    center = (hx, s["y"] + CENTER, hz)
+    bob = s["y"] - s["home"][1]
 
     player = ctx.scene.find("Player")
     if player is None:
         return
     px, py, pz = player.transform.position
+    away = math.dist(position, (px, py, pz))
+    if away < NOTICE:
+        s["chasing"] = True
+    elif away > GIVE_UP:
+        s["chasing"] = False
+
+    if s["chasing"] and entity.nav is not None:
+        # The Nav Agent flies it: the shortest way round the walls, stopping
+        # short at firing range. Bobbing is its hover height going up and down.
+        entity.nav.go(player)
+        entity.nav.hover = s["hover"] + bob
+        hx, y, hz = position
+    else:
+        if entity.nav is not None and entity.nav.target is not None:
+            # Lost interest: stop, and bob where it is from now on.
+            entity.nav.stop()
+            s["home"] = (position[0], position[1] - bob, position[2])
+            s["y"] = position[1]
+        hx, _, hz = s["home"]
+        y = s["y"]
+        entity.transform.position = (hx, y, hz)
+    center = (hx, y + CENTER, hz)
     target = (px, py + 0.5, pz)
     d = [t - c for t, c in zip(target, center)]
     flat = math.hypot(d[0], d[2])

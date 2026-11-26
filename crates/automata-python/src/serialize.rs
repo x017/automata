@@ -37,6 +37,9 @@ pub fn staged_to_entity_data(entity: &StagedEntity) -> EntityData {
             StagedComponent::Scatter(s) => data.scatter = Some(s.clone()),
             StagedComponent::Joint(j) => data.joint = Some(j.clone()),
             StagedComponent::Attach(a) => data.attach = Some(a.clone()),
+            StagedComponent::NavAgent(a) => data.nav_agent = Some(a.clone()),
+            StagedComponent::Navigation(n) => data.navigation = Some(n.clone()),
+            StagedComponent::NavLink(l) => data.nav_link = Some(l.clone()),
             StagedComponent::MeshVisual(v) => data.mesh_visual = Some(MeshVisualData::from(v)),
             StagedComponent::RigidBody(b) => data.rigid_body = Some(b.clone()),
             StagedComponent::Collider3D(c) => data.collider_3d = Some(c.clone()),
@@ -93,6 +96,15 @@ pub fn entity_data_to_staged(data: &EntityData) -> StagedEntity {
     }
     if let Some(a) = &data.attach {
         components.push(StagedComponent::Attach(a.clone()));
+    }
+    if let Some(a) = &data.nav_agent {
+        components.push(StagedComponent::NavAgent(a.clone()));
+    }
+    if let Some(n) = &data.navigation {
+        components.push(StagedComponent::Navigation(n.clone()));
+    }
+    if let Some(l) = &data.nav_link {
+        components.push(StagedComponent::NavLink(l.clone()));
     }
     if let Some(v) = &data.mesh_visual {
         components.push(StagedComponent::MeshVisual(

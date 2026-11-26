@@ -257,6 +257,8 @@ class _ViewRecord:
         if key == "att":
             a = v.attached_to
             return None if a is None else list(a)
+        if key == "nav":
+            return v.nav_state
         if key == "view":
             return v
         return None
@@ -315,6 +317,11 @@ class _EngineBackend(api.Backend):
                 ctx.audio.play_source(view)
             elif audio == "stop":
                 ctx.audio.stop_source(view)
+            nav = w.get("nav")
+            if nav:
+                if isinstance(nav.get("go"), list):
+                    nav = {**nav, "go": tuple(nav["go"])}
+                view.nav_edit(**nav)
             joint = view.joint if w.get("joint") else None
             if joint is not None:
                 for k, val in w["joint"].items():
@@ -417,6 +424,15 @@ class _EngineBackend(api.Backend):
 
     def water_height(self, x: float, z: float) -> Any:
         return self.ctx.physics.water_height(x, z)
+
+    def nav_ready(self) -> bool:
+        return bool(self.ctx.physics.nav_ready)
+
+    def nav_path(self, start: Any, end: Any, partial: bool) -> Any:
+        return self.ctx.physics.nav_path(tuple(start), tuple(end), partial)
+
+    def nav_nearest(self, point: Any, max_distance: float) -> Any:
+        return self.ctx.physics.nav_nearest(tuple(point), max_distance)
 
     def splash(self, position: Any, strength: float) -> None:
         self.ctx.physics.splash(tuple(position), strength)

@@ -637,12 +637,25 @@ graphics preset on F2. The coin-collector tutorial gained a step 7 for
 this. Games run from a `main` script on the object-oriented `at.Game`
 loop don't get `ctx.save` yet.
 
-### C4. Navigation ⬜ L
-- A navmesh baked from static colliders (voxelise → regions → polygons),
-  with a "Bake" button and overlay in Oberon.
-- `ctx.nav.path(a, b)` and a `NavAgent` component (speed, steering,
-  avoidance between agents, off-mesh jump links).
-- **Done when:** FPS enemies chase the player around obstacles.
+### C4. Navigation ✅ L
+- ✅ A navmesh baked from static colliders (the new `automata-nav` crate:
+  voxelise → walkable cells eroded by the agent radius → regions →
+  rectangular polygons, with automatic jump and drop links across gaps
+  and hand-placed `NavLink`s). The `Navigation` component holds the bake
+  settings and the saved `<scene>.nav.ron`, which is reused while it
+  matches the level and re-baked (with a warning) when it doesn't.
+  Oberon's **Bake** button saves it, and the scene view overlays the
+  walkable area and the jump arcs.
+- ✅ `ctx.nav.path(a, b)` (plus `nearest`, `reachable`, `path_length`,
+  `ready`; funnel-pulled corner paths) and a `NavAgent` component: speed,
+  acceleration, steering round corners, avoidance between agents, jump
+  links on an arc, characters moved through their controller and others
+  hovering. `entity.nav.go(point | entity | name)`, `stop`, `arrived`,
+  `path` and friends in scripts, in Python games and Oberon's Play mode
+  alike.
+- ✅ **Done:** the FPS drones are Nav Agents. Come close or shoot one and
+  it chases you round the walls and down the platforms, stopping at
+  firing range. Manual: [Navigation](docs/wiki/oberon/navigation.md).
 
 ### C5. AI helpers ⬜ S
 - Pure-Python state-machine and behaviour-tree helpers in the script API.
@@ -1167,7 +1180,7 @@ per effort. Reorder any time by telling me.
 | 27 | D3 UI layout, focus, screens | M | ✅ |
 | 28 | B4 Animation state machine | L | ✅ |
 | 29 | B5 Attachments and IK | M | ✅ |
-| 30 | C4 Navigation | L | ⬜ |
+| 30 | C4 Navigation | L | ✅ |
 | 31 | C5 AI helpers | S | ⬜ |
 | 32 | D5 Material assets and editor | M | ✅ |
 | 33 | A13 Terrain | L | ⬜ |

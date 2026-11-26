@@ -782,6 +782,31 @@ impl PhysicsWorld3D {
         self.grounded.get(&entity).copied().unwrap_or(false)
     }
 
+    /// The world-space triangles of every solid collider that doesn't move
+    /// on its own: colliders without a body and on fixed bodies, sensors
+    /// left out, as `(vertices, triangles)`. What a navigation mesh is
+    /// baked from; `skip` leaves out more entities (the agents
+    /// themselves). Balls and capsules become coarse triangle shells.
+    #[must_use]
+    pub fn static_geometry(&self, skip: &dyn Fn(Entity) -> bool) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+        let mut vertices = Vec::new();
+        let mut triangles = Vec::new();
+        for (_, c) in self.colliders.iter() {
+            if !c.is_enabled() || c.is_sensor() {
+                continue;
+            }
+            let fixed = c
+                .parent()
+                .and_then(|h| self.bodies.get(h))
+                .is_none_or(r3::dynamics::RigidBody::is_fixed);
+            if !fixed || user_data_to_entity(c.user_data).is_some_and(skip) {
+                continue;
+            }
+            shape_triangles(c.shape(), c.position(), &mut vertices, &mut triangles);
+        }
+        (vertices, triangles)
+    }
+
     /// Cast a ray and return the closest hit, if any.
     #[must_use]
     pub fn cast_ray(
@@ -998,6 +1023,48 @@ pub enum WorldShape {
         /// model at the same scale share a key.
         mesh: u64,
     },
+}
+
+/// Appends `shape`'s surface at `pose` as world-space triangles (see
+/// [`PhysicsWorld3D::static_geometry`]).
+fn shape_triangles(
+    shape: &dyn r3::geometry::Shape,
+    pose: &Pose,
+    vertices: &mut Vec<Vec3>,
+    triangles: &mut Vec<[u32; 3]>,
+) {
+    let (local, tris) = if let Some(compound) = shape.as_compound() {
+        for (sub, part) in compound.shapes() {
+            shape_triangles(part.as_ref(), &(*pose * *sub), vertices, triangles);
+        }
+        return;
+    } else if let Some(b) = shape.as_cuboid() {
+        b.to_trimesh()
+    } else if let Some(b) = shape.as_round_cuboid() {
+        r3::geometry::Cuboid::new(b.inner_shape.half_extents + Vec3::splat(b.border_radius))
+            .to_trimesh()
+    } else if let Some(t) = shape.as_trimesh() {
+        (t.vertices().to_vec(), t.indices().to_vec())
+    } else if let Some(h) = shape.as_convex_polyhedron() {
+        h.to_trimesh()
+    } else if let Some(h) = shape.as_heightfield() {
+        h.to_trimesh()
+    } else if let Some(b) = shape.as_ball() {
+        b.to_trimesh(12, 6)
+    } else if let Some(c) = shape.as_capsule() {
+        c.to_trimesh(12, 4)
+    } else if let Some(c) = shape.as_cylinder() {
+        c.to_trimesh(12)
+    } else if let Some(c) = shape.as_cone() {
+        c.to_trimesh(12)
+    } else {
+        return;
+    };
+    let Ok(base) = u32::try_from(vertices.len()) else {
+        return;
+    };
+    vertices.extend(local.into_iter().map(|v| pose.transform_point(v)));
+    triangles.extend(tris.into_iter().map(|t| t.map(|i| i + base)));
 }
 
 /// The key of a shape's shared geometry (its allocation address, stable

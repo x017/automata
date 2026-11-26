@@ -391,6 +391,35 @@ entity's origin). Its `Transform` becomes its offset in the bone's space,
 and it keeps its own size. `to` and `bone` are readable. Saved in scene
 files. Guide: [Attachments & IK](oberon/attachments-and-ik.md).
 
+### Navigation
+
+```text
+at.Navigation(file="", agent_radius=0.35, agent_height=1.8, max_climb=0.4,
+              max_slope=45.0, jump_distance=2.5, jump_height=1.2,
+              drop_height=3.0, cell_size=0.2, min_area=0.5)
+at.NavAgent(speed=3.5, acceleration=12.0, radius=0.4, hover=0.0,
+            stop_distance=0.1, avoid=True, turn=True)
+at.NavLink(to, two_way=True)
+```
+
+`Navigation` (one per scene) says how the navigation mesh is baked from
+the static colliders and, in `file`, where it was saved (relative to the
+scene; empty: baked when the game starts). `NavAgent` makes an entity walk
+the mesh by itself: a character through its controller, anything else
+`hover` metres above the mesh. `NavLink` is a hand-placed jump from this
+entity to the one named `to`. All are saved in scene files and readable.
+Guide: [Navigation](oberon/navigation.md).
+
+```text
+ctx.physics.nav_ready -> bool
+ctx.physics.nav_path(start, end, partial=False) -> [(x, y, z, is_link)] | None
+ctx.physics.nav_nearest(point, max_distance=5.0) -> (x, y, z) | None
+view.nav_state           # dict | None: the agent's speed, target, path, ...
+view.nav_edit(go=..., speed=..., stop_distance=..., hover=...)
+```
+
+Scripts use the friendlier `entity.nav` and `ctx.nav` (below).
+
 ### Physics components
 
 ```text
@@ -652,6 +681,7 @@ the number of frames run.
 | `camera` | `ScriptCamera` or `None` |
 | `audio` | `play()`, `stop()`, `playing`, `source` |
 | `animation` | `play(clip, loop=True, fade=0.0, speed=None, restart=False)`, `stop(fade=0.0)`, `clip`, `time` (settable), `duration`, `length(clip)`, `playing`, `speed` (settable), `looping`, `clips`, `springs`, `reset_springs()`, `root_motion` (settable), or `None` without an Animation. Reads include this frame's requests |
+| `nav` | `go(target)` (a point, an entity or a name; `None` stops), `stop()`, `target`, `arrived`, `moving`, `jumping`, `velocity`, `path`, `remaining_distance`, and settable `speed`, `stop_distance`, `hover`; or `None` without a Nav Agent ([Navigation](oberon/navigation.md#nav-agents)) |
 | `joint` | `kind`, `connected` (settable), `value`, `angle`, `attached`, `broken`, `force`, and settable `enabled`, `motor_speed`, `motor_target`, `limits`, `break_force`; or `None` without a Joint ([Physics → Joints](guides/physics.md#joints)) |
 | `camera_3d` | The camera as a `Camera3D` (get/set) |
 | `view` | The engine's `EntityView` for this frame |
@@ -663,6 +693,7 @@ the number of frames run.
 | `scene` | Script entities: `["Name"]`, `find`, `by_id`, `in`, iteration |
 | `input` | Keys with the aliases `"shift"`, `"ctrl"`, `"alt"` (either side) and `"left"`/`"right"`/`"up"`/`"down"`, or actions bound with `settings.bind`; `axis(neg, pos)`; `any_just_pressed()` (the new key's name, for rebinding); mouse buttons, `mouse_delta`, `lock_mouse`; `touches` (fingers, or the left mouse button as finger 0); `touch_controls` (on-screen sticks and buttons: `set(sticks, buttons, look, show)`, `visible`, `stick(side)`, `configured`; see [Touch controls](guides/touch-controls.md)) |
 | `physics` | `grounded`, `raycast`, `water_height(x, z)`; the rest of the engine's physics, which also accepts script entities |
+| `nav` | `ready`, `path(start, end, partial=False)` (corner points, or `None`), `path_length(start, end)`, `nearest(point, max_distance=5.0)`, `reachable(start, end)`; points may be entities ([Navigation](oberon/navigation.md#paths-from-scripts)) |
 | `water` | `height(x, z)` (same as `physics.water_height`), `splash(position_or_entity, strength=1.0)`: rings and foam at that point (strength 0–10; 1 is about a crate dropped from a couple of metres) |
 | `particles` | `burst(effect, position_or_entity, direction=None, count=None, **fields)`: a one-off effect (a preset name or `at.ParticleEmitter`, with fields changed) that cleans up after itself; `emit(entity, count)`: extra particles from the entity's own emitter |
 | `audio`, `hud` | One-shot sounds; HUD images (`"builtin:circle"` and `"builtin:ring"` are built in), rectangles and text (`hud.text(text, x, y, size=24, color, align, shadow, outline)`) |

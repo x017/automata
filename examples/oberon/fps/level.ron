@@ -603,6 +603,15 @@
                 enabled: true,
                 offset: (0.0, 0.45, 0.0),
             )),
+            nav_agent: Some((
+                speed: 3.0,
+                acceleration: 12.0,
+                radius: 0.6,
+                hover: 1.5,
+                stop_distance: 3.5,
+                avoid: true,
+                turn: false,
+            )),
             attributes: {
                 "health": Int(100),
             },
@@ -633,6 +642,15 @@
                 sensor: false,
                 enabled: true,
                 offset: (0.0, 0.45, 0.0),
+            )),
+            nav_agent: Some((
+                speed: 3.0,
+                acceleration: 12.0,
+                radius: 0.6,
+                hover: 1.5,
+                stop_distance: 3.5,
+                avoid: true,
+                turn: false,
             )),
             attributes: {
                 "health": Int(100),
@@ -665,6 +683,15 @@
                 enabled: true,
                 offset: (0.0, 0.45, 0.0),
             )),
+            nav_agent: Some((
+                speed: 3.0,
+                acceleration: 12.0,
+                radius: 0.6,
+                hover: 1.5,
+                stop_distance: 3.5,
+                avoid: true,
+                turn: false,
+            )),
             attributes: {
                 "health": Int(100),
             },
@@ -696,11 +723,37 @@
                 enabled: true,
                 offset: (0.0, 0.45, 0.0),
             )),
+            nav_agent: Some((
+                speed: 3.0,
+                acceleration: 12.0,
+                radius: 0.6,
+                hover: 1.5,
+                stop_distance: 3.5,
+                avoid: true,
+                turn: false,
+            )),
             attributes: {
                 "health": Int(100),
             },
             script: Some((
                 path: "scripts/enemy.py",
+            )),
+        ),
+        (
+            name: Some("Navigation"),
+            navigation: Some((
+                settings: (
+                    cell_size: 0.2,
+                    cell_height: 0.1,
+                    agent_radius: 0.4,
+                    agent_height: 1.8,
+                    max_climb: 0.4,
+                    max_slope: 45.0,
+                    jump_distance: 4.0,
+                    jump_height: 2.5,
+                    drop_height: 3.0,
+                    min_area: 0.5,
+                ),
             )),
         ),
         (

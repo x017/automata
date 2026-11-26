@@ -736,6 +736,32 @@ impl EditorApp {
                     }
                 });
             }
+            Intent::SetNavLink { id, to } => {
+                doc.modify(id, false, |d| {
+                    if let Some(l) = &mut d.nav_link {
+                        l.to.clone_from(&to);
+                    }
+                });
+            }
+            Intent::BakeNav(id) => match PlaySession::bake_nav_to_file(doc, id) {
+                Ok((path, mesh)) => {
+                    self.ui.log(
+                        LogLevel::Info,
+                        format!(
+                            "Baked the navigation mesh: {:.0} m² walkable in {} areas, {} jump links \
+                             ({})",
+                            mesh.area(),
+                            mesh.regions,
+                            mesh.links.len(),
+                            path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into()),
+                        ),
+                    );
+                    self.ui.nav_missing = None;
+                    self.ui.nav_overlay = Some((path, Arc::new(mesh)));
+                    self.ui.show_nav = true;
+                }
+                Err(message) => self.ui.log(LogLevel::Error, message),
+            },
             Intent::SetJointTarget { id, target } => {
                 doc.modify(id, false, |d| {
                     if let Some(j) = &mut d.joint {
@@ -1856,7 +1882,10 @@ impl EditorApp {
         match self.ui.play {
             PlayState::Editing => {
                 self.doc.end_gesture();
-                let session = PlaySession::start(&self.doc);
+                let mut session = PlaySession::start(&self.doc);
+                if let Some(warning) = session.nav_warning.take() {
+                    self.ui.log(LogLevel::Warn, warning);
+                }
                 let dynamic = session.dynamic_count();
                 let characters = session.character_count();
                 if let Some(pos) = session.player_position() {

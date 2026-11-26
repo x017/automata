@@ -60,6 +60,11 @@ pub struct WorldState {
     cursor_locked: bool,
     graphics_quality: automata_renderer::GraphicsQuality,
     graphics_changed: bool,
+    /// The scene's navigation mesh, once the first physics step got it
+    /// ready (see [`automata_nav::scene::prepare`]).
+    nav: Option<std::sync::Arc<automata_nav::NavMesh>>,
+    /// Whether the scene's navigation was got ready.
+    nav_ready: bool,
 }
 
 impl WorldState {
@@ -175,6 +180,41 @@ impl WorldState {
         automata_scene::animate_on(world, dt, Some(&ground));
     }
 
+    /// The scene's navigation mesh, if it has one (ready from the first
+    /// physics step on).
+    #[must_use]
+    pub fn nav(&self) -> Option<&std::sync::Arc<automata_nav::NavMesh>> {
+        self.nav.as_ref()
+    }
+
+    /// Replaces the navigation mesh (`None` drops it): a level rebuilt at
+    /// run time can bake afresh with [`automata_nav::scene::bake_scene`].
+    pub fn set_nav(&mut self, mesh: Option<automata_nav::NavMesh>) {
+        self.nav = mesh.map(std::sync::Arc::new);
+        self.nav_ready = true;
+    }
+
+    /// Gets the scene's navigation ready (once, at the first physics step):
+    /// the saved mesh, or a fresh bake. Warnings go to the log and stderr.
+    fn prepare_nav(&mut self) {
+        if self.nav_ready {
+            return;
+        }
+        self.nav_ready = true;
+        let scene = self.scene.world_mut();
+        self.physics3d.sync_from_scene(scene);
+        let base = automata_assets::root();
+        let Some(prepared) = automata_nav::scene::prepare(scene, &self.physics3d, base.as_deref())
+        else {
+            return;
+        };
+        if let Some(warning) = prepared.warning {
+            tracing::warn!("{warning}");
+            eprintln!("automata: {warning}");
+        }
+        self.nav = prepared.mesh.map(std::sync::Arc::new);
+    }
+
     /// The 2D physics world, read-only.
     #[must_use]
     pub fn physics2d_ref(&self) -> &automata_physics::PhysicsWorld2D {
@@ -241,8 +281,19 @@ impl WorldState {
             self.physics_accumulator -= timestep;
             steps += 1;
 
+            self.prepare_nav();
             {
                 let scene = self.scene.world_mut();
+                let physics = &self.physics3d;
+                let grounded = |e: automata_scene::Entity| physics.grounded(e);
+                automata_nav::step_agents(
+                    scene,
+                    &automata_nav::AgentWorld {
+                        nav: self.nav.as_deref(),
+                        dt: timestep,
+                        grounded: &grounded,
+                    },
+                );
                 self.physics3d.sync_from_scene(scene);
                 self.physics3d.move_characters(scene, timestep);
             }

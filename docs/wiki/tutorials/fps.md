@@ -258,7 +258,15 @@ them **Enemy 1** to **Enemy 4**. Give each one:
 - a **Ball** collider, radius `0.6`, offset `(0, 0.45, 0)`, so your shots
   have something to hit. Use no rigid body, because the script moves it;
 - a `health` (Int) attribute of `100`;
+- a **Nav Agent**: Speed `3`, Radius `0.6`, Hover `1.5`, Stop Distance
+  `3.5`, and Face Movement off (the script aims the drone itself);
 - the script `scripts/enemy.py`.
+
+Then add an empty entity called **Navigation** with a **Navigation**
+component: Agent Radius `0.4`, Jump Distance `4`, Jump Height `2.5`.
+Press **Bake** to see where the drones can fly: blue over the platforms,
+with orange arcs for the hops between them. See
+[Navigation](../oberon/navigation.md).
 
 Each frame a drone bobs, turns to face the player, and checks its health.
 A lower number than last frame means a shot landed:
@@ -292,6 +300,29 @@ ducking behind a wall works:
         player.attributes["health"] = player.attributes.get("health", 100) - DAMAGE
 ```
 
+A drone that notices you comes after you. Coming within 6.5 m, or
+shooting it, sets it chasing; getting 20 m away makes it give up:
+
+```python
+# scripts/enemy.py
+    away = math.dist(position, (px, py, pz))
+    if away < NOTICE:
+        s["chasing"] = True
+    elif away > GIVE_UP:
+        s["chasing"] = False
+```
+
+While it's chasing, the Nav Agent does the flying. `go(player)` finds the
+shortest way round the walls and across the gaps, follows you as you move,
+and stops 3.5 m short so it's in range. The drone bobs by moving its hover
+height up and down:
+
+```python
+# scripts/enemy.py
+        entity.nav.go(player)
+        entity.nav.hover = s["hover"] + bob
+```
+
 The player script notices its own `health` dropping, flashes the screen, and
 respawns you at full health when it reaches zero or when you fall off the
 world. The two scripts never call each other; they only share attributes.
@@ -308,7 +339,8 @@ despawned drones return, and health resets.
 
 `examples/oberon/fps/tests/test_fps.py` has two kinds of test. Some run the real
 scene with `run_scene(headless=True)`: the player lands on the platform,
-drones bob and turn, a close drone shoots, and falling off respawns you.
+drones bob and turn, a close drone shoots, a shot drone chases you round
+the walls, and falling off respawns you.
 Others drive one script with a fake `ctx` to check shooting, switching
 weapons and jumping without a mouse.
 

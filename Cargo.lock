@@ -205,8 +205,10 @@ dependencies = [
 name = "automata-core"
 version = "0.1.0"
 dependencies = [
+ "automata-assets",
  "automata-audio",
  "automata-input",
+ "automata-nav",
  "automata-physics",
  "automata-renderer",
  "automata-scene",
@@ -225,6 +227,19 @@ name = "automata-input"
 version = "0.1.0"
 dependencies = [
  "gilrs",
+]
+
+[[package]]
+name = "automata-nav"
+version = "0.1.0"
+dependencies = [
+ "automata-physics",
+ "automata-scene",
+ "glam 0.33.12",
+ "hecs",
+ "ron",
+ "serde",
+ "tracing",
 ]
 
 [[package]]
@@ -255,6 +270,7 @@ dependencies = [
  "automata-audio",
  "automata-core",
  "automata-input",
+ "automata-nav",
  "automata-physics",
  "automata-renderer",
  "automata-scene",
@@ -1556,6 +1572,7 @@ dependencies = [
  "automata-cli",
  "automata-core",
  "automata-input",
+ "automata-nav",
  "automata-physics",
  "automata-renderer",
  "automata-scene",

@@ -20,6 +20,7 @@ repository = "https://github.com/x017/automata"
 automata-assets = { path = "crates/automata-assets" }
 automata-core = { path = "crates/automata-core" }
 automata-input = { path = "crates/automata-input" }
+automata-nav = { path = "crates/automata-nav" }
 automata-physics = { path = "crates/automata-physics" }
 automata-renderer = { path = "crates/automata-renderer" }
 automata-scene = { path = "crates/automata-scene" }

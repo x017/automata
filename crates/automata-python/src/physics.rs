@@ -182,6 +182,7 @@ pub struct PyPhysics {
     grounded: Rc<HashSet<u64>>,
     colliders: Rc<automata_physics::ColliderSnapshot>,
     water: Rc<Vec<automata_renderer::WaterSurface>>,
+    nav: Option<std::sync::Arc<automata_nav::NavMesh>>,
     queue: PhysicsQueue,
 }
 
@@ -221,13 +222,56 @@ impl PyPhysics {
             grounded: Rc::new(grounded),
             colliders: Rc::new(world.collider_snapshot()),
             water: Rc::new(world.water_surfaces().to_vec()),
+            nav: None,
             queue,
         }
+    }
+
+    /// Adds the scene's navigation mesh, for the path queries.
+    pub(crate) fn with_nav(mut self, nav: Option<std::sync::Arc<automata_nav::NavMesh>>) -> Self {
+        self.nav = nav;
+        self
     }
 }
 
 #[pymethods]
 impl PyPhysics {
+    /// Whether the scene has a navigation mesh (it has once a
+    /// `Navigation` or a `NavAgent` is in it and the level has floor).
+    #[getter]
+    fn nav_ready(&self) -> bool {
+        self.nav.is_some()
+    }
+
+    /// The shortest way over the navigation mesh from `start` to `end`:
+    /// the corners as `(x, y, z, link)` tuples (`link` where a jump link
+    /// starts), both ends included; or `None` when there's no way (or no
+    /// mesh). With `partial`, an unreachable `end` gives the way to the
+    /// nearest point that can be reached.
+    #[pyo3(signature = (start, end, partial=false))]
+    #[allow(clippy::type_complexity)] // the documented Python shape
+    fn nav_path(
+        &self,
+        start: (f32, f32, f32),
+        end: (f32, f32, f32),
+        partial: bool,
+    ) -> Option<Vec<(f32, f32, f32, bool)>> {
+        let mesh = self.nav.as_ref()?;
+        let path = mesh.find_path(Vec3::from(start), Vec3::from(end), partial)?;
+        Some(crate::nav::path_tuples(&path))
+    }
+
+    /// The nearest point on the navigation mesh to `point`, no further
+    /// than `max_distance`, or `None`.
+    #[pyo3(signature = (point, max_distance=5.0))]
+    fn nav_nearest(&self, point: (f32, f32, f32), max_distance: f32) -> Option<(f32, f32, f32)> {
+        let p = self
+            .nav
+            .as_ref()?
+            .nearest(Vec3::from(point), max_distance)?;
+        Some((p.x, p.y, p.z))
+    }
+
     /// Casts a ray right now and returns the closest hit as `(entity,
     /// point, normal, distance)`, or `None`. Tests the colliders as they
     /// were at the start of the frame (after the physics step); sensors

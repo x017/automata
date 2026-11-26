@@ -62,7 +62,10 @@ GRASS = [
     ("grass", (13.2, 3.0, -3.9), 30),
 ]
 
-# Flying drones: position and starting yaw.
+# Flying drones: position and starting yaw. Each is a Nav Agent hovering
+# 1.5 m over the navigation mesh, so once it notices the player it can chase
+# them around the walls (scripts/enemy.py).
+DRONE_HOVER = 1.5
 ENEMIES = [
     ((-3.5, 2.5, -6.0), 0),
     ((-9.5, 2.5, 1.5), 90),
@@ -178,9 +181,21 @@ def build():
             .add(model("enemy-flying"))
             .add(at.Collider3D.ball(0.6).offset(0.0, 0.45, 0.0))
         )
+        enemy.add(
+            at.NavAgent(speed=3.0, radius=0.6, hover=DRONE_HOVER, stop_distance=3.5, turn=False)
+        )
         enemy.script = "scripts/enemy.py"
         enemy.attributes["health"] = 100
         scene.add(enemy)
+
+    # The navigation mesh, baked from the platforms and walls when the game
+    # starts (Oberon's Bake button saves it to level.nav.ron instead). Wide
+    # jumps between platforms are fine: the agents are drones.
+    scene.add(
+        at.Entity("Navigation").add(
+            at.Navigation(agent_radius=0.4, jump_distance=4.0, jump_height=2.5)
+        )
+    )
 
     for i, (position, size) in enumerate(CLOUDS, start=1):
         cloud = at.Entity(f"Cloud {i}").add(

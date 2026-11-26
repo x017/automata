@@ -294,11 +294,17 @@ pub enum ComponentKind {
     AudioSource,
     /// Follows a bone of another entity's model (a sword in a hand).
     Attach,
+    /// Finds its own way around the navigation mesh.
+    NavAgent,
+    /// The scene's navigation mesh: how it's baked, and the Bake button.
+    Navigation,
+    /// A hand-placed shortcut for nav agents to another entity.
+    NavLink,
 }
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 20] = [
         Self::Mesh,
         Self::Animation,
         Self::Light,
@@ -316,6 +322,9 @@ impl ComponentKind {
         Self::Joint,
         Self::AudioSource,
         Self::Attach,
+        Self::NavAgent,
+        Self::Navigation,
+        Self::NavLink,
     ];
 
     /// The display name.
@@ -339,6 +348,9 @@ impl ComponentKind {
             Self::Joint => "Joint",
             Self::AudioSource => "Audio Source",
             Self::Attach => "Attach To Bone",
+            Self::NavAgent => "Nav Agent",
+            Self::Navigation => "Navigation",
+            Self::NavLink => "Nav Link",
         }
     }
 
@@ -363,6 +375,9 @@ impl ComponentKind {
             Self::Joint => data.joint.is_some(),
             Self::AudioSource => data.audio_source.is_some(),
             Self::Attach => data.attach.is_some(),
+            Self::NavAgent => data.nav_agent.is_some(),
+            Self::Navigation => data.navigation.is_some(),
+            Self::NavLink => data.nav_link.is_some(),
         }
     }
 
@@ -466,6 +481,18 @@ impl ComponentKind {
                 data.attach
                     .get_or_insert_with(automata_core::scene_file::AttachData::default);
             }
+            Self::NavAgent => {
+                data.nav_agent
+                    .get_or_insert_with(automata_nav::NavAgent::default);
+            }
+            Self::Navigation => {
+                data.navigation
+                    .get_or_insert_with(automata_nav::Navigation::default);
+            }
+            Self::NavLink => {
+                data.nav_link
+                    .get_or_insert_with(automata_nav::NavLink::default);
+            }
         }
     }
 
@@ -494,6 +521,9 @@ impl ComponentKind {
             Self::Joint => dst.joint.clone_from(&src.joint),
             Self::AudioSource => dst.audio_source.clone_from(&src.audio_source),
             Self::Attach => dst.attach.clone_from(&src.attach),
+            Self::NavAgent => dst.nav_agent.clone_from(&src.nav_agent),
+            Self::Navigation => dst.navigation.clone_from(&src.navigation),
+            Self::NavLink => dst.nav_link.clone_from(&src.nav_link),
         }
     }
 
@@ -520,6 +550,9 @@ impl ComponentKind {
             Self::Joint => data.joint = None,
             Self::AudioSource => data.audio_source = None,
             Self::Attach => data.attach = None,
+            Self::NavAgent => data.nav_agent = None,
+            Self::Navigation => data.navigation = None,
+            Self::NavLink => data.nav_link = None,
         }
     }
 }

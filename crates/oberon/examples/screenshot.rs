@@ -48,6 +48,31 @@ fn main() {
         }
     }
 
+    // `OBERON_CAMERA="yaw pitch distance x y z"` places the editor camera.
+    if let Ok(v) = std::env::var("OBERON_CAMERA") {
+        let n: Vec<f32> = v
+            .split_whitespace()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        if let [yaw, pitch, distance, x, y, z] = n[..] {
+            ui.camera = oberon::view::ViewCamera {
+                yaw,
+                pitch,
+                distance,
+                target: [x, y, z],
+            };
+        }
+    }
+    // `OBERON_NAV=1` bakes the scene's navigation mesh for the overlay.
+    if std::env::var("OBERON_NAV").is_ok_and(|v| v == "1") {
+        match oberon::play::PlaySession::bake_nav(&doc) {
+            Ok(mesh) => {
+                ui.nav_overlay = Some((std::path::PathBuf::new(), std::sync::Arc::new(mesh)));
+            }
+            Err(e) => eprintln!("couldn't bake: {e}"),
+        }
+    }
+
     // Render the viewport frame on an offscreen GPU renderer when one is
     // available; otherwise use the software wireframe fallback.
     let view = Layout::compute(w as f32, h as f32).viewport;

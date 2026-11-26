@@ -18,8 +18,10 @@ workspace = true
 cpal = ["automata-audio/cpal"]
 
 [dependencies]
+automata-assets.workspace = true
 automata-audio = { path = "../automata-audio", default-features = false }
 automata-input.workspace = true
+automata-nav.workspace = true
 automata-physics.workspace = true
 automata-renderer.workspace = true
 automata-scene.workspace = true

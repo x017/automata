@@ -973,6 +973,9 @@ class EntityView:
     def detach(self) -> None: ...
     @property
     def attached_to(self) -> Optional[tuple[str, str]]: ...
+    @property
+    def nav_state(self) -> Optional[dict[str, Any]]: ...
+    def nav_edit(self, **changes: Any) -> None: ...
     def despawn(self) -> None: ...
 
 class SceneView:
@@ -1098,6 +1101,77 @@ class Attach:
     def to(self) -> str: ...
     @property
     def bone(self) -> str: ...
+
+class NavAgent:
+    """Finds its own way around the navigation mesh (Oberon's Nav Agent).
+    Scripts send it somewhere with ``entity.nav.go(target)``."""
+
+    def __init__(
+        self,
+        speed: float = 3.5,
+        acceleration: float = 12.0,
+        radius: float = 0.4,
+        hover: float = 0.0,
+        stop_distance: float = 0.1,
+        avoid: bool = True,
+        turn: bool = True,
+    ) -> None: ...
+    @property
+    def speed(self) -> float: ...
+    @property
+    def acceleration(self) -> float: ...
+    @property
+    def radius(self) -> float: ...
+    @property
+    def hover(self) -> float: ...
+    @property
+    def stop_distance(self) -> float: ...
+    @property
+    def avoid(self) -> bool: ...
+    @property
+    def turn(self) -> bool: ...
+
+class Navigation:
+    """The scene's navigation mesh settings and where it's baked to."""
+
+    def __init__(
+        self,
+        file: str = "",
+        agent_radius: float = 0.35,
+        agent_height: float = 1.8,
+        max_climb: float = 0.4,
+        max_slope: float = 45.0,
+        jump_distance: float = 2.5,
+        jump_height: float = 1.2,
+        drop_height: float = 3.0,
+        cell_size: float = 0.2,
+        min_area: float = 0.5,
+    ) -> None: ...
+    @property
+    def file(self) -> str: ...
+    @property
+    def agent_radius(self) -> float: ...
+    @property
+    def agent_height(self) -> float: ...
+    @property
+    def max_climb(self) -> float: ...
+    @property
+    def max_slope(self) -> float: ...
+    @property
+    def jump_distance(self) -> float: ...
+    @property
+    def drop_height(self) -> float: ...
+    @property
+    def cell_size(self) -> float: ...
+
+class NavLink:
+    """A hand-placed shortcut for nav agents to the entity named ``to``."""
+
+    def __init__(self, to: str, two_way: bool = True) -> None: ...
+    @property
+    def to(self) -> str: ...
+    @property
+    def two_way(self) -> bool: ...
 
 class AnimationRef:
     """A running entity's animation (``view.animation``)."""
@@ -1279,6 +1353,18 @@ class Screen:
 
 class Physics:
     """3D physics queries for the current frame (ctx.physics)."""
+
+    @property
+    def nav_ready(self) -> bool: ...
+    def nav_path(
+        self,
+        start: tuple[float, float, float],
+        end: tuple[float, float, float],
+        partial: bool = False,
+    ) -> Optional[list[tuple[float, float, float, bool]]]: ...
+    def nav_nearest(
+        self, point: tuple[float, float, float], max_distance: float = 5.0
+    ) -> Optional[tuple[float, float, float]]: ...
 
     def raycast(
         self,

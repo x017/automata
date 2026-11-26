@@ -493,6 +493,10 @@ class Runner:
         for key, verts, indices in msg.get("meshes", []):
             self.backend.meshes[key] = Mesh(verts, indices)
         self.backend.set_shapes(msg.get("cols", []))
+        # The navigation mesh arrives when it changes (null: none).
+        if "navmesh" in msg:
+            nav = msg["navmesh"]
+            self.backend.nav_graph = None if nav is None else api.NavGraph(nav)
         self.backend.playing = set(msg.get("playing", []))
         self.backend.water = msg.get("water", [])
         self.backend.gfx = msg.get("gfx")

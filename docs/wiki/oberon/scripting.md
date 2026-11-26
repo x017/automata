@@ -118,6 +118,8 @@ for `entity` and `ctx`.
 | `entity.animation.state` / `.layer_state("Arms")` / `.get("speed")` | Where the graph is (its first layer's state, or another layer's) and a parameter's value. Also `.parameters`, `.layers`, `.in_transition`, `.state_time`, `.graph` (assign a path to switch graphs) and `.play_state("Dance", layer=None, fade=0.2)` |
 | `entity.animation.look_at(target)` / `.reach("Palm2.R", target)` | Turn the head towards, or reach a hand for, an entity, a name or a point; `None` stops. `.foot_ik` plants the feet on the ground ([Attachments & IK](attachments-and-ik.md)) |
 | `entity.attach("Robot", "Head", position=…)` / `.detach()` / `.attached_to` | Follow a bone of another entity (a sword picked up into a hand), or let go ([Attachments & IK](attachments-and-ik.md#picking-things-up-from-a-script)) |
+| `entity.nav.go("Player")` / `.stop()` / `.arrived` / `.path` | Send a Nav Agent somewhere (a point, an entity or a name); it finds the way round walls and takes the jumps ([Navigation](navigation.md#nav-agents)) |
+| `ctx.nav.path(a, b)` / `.nearest(p)` / `.reachable(a, b)` | Ask the navigation mesh for the shortest walkable way ([Navigation](navigation.md#paths-from-scripts)) |
 | `entity.joint` | The entity's Joint while it runs, or `None`: `.angle`, `.value`, `.force`, `.attached`, `.broken`; set `.motor_target`, `.motor_speed`, `.limits`, `.enabled`, `.connected`. `on_joint_broken(entity, ctx)` runs when it snaps ([Physics → Joints](../guides/physics.md#joints)) |
 | `entity.despawn()` | Remove the entity until Play stops |
 | `entity.state` | A dict of your own that persists between frames (not saved) |

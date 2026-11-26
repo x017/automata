@@ -83,6 +83,9 @@ __all__ = [
     "EntityAnimation",
     "EntityAudio",
     "EntityJoint",
+    "EntityNav",
+    "Nav",
+    "NavGraph",
     "FrameOutput",
     "Hit",
     "Hud",
@@ -903,6 +906,7 @@ class Entity:
         self._joint_read = False
         self._joint_w: dict[str, Any] | None = None
         self._joint_was_broken = False
+        self._nav_w: dict[str, Any] | None = None
 
     def _begin(self, record):
         """Starts a frame from a fresh record."""
@@ -916,6 +920,7 @@ class Entity:
         self._joint_st = None
         self._joint_read = False
         self._joint_w = None
+        self._nav_w = None
         self.name = record.get("name") or ""
         self.script = record.get("script")
 
@@ -1086,6 +1091,12 @@ class Entity:
             return None
         return (v[0], v[1])
 
+    @property
+    def nav(self) -> "EntityNav | None":
+        """This entity's Nav Agent: ``go(target)``, ``stop()``,
+        ``arrived``, ``path``, ``speed``. None without one."""
+        return EntityNav(self) if self._record.get("nav") is not None else None
+
     def despawn(self) -> None:
         """Removes the entity from the running scene (after this frame)."""
         self._despawn = True
@@ -1104,6 +1115,8 @@ class Entity:
             w["anim"] = list(self._anim)
         if self._joint_w:
             w["joint"] = dict(self._joint_w)
+        if self._nav_w:
+            w["nav"] = dict(self._nav_w)
         for key in ("p", "r", "s", "v", "cam"):
             if key in d and self._vals.get(key) is not None:
                 w[key] = self._vals[key]
@@ -1881,6 +1894,406 @@ class Physics:
     if not TYPE_CHECKING:  # type checkers flag misspelt names instead
         def __getattr__(self, name):
             return self._host.backend.extra("physics", name)
+
+
+def _nav_point(p, what="a point"):
+    """A point from a point or anything with a position (an Entity)."""
+    if isinstance(p, Entity):
+        p = p.transform.position
+    elif hasattr(p, "position") and not isinstance(p, (tuple, list)):
+        p = p.position
+    try:
+        x, y, z = (float(v) for v in tuple(p)[:3])
+    except (TypeError, ValueError):
+        raise TypeError(f"expected {what}: (x, y, z) or an entity") from None
+    if not all(math.isfinite(v) for v in (x, y, z)):
+        raise ValueError(f"{what} must be finite")
+    return (x, y, z)
+
+
+class EntityNav:
+    """``entity.nav``: a Nav Agent finds its own way around the navigation
+    mesh. ``go(target)`` sends it to a point, an entity (followed as it
+    moves) or an entity's name; it walks the shortest way, steering round
+    corners and other agents and jumping the mesh's links, and stops
+    ``stop_distance`` short. Reads show the start of the frame; changes
+    apply after it."""
+
+    __slots__ = ("_e",)
+
+    def __init__(self, entity):
+        self._e = entity
+
+    def _rec(self):
+        return self._e._record.get("nav") or {}
+
+    def _set(self, key, value):
+        e = self._e
+        if e._nav_w is None:
+            e._nav_w = {}
+        e._nav_w[key] = value
+        e._dirty.add("nav")
+
+    def go(self, target) -> None:
+        """Heads for ``target``: a point, an entity or its name (None
+        stops). A new target finds the way afresh; the same one again
+        changes nothing, so calling it every frame is fine."""
+        if target is None:
+            self._set("go", None)
+        elif isinstance(target, str):
+            self._set("go", target)
+        elif isinstance(target, Entity) and target.name:
+            self._set("go", target.name)
+        else:
+            self._set("go", list(_nav_point(target, "a target")))
+
+    def stop(self) -> None:
+        """Stops where it is (it slows to a halt)."""
+        self._set("go", None)
+
+    @property
+    def target(self):
+        """Where it's heading: a point, an entity name, or None."""
+        w = self._e._nav_w
+        if w is not None and "go" in w:
+            t = w["go"]
+        else:
+            t = self._rec().get("t")
+        return _tuple(t) if isinstance(t, list) else t
+
+    @property
+    def arrived(self) -> bool:
+        """True once it's within ``stop_distance`` of its target (and
+        while it has none)."""
+        return bool(self._rec().get("arr", True))
+
+    @property
+    def moving(self) -> bool:
+        """True while it's on its way somewhere."""
+        return self.target is not None and not self.arrived
+
+    @property
+    def jumping(self) -> bool:
+        """True in the middle of a jump link."""
+        return bool(self._rec().get("jmp", False))
+
+    @property
+    def velocity(self) -> Vec3:
+        """How it's moving (m/s)."""
+        return _tuple(self._rec().get("vel") or (0.0, 0.0, 0.0))
+
+    @property
+    def path(self) -> list:
+        """The corners still ahead, as points (the target last)."""
+        return [tuple(p[:3]) for p in self._rec().get("path") or ()]
+
+    @property
+    def remaining_distance(self) -> float:
+        """How far it still has to go along its path (m)."""
+        pts = [self._e.transform.position, *self.path]
+        return sum(math.dist(a, b) for a, b in zip(pts, pts[1:]))
+
+    @property
+    def speed(self) -> float:
+        """Top speed (m/s)."""
+        w = self._e._nav_w
+        if w is not None and "speed" in w:
+            return w["speed"]
+        return float(self._rec().get("spd", 0.0))
+
+    @speed.setter
+    def speed(self, v: float) -> None:
+        v = float(v)
+        if not (math.isfinite(v) and v >= 0):
+            raise ValueError("speed must be a finite number, 0 or more")
+        self._set("speed", v)
+
+    @property
+    def stop_distance(self) -> float:
+        """How near the target counts as arrived (m)."""
+        w = self._e._nav_w
+        if w is not None and "stop_distance" in w:
+            return w["stop_distance"]
+        return float(self._rec().get("stop", 0.0))
+
+    @stop_distance.setter
+    def stop_distance(self, v: float) -> None:
+        v = float(v)
+        if not (math.isfinite(v) and v >= 0):
+            raise ValueError("stop_distance must be a finite number, 0 or more")
+        self._set("stop_distance", v)
+
+    @property
+    def hover(self) -> float:
+        """How high it floats above the mesh (m), if it isn't a character:
+        change it every frame to bob."""
+        w = self._e._nav_w
+        if w is not None and "hover" in w:
+            return w["hover"]
+        return float(self._rec().get("hov", 0.0))
+
+    @hover.setter
+    def hover(self, v: float) -> None:
+        v = float(v)
+        if not math.isfinite(v):
+            raise ValueError("hover must be a finite number")
+        self._set("hover", v)
+
+    def __repr__(self):
+        return f"EntityNav({self._e.name!r}, target={self.target!r}, arrived={self.arrived})"
+
+
+class Nav:
+    """``ctx.nav``: questions about the navigation mesh, which is baked
+    from the level's static colliders (Oberon's Bake button, or when the
+    game starts). Points may be entities."""
+
+    def __init__(self, host):
+        self._host = host
+
+    @property
+    def ready(self) -> bool:
+        """True when the scene has a navigation mesh."""
+        return bool(self._host.backend.nav_ready())
+
+    def path(self, start, end, partial: bool = False) -> list | None:
+        """The shortest walkable way from ``start`` to ``end`` as a list
+        of corner points, both ends included (snapped onto the mesh), or
+        None when there's no way. With ``partial``, an unreachable
+        ``end`` gives the way to the nearest point that can be reached."""
+        a = _nav_point(start, "start")
+        b = _nav_point(end, "end")
+        found = self._host.backend.nav_path(a, b, bool(partial))
+        if found is None:
+            return None
+        return [tuple(float(v) for v in p[:3]) for p in found]
+
+    def path_length(self, start, end) -> float | None:
+        """How far it is to walk from ``start`` to ``end``, or None."""
+        p = self.path(start, end)
+        if p is None:
+            return None
+        return sum(math.dist(a, b) for a, b in zip(p, p[1:]))
+
+    def nearest(self, point, max_distance: float = 5.0) -> Vec3 | None:
+        """The nearest point on the mesh to ``point``, within
+        ``max_distance`` metres, or None."""
+        p = self._host.backend.nav_nearest(_nav_point(point), float(max_distance))
+        return None if p is None else tuple(float(v) for v in p[:3])
+
+    def reachable(self, start, end) -> bool:
+        """True when there's a walkable way from ``start`` to ``end``."""
+        return self.path(start, end) is not None
+
+
+class NavGraph:
+    """Path finding over a navigation mesh given as plain numbers (what
+    Oberon sends its script bridge; the engine answers ``ctx.nav`` itself).
+
+    ``data`` is ``{"polys": [[x0, z0, x1, z1, y0, dx, dz], ...], "edges":
+    [[[to, ax, ay, az, bx, by, bz, link], ...], ...]}``: rectangles with
+    sloping planes, and each one's ways out (shared edges, or links from
+    ``a`` to ``b``). It matches the engine's search: A* over polygons, then
+    the funnel pulled tight between links."""
+
+    BELOW, ABOVE, SNAP, LINK_PENALTY = 4.0, 1.0, 2.0, 1.0
+
+    def __init__(self, data):
+        self.polys = [tuple(float(v) for v in p) for p in data.get("polys", ())]
+        self.edges = [[(int(e[0]), tuple(e[1:4]), tuple(e[4:7]), bool(e[7])) for e in es]
+                      for es in data.get("edges", ())]
+        while len(self.edges) < len(self.polys):
+            self.edges.append([])
+
+    def _h(self, i, x, z):
+        x0, z0, _, _, y0, dx, dz = self.polys[i]
+        return y0 + dx * (x - x0) + dz * (z - z0)
+
+    def locate(self, p, below=BELOW, above=ABOVE, snap=SNAP):
+        """``(polygon, point on it)`` under ``p`` (or within ``snap``
+        metres sideways), or None."""
+        x, y, z = p
+        best = None
+        for i, (x0, z0, x1, z1, *_rest) in enumerate(self.polys):
+            if x0 <= x < x1 and z0 <= z < z1:
+                h = self._h(i, x, z)
+                if y - below <= h <= y + above:
+                    score = y - h if h <= y else (h - y) * 3.0
+                    if best is None or score < best[0]:
+                        best = (score, i, (x, h, z))
+        if best is not None:
+            return best[1], best[2]
+        if snap <= 0:
+            return None
+        near = None
+        for i, (x0, z0, x1, z1, *_rest) in enumerate(self.polys):
+            inset = min(0.002, (x1 - x0) * 0.25)
+            cx = min(max(x, x0 + inset), x1 - inset)
+            cz = min(max(z, z0 + inset), z1 - inset)
+            d = math.hypot(cx - x, cz - z)
+            if d > snap:
+                continue
+            h = self._h(i, cx, cz)
+            if not (y - below <= h <= y + above):
+                continue
+            dist = d + abs(y - h) * 0.25
+            if near is None or dist < near[0]:
+                near = (dist, i, (cx, h, cz))
+        return None if near is None else (near[1], near[2])
+
+    def nearest(self, p, max_distance=5.0):
+        r = max(0.0, max_distance)
+        found = self.locate(p, max(self.BELOW, r), max(self.ABOVE, r), r)
+        return None if found is None else found[1]
+
+    @staticmethod
+    def _closest_on(p, a, b):
+        ab = [b[k] - a[k] for k in range(3)]
+        n = sum(v * v for v in ab)
+        if n <= 1e-12:
+            return a
+        t = min(1.0, max(0.0, sum((p[k] - a[k]) * ab[k] for k in range(3)) / n))
+        return tuple(a[k] + ab[k] * t for k in range(3))
+
+    def _center(self, i):
+        x0, z0, x1, z1, *_rest = self.polys[i]
+        x, z = (x0 + x1) * 0.5, (z0 + z1) * 0.5
+        return (x, self._h(i, x, z), z)
+
+    def path(self, start, end, partial=False):
+        """Corners from ``start`` to ``end`` as ``(x, y, z, link)``, or None."""
+        import heapq
+
+        s = self.locate(start)
+        if s is None:
+            return None
+        g = self.locate(end)
+        if g is None and not partial:
+            return None
+        target = end if g is None else g[1]
+        goal = -1 if g is None else g[0]
+        n = len(self.polys)
+        cost = [math.inf] * n
+        entry = [None] * n
+        parent = [(-1, -1)] * n
+        closed = [False] * n
+        si, a = s
+        cost[si], entry[si] = 0.0, a
+        heap = [(math.dist(a, target), si)]
+        best = (si, math.dist(a, target))
+        reached = False
+        while heap:
+            _, i = heapq.heappop(heap)
+            if closed[i]:
+                continue
+            closed[i] = True
+            if i == goal:
+                reached = True
+                best = (i, 0.0)
+                break
+            here = entry[i]
+            hd = math.dist(here, target)
+            if hd < best[1]:
+                best = (i, hd)
+            for k, (j, ea, eb, link) in enumerate(self.edges[i]):
+                if closed[j]:
+                    continue
+                if link:
+                    e, c = eb, math.dist(here, ea) + math.dist(ea, eb) + self.LINK_PENALTY
+                else:
+                    e = self._closest_on(here, ea, eb)
+                    c = math.dist(here, e)
+                if cost[i] + c < cost[j]:
+                    cost[j], entry[j], parent[j] = cost[i] + c, e, (i, k)
+                    heapq.heappush(heap, (cost[j] + math.dist(e, target), j))
+        if not reached and not partial:
+            return None
+        end_poly = best[0]
+        if reached:
+            fin = target
+        else:
+            x0, z0, x1, z1, *_rest = self.polys[end_poly]
+            cx, cz = min(max(target[0], x0), x1), min(max(target[2], z0), z1)
+            fin = (cx, self._h(end_poly, cx, cz), cz)
+        chain = []
+        at = end_poly
+        while at >= 0 and len(chain) <= n:
+            chain.append((at, parent[at][1]))
+            at = parent[at][0]
+        chain.reverse()
+        return self._pull(chain, a, fin)
+
+    def _pull(self, chain, start, end):
+        out = []
+        portals = [(start, start)]
+
+        def flush(to):
+            portals.append((to, to))
+            for k, c in enumerate(_string_pull(portals)):
+                if k == 0 and out:
+                    continue
+                out.append((*c, False))
+            portals.clear()
+
+        for (frm, _), (to, edge) in zip(chain, chain[1:]):
+            _, ea, eb, link = self.edges[frm][edge]
+            if link:
+                flush(ea)
+                out.append((*eb, True))
+                portals.append((eb, eb))
+                continue
+            c0, c1 = self._center(frm), self._center(to)
+            dx, dz = c1[0] - c0[0], c1[2] - c0[2]
+            mx, mz = (ea[0] + eb[0]) * 0.5, (ea[2] + eb[2]) * 0.5
+            side = dx * (ea[2] - mz) - dz * (ea[0] - mx)
+            portals.append((ea, eb) if side > 0 else (eb, ea))
+        flush(end)
+        return out
+
+
+def _string_pull(portals):
+    """The funnel algorithm over ``(left, right)`` portals (seen from
+    above), the first and last being the ends."""
+
+    def area(a, b, c):
+        return (c[0] - a[0]) * (b[2] - a[2]) - (b[0] - a[0]) * (c[2] - a[2])
+
+    def same(a, b):
+        return (a[0] - b[0]) ** 2 + (a[2] - b[2]) ** 2 < 1e-8
+
+    start = portals[0][0]
+    apex = left = right = start
+    li = ri = 0
+    out = [start]
+    i = 1
+    while i < len(portals):
+        lp, rp = portals[i]
+        if area(apex, right, rp) <= 0.0:
+            if same(apex, right) or area(apex, left, rp) > 0.0:
+                right, ri = rp, i
+            else:
+                apex = left
+                out.append(apex)
+                left = right = apex
+                ri = li
+                i = li + 1
+                continue
+        if area(apex, left, lp) >= 0.0:
+            if same(apex, left) or area(apex, right, lp) < 0.0:
+                left, li = lp, i
+            else:
+                apex = right
+                out.append(apex)
+                left = right = apex
+                li = ri
+                i = ri + 1
+                continue
+        i += 1
+    end = portals[-1][0]
+    last = out[-1]
+    if not same(last, end) or abs(last[1] - end[1]) > 1e-3:
+        out.append(end)
+    return out
 
 
 class Water:
@@ -5840,6 +6253,8 @@ class Context:
         self.time = Time()
         self.physics = Physics(host)
         self.water = Water(host)
+        #: Path finding over the navigation mesh (see :class:`Nav`).
+        self.nav = Nav(host)
         self.particles = Particles(host)
         self.scene = SceneView(host)
         self.audio = Audio(host)
@@ -6094,6 +6509,20 @@ class Backend:
     def water_height(self, x, z):
         """The water's surface height at ``(x, z)``, or None."""
         return None
+
+    def nav_ready(self):
+        """Whether there's a navigation mesh (see :class:`NavGraph`)."""
+        return getattr(self, "nav_graph", None) is not None
+
+    def nav_path(self, start, end, partial):
+        """``ctx.nav.path``: ``[(x, y, z, link), ...]`` or None."""
+        graph = getattr(self, "nav_graph", None)
+        return None if graph is None else graph.path(start, end, partial)
+
+    def nav_nearest(self, point, max_distance):
+        """``ctx.nav.nearest``: a point or None."""
+        graph = getattr(self, "nav_graph", None)
+        return None if graph is None else graph.nearest(point, max_distance)
 
     def splash(self, position, strength):
         """A splash in the water at ``position`` (x, y, z); ``strength``

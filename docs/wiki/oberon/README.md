@@ -44,6 +44,7 @@ this and `oberon run`, `test`, `export` and `doctor`.
 | [Models](models.md) | Importing glTF and OBJ models, the Assets tab, import settings (scale, rotation, pivot), fitted colliders |
 | [Animation graphs](animation-graphs.md) | `.anim.ron` state machines: parameters, blend spaces, transitions, layers with bone masks |
 | [Attachments & IK](attachments-and-ik.md) | Attach To Bone (swords, hats), Feet On Ground on slopes and stairs, reaching and looking at from scripts |
+| [Navigation](navigation.md) | Bake a navigation mesh from the level, Nav Agents that chase and follow, jump links, `ctx.nav.path` |
 | [Audio](audio.md) | Sound files, Audio Sources, previews, playing sounds from scripts |
 | [Prefabs & attributes](prefabs-and-attributes.md) | Reusable objects that stay linked: overrides, Apply / Revert, variants; custom per-entity data |
 | [Editor workflow](editor-workflow.md) | Editing many objects at once, snapping, Duplicate Along a Line, the Profiler |

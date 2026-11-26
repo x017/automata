@@ -23,7 +23,7 @@ use tiny_skia::Color;
 
 use crate::canvas::Canvas;
 use crate::doc::{ComponentKind, CreateKind, Document, EntityEntry};
-use crate::fields::{self, Choice, Field, Flag};
+use crate::fields::{self, Choice, Field, Flag, NavBakeField, NavField};
 use crate::theme::{color, layout};
 use crate::view::{self, Gizmo, GizmoMode, Projector};
 
@@ -425,6 +425,16 @@ pub enum Intent {
         /// The bone to follow ("" for the entity itself).
         bone: Option<String>,
     },
+    /// Bake the scene's navigation mesh from its static colliders and
+    /// save it next to the scene (the Navigation component's Bake).
+    BakeNav(u64),
+    /// Point a Nav Link at another entity by name.
+    SetNavLink {
+        /// Entity id.
+        id: u64,
+        /// The entity at the other end.
+        to: String,
+    },
     /// Point an entity's Joint at another entity by name (`None`: the world).
     SetJointTarget {
         /// Entity id.
@@ -638,6 +648,7 @@ impl Intent {
             | Self::SetAnimGraph { id, .. }
             | Self::SetJointTarget { id, .. }
             | Self::SetAttach { id, .. }
+            | Self::SetNavLink { id, .. }
             | Self::PasteComponent { id, .. }
             | Self::SetAttribute { id, .. }
             | Self::RemoveAttribute { id, .. }
@@ -673,6 +684,7 @@ impl Intent {
             | Self::SetAnimGraph { id, .. }
             | Self::SetJointTarget { id, .. }
             | Self::SetAttach { id, .. }
+            | Self::SetNavLink { id, .. }
             | Self::PasteComponent { id, .. }
             | Self::SetAttribute { id, .. }
             | Self::RemoveAttribute { id, .. }
@@ -964,6 +976,13 @@ pub struct Ui {
     /// The animation playing or scrubbed in the scene view while editing
     /// (the app advances it and poses the model).
     pub anim_preview: Option<AnimPreview>,
+    /// The baked navigation mesh drawn over the scene view, and the file
+    /// it came from.
+    pub nav_overlay: Option<(PathBuf, std::sync::Arc<automata_nav::NavMesh>)>,
+    /// A navigation mesh file that failed to load (not retried each frame).
+    pub nav_missing: Option<PathBuf>,
+    /// Whether the navigation mesh is drawn while editing.
+    pub show_nav: bool,
     /// The foliage brush (Grass and Scatter painting).
     pub brush: brush::Brush,
     /// The animation preview's time bar is being dragged.
@@ -1091,6 +1110,9 @@ impl Ui {
             profiler: profiler::Profiler::default(),
             camera_preview: None,
             anim_preview: None,
+            nav_overlay: None,
+            nav_missing: None,
+            show_nav: true,
             brush: brush::Brush::default(),
             anim_scrub: false,
             menu_fresh: false,
@@ -3009,6 +3031,8 @@ impl Ui {
             }
         }
 
+        y = self.nav_sections(canvas, doc, x, y, w, e);
+
         if d.audio_source.is_some() {
             let kind = ComponentKind::AudioSource;
             let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
@@ -3421,6 +3445,218 @@ impl Ui {
     }
 
     /// Attach To Bone: the entity followed and which of its bones.
+    /// The Nav Agent, Navigation and Nav Link sections.
+    fn nav_sections(
+        &mut self,
+        canvas: &mut Canvas,
+        doc: &Document,
+        x: f32,
+        mut y: f32,
+        w: f32,
+        e: &EntityEntry,
+    ) -> f32 {
+        let id = e.id;
+        if e.data.nav_agent.is_some() {
+            let kind = ComponentKind::NavAgent;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), true);
+            y = ny;
+            if open {
+                y = self.float_row(canvas, x, y, w, e, "Speed", Field::Nav(NavField::Speed));
+                y = self.float_row(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    e,
+                    "Acceleration",
+                    Field::Nav(NavField::Acceleration),
+                );
+                y = self.float_row(canvas, x, y, w, e, "Radius", Field::Nav(NavField::Radius));
+                if e.data.character_controller.is_none() {
+                    y = self.float_row(canvas, x, y, w, e, "Hover", Field::Nav(NavField::Hover));
+                }
+                y = self.float_row(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    e,
+                    "Stop Distance",
+                    Field::Nav(NavField::StopDistance),
+                );
+                y = self.flag_row(canvas, x, y, w, e, "Avoid Others", Flag::NavAvoid);
+                y = self.flag_row(canvas, x, y, w, e, "Face Movement", Flag::NavTurn);
+                y = self.dim_lines(canvas, x, y, w, &["Scripts: entity.nav.go(target)."]);
+                y += 6.0;
+            }
+        }
+        if e.data.navigation.is_some() {
+            let kind = ComponentKind::Navigation;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), true);
+            y = ny;
+            if open {
+                y = self.navigation_rows(canvas, doc, x, y, w, e);
+                y += 6.0;
+            }
+        }
+        if let Some(link) = e.data.nav_link.clone() {
+            let kind = ComponentKind::NavLink;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                let found = doc
+                    .entities
+                    .iter()
+                    .any(|o| o.id != id && o.name() == link.to);
+                let text = match () {
+                    () if link.to.is_empty() => ("Pick an entity".to_string(), true),
+                    () if !found => (format!("{} (missing)", link.to), true),
+                    () => (link.to.clone(), false),
+                };
+                let items = || {
+                    let mut names: Vec<&str> = doc
+                        .entities
+                        .iter()
+                        .filter(|o| o.id != id && o.data.name.is_some())
+                        .map(EntityEntry::name)
+                        .collect();
+                    names.sort_unstable();
+                    names.dedup();
+                    names
+                        .into_iter()
+                        .map(|n| menus::MenuItem {
+                            label: if n == link.to {
+                                format!("✓ {n}")
+                            } else {
+                                format!("   {n}")
+                            },
+                            shortcut: "",
+                            action: Some(menus::Action::Intent(Intent::SetNavLink {
+                                id,
+                                to: n.to_string(),
+                            })),
+                            enabled: true,
+                        })
+                        .collect()
+                };
+                y = self.menu_row(canvas, x, y, w, "To", (&text.0, text.1), items);
+                y = self.flag_row(canvas, x, y, w, e, "Both Ways", Flag::NavLinkTwoWay);
+                y += 6.0;
+            }
+        }
+        y
+    }
+
+    /// Dim help lines under a section's rows.
+    fn dim_lines(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        mut y: f32,
+        w: f32,
+        lines: &[&str],
+    ) -> f32 {
+        for line in lines {
+            if self.row_visible(Rect::new(x, y, w, 16.0)) {
+                canvas.text(x, y, layout::SMALL_SIZE, line, color::text_dim());
+            }
+            y += 16.0;
+        }
+        y
+    }
+
+    /// The Navigation section: bake settings, Bake and Show Mesh.
+    /// Loads the scene's saved navigation mesh for the overlay, once per
+    /// file (a Bake replaces it directly).
+    fn refresh_nav_overlay(&mut self, doc: &Document) {
+        let Some(file) = doc
+            .entities
+            .iter()
+            .find_map(|e| e.data.navigation.as_ref())
+            .map(|n| n.file.clone())
+            .filter(|f| !f.is_empty())
+        else {
+            return;
+        };
+        let path = doc.resolve(&file);
+        if self.nav_overlay.as_ref().is_none_or(|(p, _)| *p != path)
+            && self.nav_missing.as_ref() != Some(&path)
+        {
+            match automata_nav::NavMesh::load(&path) {
+                Ok(mesh) => self.nav_overlay = Some((path, std::sync::Arc::new(mesh))),
+                // Don't try the disk again every frame.
+                Err(_) => self.nav_missing = Some(path),
+            }
+        }
+    }
+
+    fn navigation_rows(
+        &mut self,
+        canvas: &mut Canvas,
+        doc: &Document,
+        x: f32,
+        mut y: f32,
+        w: f32,
+        e: &EntityEntry,
+    ) -> f32 {
+        let Some(nav) = e.data.navigation.clone() else {
+            return y;
+        };
+        for (label, f) in [
+            ("Agent Radius", NavBakeField::Radius),
+            ("Agent Height", NavBakeField::Height),
+            ("Max Climb", NavBakeField::Climb),
+            ("Max Slope", NavBakeField::Slope),
+            ("Jump Distance", NavBakeField::Jump),
+            ("Jump Height", NavBakeField::JumpHeight),
+            ("Drop Height", NavBakeField::Drop),
+            ("Cell Size", NavBakeField::Cell),
+        ] {
+            y = self.float_row(canvas, x, y, w, e, label, Field::NavBake(f));
+        }
+        self.refresh_nav_overlay(doc);
+        y += 4.0;
+        let half = (w - 6.0) * 0.5;
+        let bake = Rect::new(x, y, half, 26.0);
+        let show = Rect::new(x + half + 6.0, y, half, 26.0);
+        if self.row_visible(bake) {
+            let style = if self.play == PlayState::Editing {
+                ButtonStyle::Accent
+            } else {
+                ButtonStyle::Disabled
+            };
+            self.tip(
+                bake,
+                "Work out where agents can walk from the static colliders, and save it \
+                 next to the scene",
+            );
+            if self.button(canvas, bake, "Bake", style) && style != ButtonStyle::Disabled {
+                self.out.push(Intent::BakeNav(e.id));
+            }
+            let label = if self.show_nav {
+                "Hide Mesh"
+            } else {
+                "Show Mesh"
+            };
+            if self.button(canvas, show, label, ButtonStyle::Normal) {
+                self.show_nav = !self.show_nav;
+            }
+        }
+        y += 32.0;
+        let status = match &self.nav_overlay {
+            _ if nav.file.is_empty() => "Not baked yet (bakes when the game starts).".to_string(),
+            Some((path, mesh)) if *path == doc.resolve(&nav.file) => format!(
+                "{}: {:.0} m², {} areas, {} links",
+                nav.file,
+                mesh.area(),
+                mesh.regions,
+                mesh.links.len()
+            ),
+            _ => format!("{} (missing: bake again)", nav.file),
+        };
+        self.dim_lines(canvas, x, y, w, &[&status])
+    }
+
     fn attach_rows(
         &mut self,
         canvas: &mut Canvas,
@@ -5004,6 +5240,12 @@ impl Ui {
         // game's — often through the scene's own camera, which the editor
         // camera's projection wouldn't even line up with). ---
         if editing {
+            if self.show_nav && doc.entities.iter().any(|e| e.data.navigation.is_some()) {
+                self.refresh_nav_overlay(doc);
+                if let Some((_, mesh)) = &self.nav_overlay {
+                    draw_nav_mesh(canvas, mesh, &proj);
+                }
+            }
             draw_markers(canvas, doc, &proj, rect);
             draw_camera_frustums(canvas, doc, &proj, selected.map(|e| e.id));
             for id in doc.selection() {
@@ -5717,6 +5959,38 @@ fn world_polyline(canvas: &mut Canvas, proj: &Projector, points: &[Vec3], c: Col
     }
     if run.len() > 1 {
         canvas.polyline(&run, c, width);
+    }
+}
+
+/// The navigation mesh: each polygon outlined a little above the floor,
+/// the jump links as arcs.
+fn draw_nav_mesh(canvas: &mut Canvas, mesh: &automata_nav::NavMesh, proj: &Projector) {
+    let lift = Vec3::Y * 0.04;
+    let mut fill = Color::from_rgba8(70, 190, 255, 255);
+    fill.apply_opacity(0.18);
+    let edge = Color::from_rgba8(110, 210, 255, 200);
+    for i in 0..mesh.polys.len() {
+        let c = mesh.poly_corners(i).map(|p| p + lift);
+        let screen: Option<Vec<(f32, f32)>> = c.iter().map(|p| proj.project(*p)).collect();
+        if let Some(pts) = screen {
+            canvas.fill_polygon(&pts, fill);
+        }
+        world_polyline(canvas, proj, &[c[0], c[1], c[2], c[3], c[0]], edge, 1.0);
+    }
+    let link = Color::from_rgba8(255, 200, 80, 255);
+    for l in &mesh.links {
+        let rise = (l.start.distance(l.end) * 0.25).max(0.4) + (l.end.y - l.start.y).max(0.0);
+        let arc: Vec<Vec3> = (0..=12)
+            .map(|k| {
+                #[allow(clippy::cast_precision_loss)] // small counter
+                let t = k as f32 / 12.0;
+                l.start.lerp(l.end, t) + Vec3::Y * (rise * 4.0 * t * (1.0 - t))
+            })
+            .collect();
+        world_polyline(canvas, proj, &arc, link, 1.5);
+        if let Some((x, y)) = proj.project(l.end) {
+            canvas.fill_circle(x, y, 3.0, link);
+        }
     }
 }
 

@@ -628,8 +628,10 @@ translate their keys, a per-language fallback font, and right-to-left text
 with Persian/Arabic letter joining (demo: Shape Signal in English, Spanish,
 Japanese and Persian). Before it, D6 editor workflow ✅.
 E1 Android export ✅ followed, then E3 web export phase 1 (#7), B4
-animation graphs ✅ (state machines with an Oberon graph editor) and B5
-attachments and IK ✅ (Attach To Bone, Feet On Ground, reach and look-at).
+animation graphs ✅ (state machines with an Oberon graph editor), B5
+attachments and IK ✅ (Attach To Bone, Feet On Ground, reach and look-at)
+and C4 navigation ✅ (baked navmeshes, Nav Agents, `ctx.nav.path`; the FPS
+drones chase you round the walls).
 
 ## Process note
 

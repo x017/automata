@@ -32,6 +32,7 @@ worlds.
 | `automata-renderer` | ✅ Phase 2 (context) | wgpu device, surface, frame presentation; drawing in Phase 3 |
 | `automata-scene` | ✅ Phase 4 | Scenes, entities, ECS, transforms |
 | `automata-physics` | Phase 6 | Rapier 2D/3D integration |
+| `automata-nav` | ✅ C4 | Navigation meshes baked from static colliders, path finding, Nav Agents (steering, avoidance, jump links) |
 | `automata-audio` | Phase 7 | Kira-based audio |
 | `automata-assets` | ✅ Models | glTF 2.0 / OBJ model loading (meshes, base colour, textures), a hot-reloading cache, asset-root path resolution |
 | `automata-python` | ✅ Phase 5 | PyO3 bindings and Python API |

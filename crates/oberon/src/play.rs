@@ -106,33 +106,45 @@ pub struct PlaySession {
     volume: Option<f32>,
     /// The master volume last given to the audio engine.
     applied_volume: Option<f32>,
+    /// The scene's navigation mesh (loaded or baked at Play), if any.
+    nav: Option<std::sync::Arc<automata_nav::NavMesh>>,
+    /// What getting the navigation mesh ready had to say (for the
+    /// Console), taken by the app.
+    pub nav_warning: Option<String>,
+}
+
+/// The document as simulated (a play copy) and its ECS scene, with
+/// model paths pinned to the document's folder.
+fn simulated_scene(doc: &Document) -> (Document, Scene) {
+    let display = doc.play_copy();
+    let mut scene = Scene::new();
+    let mut file = display.to_scene_file();
+    // Mesh / hull colliders load their model by path: pin it to the
+    // document's folder so it doesn't hang on the global asset root.
+    for entity in &mut file.entities {
+        if let Some(
+            automata_physics::Shape3D::Mesh { model }
+            | automata_physics::Shape3D::ConvexHull { model },
+        ) = entity.collider_3d.as_mut().map(|c| &mut c.shape)
+        {
+            *model = doc.resolve(model).to_string_lossy().into_owned();
+        }
+        // Models too, so play needn't rely on the global asset root.
+        if let Some(automata_core::PrimitiveData::Model { path }) =
+            entity.mesh_visual.as_mut().map(|m| &mut m.primitive)
+        {
+            *path = doc.resolve(path).to_string_lossy().into_owned();
+        }
+    }
+    file.apply_to_world(scene.world_mut());
+    (display, scene)
 }
 
 impl PlaySession {
     /// Starts a session from the edited document.
     #[must_use]
     pub fn start(doc: &Document) -> Self {
-        let display = doc.play_copy();
-        let mut scene = Scene::new();
-        let mut file = display.to_scene_file();
-        // Mesh / hull colliders load their model by path: pin it to the
-        // document's folder so it doesn't hang on the global asset root.
-        for entity in &mut file.entities {
-            if let Some(
-                automata_physics::Shape3D::Mesh { model }
-                | automata_physics::Shape3D::ConvexHull { model },
-            ) = entity.collider_3d.as_mut().map(|c| &mut c.shape)
-            {
-                *model = doc.resolve(model).to_string_lossy().into_owned();
-            }
-            // Models too, so play needn't rely on the global asset root.
-            if let Some(automata_core::PrimitiveData::Model { path }) =
-                entity.mesh_visual.as_mut().map(|m| &mut m.primitive)
-            {
-                *path = doc.resolve(path).to_string_lossy().into_owned();
-            }
-        }
-        file.apply_to_world(scene.world_mut());
+        let (display, mut scene) = simulated_scene(doc);
 
         // Map document entries to ECS entities by name (the scene file keeps
         // names; duplicates are matched in order of appearance).
@@ -162,9 +174,11 @@ impl PlaySession {
             .map(|&(_, entity)| entity)
             .collect();
 
+        // Nav agents with a controller walk themselves, not by the input.
         let characters = scene
             .world()
             .query::<(Entity, &CharacterController)>()
+            .without::<&automata_nav::NavAgent>()
             .iter()
             .map(|(entity, _)| Character {
                 entity,
@@ -174,6 +188,10 @@ impl PlaySession {
 
         let mut physics = PhysicsWorld3D::new();
         physics.sync_from_scene(scene.world_mut());
+        let prepared = automata_nav::scene::prepare(scene.world(), &physics, Some(&doc.base_dir()));
+        let (nav, nav_warning) = prepared.map_or((None, None), |p| {
+            (p.mesh.map(std::sync::Arc::new), p.warning)
+        });
         Self {
             doc: display,
             scene,
@@ -194,7 +212,84 @@ impl PlaySession {
             graphics: None,
             volume: None,
             applied_volume: None,
+            nav,
+            nav_warning,
         }
+    }
+
+    /// The navigation mesh agents walk in this session, if any.
+    #[must_use]
+    pub fn nav(&self) -> Option<&std::sync::Arc<automata_nav::NavMesh>> {
+        self.nav.as_ref()
+    }
+
+    /// Where each nav agent is heading: `(position, corners ahead)`, for
+    /// the overlay.
+    #[must_use]
+    pub fn agent_paths(&self) -> Vec<(Vec3, Vec<Vec3>)> {
+        self.scene
+            .world()
+            .query::<(&Transform, &automata_nav::NavAgent)>()
+            .iter()
+            .filter(|(_, a)| !a.state.arrived)
+            .map(|(t, a)| {
+                let s = &a.state;
+                let ahead = s.path.get(s.next..).unwrap_or_default();
+                (t.position, ahead.iter().map(|p| p.position).collect())
+            })
+            .collect()
+    }
+
+    /// Bakes `doc`'s navigation mesh with its Navigation's settings (the
+    /// defaults without one) from its static colliders.
+    ///
+    /// # Errors
+    ///
+    /// When there's no floor to walk on, or the level is too big.
+    pub fn bake_nav(doc: &Document) -> Result<automata_nav::NavMesh, automata_nav::BakeError> {
+        let (_, mut scene) = simulated_scene(doc);
+        let mut physics = PhysicsWorld3D::new();
+        physics.sync_from_scene(scene.world_mut());
+        let settings = automata_nav::scene::navigation(scene.world())
+            .unwrap_or_default()
+            .settings
+            .sanitized();
+        automata_nav::scene::bake_scene(scene.world(), &physics, settings)
+    }
+
+    /// Bakes `doc`'s navigation mesh and saves it next to the scene as
+    /// `<scene>.nav.ron`, pointing entity `id`'s Navigation at it (one
+    /// undo step). Returns the file and the mesh.
+    ///
+    /// # Errors
+    ///
+    /// A message for the Console: the scene isn't saved yet, there's no
+    /// floor, or the file can't be written.
+    pub fn bake_nav_to_file(
+        doc: &mut Document,
+        id: u64,
+    ) -> Result<(PathBuf, automata_nav::NavMesh), String> {
+        let Some(scene_path) = doc.path.clone() else {
+            return Err("Save the scene first: the navigation mesh is saved next to it".into());
+        };
+        let mesh = Self::bake_nav(doc).map_err(|e| format!("Couldn't bake: {e}"))?;
+        let stem = scene_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map_or("level", |s| s.trim_end_matches(".scene"));
+        let name = format!("{stem}.nav.ron");
+        let path = doc.base_dir().join(&name);
+        let text = mesh
+            .to_ron()
+            .map_err(|e| format!("Couldn't save the mesh: {e}"))?;
+        std::fs::write(&path, text)
+            .map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
+        doc.modify(id, false, |d| {
+            if let Some(n) = &mut d.navigation {
+                n.file.clone_from(&name);
+            }
+        });
+        Ok((path, mesh))
     }
 
     /// The document id of a simulated entity.
@@ -295,6 +390,7 @@ impl PlaySession {
             meshes,
             playing,
             water,
+            nav: self.nav.clone(),
             ..FrameInput::default()
         }
     }
@@ -472,6 +568,10 @@ impl PlaySession {
                         .get::<&automata_scene::Attachment>(entity)
                         .ok()
                         .map(|a| (a.to.clone(), a.bone.clone())),
+                    nav: world
+                        .get::<&automata_nav::NavAgent>(entity)
+                        .ok()
+                        .map(|a| (*a).clone()),
                 })
             })
             .collect()
@@ -540,6 +640,11 @@ impl PlaySession {
                     let _ = world.remove_one::<automata_scene::Attachment>(entity);
                 }
                 None => {}
+            }
+            if let Some(edit) = &w.nav {
+                if let Ok(mut agent) = world.get::<&mut automata_nav::NavAgent>(entity) {
+                    edit.apply(&mut agent);
+                }
             }
             if w.position.is_some() || w.rotation.is_some() || w.scale.is_some() {
                 if let Ok(mut t) = world.get::<&mut Transform>(entity) {
@@ -704,6 +809,17 @@ impl PlaySession {
         self.physics.sync_from_scene(world);
         self.drive_characters();
         let world = self.scene.world_mut();
+        let physics = &self.physics;
+        let grounded = |e: Entity| physics.grounded(e);
+        automata_nav::step_agents(
+            world,
+            &automata_nav::AgentWorld {
+                nav: self.nav.as_deref(),
+                dt: TIMESTEP,
+                grounded: &grounded,
+            },
+        );
+        self.physics.sync_from_scene(world);
         self.physics.move_characters(world, TIMESTEP);
         let _tick = self.physics.step(world, TIMESTEP);
         self.elapsed += TIMESTEP;
@@ -962,6 +1078,71 @@ pub(crate) mod tests {
         assert!(end[1] > 0.5 && end[1] < 1.5, "stays on the ground: {end:?}");
         let pos = play.player_position().unwrap();
         assert!((pos.z - end[2]).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_navigation_mesh_bakes_and_saves_next_to_the_scene() {
+        let dir = std::env::temp_dir().join(format!("oberon_nav_bake_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut doc = Document::starter();
+        let id = doc.create(CreateKind::Empty);
+        assert!(doc.add_component(id, crate::doc::ComponentKind::Navigation));
+        assert!(
+            PlaySession::bake_nav_to_file(&mut doc, id).is_err(),
+            "an unsaved scene has nowhere to keep the mesh"
+        );
+        doc.save(Some(&dir.join("arena.scene.ron"))).unwrap();
+        let (path, mesh) = PlaySession::bake_nav_to_file(&mut doc, id).unwrap();
+        assert_eq!(path, dir.join("arena.nav.ron"));
+        assert!(
+            mesh.area() > 50.0,
+            "the ground is walkable: {} m²",
+            mesh.area()
+        );
+        let i = doc.index_of(id).unwrap();
+        assert_eq!(
+            doc.entities[i].data.navigation.as_ref().unwrap().file,
+            "arena.nav.ron"
+        );
+        let loaded = automata_nav::NavMesh::load(&path).unwrap();
+        assert!((loaded.area() - mesh.area()).abs() < 1e-3);
+        // Playing uses the saved mesh.
+        let play = PlaySession::start(&doc);
+        assert!(
+            play.nav().is_some() && play.nav_warning.is_none(),
+            "{:?}",
+            play.nav_warning
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nav_agents_walk_to_their_targets_in_play_mode() {
+        let mut doc = Document::starter();
+        let id = doc.create(CreateKind::Empty);
+        assert!(doc.add_component(id, crate::doc::ComponentKind::NavAgent));
+        let i = doc.index_of(id).unwrap();
+        doc.modify(id, false, |d| {
+            d.transform.as_mut().unwrap().position = [-3.0, 0.0, 3.0];
+        });
+        let mut play = PlaySession::start(&doc);
+        assert!(play.nav().is_some(), "baked when play starts");
+        let goal = glam::Vec3::new(3.0, 0.0, 3.0);
+        for agent in play
+            .scene
+            .world_mut()
+            .query_mut::<&mut automata_nav::NavAgent>()
+        {
+            agent.target = Some(automata_nav::NavTarget::Point(goal));
+        }
+        play.update(TIMESTEP);
+        assert_eq!(play.agent_paths().len(), 1, "it has somewhere to go");
+        for _ in 0..240 {
+            play.update(TIMESTEP);
+        }
+        let end = glam::Vec3::from(play.doc.entities[i].data.transform.unwrap().position);
+        assert!(end.distance(goal) < 0.3, "it got there: {end}");
+        assert!(play.agent_paths().is_empty(), "and stopped");
     }
 
     #[test]
@@ -1933,6 +2114,13 @@ pub(crate) mod tests {
         assert_eq!(lock, Some(true), "the player captures the mouse");
         assert!(most_voices >= 1, "the blaster sounded");
         assert!(drone_health < 100, "a volley hit Enemy 1");
+        let chasing = play
+            .scene
+            .world()
+            .query::<&automata_nav::NavAgent>()
+            .iter()
+            .any(|a| a.target.is_some());
+        assert!(chasing || drone_health <= 0, "the shot drone gives chase");
         assert!(most_sparks >= 10, "hits throw sparks: {most_sparks}");
         let images: Vec<&str> = play
             .hud

@@ -145,6 +145,51 @@ def test_falling_off_the_world_respawns():
     assert health == 100
 
 
+def test_a_shot_drone_chases_the_player_around_the_walls():
+    """Enemy 4 starts 17 m away on the high platform, behind a wall. Hurt,
+    it flies the navigation mesh round the wall and down the platforms
+    (jump links) until it's in range, then fires."""
+    seen = []
+
+    def after(ctx):
+        drone = ctx.scene.find("Enemy 4")
+        player = ctx.scene["Player"]
+        if ctx.time.frame == 5:
+            drone.attributes["health"] = 90
+        nav = drone.nav_state
+        seen.append(
+            (
+                drone.transform.position,
+                nav["jmp"],
+                math.dist(drone.transform.position, player.transform.position),
+                player.attributes.get("health"),
+            )
+        )
+
+    at.run_scene(LEVEL, headless=True, max_frames=480, target_fps=60, update=after)
+    assert seen[0][2] > 15
+    assert any(jumping for _, jumping, _, _ in seen), "it took a jump link down"
+    position, _, distance, health = seen[-1]
+    assert distance < enemy_script.RANGE, f"it caught up: {position}"
+    assert health < 100, "and opened fire"
+    # The straight line from its start to the player crosses the tall wall
+    # at (11.5, 3, -5.5); it went round it (to the north-east side).
+    assert all(math.dist(p[::2], (11.5, -5.5)) > 0.6 for p, _, _, _ in seen)
+
+
+def test_the_navigation_mesh_links_every_platform():
+    reachable = []
+
+    def after(ctx):
+        if ctx.time.frame == 1:
+            for position, _ in build_level.ENEMIES:
+                start = ctx.physics.nav_nearest(position, 5.0)
+                reachable.append(ctx.physics.nav_path(start, build_level.SPAWN, False) is not None)
+
+    at.run_scene(LEVEL, headless=True, max_frames=2, update=after)
+    assert reachable == [True] * len(build_level.ENEMIES)
+
+
 def test_a_drone_at_zero_health_is_destroyed(tmp_path):
     level = project_copy(tmp_path, ENEMIES=[((0.0, 3.0, -8.0), 0)])
     alive = []
@@ -195,6 +240,7 @@ class FakeEntity:
         self.character_velocity = (0.0, 0.0, 0.0)
         self.audio = FakeAudio()
         self.despawned = False
+        self.nav = None
 
     def despawn(self):
         self.despawned = True
@@ -424,6 +470,47 @@ def test_a_hurt_drone_cries_out_and_a_dead_one_explodes():
     enemy_script.update(drone, ctx)
     assert ctx.audio.played[-1] == "sounds/enemy_destroy.ogg"
     assert drone.despawned
+
+
+class FakeNav:
+    def __init__(self):
+        self.target = None
+        self.hover = 1.5
+
+    def go(self, target):
+        self.target = target
+
+    def stop(self):
+        self.target = None
+
+
+def test_a_drone_notices_a_close_player_and_gives_up_on_a_far_one():
+    player, drone, scene = fps_world()
+    drone.nav = FakeNav()
+    drone.transform.position = (0.0, 2.0, -8.0)
+    ctx = FakeCtx(scene)
+    enemy_script.start(drone, ctx)
+    enemy_script.update(drone, ctx)
+    assert drone.nav.target is None, "8 m away: not noticed yet"
+    drone.transform.position = (0.0, 2.0, -4.0)
+    enemy_script.update(drone, ctx)
+    assert drone.nav.target is player, "close: it gives chase"
+    drone.transform.position = (0.0, 2.0, -30.0)
+    enemy_script.update(drone, ctx)
+    assert drone.nav.target is None, "far away: it gives up"
+    assert drone.state["home"][2] == -30.0, "and bobs where it stopped"
+
+
+def test_a_shot_drone_gives_chase():
+    player, drone, scene = fps_world()
+    drone.nav = FakeNav()
+    ctx = FakeCtx(scene)
+    enemy_script.start(drone, ctx)
+    drone.transform.position = (0.0, 2.0, -12.0)
+    drone.attributes["health"] = 75
+    enemy_script.update(drone, ctx)
+    assert drone.nav.target is player
+    assert drone.nav.hover > 1.5, "it bobs by changing its hover height"
 
 
 def test_drones_only_fire_with_a_clear_line_of_sight():

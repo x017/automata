@@ -369,7 +369,8 @@ fn run_python_frame(
                 world.physics3d_ref(),
                 scene_world,
                 Rc::clone(physics_queue),
-            ),
+            )
+            .with_nav(world.nav().cloned()),
             crate::physics::PyPhysics2D::snapshot(
                 world.physics2d_ref(),
                 scene_world,

@@ -1,0 +1,21 @@
+[package]
+name = "automata-nav"
+description = "AUTOMATA navigation: navmesh baking, path finding, and agents that walk them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+automata-physics.workspace = true
+automata-scene.workspace = true
+glam.workspace = true
+hecs.workspace = true
+ron.workspace = true
+serde.workspace = true
+tracing.workspace = true

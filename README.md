@@ -25,6 +25,7 @@ wgpu rendering, scene/events core, Python bindings, and physics + input.
   `automata-scene` (hecs ECS, events, resources), `automata-renderer`
   (wgpu 2D/3D), `automata-input` (keyboard/mouse/gamepad, action mapping),
   `automata-physics` (Rapier 2D/3D, raycasts, character controllers),
+  `automata-nav` (navigation meshes, path finding, nav agents),
   `automata-assets` (glTF / OBJ model import), `automata-python` (PyO3
   bindings)
 - Python API: decorator, procedural, and OOP (subclassing) styles —
@@ -106,6 +107,7 @@ automata/
 │   ├── automata-renderer/  # wgpu device, surface, presentation
 │   ├── automata-input/     # Keyboard/mouse/gamepad state, action mapping
 │   ├── automata-physics/   # Rapier 2D/3D worlds, raycasts, controllers
+│   ├── automata-nav/       # Navmesh baking, path finding, nav agents
 │   ├── automata-assets/    # glTF / OBJ model loading and caching
 │   └── automata-python/    # PyO3 bindings + the `automata` package
 ├── docs/                   # Architecture, development, and API documentation
