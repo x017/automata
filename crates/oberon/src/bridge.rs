@@ -89,6 +89,8 @@ pub struct EntityState {
     pub attached: Option<(String, String)>,
     /// The entity's Nav Agent and how it's getting on, if it has one.
     pub nav: Option<automata_nav::NavAgent>,
+    /// The entity's ragdoll and whether it's limp, if it has one.
+    pub rag: Option<automata_scene::RagdollStatus>,
 }
 
 /// A collider as the runner sees it (for `ctx.physics.raycast`).
@@ -361,6 +363,8 @@ pub struct EntityWrite {
     pub attach: Option<AttachWrite>,
     /// Changes to the entity's Nav Agent (`entity.nav.go`, `speed`).
     pub nav: Option<automata_nav::NavEdit>,
+    /// Changes to the entity's ragdoll (`entity.ragdoll.on()`, pushes).
+    pub rag: Option<automata_scene::RagdollEdit>,
     /// Remove the entity from the running scene.
     pub despawn: bool,
 }
@@ -921,7 +925,61 @@ fn state_json(e: &EntityState) -> Json {
     if let Some(agent) = &e.nav {
         obj.set("nav", nav_state_json(agent));
     }
+    if let Some(rag) = &e.rag {
+        obj.set("rag", rag_state_json(rag));
+    }
     obj
+}
+
+/// A ragdoll's state: `{"on", "mass", "stiff", "blend", "limp", "w",
+/// "rest", "hips"}` (see the script API's `EntityRagdoll`).
+fn rag_state_json(s: &automata_scene::RagdollStatus) -> Json {
+    let f = |v: f32| Json::Float(f64::from(v));
+    Json::obj([
+        ("on", Json::Bool(s.ragdoll.active)),
+        ("mass", f(s.ragdoll.mass)),
+        ("stiff", f(s.ragdoll.stiffness)),
+        ("blend", f(s.ragdoll.blend_time)),
+        ("limp", Json::Bool(s.limp)),
+        ("w", f(s.weight)),
+        ("rest", Json::Bool(s.resting)),
+        (
+            "hips",
+            s.hips.map_or(Json::Null, |h| Json::floats(&h.to_array())),
+        ),
+    ])
+}
+
+/// `{"on", "mass", "stiffness", "blend_time", "push": [[[x, y, z], bone or
+/// null], ...]}`; anything missing is left alone, non-finite pushes are
+/// dropped.
+fn parse_rag(v: &Json) -> Option<automata_scene::RagdollEdit> {
+    v.as_obj()?;
+    let pushes = v
+        .get("push")
+        .and_then(Json::as_arr)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|p| {
+            let p = p.as_arr()?;
+            let impulse = glam::Vec3::from(p.first()?.as_floats::<3>()?);
+            impulse.is_finite().then(|| automata_scene::RagdollPush {
+                bone: p.get(1).and_then(Json::as_str).map(str::to_string),
+                impulse,
+            })
+        })
+        .collect();
+    let finite = |key: &str| v.get(key).and_then(num).filter(|x| x.is_finite());
+    Some(automata_scene::RagdollEdit {
+        active: match v.get("on") {
+            Some(Json::Bool(b)) => Some(*b),
+            _ => None,
+        },
+        mass: finite("mass"),
+        stiffness: finite("stiffness"),
+        blend_time: finite("blend_time"),
+        pushes,
+    })
 }
 
 /// A Nav Agent's state: `{"spd", "stop", "hov", "t", "arr", "jmp", "vel",
@@ -1253,6 +1311,7 @@ fn parse_write(w: &Json) -> Option<EntityWrite> {
         joint: w.get("joint").and_then(parse_joint),
         attach: w.get("att").and_then(parse_attach),
         nav: w.get("nav").and_then(parse_nav),
+        rag: w.get("rag").and_then(parse_rag),
         despawn: matches!(w.get("despawn"), Some(Json::Bool(true))),
     })
 }
@@ -2123,6 +2182,89 @@ mod tests {
         }
         drop(bridge.stop());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `entity.ragdoll` reads the ragdoll's state; switching it on and
+    /// pushing comes back as a `RagdollEdit`.
+    #[test]
+    fn scripts_knock_ragdolls_over_through_the_bridge() {
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("oberon_bridge_rag_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("robot.py");
+        std::fs::write(
+            &script,
+            "def update(entity, ctx):\n    \
+             rag = entity.ragdoll\n    \
+             entity.attributes['limp'] = rag.limp\n    \
+             entity.attributes['hips'] = rag.hips[1]\n    \
+             entity.attributes['mass'] = rag.mass\n    \
+             rag.on(push=(0, 0, -40), bone='Chest')\n    \
+             rag.stiffness = 0.5\n",
+        )
+        .unwrap();
+        let rag = automata_scene::RagdollStatus {
+            ragdoll: automata_scene::Ragdoll::default(),
+            limp: true,
+            weight: 1.0,
+            resting: false,
+            hips: Some(glam::Vec3::new(0.0, 0.25, 0.0)),
+        };
+        let entities = vec![EntityState {
+            id: 1,
+            name: "Robot".into(),
+            script: Some(script.clone()),
+            scale: [1.0; 3],
+            rag: Some(rag),
+            ..EntityState::default()
+        }];
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+        assert!(bridge.send_frame_with(0.016, 0.016, &[], &entities, &FrameInput::default()));
+        let msgs = pump(&mut bridge, |m| {
+            matches!(m, BridgeMsg::Frame(_) | BridgeMsg::Error { .. })
+        });
+        let reply = msgs
+            .iter()
+            .find_map(|m| match m {
+                BridgeMsg::Frame(r) => Some(r.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{msgs:?}"));
+        let w = reply.writes.iter().find(|w| w.id == 1).unwrap();
+        let attrs = w.attributes.as_ref().unwrap();
+        assert_eq!(attrs["limp"], AttributeValue::Bool(true));
+        assert_eq!(attrs["hips"], AttributeValue::Float(0.25));
+        assert_eq!(attrs["mass"], AttributeValue::Float(70.0));
+        let edit = w.rag.as_ref().unwrap();
+        assert_eq!(edit.active, Some(true));
+        assert_eq!(edit.stiffness, Some(0.5));
+        assert_eq!(edit.mass, None);
+        assert_eq!(
+            edit.pushes,
+            [automata_scene::RagdollPush {
+                bone: Some("Chest".into()),
+                impulse: glam::Vec3::new(0.0, 0.0, -40.0),
+            }]
+        );
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bad_ragdoll_writes_are_cleaned_up() {
+        let w =
+            Json::parse(r#"{"on": 1, "mass": 80, "push": [[[1, 2, 3], null], [["x"], "Head"]]}"#)
+                .unwrap();
+        let edit = super::parse_rag(&w).unwrap();
+        assert_eq!(edit.active, None, "not a bool");
+        assert_eq!(edit.mass, Some(80.0));
+        assert_eq!(edit.pushes.len(), 1);
+        assert_eq!(edit.pushes[0].bone, None);
     }
 
     /// `ctx.ai` (the shared script API's AI helpers) sees through the

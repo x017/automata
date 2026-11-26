@@ -109,6 +109,7 @@ from ._core import (
     Physics2D,
     PointLight,
     Prefab,
+    Ragdoll,
     Resources,
     RigidBody,
     Scatter,
@@ -154,6 +155,7 @@ Component = Union[
     NavAgent,
     Navigation,
     NavLink,
+    Ragdoll,
 ]
 
 #: A per-frame update callback.
@@ -278,6 +280,7 @@ __all__ = [
     "ParticleEmitter",
     "Physics",
     "Physics2D",
+    "Ragdoll",
     "PointLight",
     "Prefab",
     "Resources",

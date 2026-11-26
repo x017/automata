@@ -119,6 +119,7 @@ for `entity` and `ctx`.
 | `entity.animation.look_at(target)` / `.reach("Palm2.R", target)` | Turn the head towards, or reach a hand for, an entity, a name or a point; `None` stops. `.foot_ik` plants the feet on the ground ([Attachments & IK](attachments-and-ik.md)) |
 | `entity.attach("Robot", "Head", position=…)` / `.detach()` / `.attached_to` | Follow a bone of another entity (a sword picked up into a hand), or let go ([Attachments & IK](attachments-and-ik.md#picking-things-up-from-a-script)) |
 | `entity.nav.go("Player")` / `.stop()` / `.arrived` / `.path` | Send a Nav Agent somewhere (a point, an entity or a name); it finds the way round walls and takes the jumps ([Navigation](navigation.md#nav-agents)) |
+| `entity.ragdoll.on(push=(0, 50, -300))` / `.off()` / `.resting` / `.hips` | Make a character go limp (with a shove), and stand it back up where it fell once it has come to rest ([Ragdolls](ragdolls.md)) |
 | `ctx.nav.path(a, b)` / `.nearest(p)` / `.reachable(a, b)` | Ask the navigation mesh for the shortest walkable way ([Navigation](navigation.md#paths-from-scripts)) |
 | `ctx.ai.can_see(entity, "Player")` / `ctx.ai.hear(entity)` | Sight (a cone, blocked by walls) and hearing (noises made with `ctx.ai.noise`) ([AI](ai.md#sight)) |
 | `ctx.ai.state_machine({...})` / `ctx.ai.selector(...)` | State machines and behaviour trees for enemy brains ([AI](ai.md)) |

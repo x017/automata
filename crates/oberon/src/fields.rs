@@ -155,6 +155,12 @@ pub enum Field {
     ScatterAlign,
     /// Where scattered copies go.
     ScatterSeed,
+    /// A ragdoll's total mass (kg).
+    RagdollMass,
+    /// How hard a ragdoll holds its pose (0 floppy .. 1 stiff).
+    RagdollStiffness,
+    /// Seconds a ragdoll takes to blend back into its animation.
+    RagdollBlend,
     /// The terrain's side (metres).
     TerrainSize,
     /// The terrain's lighting roughness.
@@ -488,6 +494,8 @@ pub enum Flag {
     NavLinkTwoWay,
     /// The terrain is solid.
     TerrainCollide,
+    /// The ragdoll starts limp.
+    RagdollActive,
 }
 
 /// An enumerated property of an entity (cycled by a dropdown-style button).
@@ -634,6 +642,9 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         | F::ScatterScale(_)
         | F::ScatterAlign
         | F::ScatterSeed => scatter_get(data.scatter.as_ref()?, field)?,
+        F::RagdollMass => data.ragdoll.as_ref()?.mass,
+        F::RagdollStiffness => data.ragdoll.as_ref()?.stiffness,
+        F::RagdollBlend => data.ragdoll.as_ref()?.blend_time,
         F::TerrainSize => data.terrain.as_ref()?.size,
         F::TerrainRoughness => data.terrain.as_ref()?.roughness,
         F::TerrainColor(i) => {
@@ -865,6 +876,7 @@ pub fn range(field: Field) -> (f32, f32) {
     use Field as F;
     match field {
         F::ParticleColor(_)
+        | F::RagdollStiffness
         | F::ParticleEndColor(_)
         | F::ParticleStretch
         | F::MeshColor(_)
@@ -900,6 +912,7 @@ pub fn range(field: Field) -> (f32, f32) {
         | F::TerrainRoughness
         | F::ScatterAlign => (0.0, 1.0),
         F::TerrainSize => (1.0, automata_scene::MAX_TERRAIN_SIZE),
+        F::RagdollMass => (1.0, 10_000.0),
         F::TerrainTile(_) => (0.05, 1_000.0),
         F::GrassArea(_) | F::ScatterArea(_) => (0.0, automata_scene::MAX_AREA),
         F::GrassHeight => (0.01, 10.0),
@@ -949,7 +962,7 @@ pub fn range(field: Field) -> (f32, f32) {
         F::LightShadowSoftness => (0.0, 8.0),
         F::EnvExposure | F::EnvPixelate => (0.0, 16.0),
         F::MeshEmissiveStrength => (0.0, 100.0),
-        F::MeshGlowLight | F::EnvFogFalloff => (0.0, 10.0),
+        F::MeshGlowLight | F::EnvFogFalloff | F::RagdollBlend => (0.0, 10.0),
         F::EnvFogDensity
         | F::EnvAmbientOcclusion
         | F::WaterCaustics
@@ -1075,6 +1088,8 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::ScatterScale(_)
         | F::TerrainColor(_)
         | F::TerrainRoughness
+        | F::RagdollStiffness
+        | F::RagdollBlend
         | F::WaterCaustics
         | F::WaterWaveHeight
         | F::AudioVolume
@@ -1281,6 +1296,16 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
             Some(scatter) => scatter_set(scatter, field, v),
             None => return false,
         },
+        F::RagdollMass | F::RagdollStiffness | F::RagdollBlend => {
+            let Some(r) = &mut data.ragdoll else {
+                return false;
+            };
+            match field {
+                F::RagdollMass => r.mass = v,
+                F::RagdollStiffness => r.stiffness = v,
+                _ => r.blend_time = v,
+            }
+        }
         F::TerrainSize | F::TerrainRoughness | F::TerrainColor(_) | F::TerrainTile(_) => {
             let Some(t) = &mut data.terrain else {
                 return false;
@@ -1512,6 +1537,7 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::NavTurn => data.nav_agent.as_ref()?.turn,
         Flag::NavLinkTwoWay => data.nav_link.as_ref()?.two_way,
         Flag::TerrainCollide => data.terrain.as_ref()?.collide,
+        Flag::RagdollActive => data.ragdoll.as_ref()?.active,
     })
 }
 
@@ -1619,6 +1645,10 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
         },
         Flag::NavLinkTwoWay => match &mut data.nav_link {
             Some(l) => l.two_way = !l.two_way,
+            None => return false,
+        },
+        Flag::RagdollActive => match &mut data.ragdoll {
+            Some(r) => r.active = !r.active,
             None => return false,
         },
         Flag::TerrainCollide => match &mut data.terrain {

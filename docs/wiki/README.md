@@ -65,6 +65,7 @@ hours.
 | Share textured looks between objects | [Materials](oberon/materials.md) |
 | Let a graph pick a character's clips (blend spaces, transitions, layers) | [Animation graphs](oberon/animation-graphs.md) |
 | Put a sword in a hand, keep feet on stairs, turn heads | [Attachments & IK](oberon/attachments-and-ik.md) |
+| Knock characters over and stand them back up | [Ragdolls](oberon/ragdolls.md) |
 | Make enemies find their way round walls and chase the player | [Navigation](oberon/navigation.md) |
 | Give enemies moods, sight and hearing | [AI](oberon/ai.md) |
 | Reuse objects and add custom data | [Prefabs & attributes](oberon/prefabs-and-attributes.md) |

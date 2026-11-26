@@ -84,6 +84,7 @@ __all__ = [
     "EntityAudio",
     "EntityJoint",
     "EntityNav",
+    "EntityRagdoll",
     "Nav",
     "NavGraph",
     "AI",
@@ -924,6 +925,7 @@ class Entity:
         self._joint_w: dict[str, Any] | None = None
         self._joint_was_broken = False
         self._nav_w: dict[str, Any] | None = None
+        self._rag_w: dict[str, Any] | None = None
 
     def _begin(self, record):
         """Starts a frame from a fresh record."""
@@ -938,6 +940,7 @@ class Entity:
         self._joint_read = False
         self._joint_w = None
         self._nav_w = None
+        self._rag_w = None
         self.name = record.get("name") or ""
         self.script = record.get("script")
 
@@ -1114,6 +1117,12 @@ class Entity:
         ``arrived``, ``path``, ``speed``. None without one."""
         return EntityNav(self) if self._record.get("nav") is not None else None
 
+    @property
+    def ragdoll(self) -> "EntityRagdoll | None":
+        """This entity's Ragdoll: ``on()``, ``off()``, ``push(impulse,
+        bone)``, ``limp``, ``resting``, ``hips``. None without one."""
+        return EntityRagdoll(self) if self._record.get("rag") is not None else None
+
     def despawn(self) -> None:
         """Removes the entity from the running scene (after this frame)."""
         self._despawn = True
@@ -1134,6 +1143,8 @@ class Entity:
             w["joint"] = dict(self._joint_w)
         if self._nav_w:
             w["nav"] = dict(self._nav_w)
+        if self._rag_w:
+            w["rag"] = dict(self._rag_w)
         for key in ("p", "r", "s", "v", "cam"):
             if key in d and self._vals.get(key) is not None:
                 w[key] = self._vals[key]
@@ -2058,6 +2069,142 @@ class EntityNav:
 
     def __repr__(self):
         return f"EntityNav({self._e.name!r}, target={self.target!r}, arrived={self.arrived})"
+
+
+def _rag_number(name, v, lo, hi):
+    v = float(v)
+    if not (math.isfinite(v) and lo <= v <= hi):
+        raise ValueError(f"{name} must be a number from {lo} to {hi}")
+    return v
+
+
+class EntityRagdoll:
+    """``entity.ragdoll``: the animated model can go limp, its skeleton
+    thrown about by physics (a capsule per big bone, joined at the knees,
+    elbows, hips and so on). ``off()`` hands it back to the animation,
+    which blends in over ``blend_time`` seconds with the entity standing
+    where the hips came down. Reads show the start of the frame; changes
+    apply after it::
+
+        if hit:
+            enemy.ragdoll.on(push=(0, 2, -6))   # knocked flying
+        if enemy.ragdoll.resting:
+            enemy.ragdoll.off()                 # back on its feet
+    """
+
+    __slots__ = ("_e",)
+
+    def __init__(self, entity):
+        self._e = entity
+
+    def _rec(self):
+        return self._e._record.get("rag") or {}
+
+    def _set(self, key, value):
+        e = self._e
+        if e._rag_w is None:
+            e._rag_w = {}
+        e._rag_w[key] = value
+        e._dirty.add("rag")
+
+    def _get(self, key, rec_key, default):
+        w = self._e._rag_w
+        if w is not None and key in w:
+            return w[key]
+        return self._rec().get(rec_key, default)
+
+    def on(self, push=None, bone: str | None = None) -> None:
+        """Goes limp (from the next physics step), keeping the motion it
+        had. ``push`` (an impulse in kg·m/s, ``(x, y, z)``) shoves it as
+        it goes: on ``bone`` if named, else the whole body."""
+        self._set("on", True)
+        if push is not None:
+            self.push(push, bone)
+
+    def off(self) -> None:
+        """Gets back to the animation: it blends in over ``blend_time``
+        seconds, the entity standing where the hips came down."""
+        self._set("on", False)
+
+    def push(self, impulse, bone: str | None = None) -> None:
+        """Shoves the limp body with ``impulse`` (kg·m/s, ``(x, y, z)``):
+        on ``bone`` (a bone's name, like ``"Head"``) or, by default, the
+        whole body. Pushes while it isn't limp do nothing."""
+        x, y, z = _vec(impulse, 3)
+        if not all(math.isfinite(v) for v in (x, y, z)):
+            raise ValueError("a push must be finite")
+        pushes = (self._e._rag_w or {}).get("push") or []
+        self._set("push", [*pushes, [[x, y, z], None if bone is None else str(bone)]])
+
+    @property
+    def active(self) -> bool:
+        """Whether it's switched on (limp, or about to be). Settable."""
+        return bool(self._get("on", "on", False))
+
+    @active.setter
+    def active(self, on: bool) -> None:
+        self._set("on", bool(on))
+
+    @property
+    def limp(self) -> bool:
+        """Whether physics has the skeleton right now."""
+        return bool(self._rec().get("limp", False))
+
+    @property
+    def resting(self) -> bool:
+        """Whether it's limp and has come to rest: a good time for
+        ``off()``."""
+        return bool(self._rec().get("rest", False))
+
+    @property
+    def weight(self) -> float:
+        """How much of the pose is the ragdoll's: 1 limp, falling to 0 as
+        the animation takes over again."""
+        return float(self._rec().get("w", 0.0))
+
+    @property
+    def blending(self) -> bool:
+        """Whether the animation is taking over again right now."""
+        return not self.limp and self.weight > 0.0
+
+    @property
+    def hips(self) -> Vec3 | None:
+        """Where the hips are while it's limp or blending back (cameras
+        follow this), else None."""
+        h = self._rec().get("hips")
+        return None if h is None else _tuple(h)
+
+    @property
+    def mass(self) -> float:
+        """The whole body's mass (kg). Settable (from the next time it
+        goes limp)."""
+        return float(self._get("mass", "mass", 70.0))
+
+    @mass.setter
+    def mass(self, v: float) -> None:
+        self._set("mass", _rag_number("mass", v, 1.0, 10000.0))
+
+    @property
+    def stiffness(self) -> float:
+        """How hard the joints hold the pose it went limp in: 0 a rag
+        doll, 1 stiff. Settable, even while limp."""
+        return float(self._get("stiffness", "stiff", 0.0))
+
+    @stiffness.setter
+    def stiffness(self, v: float) -> None:
+        self._set("stiffness", _rag_number("stiffness", v, 0.0, 1.0))
+
+    @property
+    def blend_time(self) -> float:
+        """Seconds the animation takes to take over again. Settable."""
+        return float(self._get("blend_time", "blend", 0.5))
+
+    @blend_time.setter
+    def blend_time(self, v: float) -> None:
+        self._set("blend_time", _rag_number("blend_time", v, 0.0, 10.0))
+
+    def __repr__(self):
+        return f"EntityRagdoll({self._e.name!r}, limp={self.limp})"
 
 
 class Nav:

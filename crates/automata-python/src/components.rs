@@ -1895,6 +1895,8 @@ pub enum StagedComponent {
     Navigation(automata_nav::Navigation),
     /// A hand-placed shortcut for nav agents.
     NavLink(automata_nav::NavLink),
+    /// The animated model can go limp.
+    Ragdoll(automata_scene::Ragdoll),
 }
 
 /// Extracts a staged component from an arbitrary Python object, raising a
@@ -1975,13 +1977,16 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(l) = obj.cast::<crate::nav::PyNavLink>() {
         return Ok(StagedComponent::NavLink(l.get().inner.clone()));
     }
+    if let Ok(r) = obj.cast::<crate::ragdoll::PyRagdoll>() {
+        return Ok(StagedComponent::Ragdoll(r.get().inner.clone()));
+    }
     let typename = obj.get_type().name()?.to_string();
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
          MeshRenderer, DirectionalLight, PointLight, SpotLight, Environment, Water, \
          AudioSource, ParticleEmitter, Animation, Grass, Scatter, Terrain, Joint, \
-         Attach, NavAgent, Navigation, or NavLink"
+         Attach, NavAgent, Navigation, NavLink, or Ragdoll"
     )))
 }
 

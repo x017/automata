@@ -27,7 +27,7 @@ def test_level_runs_and_every_robot_animates():
     seen = {}
 
     def after(ctx):
-        for name in ("Robot", "Greeter", "Dancer", "Sitter", "Slowpoke"):
+        for name in ("Robot", "Greeter", "Dancer", "Sitter", "Slowpoke", "Wobbly"):
             anim = ctx.scene[name].animation
             seen[name] = (anim.clip, anim.playing, anim.time, anim.speed)
 
@@ -225,3 +225,35 @@ def test_a_script_picks_up_and_drops_a_hat(tmp_path):
     assert seen["held"] == "Greeter,Palm2.R"
     assert seen["after"] == "None", "dropped"
     assert seen["still"] == pytest.approx(seen["y"]), "and it stays where it was let go"
+
+
+def test_wobbly_falls_over_when_bumped_and_gets_back_up(tmp_path):
+    for folder in ("models", "anims", "scripts"):
+        shutil.copytree(os.path.join(GAME, folder), tmp_path / folder)
+    original = list(build_level.CROWD)
+    # Put Wobbly right next to where the player starts: an instant bump.
+    build_level.CROWD[-1] = ("Wobbly", (0.7, 0.0, 3.0), -90, at.Animation("Idle"))
+    try:
+        build_level.build().save(str(tmp_path / "level.ron"))
+    finally:
+        build_level.CROWD[:] = original
+    seen = {"limp": 0, "lowest": 9.0}
+
+    def after(ctx):
+        wobbly = ctx.scene["Wobbly"]
+        state = wobbly.ragdoll_state
+        if state["limp"]:
+            seen["limp"] += 1
+            seen["lowest"] = min(seen["lowest"], state["hips"][1])
+        seen["state"] = state
+        seen["falls"] = wobbly.attributes.get("falls", 0)
+        seen["at"] = wobbly.transform.position
+
+    at.run_scene(str(tmp_path / "level.ron"), headless=True, max_frames=480, update=after,
+                 fixed_delta=1 / 60)
+    assert seen["falls"] >= 1, "the bump knocked it over"
+    assert seen["limp"] > 60 and seen["lowest"] < 0.5, "it lay on the ground"
+    assert not seen["state"]["limp"], "and got back up"
+    x, y, _ = seen["at"]
+    assert x > 0.9, "away from the player, who bumped it along +x"
+    assert y == pytest.approx(build_level.STAND, abs=0.05)

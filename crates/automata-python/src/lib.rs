@@ -32,6 +32,7 @@ mod nav;
 mod particles;
 mod physics;
 mod physics_components;
+mod ragdoll;
 mod scene;
 mod screen;
 mod serialize;
@@ -122,6 +123,7 @@ pub fn init_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<animation::PyAnimation>()?;
     m.add_class::<animation::PyAttach>()?;
     m.add_class::<nav::PyNavAgent>()?;
+    m.add_class::<ragdoll::PyRagdoll>()?;
     m.add_class::<nav::PyNavigation>()?;
     m.add_class::<nav::PyNavLink>()?;
     m.add_class::<animation::PyAnimationRef>()?;

@@ -134,6 +134,10 @@ pub struct EntityData {
     /// A hand-placed shortcut for agents from here to another entity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nav_link: Option<automata_nav::NavLink>,
+    /// The animated model can go limp, its skeleton thrown about by
+    /// physics, and blend back to its animation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ragdoll: Option<automata_scene::Ragdoll>,
     /// Custom named gameplay values (`health: Int(100)`, `team: Text("red")`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub attributes: BTreeMap<String, AttributeValue>,
@@ -435,6 +439,9 @@ impl SceneFile {
             if let Some(l) = eref.get::<&automata_nav::NavLink>() {
                 data.nav_link = Some((*l).clone());
             }
+            if let Some(r) = eref.get::<&automata_scene::Ragdoll>() {
+                data.ragdoll = Some((*r).clone());
+            }
             if let Some(attributes) = eref.get::<&Attributes>() {
                 data.attributes = attributes.0.clone();
             }
@@ -528,18 +535,7 @@ impl SceneFile {
             if let Some(velocity) = &data.character_velocity {
                 let _ = world.insert_one(entity, *velocity);
             }
-            if let Some(joint) = &data.joint {
-                let _ = world.insert_one(entity, joint.clone());
-            }
-            if let Some(n) = &data.navigation {
-                let _ = world.insert_one(entity, n.clone());
-            }
-            if let Some(a) = &data.nav_agent {
-                let _ = world.insert_one(entity, a.clone());
-            }
-            if let Some(l) = &data.nav_link {
-                let _ = world.insert_one(entity, l.clone());
-            }
+            insert_gameplay(world, entity, data);
             if let Some(attach) = &data.attach {
                 let offset = data.transform.map(Transform::from).unwrap_or_default();
                 let _ = world.insert_one(
@@ -586,6 +582,26 @@ impl SceneFile {
             return Err(SceneFileError::UnsupportedVersion(file.version));
         }
         Ok(file)
+    }
+}
+
+/// Joints, navigation and ragdolls: the components that make an entity
+/// act in play rather than show.
+fn insert_gameplay(world: &mut SceneWorld, entity: Entity, data: &EntityData) {
+    if let Some(joint) = &data.joint {
+        let _ = world.insert_one(entity, joint.clone());
+    }
+    if let Some(n) = &data.navigation {
+        let _ = world.insert_one(entity, n.clone());
+    }
+    if let Some(a) = &data.nav_agent {
+        let _ = world.insert_one(entity, a.clone());
+    }
+    if let Some(l) = &data.nav_link {
+        let _ = world.insert_one(entity, l.clone());
+    }
+    if let Some(r) = &data.ragdoll {
+        let _ = world.insert_one(entity, r.sanitized());
     }
 }
 

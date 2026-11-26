@@ -28,6 +28,9 @@ mod joints;
 #[path = "terrain3d.rs"]
 mod terrain;
 
+#[path = "ragdoll3d.rs"]
+mod ragdoll;
+
 use crate::components::{
     BodyType, CharacterController, CharacterVelocity, Collider3D, RigidBody, Shape3D,
 };
@@ -95,6 +98,10 @@ pub struct PhysicsWorld3D {
     joint_warned: std::collections::HashSet<Entity>,
     /// Each colliding terrain's heightfield body.
     terrains: HashMap<Entity, terrain::TerrainBody>,
+    /// Each limp entity's ragdoll bodies (see `ragdoll3d.rs`).
+    ragdolls: HashMap<Entity, ragdoll::RagdollBodies>,
+    /// Ragdoll layouts by model (`None`: the model can't have one).
+    ragdoll_layouts: HashMap<usize, Option<std::sync::Arc<automata_scene::RagdollLayout>>>,
 }
 
 /// What a built model shape depends on: the loaded model (by identity, so
@@ -179,6 +186,8 @@ impl PhysicsWorld3D {
             ground: None,
             joint_warned: std::collections::HashSet::new(),
             terrains: HashMap::new(),
+            ragdolls: HashMap::new(),
+            ragdoll_layouts: HashMap::new(),
         }
     }
 
@@ -225,6 +234,7 @@ impl PhysicsWorld3D {
         self.sync_terrains(scene);
         mark_characters(scene);
         self.sync_joints(scene);
+        self.sync_ragdolls(scene);
     }
 
     fn spawn_missing(&mut self, scene: &mut SceneWorld) {
@@ -517,6 +527,10 @@ impl PhysicsWorld3D {
                 continue;
             }
             let root = motion.map_or(Vec3::ZERO, CharacterMotion::take);
+            // A limp character lies where its ragdoll fell.
+            if self.ragdolls.contains_key(&entity) {
+                continue;
+            }
             if velocity.is_some() || root != Vec3::ZERO {
                 moves.push((
                     entity,
@@ -627,6 +641,7 @@ impl PhysicsWorld3D {
         self.collect_water(scene);
         self.apply_water(dt);
         self.step_ripples(dt);
+        self.drive_ragdolls(dt);
         let splashes = self.water_effects(scene, dt);
         self.sim_time += f64::from(dt);
 
@@ -693,6 +708,7 @@ impl PhysicsWorld3D {
 
         tick.broken_joints = self.update_joints(scene, dt);
         self.write_back_transforms(scene);
+        self.report_ragdolls(scene);
         tick
     }
 

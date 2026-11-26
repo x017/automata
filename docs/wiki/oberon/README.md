@@ -44,6 +44,7 @@ this and `oberon run`, `test`, `export` and `doctor`.
 | [Models](models.md) | Importing glTF and OBJ models, the Assets tab, import settings (scale, rotation, pivot), fitted colliders |
 | [Animation graphs](animation-graphs.md) | `.anim.ron` state machines: parameters, blend spaces, transitions, layers with bone masks |
 | [Attachments & IK](attachments-and-ik.md) | Attach To Bone (swords, hats), Feet On Ground on slopes and stairs, reaching and looking at from scripts |
+| [Ragdolls](ragdolls.md) | Characters that go limp when hit: bodies and joints from the skeleton, pushes, standing back up with a blend |
 | [Navigation](navigation.md) | Bake a navigation mesh from the level, Nav Agents that chase and follow, jump links, `ctx.nav.path` |
 | [Terrain](terrain.md) | Sculpt hills, cliffs and beaches with brushes, paint four ground layers, Auto Paint, heightmaps |
 | [AI](ai.md) | State machines, behaviour trees, sight cones with line of sight, and hearing (`ctx.ai`) |

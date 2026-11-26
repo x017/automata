@@ -565,10 +565,31 @@ layers with bone masks).
   Robot Plaza's top hat, steps and ramp, a Stepper standing on a step and
   a Greeter that watches you.
 
-### B6. Ragdolls ⬜ M
+### B6. Ragdolls ✅ M
 Needs C1 (joints).
-- Generate capsule bodies and joints from the skeleton.
-- Switch between animated and ragdoll, with blending back.
+- ✅ Capsule bodies and joints generated from the skeleton
+  (`RagdollLayout::of`, cached per model): a capsule per main bone sized
+  from the skinned mesh around it, mass shared by volume, hinges for knees
+  and elbows, cone-limited ball joints elsewhere, small bones and spring
+  bones (hair, skirts) left to their parents. Works from the usual bone
+  names (camelCase, `_L`/`.R`, `mixamorig:`); checked on the runner and the
+  robot.
+- ✅ Switching between animated and ragdoll: a `Ragdoll` component
+  (`active`, `mass`, `stiffness`, `blend_time`). Limp bodies start at the
+  posed bones with the character's velocity; the entity's own capsule and
+  Character Controller sleep; ray casts report the entity. Stiffness holds
+  the pose it went limp in. Pushes go on a named bone or spread by mass.
+  Switched off, the entity is placed on the ground under the hips, as high
+  as it stood, and the animation blends back in over `blend_time`.
+  Ragdolls settle (extra solver passes, damping once calm) so they come to
+  rest however they land.
+- ✅ Scripts: `entity.ragdoll.on(push=..., bone=...)`, `.off()`, `.push()`,
+  `.limp`, `.resting`, `.blending`, `.weight`, `.hips`; Python
+  `at.Ragdoll`; Oberon's Inspector section (Start Limp, Mass, Stiffness,
+  Blend Time) and bridge.
+- ✅ **Done:** Robot Plaza's **Wobbly** falls over when you walk into it and
+  gets back up. Manual: [Ragdolls](docs/wiki/oberon/ragdolls.md). Not done
+  yet: no get-up animation (it blends from how it lay into its clip).
 
 ---
 
@@ -1218,7 +1239,7 @@ per effort. Reorder any time by telling me.
 | 31 | C5 AI helpers | S | ✅ |
 | 32 | D5 Material assets and editor | M | ✅ |
 | 33 | A13 Terrain | L | ✅ |
-| 34 | B6 Ragdolls | M | ⬜ |
+| 34 | B6 Ragdolls | M | ✅ |
 | 35 | C6 2D toolkit | L | ⬜ |
 | 36 | D6 Editor workflow | M | ✅ |
 | 37 | D4 UI editor | L | ✅ |

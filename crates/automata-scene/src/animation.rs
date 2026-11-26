@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::anim_graph::{GraphPlayer, GraphState, Sampler};
 use crate::ik::{GroundProbe, Ik, IkTarget, IkWorld};
+use crate::ragdoll::RagdollPose;
 use crate::render::{MeshRenderer, MeshVisual};
 use crate::scene::SceneWorld;
 use crate::springs::SpringSim;
@@ -315,6 +316,9 @@ pub struct Animator {
     /// Inverse kinematics bending the pose after the clips: hands
     /// reaching, the head looking, the feet on the ground.
     pub ik: Ik,
+    /// The pose as the animation had it before a ragdoll was laid over
+    /// it ([`Self::blend_ragdoll`]), put back before the next advance.
+    unragdolled: Option<Pose>,
 }
 
 impl Animator {
@@ -343,6 +347,7 @@ impl Animator {
             graph: None,
             graph_gen: 0,
             ik: Ik::default(),
+            unragdolled: None,
         }
     }
 
@@ -655,6 +660,9 @@ impl Animator {
     /// [`Self::advance`] with the entity at `world`, so spring bones swing
     /// as it moves.
     pub fn advance_in(&mut self, dt: f32, world: Mat4) {
+        if let Some(pose) = self.unragdolled.take() {
+            self.pose = pose;
+        }
         self.advance_clip(dt);
         if let Some(springs) = &mut self.springs {
             springs.update(&self.rig, &mut self.pose, world, dt);
@@ -807,6 +815,21 @@ impl Animator {
         if self.ik.active() {
             let rig = Arc::clone(&self.rig);
             self.ik.apply(&rig, &mut self.pose, world);
+        }
+    }
+
+    /// Lays `ragdoll`'s bones over the pose (for an entity placed at
+    /// `place`) and moves its blend back on by `dt` seconds (see
+    /// [`RagdollPose::blend_into`]). The animation's own pose comes back
+    /// at the next advance. Returns whether the ragdoll showed.
+    pub fn blend_ragdoll(&mut self, ragdoll: &mut RagdollPose, place: Mat4, dt: f32) -> bool {
+        let before = self.pose.clone();
+        let rig = Arc::clone(&self.rig);
+        if ragdoll.blend_into(&rig, place, &mut self.pose, dt) {
+            self.unragdolled = Some(before);
+            true
+        } else {
+            false
         }
     }
 
@@ -1161,24 +1184,33 @@ pub fn animate_on(world: &mut SceneWorld, dt: f32, ground: Option<Ground<'_>>) {
     let mut moves: Vec<(Entity, Vec3)> = Vec::new();
     let mut bending: Vec<(Entity, Mat4)> = Vec::new();
     let mut names: Vec<String> = Vec::new();
-    for (entity, animator, renderer, place) in world.query_mut::<(
+    for (entity, animator, renderer, place, ragdoll) in world.query_mut::<(
         Entity,
         &mut Animator,
         Option<&mut MeshRenderer>,
         Option<&GlobalTransform>,
+        Option<&mut RagdollPose>,
     )>() {
         let place = place.map_or(Mat4::IDENTITY, |g| g.0);
         animator.set_wind(wind);
         animator.advance_in(dt, place);
-        if animator.ik.active() {
+        // A limp model's bones are physics', not the animation's: no IK,
+        // no root motion. Blending back, the IK still runs underneath.
+        let limp = ragdoll.as_ref().is_some_and(|r| r.simulating);
+        if animator.ik.active() && !limp {
             bending.push((entity, place));
             if animator.ik.follows_entities() {
                 animator.ik.target_names(&mut names);
             }
-        } else if let Some(renderer) = renderer {
-            renderer.joints = Some(animator.palette());
+        } else {
+            if let Some(ragdoll) = ragdoll {
+                animator.blend_ragdoll(ragdoll, place, dt);
+            }
+            if let Some(renderer) = renderer {
+                renderer.joints = Some(animator.palette());
+            }
         }
-        let travel = animator.travel();
+        let travel = if limp { Vec3::ZERO } else { animator.travel() };
         if travel != Vec3::ZERO {
             let mut step = place.transform_vector3(travel);
             step.y = 0.0;
@@ -1211,6 +1243,9 @@ pub fn animate_on(world: &mut SceneWorld, dt: f32, ground: Option<Ground<'_>>) {
                     ground: Some(probe),
                 };
                 animator.apply_ik(&ik_world);
+                if let Ok(mut ragdoll) = world.get::<&mut RagdollPose>(entity) {
+                    animator.blend_ragdoll(&mut ragdoll, place, dt);
+                }
                 animator.palette()
             };
             if let Ok(mut renderer) = world.get::<&mut MeshRenderer>(entity) {

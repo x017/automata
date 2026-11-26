@@ -248,6 +248,9 @@ impl PyEntity {
                     StagedComponent::NavLink(v) => {
                         Py::new(py, crate::nav::PyNavLink { inner: v.clone() })?.into_any()
                     }
+                    StagedComponent::Ragdoll(v) => {
+                        Py::new(py, crate::ragdoll::PyRagdoll { inner: v.clone() })?.into_any()
+                    }
                 })
             })
             .collect()
@@ -522,6 +525,9 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
             StagedComponent::NavLink(c) => {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }
+            StagedComponent::Ragdoll(c) => {
+                let _ = scene.world_mut().insert_one(id, c.sanitized());
+            }
         }
     }
     if !staged.attributes.is_empty() {
@@ -578,6 +584,8 @@ pub struct FrameWrites {
     pub attachments: Vec<(u64, Option<automata_scene::Attachment>)>,
     /// Changes to nav agents (targets, speeds), in call order.
     pub navs: Vec<(u64, automata_nav::NavEdit)>,
+    /// Ragdolls switched on or off, retuned and pushed, in call order.
+    pub ragdolls: Vec<(u64, automata_scene::RagdollEdit)>,
 }
 
 /// Shared write buffer between the per-frame views and the game loop.
@@ -668,6 +676,11 @@ pub fn apply_writes(scene: &mut Scene, writes: &WriteQueue) {
             }
         }
     }
+    for (bits, edit) in drained.ragdolls {
+        if let Some(entity) = EntityId::from_bits(bits) {
+            edit.apply(scene.world_mut(), entity);
+        }
+    }
     for entity in drained.despawns {
         if scene.world().contains(entity) {
             scene.despawn_recursive(entity);
@@ -690,6 +703,7 @@ struct EntitySnapshot {
     joint: Option<(automata_physics::Joint, automata_physics::JointState)>,
     attached: Option<(String, String)>,
     nav_agent: Option<automata_nav::NavAgent>,
+    ragdoll: Option<automata_scene::RagdollStatus>,
 }
 
 /// Read access to the scene during the update callback.
@@ -748,6 +762,7 @@ impl SceneView {
                             .get::<&automata_nav::NavAgent>(id)
                             .ok()
                             .map(|a| (*a).clone()),
+                        ragdoll: automata_scene::ragdoll_status(world, id),
                     }
                 },
             )
@@ -875,6 +890,7 @@ pub struct EntityView {
     joint: Option<(automata_physics::Joint, automata_physics::JointState)>,
     attached: Option<(String, String)>,
     nav_agent: Option<automata_nav::NavAgent>,
+    ragdoll: Option<automata_scene::RagdollStatus>,
     writes: WriteQueue,
 }
 
@@ -893,6 +909,7 @@ impl EntityView {
             joint: snapshot.joint.clone(),
             attached: snapshot.attached.clone(),
             nav_agent: snapshot.nav_agent.clone(),
+            ragdoll: snapshot.ragdoll.clone(),
             writes,
         }
     }
@@ -1108,6 +1125,56 @@ impl EntityView {
             }
         }
         self.writes.borrow_mut().navs.push((self.id, edit));
+        Ok(())
+    }
+
+    /// The ragdoll's start-of-frame state as a dict (`on` switched on,
+    /// `mass`, `stiff` stiffness, `blend` blend-back time, `limp` physics
+    /// has it, `w` its weight over the animation, `rest` limp and still,
+    /// `hips` where the hips are or `None`), or `None` without a
+    /// `Ragdoll`. Behaviour scripts read it through `entity.ragdoll`.
+    #[getter]
+    fn ragdoll_state<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<Option<Bound<'py, pyo3::types::PyDict>>> {
+        self.ragdoll
+            .as_ref()
+            .map(|s| crate::ragdoll::status_dict(py, s))
+            .transpose()
+    }
+
+    /// Changes the ragdoll (applied after the callback returns): `on`
+    /// switches it, `mass` / `stiffness` / `blend_time` retune it, `push`
+    /// is `(impulse, bone)` (bone `None`: the whole body) for the next
+    /// physics step. Behaviour scripts use `entity.ragdoll.on()` and the
+    /// like.
+    #[pyo3(signature = (**changes))]
+    fn ragdoll_edit(&self, changes: Option<&Bound<'_, pyo3::types::PyDict>>) -> PyResult<()> {
+        let mut edit = automata_scene::RagdollEdit::default();
+        if let Some(changes) = changes {
+            for (key, value) in changes.iter() {
+                match key.extract::<String>()?.as_str() {
+                    "on" => edit.active = Some(value.extract()?),
+                    "mass" => edit.mass = Some(value.extract()?),
+                    "stiffness" => edit.stiffness = Some(value.extract()?),
+                    "blend_time" => edit.blend_time = Some(value.extract()?),
+                    "push" => {
+                        let (impulse, bone): ((f32, f32, f32), Option<String>) = value.extract()?;
+                        edit.pushes.push(automata_scene::RagdollPush {
+                            bone,
+                            impulse: glam::Vec3::new(impulse.0, impulse.1, impulse.2),
+                        });
+                    }
+                    other => {
+                        return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                            "ragdoll_edit() got an unexpected keyword {other:?}"
+                        )))
+                    }
+                }
+            }
+        }
+        self.writes.borrow_mut().ragdolls.push((self.id, edit));
         Ok(())
     }
 

@@ -259,6 +259,8 @@ class _ViewRecord:
             return None if a is None else list(a)
         if key == "nav":
             return v.nav_state
+        if key == "rag":
+            return v.ragdoll_state
         if key == "view":
             return v
         return None
@@ -322,6 +324,13 @@ class _EngineBackend(api.Backend):
                 if isinstance(nav.get("go"), list):
                     nav = {**nav, "go": tuple(nav["go"])}
                 view.nav_edit(**nav)
+            rag = w.get("rag")
+            if rag:
+                for impulse, bone in rag.get("push") or ():
+                    view.ragdoll_edit(push=(tuple(impulse), bone))
+                changes = {k: val for k, val in rag.items() if k != "push"}
+                if changes:
+                    view.ragdoll_edit(**changes)
             joint = view.joint if w.get("joint") else None
             if joint is not None:
                 for k, val in w["joint"].items():

@@ -579,6 +579,7 @@ impl PlaySession {
                         .get::<&automata_nav::NavAgent>(entity)
                         .ok()
                         .map(|a| (*a).clone()),
+                    rag: automata_scene::ragdoll_status(world, entity),
                 })
             })
             .collect()
@@ -652,6 +653,9 @@ impl PlaySession {
                 if let Ok(mut agent) = world.get::<&mut automata_nav::NavAgent>(entity) {
                     edit.apply(&mut agent);
                 }
+            }
+            if let Some(edit) = &w.rag {
+                edit.clone().apply(world, entity);
             }
             if w.position.is_some() || w.rotation.is_some() || w.scale.is_some() {
                 if let Ok(mut t) = world.get::<&mut Transform>(entity) {
@@ -1292,6 +1296,73 @@ pub(crate) mod tests {
             play.update(0.1);
         }
         assert!(!state(&play).playing, "a one-shot ends");
+    }
+
+    #[test]
+    fn ragdolls_fall_in_play_mode_and_scripts_stand_them_back_up() {
+        let mut doc = Document::starter();
+        let id = doc.create_model(ROBOT, "Robot", [0.0, 0.0, 6.0]);
+        assert!(doc.add_component(id, crate::doc::ComponentKind::Ragdoll));
+        let i = doc.index_of(id).unwrap();
+        let stand = doc.entities[i].data.transform.unwrap().position;
+        let mut play = PlaySession::start(&doc);
+        let rag = |play: &PlaySession| {
+            play.script_states(|p| PathBuf::from(p))
+                .into_iter()
+                .find(|s| s.id == id)
+                .unwrap()
+                .rag
+                .unwrap()
+        };
+        play.update(0.1);
+        assert!(!rag(&play).limp, "it starts animated");
+        play.apply_script_writes(&[EntityWrite {
+            id,
+            rag: Some(automata_scene::RagdollEdit {
+                active: Some(true),
+                pushes: vec![automata_scene::RagdollPush {
+                    bone: None,
+                    impulse: glam::Vec3::new(150.0, 0.0, 0.0),
+                }],
+                ..automata_scene::RagdollEdit::default()
+            }),
+            ..EntityWrite::default()
+        }]);
+        for _ in 0..100 {
+            play.update(0.1);
+            if rag(&play).resting {
+                break;
+            }
+        }
+        let down = rag(&play);
+        assert!(down.limp && down.resting, "it fell and lay still: {down:?}");
+        let hips = down.hips.unwrap();
+        assert!(
+            hips.y < stand[1] - 0.3,
+            "on the floor: {hips} (stood at {stand:?})"
+        );
+        play.apply_script_writes(&[EntityWrite {
+            id,
+            rag: Some(automata_scene::RagdollEdit {
+                active: Some(false),
+                ..automata_scene::RagdollEdit::default()
+            }),
+            ..EntityWrite::default()
+        }]);
+        for _ in 0..10 {
+            play.update(0.1);
+        }
+        let up = rag(&play);
+        assert!(
+            !up.limp && up.weight < 1e-3,
+            "back in its animation: {up:?}"
+        );
+        let at = play.doc.entities[i].data.transform.unwrap().position;
+        assert!(
+            (at[1] - stand[1]).abs() < 0.05,
+            "standing as tall as before: {at:?}"
+        );
+        assert!(at[0] > stand[0] + 0.3, "where it fell: {at:?}");
     }
 
     fn player_index(doc: &Document) -> usize {

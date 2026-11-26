@@ -1152,6 +1152,35 @@
             )),
         ),
         (
+            name: Some("Wobbly"),
+            transform: Some((
+                position: (2.4, 0.89, 0.6),
+                rotation_euler: (3.1415927, -1.0471975, 3.1415927),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/robot.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            animation: Some((
+                clip: "Idle",
+                speed: 1.0,
+                looping: true,
+                play_on_start: true,
+            )),
+            ragdoll: Some((
+                active: false,
+                mass: 70.0,
+                stiffness: 0.0,
+                blend_time: 0.6,
+            )),
+            script: Some((
+                path: "scripts/wobbly.py",
+            )),
+        ),
+        (
             name: Some("Main Camera"),
             transform: Some((
                 position: (0.0, 3.5, 9.5),

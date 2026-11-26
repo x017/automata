@@ -455,6 +455,32 @@ view.nav_edit(go=..., speed=..., stop_distance=..., hover=...)
 
 Scripts use the friendlier `entity.nav` and `ctx.nav` (below).
 
+### Ragdoll
+
+```text
+at.Ragdoll(active=False, mass=70.0, stiffness=0.0, blend_time=0.5)
+r.active, r.mass, r.stiffness, r.blend_time
+```
+
+Lets an entity with an animated model go limp: capsules and limited
+joints are built from its skeleton, and physics moves every bone. `mass`
+(kg, 1 to 10000) is shared out by the capsules' sizes. `stiffness` (0 to 1)
+is how hard the joints hold the pose it went limp in. `blend_time`
+(seconds, 0 to 10) is how long the animation takes to take over again.
+`active=True` starts it limp. Saved in scene files.
+Guide: [Ragdolls](oberon/ragdolls.md).
+
+```text
+view.ragdoll_state        # dict | None: on, mass, stiff, blend, limp, w, rest, hips
+view.ragdoll_edit(on=..., mass=..., stiffness=..., blend_time=...,
+                  push=((x, y, z), bone_or_None))
+```
+
+Scripts use the friendlier `entity.ragdoll`: `.on(push=None, bone=None)`,
+`.off()`, `.push(impulse, bone=None)`, `.limp`, `.resting`, `.blending`,
+`.weight`, `.hips`, and settable `.active`, `.mass`, `.stiffness`,
+`.blend_time`.
+
 ### Physics components
 
 ```text

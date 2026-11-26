@@ -3053,6 +3053,7 @@ impl Ui {
             }
         }
 
+        y = self.ragdoll_section(canvas, x, y, w, e);
         y = self.nav_sections(canvas, doc, x, y, w, e);
 
         if d.audio_source.is_some() {
@@ -3466,7 +3467,38 @@ impl Ui {
         y + 16.0
     }
 
-    /// Attach To Bone: the entity followed and which of its bones.
+    /// The Ragdoll section: whether it starts limp, how heavy and stiff
+    /// it is, and how long it takes to get back into its animation.
+    fn ragdoll_section(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        mut y: f32,
+        w: f32,
+        e: &EntityEntry,
+    ) -> f32 {
+        if e.data.ragdoll.is_none() {
+            return y;
+        }
+        let kind = ComponentKind::Ragdoll;
+        let (ny, open) = self.section(canvas, x, y, w, kind.label(), e.id, Some(kind), true);
+        y = ny;
+        if open {
+            y = self.flag_row(canvas, x, y, w, e, "Start Limp", Flag::RagdollActive);
+            y = self.float_row(canvas, x, y, w, e, "Mass (kg)", Field::RagdollMass);
+            y = self.float_row(canvas, x, y, w, e, "Stiffness", Field::RagdollStiffness);
+            y = self.float_row(canvas, x, y, w, e, "Blend Time (s)", Field::RagdollBlend);
+            let hints: &[&str] = if e.data.animation.is_none() || e.data.mesh_visual.is_none() {
+                &["Needs an animated model (Mesh + Animation)."]
+            } else {
+                &["Scripts: entity.ragdoll.on(push=...), .off()."]
+            };
+            y = self.dim_lines(canvas, x, y, w, hints);
+            y += 6.0;
+        }
+        y
+    }
+
     /// The Nav Agent, Navigation and Nav Link sections.
     fn nav_sections(
         &mut self,

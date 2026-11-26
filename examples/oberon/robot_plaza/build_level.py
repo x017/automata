@@ -19,6 +19,8 @@ of them; the others each show a different way to use an Animation:
 - **Dancer**: just an Animation set to Dance. No script needed.
 - **Sitter**: Sitting with Loop off. One-shot clips hold their last frame.
 - **Slowpoke**: Walking at Speed 0.35, on the spot.
+- **Wobbly**: has a Ragdoll. ``scripts/wobbly.py`` lets it fall over when
+  you bump into it and stands it back up when it's lain still a moment.
 
 The model is ``models/robot.glb`` (RobotExpressive, CC0; see CREDITS.md).
 Its ``robot.glb.import.ron`` scales it to 1.8 m and moves its origin to
@@ -50,8 +52,11 @@ CROWD = [
     ("Slowpoke", (-3.5, 0.0, 1.5), 110, at.Animation("Walking", speed=0.35)),
     # Its left foot is on the bottom step, its right on the paving.
     ("Stepper", (4.2, 0.0, 2.6), 0, at.Animation("Idle", foot_ik=True)),
+    ("Wobbly", (2.4, 0.0, 0.6), -120, at.Animation("Idle")),
 ]
-SCRIPTS = {"Greeter": "scripts/greeter.py"}
+SCRIPTS = {"Greeter": "scripts/greeter.py", "Wobbly": "scripts/wobbly.py"}
+# Who can fall over, and how: limp, 70 kg, back on its feet in 0.6 s.
+RAGDOLLS = {"Wobbly": at.Ragdoll(mass=70.0, blend_time=0.6)}
 
 
 def environment(preset, **changes):
@@ -183,6 +188,8 @@ def build():
         bot = robot(name, position, yaw, animation)
         if name in SCRIPTS:
             bot.script = SCRIPTS[name]
+        if name in RAGDOLLS:
+            bot.add(RAGDOLLS[name])
         scene.add(bot)
 
     eye = (0.0, 3.5, 9.5)

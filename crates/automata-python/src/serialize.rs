@@ -41,6 +41,7 @@ pub fn staged_to_entity_data(entity: &StagedEntity) -> EntityData {
             StagedComponent::NavAgent(a) => data.nav_agent = Some(a.clone()),
             StagedComponent::Navigation(n) => data.navigation = Some(n.clone()),
             StagedComponent::NavLink(l) => data.nav_link = Some(l.clone()),
+            StagedComponent::Ragdoll(r) => data.ragdoll = Some(r.clone()),
             StagedComponent::MeshVisual(v) => data.mesh_visual = Some(MeshVisualData::from(v)),
             StagedComponent::RigidBody(b) => data.rigid_body = Some(b.clone()),
             StagedComponent::Collider3D(c) => data.collider_3d = Some(c.clone()),
@@ -106,6 +107,9 @@ pub fn entity_data_to_staged(data: &EntityData) -> StagedEntity {
     }
     if let Some(n) = &data.navigation {
         components.push(StagedComponent::Navigation(n.clone()));
+    }
+    if let Some(r) = &data.ragdoll {
+        components.push(StagedComponent::Ragdoll(r.clone()));
     }
     if let Some(l) = &data.nav_link {
         components.push(StagedComponent::NavLink(l.clone()));

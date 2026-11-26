@@ -19,6 +19,7 @@
 //! - [`Grass`] and [`Scatter`] — fields of blades and scattered models,
 //!   painted onto the ground.
 //! - [`Terrain`] — a heightmap ground, sculpted and painted with brushes.
+//! - [`Ragdoll`] — animated models going limp and blending back.
 //!
 //! All ECS types needed for common game code (`Entity`, queries) are
 //! re-exported; `hecs` remains available for advanced use.
@@ -31,6 +32,7 @@ mod foliage;
 mod handle;
 pub mod ik;
 mod particles;
+pub mod ragdoll;
 mod render;
 mod resources;
 mod scene;
@@ -56,6 +58,10 @@ pub use particles::{
     blend_label, burst, load_particle_textures, preview_particles, simulate_particles, spawn_burst,
     splash_emitter, spray_emitter, EmitterShape, FieldValue as ParticleField, ParticleEmitter,
     ParticleState, ParticleTexture, PRESETS as PARTICLE_PRESETS,
+};
+pub use ragdoll::{
+    push_ragdoll, ragdoll_status, set_ragdoll, Ragdoll, RagdollEdit, RagdollLayout, RagdollPose,
+    RagdollPush, RagdollStatus,
 };
 pub use render::{
     materialize_visuals, record_draw_list, DirectionalLight, MeshRenderer, MeshVisual,

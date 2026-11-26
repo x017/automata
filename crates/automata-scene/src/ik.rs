@@ -56,9 +56,29 @@ impl Limb {
     }
 }
 
+/// The side letter of a camel-case name (`ThighL`, `ForearmR`): `L` or
+/// `R` straight after a lower-case letter, ending the name.
+fn camel_side(name: &str) -> Option<bool> {
+    let n = name.rsplit(':').next().unwrap_or(name);
+    let mut chars = n.chars().rev();
+    let last = chars.next()?;
+    let before = chars.next()?;
+    if !before.is_ascii_lowercase() {
+        return None;
+    }
+    match last {
+        'L' => Some(true),
+        'R' => Some(false),
+        _ => None,
+    }
+}
+
 /// Which side a bone is on, from its name: `Some(true)` left,
 /// `Some(false)` right.
-fn side(name: &str) -> Option<bool> {
+pub(crate) fn side(name: &str) -> Option<bool> {
+    if let Some(left) = camel_side(name) {
+        return Some(left);
+    }
     let n = name.rsplit(':').next().unwrap_or(name).to_ascii_lowercase();
     let ends = |s: &str| {
         [".", "_", "-", " "]
@@ -80,9 +100,16 @@ fn side(name: &str) -> Option<bool> {
 }
 
 /// A bone name without its side and separators: `UpperLeg.L` →
-/// `upperleg`, `mixamorig:LeftUpLeg` → `upleg`, `thigh_l` → `thigh`.
-fn base(name: &str) -> String {
-    let n = name.rsplit(':').next().unwrap_or(name).to_ascii_lowercase();
+/// `upperleg`, `mixamorig:LeftUpLeg` → `upleg`, `thigh_l` → `thigh`,
+/// `ShinL` → `shin`.
+pub(crate) fn base(name: &str) -> String {
+    let n = name.rsplit(':').next().unwrap_or(name);
+    let n = if camel_side(n).is_some() {
+        &n[..n.len() - 1]
+    } else {
+        n
+    };
+    let n = n.to_ascii_lowercase();
     let mut n = n.replace("left", "").replace("right", "");
     for sep in [".", "_", "-", " "] {
         for s in ["l", "r"] {
@@ -717,6 +744,12 @@ mod tests {
         assert_eq!(base("UpperLeg.L"), "upperleg");
         assert_eq!(base("mixamorig:LeftUpLeg"), "upleg");
         assert_eq!(base("calf_l"), "calf");
+        assert_eq!((side("ShinL"), base("ShinL")), (Some(true), "shin".into()));
+        assert_eq!(
+            (side("ForearmR"), base("ForearmR")),
+            (Some(false), "forearm".into())
+        );
+        assert_eq!((side("HEAD"), base("Spinal")), (None, "spinal".into()));
         let rig = legs();
         assert_eq!(
             find_legs(&rig),

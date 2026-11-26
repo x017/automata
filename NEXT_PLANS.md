@@ -636,7 +636,10 @@ machines, behaviour trees, sight cones and hearing; the FPS drones now
 look, listen, chase and search). A13 terrain ✅ came next: a sculpted,
 splat-painted heightmap with a heightfield collider, grass that stands on
 it, and an island made only with Oberon's brushes
-(`examples/oberon/island`).
+(`examples/oberon/island`). Then B6 ragdolls ✅: characters go limp
+with bodies and joints worked out from their skeletons, take pushes, and
+stand back up where they fell with a blend (`entity.ragdoll`; Robot
+Plaza's Wobbly falls over when you bump into it).
 
 ## Process note
 
