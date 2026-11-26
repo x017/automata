@@ -284,6 +284,40 @@ impl GraphPlayer {
         }
     }
 
+    /// Switches to an edited version of the graph, carrying on where it
+    /// was: parameters keep their values and each layer stays in its state
+    /// (both by name) where the new graph still has them; the rest start
+    /// over. A fade in progress finishes at once.
+    pub fn reload(&mut self, graph: Arc<AnimGraph>, rig: &Rig) {
+        let mut next = Self::new(graph, rig);
+        for (i, p) in next.graph.parameters.iter().enumerate() {
+            if let Some(old) = self.param_index(&p.name) {
+                if self.kinds[old].label() == next.kinds[i].label() {
+                    next.params[i] = self.params[old];
+                }
+            }
+        }
+        for (l, layer) in next.graph.layers.iter().enumerate() {
+            let Some(old) = self.graph.layers.iter().position(|o| o.name == layer.name) else {
+                continue;
+            };
+            let head = self.run[old].head;
+            let name = &self.graph.layers[old].states[head.state].name;
+            if let Some(s) = layer.state_index(name) {
+                next.run[l].head = Playhead {
+                    state: s,
+                    fresh: false,
+                    ..head
+                };
+            }
+            // A weight a script set stays; one edited in the graph wins.
+            if (self.graph.layers[old].weight - layer.weight).abs() < 1e-6 {
+                next.run[l].weight = self.run[old].weight;
+            }
+        }
+        *self = next;
+    }
+
     /// The graph being played.
     #[must_use]
     pub fn graph(&self) -> &Arc<AnimGraph> {
@@ -957,6 +991,43 @@ mod tests {
 
     fn at(out: &GraphOutput, node: usize) -> Vec3 {
         out.pose.0[node].translation
+    }
+
+    #[test]
+    fn reloading_an_edited_graph_carries_on() {
+        let rig = rig();
+        let mut p = GraphPlayer::new(Arc::new(walk_graph()), &rig);
+        p.set("speed", 2.0);
+        p.set_layer_weight("Arms", 0.25);
+        p.play_state("", "Strafe", 0.0);
+        step(&mut p, &rig, 0.3);
+        // The edit: Strafe moves on the canvas, a parameter is added and
+        // Jump is renamed.
+        let mut g = walk_graph();
+        g.layers[0].states[2].position = [300.0, 40.0];
+        g.parameters.push(Parameter::float("lean", 0.5));
+        g.rename_state(0, "Jump", "Leap");
+        p.reload(Arc::new(g), &rig);
+        let s = p.state();
+        assert_eq!(s.layers[0].state, "Strafe", "stays in its state");
+        assert!(
+            (s.layers[0].time - 0.3).abs() < 1e-4,
+            "{}",
+            s.layers[0].time
+        );
+        assert!((p.get("speed").unwrap_or_default() - 2.0).abs() < 1e-6);
+        assert!((p.get("lean").unwrap_or_default() - 0.5).abs() < 1e-6);
+        assert!(
+            (s.layers[1].weight - 0.25).abs() < 1e-6,
+            "script weight kept"
+        );
+        p.trigger("jump");
+        step(&mut p, &rig, 0.01);
+        assert_eq!(p.state().layers[0].state, "Leap");
+        // A state that's gone (Leap is Jump again): the layer starts over
+        // at its entry.
+        p.reload(Arc::new(walk_graph()), &rig);
+        assert_eq!(p.state().layers[0].state, "Move");
     }
 
     #[test]

@@ -27,6 +27,9 @@ use crate::fields::{self, Choice, Field, Flag};
 use crate::theme::{color, layout};
 use crate::view::{self, Gizmo, GizmoMode, Projector};
 
+mod anim_canvas;
+pub mod anim_editor;
+mod anim_panels;
 pub mod assets_panel;
 pub mod attributes;
 pub mod brush;
@@ -801,6 +804,8 @@ enum EditTarget {
     UiProp(ui_editor::UiProp),
     /// A material editor property.
     MatProp(material_editor::MatProp),
+    /// An animation graph editor field.
+    AnimProp(anim_editor::AnimProp),
 }
 
 #[derive(Debug, Clone)]
@@ -1009,6 +1014,8 @@ pub struct Ui {
     /// The UI editor (for `.ui.ron` tabs).
     uied: ui_editor::UiEditor,
     mated: material_editor::MaterialEditor,
+    /// The animation graph editor (for `.anim.ron` tabs).
+    animed: anim_editor::AnimEditor,
     /// Drag-selecting text (`true` = whole lines from the gutter).
     code_drag: Option<bool>,
     /// The completion popup's rectangle this frame.
@@ -1107,6 +1114,7 @@ impl Ui {
             code_requests: Vec::new(),
             uied: ui_editor::UiEditor::default(),
             mated: material_editor::MaterialEditor::default(),
+            animed: anim_editor::AnimEditor::default(),
             code_drag: None,
             code_popup: None,
             code_clicks: None,
@@ -1334,6 +1342,10 @@ impl Ui {
             }
             EditTarget::MatProp(prop) => {
                 self.commit_material_prop(prop, &edit.buffer);
+                None
+            }
+            EditTarget::AnimProp(prop) => {
+                self.commit_anim_prop(prop, &edit.buffer);
                 None
             }
             EditTarget::Setting(which) => self.commit_setting(which, &edit.buffer),
@@ -1571,6 +1583,9 @@ impl Ui {
         // covered by the panels drawn after it.
         let t = Instant::now();
         if self.code.active.is_some() {
+            if self.anim_editor_shown() {
+                self.anim_find_model(doc);
+            }
             self.code_view(canvas, lay.viewport);
             self.profiler.since("UI: script / document editor", t);
         } else {

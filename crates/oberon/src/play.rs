@@ -472,6 +472,27 @@ impl PlaySession {
             .collect()
     }
 
+    /// The animation graphs running, for the graph editor: `(entity index
+    /// in the document, graph path as written, its playback)` for every
+    /// entity with an Animation whose graph runs.
+    #[must_use]
+    pub fn anim_graphs(&self) -> Vec<(usize, String, automata_scene::GraphState)> {
+        let world = self.scene.world();
+        self.map
+            .iter()
+            .filter(|&&(i, _)| {
+                self.doc
+                    .entities
+                    .get(i)
+                    .is_some_and(|e| e.data.animation.is_some())
+            })
+            .filter_map(|&(i, entity)| {
+                let s = automata_scene::animation_state(world, entity)?;
+                Some((i, s.graph_path?, s.graph?))
+            })
+            .collect()
+    }
+
     /// Applies what scripts changed (transforms, character velocities,
     /// attributes) to the simulation and the display document.
     pub fn apply_script_writes(&mut self, writes: &[EntityWrite]) {

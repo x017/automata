@@ -301,6 +301,9 @@ pub struct Animator {
     fresh: bool,
     /// The animation graph picking the clips, and its path.
     graph: Option<(String, GraphPlayer)>,
+    /// [`automata_assets::anim_graph_generation`] when the graph was last
+    /// loaded: when it moves, an edited graph is picked up.
+    graph_gen: u64,
 }
 
 impl Animator {
@@ -327,6 +330,7 @@ impl Animator {
             next_event: 1,
             fresh: false,
             graph: None,
+            graph_gen: 0,
         }
     }
 
@@ -392,6 +396,27 @@ impl Animator {
         self.fade = None;
         self.playing = true;
         self.graph = Some((path.to_string(), player));
+        self.graph_gen = automata_assets::anim_graph_generation();
+    }
+
+    /// Picks up an edited graph (an editor's unsaved changes coming or
+    /// going), carrying on where it was.
+    fn reload_graph(&mut self) {
+        let generation = automata_assets::anim_graph_generation();
+        if generation == self.graph_gen {
+            return;
+        }
+        self.graph_gen = generation;
+        let Some((path, player)) = &mut self.graph else {
+            return;
+        };
+        match automata_assets::load_anim_graph(path) {
+            Ok(graph) if !Arc::ptr_eq(&graph, player.graph()) => {
+                player.reload(graph, &self.rig);
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("{e}; keeping the graph as it was"),
+        }
     }
 
     /// Stops running the graph (the pose stays until something plays).
@@ -654,6 +679,7 @@ impl Animator {
     /// Runs the graph for `dt` seconds (when one is set and playing).
     /// Returns whether it did.
     fn advance_graph(&mut self, dt: f32) -> bool {
+        self.reload_graph();
         let Some((_, graph)) = &mut self.graph else {
             return false;
         };

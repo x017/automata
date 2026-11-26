@@ -141,6 +141,8 @@ pub enum UiAction {
     File(super::project_panel::FileCommand),
     /// A UI editor command.
     UiDoc(super::ui_editor::UiDocAction),
+    /// An animation graph editor command.
+    Anim(super::anim_editor::AnimAction),
 }
 
 /// Commands from a script tab's context menu (VS Code's set).
@@ -798,6 +800,7 @@ impl Ui {
             UiAction::CopyEntity(id) => self.copy_entity(doc, id),
             UiAction::Gizmo(mode) => self.gizmo = mode,
             UiAction::UiDoc(a) => self.ui_doc_action(a),
+            UiAction::Anim(a) => self.anim_action(a),
             UiAction::TogglePanel(panel) => {
                 let p = &mut self.panels;
                 match panel {

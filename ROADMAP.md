@@ -509,10 +509,14 @@ layers with bone masks).
   model's clips, or drop a `.anim.ron`), `automata-cli check` validating
   graphs against the model, and Robot Plaza's player driven by
   `anims/robot.anim.ron` (waving on a `["Torso"]` layer while it walks).
-- ⬜ The Oberon graph editor: `.anim.ron` files open in a tab with a node
-  canvas for states and transitions, panels for conditions, parameters,
-  layers and masks, 1D and 2D blend space editors, and during Play the
-  live state of the selected entity highlighted.
+- ✅ The Oberon graph editor: `.anim.ron` files open in a tab with a node
+  canvas (drag states, pan, zoom, right-click to add states and draw
+  transitions, Any State and the entry marked), panels for parameters,
+  layers and masks (bones picked from the model), states and transitions
+  with their conditions, and 1D and 2D blend space editors with draggable
+  points. During Play the selected entity's live state glows with its
+  progress, a firing transition lights up, parameters show their values,
+  and unsaved edits run at once, picking up where the graph was.
 - ⬜ Docs and an example.
 
 ### B5. Attachments and IK ⬜ M

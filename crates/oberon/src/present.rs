@@ -1062,6 +1062,7 @@ impl EditorApp {
     /// twice a second).
     fn watch_models(&mut self) {
         self.sync_material_previews();
+        self.sync_anim_editor();
         let root = self.doc.base_dir();
         if automata_assets::root().as_deref() != Some(root.as_path()) {
             automata_assets::set_root(Some(&root));
@@ -1562,6 +1563,43 @@ impl EditorApp {
         if changed {
             self.viewport.invalidate();
         }
+    }
+
+    /// Runs open graph tabs' unsaved edits in Play (and stops once they're
+    /// saved or closed), and shows the graph editor what the selected
+    /// entity's graph is doing (else the first entity running it).
+    fn sync_anim_editor(&mut self) {
+        let canonical =
+            |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        let wanted = self.ui.anim_tab_previews();
+        for (path, graph) in &wanted {
+            automata_assets::anim_graph::set_anim_graph_preview(path, graph.as_ref());
+        }
+        for shown in automata_assets::anim_graph::anim_graph_previews() {
+            if !wanted.iter().any(|(p, _)| canonical(p) == shown) {
+                automata_assets::anim_graph::set_anim_graph_preview(&shown, None);
+            }
+        }
+        let live = self.ui.anim_editor_path().and_then(|path| {
+            let play = self.play.as_ref()?;
+            let me = canonical(&path);
+            let running: Vec<_> = play
+                .anim_graphs()
+                .into_iter()
+                .filter(|(_, g, _)| canonical(&play.doc.resolve(g)) == me)
+                .collect();
+            let selected = play.doc.selected_index();
+            let (i, _, state) = running
+                .iter()
+                .find(|(i, _, _)| Some(*i) == selected)
+                .or_else(|| running.first())?
+                .clone();
+            Some(crate::ui::anim_editor::AnimLive {
+                entity: play.doc.entities[i].name().to_string(),
+                state,
+            })
+        });
+        self.ui.set_anim_live(live);
     }
 
     /// Creates a UI document from a template unless it exists: a HUD for

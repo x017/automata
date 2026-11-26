@@ -24,6 +24,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
@@ -838,6 +839,15 @@ type GraphEntry = (Option<SystemTime>, Result<Arc<AnimGraph>, String>);
 
 static GRAPHS: Mutex<BTreeMap<PathBuf, GraphEntry>> = Mutex::new(BTreeMap::new());
 static PREVIEWS: Mutex<BTreeMap<PathBuf, Arc<AnimGraph>>> = Mutex::new(BTreeMap::new());
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// A number that changes whenever an editor's unsaved version of a graph
+/// comes or goes ([`set_anim_graph_preview`]): running graphs compare it
+/// to reload what changed.
+#[must_use]
+pub fn anim_graph_generation() -> u64 {
+    GENERATION.load(Ordering::Relaxed)
+}
 
 fn canonical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
@@ -891,6 +901,25 @@ pub fn load_anim_graph(path: &str) -> Result<Arc<AnimGraph>, AnimGraphError> {
 /// editor's unsaved changes), or goes back to the disk with `None`.
 /// Returns whether anything changed.
 pub fn set_anim_graph_preview(path: &Path, graph: Option<&AnimGraph>) -> bool {
+    let changed = swap_preview(path, graph);
+    if changed {
+        GENERATION.fetch_add(1, Ordering::Relaxed);
+    }
+    changed
+}
+
+/// The graphs shown with an editor's unsaved changes (canonical paths).
+#[must_use]
+pub fn anim_graph_previews() -> Vec<PathBuf> {
+    PREVIEWS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .keys()
+        .cloned()
+        .collect()
+}
+
+fn swap_preview(path: &Path, graph: Option<&AnimGraph>) -> bool {
     let key = canonical(path);
     let mut previews = PREVIEWS.lock().unwrap_or_else(PoisonError::into_inner);
     match graph {

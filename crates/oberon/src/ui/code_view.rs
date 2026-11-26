@@ -127,6 +127,11 @@ impl Ui {
             self.drain_code_events();
             return handled;
         }
+        if self.anim_editor_shown() {
+            let handled = self.anim_editor_key(key, mods);
+            self.drain_code_events();
+            return handled;
+        }
         let handled = self.code.key(key, mods);
         self.drain_code_events();
         handled
@@ -149,7 +154,7 @@ impl Ui {
     /// Forwards typed text to the code editor.
     pub fn code_text(&mut self, text: &str) {
         self.code.hover = None;
-        if self.ui_editor_shown() || self.material_editor_shown() {
+        if self.ui_editor_shown() || self.material_editor_shown() || self.anim_editor_shown() {
             return;
         }
         let clean: String = text
@@ -571,6 +576,21 @@ impl Ui {
             }
             let bar = Rect::new(rect.x, rect.y, rect.w, 30.0);
             self.material_source_bar(canvas, bar);
+            rect = Rect::new(rect.x, rect.y + bar.h, rect.w, (rect.h - bar.h).max(0.0));
+        }
+        // And animation graphs in the graph editor.
+        if let Some(idx) = self.code.active.filter(|&i| {
+            self.code
+                .tabs
+                .get(i)
+                .is_some_and(|t| automata_assets::anim_graph::is_anim_graph_path(&t.path))
+        }) {
+            if self.anim_editor_shown() {
+                self.anim_doc_view(canvas, rect, idx);
+                return;
+            }
+            let bar = Rect::new(rect.x, rect.y, rect.w, 30.0);
+            self.anim_source_bar(canvas, bar);
             rect = Rect::new(rect.x, rect.y + bar.h, rect.w, (rect.h - bar.h).max(0.0));
         }
         // The editor's own zoom: draw in a space scaled by `k` on top of the
