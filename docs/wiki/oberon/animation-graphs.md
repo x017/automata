@@ -199,6 +199,49 @@ starting with one state per clip of the model. You can also drag a
 `.anim.ron` from the Files panel onto the model. **Edit** opens the file;
 **×** goes back to playing the Clip.
 
+![The graph editor: Robot Plaza's graph with the Move state selected, its 1D blend space on the right, and the robot live in Move during Play](../../assets/oberon/animation-graph.png)
+
+A graph opens in its own tab as a graph:
+
+- **The canvas** shows the shown layer's states as boxes and its
+  transitions as arrows, labelled with their conditions. **Any State** sits
+  above the others, and a small arrow marks the entry state. Drag a state
+  to move it, drag the background (or hold the middle button) to pan, and
+  use the wheel to zoom. Double-click the background to add a state.
+  Right-click for the rest: add a clip, 1D, 2D or empty state, **Make
+  Transition** (then click the state it goes to), **Set as Entry State**,
+  delete. **Delete** removes what's selected and **Esc** stops drawing a
+  transition.
+- **Layers** are tabs along the top. **+** adds one, and the panel sets its
+  name, weight and mask. Bones come from the model's skeleton through the
+  mask's **+** menu, or you can type them.
+- **Parameters** are listed with their kind and starting value. **+** adds
+  one, and renaming one renames it in every condition.
+- **A selected state** shows its motion. Switch between None, Clip, 1D
+  and 2D, pick clips from the model's list, and set the speed, a parameter
+  to multiply the speed by, and Loop. Blend spaces get an editor: a line
+  for 1D and a plane for 2D, with a handle per clip that you drag to move.
+- **A selected transition** shows its fade, exit time and conditions. Pick
+  a parameter and a test for each condition. A transition drawn from Any
+  State starts with a condition on a trigger, because without one it would
+  fire all the time.
+
+The status line names the model the clips and bones come from (an entity
+using the graph, else the selected or any animated one) and the graph's
+first problem, if it has any. **Edit as Text** shows the file as RON, and
+a file that doesn't read opens that way, with the error. Every graph edit
+is one undo step, and **Ctrl+S** saves. Editing in the graph view writes
+the whole file again, so comments in it are lost; Edit as Text keeps
+them.
+
+During Play the graph shows what the selected entity's graph is doing.
+If the selected entity doesn't run this graph, it shows the first entity
+that does. The state it's in glows green, with its progress along the
+bottom. A transition lights up while it fades, parameters show the
+script's values, and a blend space marks where the parameters put the
+character. Edits take effect at once, even unsaved: the running graph
+switches over and stays in its state, and parameters keep their values.
+
 `automata-cli check` (and Build) checks every graph the start scene uses
 against its model: clips and bones it doesn't have show up as warnings.
 

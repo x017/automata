@@ -494,7 +494,7 @@ and names with `:` under the entity name. Ponytail Park: C makes the
 Spectator cheer through `ctx.ref("Spectator:animation")`. Docs:
 [Scripting → Keys](docs/wiki/oberon/scripting.md#keys),
 [Channels](docs/wiki/oberon/scripting.md#channels).
-### B4. Animation state machine and graph editor 🔨 L
+### B4. Animation state machine and graph editor ✅ L
 NEXT_PLANS #4 phase 4. Scope: everything (1D and 2D blend spaces, and
 layers with bone masks).
 - ✅ Graph files and the runtime: `.anim.ron` with parameters (float, int,
@@ -517,7 +517,9 @@ layers with bone masks).
   points. During Play the selected entity's live state glows with its
   progress, a firing transition lights up, parameters show their values,
   and unsaved edits run at once, picking up where the graph was.
-- ⬜ Docs and an example.
+- ✅ Docs and an example: the manual's
+  [Animation graphs](docs/wiki/oberon/animation-graphs.md) page (format,
+  scripts, the editor) and Robot Plaza's graph-driven player.
 
 ### B5. Attachments and IK ⬜ M
 - Attach any entity to a bone (a sword in the hand, a hat on the head).
@@ -1146,7 +1148,7 @@ per effort. Reorder any time by telling me.
 | 25 | D1 UI widgets | M | ✅ |
 | 26 | D2 Custom fonts | S | ✅ |
 | 27 | D3 UI layout, focus, screens | M | ✅ |
-| 28 | B4 Animation state machine | L | 🔨 |
+| 28 | B4 Animation state machine | L | ✅ |
 | 29 | B5 Attachments and IK | M | ⬜ |
 | 30 | C4 Navigation | L | ⬜ |
 | 31 | C5 AI helpers | S | ⬜ |

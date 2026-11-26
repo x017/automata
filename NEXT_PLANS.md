@@ -366,7 +366,7 @@ engine (wgpu sprites).
 
 ---
 
-## 4. Skeletal animation 🟡 in progress (phases 1–2 ✅)
+## 4. Skeletal animation ✅ done
 
 **Decision: everything**: clips, crossfades, Inspector preview, animation
 events, root motion, and a visual animation state machine in Oberon.
@@ -397,13 +397,17 @@ events, root motion, and a visual animation state machine in Oberon.
    - Crossfading between clips.
    - In the Inspector: the clip list and a preview scrubber, so animations
      play in the editor without pressing Play.
-3. **Events and root motion:**
+3. **Events and root motion:** ✅
+   - Done: ROADMAP B3 (events in `.import.ron`, `on_animation_event`,
+     root motion driving the Character Controller).
    - Per-clip events stored in the model's import settings
      (`.import.ron`), e.g. `("run", 0.3, "footstep")`, delivered to
      scripts as an `on_animation_event(entity, ctx, name)` callback.
    - Optional root motion: the root bone's movement drives the Character
      Controller instead of sliding the feet.
-4. **State machine:**
+4. **State machine:** ✅
+   - Done: ROADMAP B4, with 2D blend spaces and layers with bone masks
+     too. Manual: [`animation-graphs.md`](docs/wiki/oberon/animation-graphs.md).
    - An animation graph asset (e.g. `player.anim.ron`) holding:
      - states (clip, speed, loop) and 1D blend spaces (idle / walk / run
        by speed);
@@ -609,7 +613,7 @@ Agreed: **quick wins first.**
 2. **HUD text** (#3, phase 1) ✅.
 3. **Mesh colliders** (#5) ✅.
 4. **Performance baseline** (#6) ✅.
-5. **Skeletal animation** (#4, phases 1–4): phase 1 ✅.
+5. **Skeletal animation** (#4, phases 1–4) ✅ (ROADMAP B1–B4).
 6. **Game UI**, the rest (#3, phases 2–5) ✅ (ROADMAP D1–D4).
 7. **Android** (#1), then the web.
 
@@ -623,7 +627,8 @@ localization** ✅: `lang/*.csv` string tables read with `ctx.tr`, a saved
 translate their keys, a per-language fallback font, and right-to-left text
 with Persian/Arabic letter joining (demo: Shape Signal in English, Spanish,
 Japanese and Persian). Before it, D6 editor workflow ✅.
-E1 Android export ✅ followed. Next: E3 web export (#7).
+E1 Android export ✅ followed, then E3 web export phase 1 (#7) and B4
+animation graphs ✅ (state machines with an Oberon graph editor).
 
 ## Process note
 

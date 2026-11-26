@@ -159,6 +159,40 @@ Pick a graph, or type a new name: Oberon makes the file in <code>anims/</code>,
 starting with one state per clip of the model. You can also drag a
 <code>.anim.ron</code> from the Files panel onto the model. <strong>Edit</strong> opens the file;
 <strong>×</strong> goes back to playing the Clip.</p>
+<p><img src="../../../assets/oberon/animation-graph.png" alt="The graph editor: Robot Plaza's graph with the Move state selected, its 1D blend space on the right, and the robot live in Move during Play" loading="lazy" decoding="async"></p>
+<p>A graph opens in its own tab as a graph:</p>
+<ul><li><strong>The canvas</strong> shows the shown layer's states as boxes and its
+transitions as arrows, labelled with their conditions. <strong>Any State</strong> sits
+above the others, and a small arrow marks the entry state. Drag a state
+to move it, drag the background (or hold the middle button) to pan, and
+use the wheel to zoom. Double-click the background to add a state.
+Right-click for the rest: add a clip, 1D, 2D or empty state, <strong>Make
+Transition</strong> (then click the state it goes to), <strong>Set as Entry State</strong>,
+delete. <strong>Delete</strong> removes what's selected and <strong>Esc</strong> stops drawing a
+transition.</li><li><strong>Layers</strong> are tabs along the top. <strong>+</strong> adds one, and the panel sets its
+name, weight and mask. Bones come from the model's skeleton through the
+mask's <strong>+</strong> menu, or you can type them.</li><li><strong>Parameters</strong> are listed with their kind and starting value. <strong>+</strong> adds
+one, and renaming one renames it in every condition.</li><li><strong>A selected state</strong> shows its motion. Switch between None, Clip, 1D
+and 2D, pick clips from the model's list, and set the speed, a parameter
+to multiply the speed by, and Loop. Blend spaces get an editor: a line
+for 1D and a plane for 2D, with a handle per clip that you drag to move.</li><li><strong>A selected transition</strong> shows its fade, exit time and conditions. Pick
+a parameter and a test for each condition. A transition drawn from Any
+State starts with a condition on a trigger, because without one it would
+fire all the time.</li></ul>
+<p>The status line names the model the clips and bones come from (an entity
+using the graph, else the selected or any animated one) and the graph's
+first problem, if it has any. <strong>Edit as Text</strong> shows the file as RON, and
+a file that doesn't read opens that way, with the error. Every graph edit
+is one undo step, and <strong>Ctrl+S</strong> saves. Editing in the graph view writes
+the whole file again, so comments in it are lost; Edit as Text keeps
+them.</p>
+<p>During Play the graph shows what the selected entity's graph is doing.
+If the selected entity doesn't run this graph, it shows the first entity
+that does. The state it's in glows green, with its progress along the
+bottom. A transition lights up while it fades, parameters show the
+script's values, and a blend space marks where the parameters put the
+character. Edits take effect at once, even unsaved: the running graph
+switches over and stays in its state, and parameters keep their values.</p>
 <p><code>automata-cli check</code> (and Build) checks every graph the start scene uses
 against its model: clips and bones it doesn't have show up as warnings.</p>
 <h2 id="when-somethings-wrong">When something's wrong<a class="anchor" href="#when-somethings-wrong" aria-label="Link to this section">#</a></h2>
