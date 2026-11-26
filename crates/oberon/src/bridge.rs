@@ -2115,6 +2115,104 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// `ctx.ai` (the shared script API's AI helpers) sees through the
+    /// frame's colliders: walls block sight, and the cone ignores what's
+    /// behind. Noises are heard once, and state machines run.
+    #[test]
+    fn scripts_see_hear_and_think_through_the_bridge() {
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("oberon_bridge_ai_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("guard.py");
+        std::fs::write(
+            &script,
+            "def start(entity, ctx):\n    \
+             entity.state['brain'] = ctx.ai.state_machine({\n        \
+             'idle': lambda e, c: 'alert' if c.ai.can_see(e, 'Front') else None,\n        \
+             'alert': lambda e, c: None}, initial='idle')\n\n\
+             def update(entity, ctx):\n    \
+             for name in ('Front', 'Behind', 'Walled'):\n        \
+             entity.attributes[name] = ctx.ai.can_see(entity, name)\n    \
+             if ctx.time.frame == 1:\n        \
+             ctx.ai.noise((0, 0, -5), radius=10, kind='shot')\n    \
+             entity.attributes['heard'] = len(ctx.ai.hear(entity, kinds='shot'))\n    \
+             entity.attributes['state'] = entity.state['brain'].update(entity, ctx)\n",
+        )
+        .unwrap();
+        let target = |id: u64, name: &str, position: [f32; 3]| EntityState {
+            id,
+            name: name.into(),
+            position,
+            scale: [1.0; 3],
+            ..EntityState::default()
+        };
+        let entities = vec![
+            EntityState {
+                script: Some(script.clone()),
+                ..target(1, "Guard", [0.0; 3])
+            },
+            target(2, "Front", [0.0, 0.0, -8.0]),
+            target(3, "Behind", [0.0, 0.0, 8.0]),
+            target(4, "Walled", [-4.0, 0.0, -6.0]),
+            target(5, "Wall", [-2.0, 0.0, -3.0]),
+        ];
+        let ball = |id: u64, center: [f32; 3]| ColliderShape::Ball {
+            id,
+            center,
+            radius: 0.5,
+        };
+        let input = FrameInput {
+            colliders: vec![
+                ball(2, [0.0, 1.0, -8.0]),
+                ball(3, [0.0, 1.0, 8.0]),
+                ball(4, [-4.0, 1.0, -6.0]),
+                ColliderShape::Cuboid {
+                    id: 5,
+                    center: [-2.0, 1.0, -3.0],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    half: [1.0, 2.0, 0.2],
+                },
+            ],
+            ..FrameInput::default()
+        };
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+        for (frame, heard) in [(1, 1), (2, 0)] {
+            assert!(bridge.send_frame_with(0.016, 0.016, &[], &entities, &input));
+            let msgs = pump(&mut bridge, |m| {
+                matches!(m, BridgeMsg::Frame(_) | BridgeMsg::Error { .. })
+            });
+            let reply = msgs
+                .iter()
+                .find_map(|m| match m {
+                    BridgeMsg::Frame(r) => Some(r.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{msgs:?}"));
+            let w = reply.writes.iter().find(|w| w.id == 1).unwrap();
+            let attrs = w.attributes.as_ref().unwrap();
+            assert_eq!(attrs["Front"], AttributeValue::Bool(true), "frame {frame}");
+            assert_eq!(
+                attrs["Behind"],
+                AttributeValue::Bool(false),
+                "frame {frame}"
+            );
+            assert_eq!(
+                attrs["Walled"],
+                AttributeValue::Bool(false),
+                "frame {frame}"
+            );
+            assert_eq!(attrs["heard"], AttributeValue::Int(heard), "frame {frame}");
+            assert_eq!(attrs["state"], AttributeValue::Text("alert".into()));
+        }
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn saves_and_settings_live_in_the_project() {
         let Some(python) = python() else {

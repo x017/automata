@@ -268,8 +268,8 @@ Press **Bake** to see where the drones can fly: blue over the platforms,
 with orange arcs for the hops between them. See
 [Navigation](../oberon/navigation.md).
 
-Each frame a drone bobs, turns to face the player, and checks its health.
-A lower number than last frame means a shot landed:
+Each frame a drone bobs and checks its health. A lower number than last
+frame means a shot landed, and the drone makes a note of where you were:
 
 ```python
 # scripts/enemy.py
@@ -281,15 +281,103 @@ A lower number than last frame means a shot landed:
             entity.despawn()
             return
         ctx.audio.play("sounds/enemy_hurt.ogg", volume=VOLUME, position=position)
+        if player is not None:
+            s["clue"] = player.transform.position  # go and look for the shooter
     s["health"] = health
 ```
 
 Passing `position=` makes a one-shot sound fade with distance, so a drone
 blowing up across the map is quieter than one next to you.
 
-Four times a second, a drone casts its own ray at you. It only fires if
-you're within 6 m and the first thing the ray hits is the Player, so
-ducking behind a wall works:
+Then it uses its senses. `ctx.ai.can_see` checks whether you're inside a
+110° cone in front of the drone, within 14 m, and not behind a wall (it
+casts a ray to find out). `ctx.ai.hear` returns the noises made near it
+this frame. Every blaster shot makes one, from `player.py`:
+
+```python
+# scripts/player.py
+    ctx.ai.noise(entity, radius=HEARD_FROM, kind="shot")  # drones hear it
+```
+
+```python
+# scripts/enemy.py
+    s["sees"] = ctx.ai.can_see(entity, player, fov=FOV, distance=SIGHT, eye=CENTER, aim=0.5)
+    if s["sees"]:
+        s["unseen"] = 0.0
+        s["clue"] = player.transform.position
+    else:
+        s["unseen"] += dt
+    for noise in ctx.ai.hear(entity, kinds="shot"):
+        s["clue"] = noise.position
+```
+
+So you can sneak up on a drone from behind, but the first shot you miss
+gives you away to every drone within 10 m.
+
+What the drone does with that is up to its *state machine*. It has three
+moods, and it's in exactly one at a time:
+
+- **idle**: bob in place and look slowly from side to side;
+- **chase**: fly after you and fire whenever it has a clear shot;
+- **search**: fly to where it last saw or heard you and look around.
+
+```python
+# scripts/enemy.py
+    s["brain"] = ctx.ai.state_machine(
+        {
+            "idle": {"enter": settle, "update": idle},
+            "chase": chase,
+            "search": {"enter": start_search, "update": search},
+        },
+        initial="idle",
+    )
+```
+
+Each mood is a function that runs every frame. Returning the name of
+another mood switches to it; `enter` functions run once on the way in.
+Here's idle:
+
+```python
+# scripts/enemy.py
+def idle(entity, ctx):
+    """Bob in place and look slowly from side to side."""
+    s = entity.state
+    hx, _, hz = s["home"]
+    entity.transform.position = (hx, s["y"], hz)
+    look(entity, s["yaw"] + math.sin(s["t"] * 0.8) * LOOK_AROUND)
+    if s["sees"]:
+        return "chase"
+    if s["clue"] is not None:
+        return "search"
+```
+
+While it's chasing, the Nav Agent does the flying. `go(player)` finds the
+shortest way round the walls and across the gaps, and follows you as you
+move. With a clear shot, the drone stops 3.5 m short so it's in range;
+without one it keeps coming round the wall. The drone bobs by moving its
+hover height up and down:
+
+```python
+# scripts/enemy.py
+    if entity.nav is not None:
+        # Hold back at firing range while it has a clear shot; otherwise
+        # keep coming, round the wall in the way.
+        entity.nav.stop_distance = s["hold_back"] if s["sees"] else 0.5
+    fly_to(entity, player)
+```
+
+```python
+# scripts/enemy.py
+    entity.nav.go(target)
+    entity.nav.hover = s["hover"] + bob(entity)
+```
+
+Out of sight for 3 seconds, it switches to search; seeing nothing there for
+another 3, it settles back to idle wherever it ended up.
+
+Four times a second, a chasing drone fires if you're within 6 m. It casts
+its own ray at you and only fires if the first thing the ray hits is the
+Player:
 
 ```python
 # scripts/enemy.py
@@ -300,28 +388,8 @@ ducking behind a wall works:
         player.attributes["health"] = player.attributes.get("health", 100) - DAMAGE
 ```
 
-A drone that notices you comes after you. Coming within 6.5 m, or
-shooting it, sets it chasing; getting 20 m away makes it give up:
-
-```python
-# scripts/enemy.py
-    away = math.dist(position, (px, py, pz))
-    if away < NOTICE:
-        s["chasing"] = True
-    elif away > GIVE_UP:
-        s["chasing"] = False
-```
-
-While it's chasing, the Nav Agent does the flying. `go(player)` finds the
-shortest way round the walls and across the gaps, follows you as you move,
-and stops 3.5 m short so it's in range. The drone bobs by moving its hover
-height up and down:
-
-```python
-# scripts/enemy.py
-        entity.nav.go(player)
-        entity.nav.hover = s["hover"] + bob
-```
+See [AI](../oberon/ai.md) for the state machines, behaviour trees, sight
+and hearing.
 
 The player script notices its own `health` dropping, flashes the screen, and
 respawns you at full health when it reaches zero or when you fall off the
@@ -339,10 +407,14 @@ despawned drones return, and health resets.
 
 `examples/oberon/fps/tests/test_fps.py` has two kinds of test. Some run the real
 scene with `run_scene(headless=True)`: the player lands on the platform,
-drones bob and turn, a close drone shoots, a shot drone chases you round
-the walls, and falling off respawns you.
+idle drones bob and look around, a drone that sees you shoots and one
+looking the other way doesn't, a shot drone chases you round the walls, and
+falling off respawns you.
 Others drive one script with a fake `ctx` to check shooting, switching
-weapons and jumping without a mouse.
+weapons and jumping without a mouse, and walk a drone through its moods:
+see you, lose you behind a wall, search, give up. The fake `ctx` uses the
+real `AI` helpers (`from automata.script_api import AI`), so sight and
+hearing work as in the game.
 
 Gameplay over time needs a paced run, otherwise `ctx.time.delta` is close to
 zero:

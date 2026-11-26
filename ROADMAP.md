@@ -657,10 +657,22 @@ loop don't get `ctx.save` yet.
   it chases you round the walls and down the platforms, stopping at
   firing range. Manual: [Navigation](docs/wiki/oberon/navigation.md).
 
-### C5. AI helpers ⬜ S
-- Pure-Python state-machine and behaviour-tree helpers in the script API.
-- Perception: a sight cone with line-of-sight ray casts, and hearing
-  radii.
+### C5. AI helpers ✅ S
+- ✅ Pure-Python state-machine and behaviour-tree helpers in the script
+  API (`ctx.ai.state_machine`: states as functions or enter/update/exit,
+  switching by returned name or `when` rules, `time` in state, history;
+  `sequence`, `selector`, `parallel`, `action`, `condition`, `wait`,
+  `invert`, `succeed`, `repeat`, `cooldown` nodes with
+  `SUCCESS`/`FAILURE`/`RUNNING`). The same classes are `automata.ai` for
+  Python games.
+- ✅ Perception: `ctx.ai.can_see` (a sight cone turned by the viewer's
+  rotation, with a line-of-sight ray cast that walls block) and
+  `visible`; hearing with `ctx.ai.noise(position, radius, kind)` and
+  `ctx.ai.hear(listener)`, each noise heard once per listener.
+- ✅ **Done:** the FPS drones are a three-state machine (idle → chase →
+  search): they look around, notice you when they see you, hear your
+  shots, search where they lost you, and only hold back at firing range
+  with a clear shot. Manual: [AI](docs/wiki/oberon/ai.md).
 
 ### C6. 2D toolkit ⬜ L
 The renderer draws sprites (`SpriteRenderer`), but Python and Oberon can
@@ -1181,7 +1193,7 @@ per effort. Reorder any time by telling me.
 | 28 | B4 Animation state machine | L | ✅ |
 | 29 | B5 Attachments and IK | M | ✅ |
 | 30 | C4 Navigation | L | ✅ |
-| 31 | C5 AI helpers | S | ⬜ |
+| 31 | C5 AI helpers | S | ✅ |
 | 32 | D5 Material assets and editor | M | ✅ |
 | 33 | A13 Terrain | L | ⬜ |
 | 34 | B6 Ragdolls | M | ⬜ |

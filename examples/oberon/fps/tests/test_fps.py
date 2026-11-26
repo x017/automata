@@ -15,6 +15,7 @@ import shutil
 import pytest
 
 import automata as at
+from automata.script_api import AI
 from automata.scripting import load_script
 
 GAME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -90,24 +91,26 @@ def test_the_player_stands_on_the_platform_and_holds_a_blaster():
     assert seen["repeater"][1] < -50, "the other weapon is put away"
 
 
-def test_drones_bob_and_face_the_player():
+def test_idle_drones_bob_and_look_around():
     heights, yaws = [], []
 
     def after(ctx):
-        drone = ctx.scene["Enemy 2"]  # starts at (-9.5, 2.5, 1.5), west of the player
+        drone = ctx.scene["Enemy 2"]  # at (-9.5, 2.5, 1.5), looking west, away from you
         heights.append(drone.transform.position[1])
-        yaws.append(drone.transform.rotation_euler)
+        yaws.append(drone.transform.rotation_euler[1])
 
-    at.run_scene(LEVEL, headless=True, max_frames=90, target_fps=60, update=after)
+    at.run_scene(LEVEL, headless=True, max_frames=120, target_fps=60, update=after)
     assert max(heights) - min(heights) > 0.05, "drones bob up and down"
-    # Facing east (+X) toward the player: turned -90 degrees about Y.
-    rx, ry, rz = yaws[-1]
-    facing = (-math.sin(ry), math.sin(rx) * math.cos(ry), -math.cos(rx) * math.cos(ry))
-    assert facing[0] > 0.8, f"the drone should look toward +X, looks along {facing}"
+    start = math.radians(90)
+    assert max(yaws) - min(yaws) > 0.5, "it looks from side to side"
+    assert all(abs(y - start) <= enemy_script.LOOK_AROUND + 1e-3 for y in yaws), (
+        "around the way it started out facing"
+    )
 
 
-def test_a_close_drone_shoots_the_player(tmp_path):
-    level = project_copy(tmp_path, ENEMIES=[((0.0, 1.0, -3.0), 0)])
+def test_a_drone_that_sees_the_player_shoots(tmp_path):
+    # 3 m away and turned round to face the player.
+    level = project_copy(tmp_path, ENEMIES=[((0.0, 1.0, -3.0), 180)])
     health = []
 
     def after(ctx):
@@ -116,6 +119,17 @@ def test_a_close_drone_shoots_the_player(tmp_path):
     at.run_scene(level, headless=True, max_frames=60, target_fps=60, update=after)
     assert health[0] == 100
     assert 70 <= health[-1] <= 90, health[-1]
+
+
+def test_a_drone_looking_the_other_way_does_not_notice(tmp_path):
+    level = project_copy(tmp_path, ENEMIES=[((0.0, 1.0, -3.0), 0)])
+    health = []
+
+    def after(ctx):
+        health.append(ctx.scene["Player"].attributes.get("health"))
+
+    at.run_scene(level, headless=True, max_frames=40, target_fps=60, update=after)
+    assert health[-1] == 100
 
 
 def test_far_drones_hold_fire():
@@ -231,8 +245,11 @@ class FakeAudio:
 
 
 class FakeEntity:
+    _ids = iter(range(1, 10_000))
+
     def __init__(self, name, position=(0.0, 0.0, 0.0), attributes=None):
         self.name = name
+        self.id = next(FakeEntity._ids)
         self.transform = FakeTransform(position)
         self.attributes = dict(attributes or {})
         self.state = {}
@@ -314,6 +331,7 @@ class FakeHud:
 class FakeTime:
     delta = 1.0 / 60.0
     elapsed = 1.0
+    frame = 1
 
 
 class FakeScene:
@@ -344,6 +362,7 @@ class FakeCtx:
         self.audio = FakeAudio()
         self.hud = FakeHud()
         self.time = FakeTime()
+        self.ai = AI(self)  # the real senses and state machines
         self.logs = []
 
     def log(self, *parts):
@@ -379,6 +398,7 @@ def test_shooting_a_drone_lowers_its_health_and_plays_the_blaster():
     blaster = player_script.WEAPONS[0]
     assert len(physics.rays) == blaster["shots"]
     assert all(ignore is player for _, _, ignore in physics.rays)
+    assert [n.kind for n in ctx.ai.noises] == ["shot"], "drones can hear it"
     assert drone.attributes["health"] == 100 - blaster["shots"] * blaster["damage"]
     assert blaster["sound"] in ctx.audio.played
     assert ("sprites/hit.png", 640.0, 360.0) in ctx.hud.images
@@ -476,46 +496,83 @@ class FakeNav:
     def __init__(self):
         self.target = None
         self.hover = 1.5
+        self.stop_distance = 3.5
+        self.arrived = True
+        self.velocity = (0.0, 0.0, 0.0)
 
     def go(self, target):
+        if target is not self.target:
+            self.arrived = False
         self.target = target
 
     def stop(self):
         self.target = None
+        self.arrived = True
 
 
-def test_a_drone_notices_a_close_player_and_gives_up_on_a_far_one():
+def drone_world(position, yaw=0.0):
+    """A drone with a (fake) Nav Agent, turned by ``yaw`` radians."""
     player, drone, scene = fps_world()
     drone.nav = FakeNav()
-    drone.transform.position = (0.0, 2.0, -8.0)
+    drone.transform.position = position
+    drone.transform.rotation_euler = (0.0, yaw, 0.0)
     ctx = FakeCtx(scene)
     enemy_script.start(drone, ctx)
-    enemy_script.update(drone, ctx)
-    assert drone.nav.target is None, "8 m away: not noticed yet"
-    drone.transform.position = (0.0, 2.0, -4.0)
-    enemy_script.update(drone, ctx)
-    assert drone.nav.target is player, "close: it gives chase"
-    drone.transform.position = (0.0, 2.0, -30.0)
-    enemy_script.update(drone, ctx)
-    assert drone.nav.target is None, "far away: it gives up"
-    assert drone.state["home"][2] == -30.0, "and bobs where it stopped"
+    return player, drone, ctx
 
 
-def test_a_shot_drone_gives_chase():
-    player, drone, scene = fps_world()
-    drone.nav = FakeNav()
-    ctx = FakeCtx(scene)
-    enemy_script.start(drone, ctx)
-    drone.transform.position = (0.0, 2.0, -12.0)
+def test_a_drone_chases_what_it_sees_and_searches_where_it_lost_it():
+    # 8 m north of the player, looking south at them.
+    player, drone, ctx = drone_world((0.0, 2.0, -8.0), yaw=math.pi)
+    enemy_script.update(drone, ctx)  # sees them: idle -> chase
+    enemy_script.update(drone, ctx)  # and flies after them
+    brain = drone.state["brain"]
+    assert brain.state == "chase" and drone.nav.target is player
+    assert drone.nav.stop_distance == 3.5, "holding back at firing range"
+    # A wall in the way: after FORGET seconds out of sight, it goes looking
+    # where it last saw them.
+    ctx.physics.hit = FakeHit(FakeEntity("Wall Low 1"), 2.0)
+    enemy_script.update(drone, ctx)
+    assert brain.state == "chase" and drone.nav.stop_distance == 0.5, "round the wall"
+    for _ in range(int(enemy_script.FORGET * 60) + 2):
+        enemy_script.update(drone, ctx)
+    assert brain.state == "search"
+    assert drone.nav.target == (0.0, 1.0, 0.0)
+    # There, it looks around for a while and settles down.
+    drone.nav.arrived = True
+    for _ in range(int(enemy_script.SEARCH_FOR * 60) + 2):
+        enemy_script.update(drone, ctx)
+    assert brain.state == "idle" and drone.nav.target is None
+    assert brain.history == ["idle", "chase", "search", "idle"]
+
+
+def test_a_drone_does_not_see_behind_itself_but_hears_a_shot():
+    # Looking north, away from the player 8 m south of it.
+    player, drone, ctx = drone_world((0.0, 2.0, -8.0))
+    enemy_script.update(drone, ctx)
+    assert drone.state["brain"].state == "idle"
+    ctx.ai.noise(player, radius=10.0, kind="shot")
+    enemy_script.update(drone, ctx)
+    enemy_script.update(drone, ctx)
+    assert drone.state["brain"].state == "search"
+    assert drone.nav.target == player.transform.position, "it comes to have a look"
+
+
+def test_a_shot_drone_goes_looking_for_the_shooter():
+    player, drone, ctx = drone_world((0.0, 2.0, -12.0))
+    enemy_script.update(drone, ctx)
     drone.attributes["health"] = 75
     enemy_script.update(drone, ctx)
-    assert drone.nav.target is player
-    assert drone.nav.hover > 1.5, "it bobs by changing its hover height"
+    enemy_script.update(drone, ctx)
+    assert drone.state["brain"].state == "search"
+    assert drone.nav.target == player.transform.position
+    assert drone.nav.hover != 1.5, "it bobs by changing its hover height"
 
 
 def test_drones_only_fire_with_a_clear_line_of_sight():
     player, drone, scene = fps_world()
     drone.transform.position = (0.0, 1.0, -3.0)
+    drone.transform.rotation_euler = (0.0, math.pi, 0.0)  # facing the player
     wall = FakeEntity("Wall Low 1")
     ctx = FakeCtx(scene, physics=FakePhysics(hit=FakeHit(wall, 1.5)))
     enemy_script.start(drone, ctx)

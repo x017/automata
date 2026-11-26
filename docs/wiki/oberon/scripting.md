@@ -120,6 +120,8 @@ for `entity` and `ctx`.
 | `entity.attach("Robot", "Head", position=…)` / `.detach()` / `.attached_to` | Follow a bone of another entity (a sword picked up into a hand), or let go ([Attachments & IK](attachments-and-ik.md#picking-things-up-from-a-script)) |
 | `entity.nav.go("Player")` / `.stop()` / `.arrived` / `.path` | Send a Nav Agent somewhere (a point, an entity or a name); it finds the way round walls and takes the jumps ([Navigation](navigation.md#nav-agents)) |
 | `ctx.nav.path(a, b)` / `.nearest(p)` / `.reachable(a, b)` | Ask the navigation mesh for the shortest walkable way ([Navigation](navigation.md#paths-from-scripts)) |
+| `ctx.ai.can_see(entity, "Player")` / `ctx.ai.hear(entity)` | Sight (a cone, blocked by walls) and hearing (noises made with `ctx.ai.noise`) ([AI](ai.md#sight)) |
+| `ctx.ai.state_machine({...})` / `ctx.ai.selector(...)` | State machines and behaviour trees for enemy brains ([AI](ai.md)) |
 | `entity.joint` | The entity's Joint while it runs, or `None`: `.angle`, `.value`, `.force`, `.attached`, `.broken`; set `.motor_target`, `.motor_speed`, `.limits`, `.enabled`, `.connected`. `on_joint_broken(entity, ctx)` runs when it snaps ([Physics → Joints](../guides/physics.md#joints)) |
 | `entity.despawn()` | Remove the entity until Play stops |
 | `entity.state` | A dict of your own that persists between frames (not saved) |

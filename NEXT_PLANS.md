@@ -630,8 +630,10 @@ Japanese and Persian). Before it, D6 editor workflow ✅.
 E1 Android export ✅ followed, then E3 web export phase 1 (#7), B4
 animation graphs ✅ (state machines with an Oberon graph editor), B5
 attachments and IK ✅ (Attach To Bone, Feet On Ground, reach and look-at)
-and C4 navigation ✅ (baked navmeshes, Nav Agents, `ctx.nav.path`; the FPS
-drones chase you round the walls).
+C4 navigation ✅ (baked navmeshes, Nav Agents, `ctx.nav.path`; the FPS
+drones chase you round the walls) and C5 AI helpers ✅ (`ctx.ai` state
+machines, behaviour trees, sight cones and hearing; the FPS drones now
+look, listen, chase and search).
 
 ## Process note
 

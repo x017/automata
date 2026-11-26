@@ -68,6 +68,7 @@ NAV: list[tuple[str, list[tuple[str, str]]]] = [
         ("wiki/oberon/animation-graphs.md", "Animation graphs"),
         ("wiki/oberon/attachments-and-ik.md", "Attachments & IK"),
         ("wiki/oberon/navigation.md", "Navigation"),
+        ("wiki/oberon/ai.md", "AI"),
         ("wiki/oberon/foliage.md", "Grass & foliage"),
         ("wiki/oberon/audio.md", "Audio"),
         ("wiki/oberon/prefabs-and-attributes.md", "Prefabs & attributes"),

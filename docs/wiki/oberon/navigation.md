@@ -12,7 +12,7 @@ round walls, up ramps, and across gaps they can jump. It has three parts:
 | [**Path queries**](#paths-from-scripts) | `ctx.nav.path(a, b)` and friends, for your own logic | Scripts |
 
 [The FPS example](../../../examples/oberon/fps) uses all three: once a
-drone notices you (you come near, or shoot it), it chases you round the
+drone sees you or hears a shot ([AI](ai.md)), it chases you round the
 walls and down the platforms until you're in range.
 
 ## The navigation mesh
@@ -122,12 +122,12 @@ firing range:
 
 ```python
 # scripts/enemy.py
-    if s["chasing"] and entity.nav is not None:
-        # The Nav Agent flies it: the shortest way round the walls, stopping
-        # short at firing range. Bobbing is its hover height going up and down.
-        entity.nav.go(player)
-        entity.nav.hover = s["hover"] + bob
+    entity.nav.go(target)
+    entity.nav.hover = s["hover"] + bob(entity)
 ```
+
+Scripts can change `stop_distance` as they go: the drones only hold back
+while they have a clear shot, and otherwise come round the wall.
 
 ## Paths from scripts
 

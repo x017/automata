@@ -24,6 +24,7 @@ EYE = 0.6  # eye height above the capsule's centre
 FALL_LIMIT = -10.0  # respawn below this
 RANGE = 30.0  # how far shots reach
 VOLUME = 0.45
+HEARD_FROM = 10.0  # how far away drones hear a shot (m)
 
 # The two blasters: entity name, sound, crosshair and how they shoot.
 WEAPONS = [
@@ -242,6 +243,7 @@ def shoot(entity, ctx, eye, axes):
     s["kick"] = 1.0
     s["pitch"] = min(1.5, s["pitch"] + weapon["kick"])
     ctx.audio.play(weapon["sound"], volume=VOLUME, pitch=random.uniform(0.92, 1.08))
+    ctx.ai.noise(entity, radius=HEARD_FROM, kind="shot")  # drones hear it
     spread = weapon["spread"]
     for _ in range(weapon["shots"]):
         jitter = (random.uniform(-spread, spread), random.uniform(-spread, spread))

@@ -694,6 +694,7 @@ the number of frames run.
 | `input` | Keys with the aliases `"shift"`, `"ctrl"`, `"alt"` (either side) and `"left"`/`"right"`/`"up"`/`"down"`, or actions bound with `settings.bind`; `axis(neg, pos)`; `any_just_pressed()` (the new key's name, for rebinding); mouse buttons, `mouse_delta`, `lock_mouse`; `touches` (fingers, or the left mouse button as finger 0); `touch_controls` (on-screen sticks and buttons: `set(sticks, buttons, look, show)`, `visible`, `stick(side)`, `configured`; see [Touch controls](guides/touch-controls.md)) |
 | `physics` | `grounded`, `raycast`, `water_height(x, z)`; the rest of the engine's physics, which also accepts script entities |
 | `nav` | `ready`, `path(start, end, partial=False)` (corner points, or `None`), `path_length(start, end)`, `nearest(point, max_distance=5.0)`, `reachable(start, end)`; points may be entities ([Navigation](oberon/navigation.md#paths-from-scripts)) |
+| `ai` | State machines (`state_machine(states, initial)`), behaviour-tree nodes (`sequence`, `selector`, `parallel`, `action`, `condition`, `wait`, `invert`, `succeed`, `repeat`, `cooldown`; `SUCCESS`, `FAILURE`, `RUNNING`), sight (`can_see(viewer, target, fov=120, distance=20, eye=1.6, aim=1.0, forward=(0, 0, -1), walls=True)`, `visible(viewer, targets=None, ...)`) and hearing (`noise(position_or_entity, radius=10, kind="noise")`, `hear(listener, hearing=1.0, kinds=None)`, `noises`). See [AI helpers](#ai-helpers-ctxai-automataai) |
 | `water` | `height(x, z)` (same as `physics.water_height`), `splash(position_or_entity, strength=1.0)`: rings and foam at that point (strength 0–10; 1 is about a crate dropped from a couple of metres) |
 | `particles` | `burst(effect, position_or_entity, direction=None, count=None, **fields)`: a one-off effect (a preset name or `at.ParticleEmitter`, with fields changed) that cleans up after itself; `emit(entity, count)`: extra particles from the entity's own emitter |
 | `audio`, `hud` | One-shot sounds; HUD images (`"builtin:circle"` and `"builtin:ring"` are built in), rectangles and text (`hud.text(text, x, y, size=24, color, align, shadow, outline)`) |
@@ -722,4 +723,49 @@ module (`automata.script_api`).
 `follow(entity, offset=(0, 3, 8), smooth=8.0, look_height=0.6)`. Several
 writes in one frame accumulate. The same API exists in Oberon's Play mode.
 See [Oberon: Cameras](oberon/cameras.md).
+
+### AI helpers (`ctx.ai`, `automata.ai`)
+
+Plain Python, in `automata.script_api` (re-exported as `automata.ai`).
+The manual page is [AI](oberon/ai.md).
+
+**`StateMachine(states=None, initial=None, on_change=None)`**: one state
+at a time. A state is a function (its update) or a dict/object with
+`enter`, `update`, `exit`; each is called with `(entity, ctx)` or
+`(entity, ctx, machine)`. `update(entity, ctx)` runs the `when` rules,
+then the state's update; a returned state name switches (`exit`,
+`on_change(entity, ctx, old, new)`, `enter`). `add(name, spec, enter=,
+update=, exit=)`, `when(source_or_"*", target, condition)`, `go(name)`,
+`is_in(*names)`, `state`, `previous`, `time` (seconds in the state),
+`states`, `history` (last 16). Unknown names raise `KeyError`.
+
+**Behaviour trees**: nodes have `tick(entity, ctx)` (returns `SUCCESS`,
+`FAILURE` or `RUNNING`, the strings `"success"`, `"failure"`,
+`"running"`), `status`, `reset()`, `describe()`. Functions passed as
+children become `Action`s: `True`/`None` is success, `False` failure,
+other statuses pass through, anything else raises `ValueError`.
+
+| Node | |
+|---|---|
+| `Action(fn, name=None)` | `fn(entity, ctx)` |
+| `Condition(fn, name=None)` | Success if true, else failure |
+| `Sequence(*children)` | In order until one fails; resumes at a running child |
+| `Selector(*children)` | In order until one succeeds; re-checks from the first child every tick |
+| `Parallel(*children, need="all")` | All every tick; `need="one"` succeeds on the first success |
+| `Invert(child)`, `Succeed(child)` | Swap success/failure; always succeed once done |
+| `Repeat(child, times=None)` | One repeat per tick; fails if the child fails |
+| `Wait(seconds)` | Running until `ctx.time.elapsed` has moved on that much |
+| `Cooldown(seconds, child)` | Fails for `seconds` after the child succeeds |
+
+**Senses** (`ctx.ai`, or `AI(ctx)` around any context with `physics.raycast`,
+`scene.find` and `time`): `can_see(viewer, target, fov=120, distance=20,
+eye=1.6, aim=1.0, forward=(0, 0, -1), walls=True)` (target: an entity, a
+name or a point; forward is turned by the viewer's `rotation_euler`; the
+line-of-sight ray ignores the viewer); `visible(viewer, targets=None,
+...)` (seen entities, nearest first); `noise(position_or_entity,
+radius=10, kind="noise", source=None)` returns a `Noise` (`position`,
+`radius`, `kind`, `source`, `time`, `distance`) that lasts this frame and
+the next; `hear(listener, hearing=1.0, kinds=None)` (noises within
+`radius × hearing` not yet heard by this listener, excluding its own);
+`noises`.
 

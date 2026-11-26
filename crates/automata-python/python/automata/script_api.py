@@ -86,6 +86,23 @@ __all__ = [
     "EntityNav",
     "Nav",
     "NavGraph",
+    "AI",
+    "StateMachine",
+    "Node",
+    "Action",
+    "Condition",
+    "Sequence",
+    "Selector",
+    "Parallel",
+    "Invert",
+    "Succeed",
+    "Repeat",
+    "Wait",
+    "Cooldown",
+    "Noise",
+    "SUCCESS",
+    "FAILURE",
+    "RUNNING",
     "FrameOutput",
     "Hit",
     "Hud",
@@ -2294,6 +2311,759 @@ def _string_pull(portals):
     if not same(last, end) or abs(last[1] - end[1]) > 1e-3:
         out.append(end)
     return out
+
+
+# --------------------------------------------------------------------------
+# AI helpers: state machines, behaviour trees, sight and hearing (ctx.ai)
+# --------------------------------------------------------------------------
+
+#: A behaviour tree node finished well.
+SUCCESS = "success"
+#: A behaviour tree node finished badly (or its condition is false).
+FAILURE = "failure"
+#: A behaviour tree node isn't done yet: tick it again next frame.
+RUNNING = "running"
+_STATUSES = (SUCCESS, FAILURE, RUNNING)
+
+
+def _call_state_fn(fn, entity, ctx, machine):
+    """Calls a state's function with as many of (entity, ctx, machine) as
+    it takes."""
+    if fn is None:
+        return None
+    try:
+        code = fn.__code__
+        n = 3 if code.co_flags & 0x04 else code.co_argcount  # *args: all three
+        if hasattr(fn, "__self__"):
+            n -= 1
+    except AttributeError:
+        n = 3
+    if n >= 3:
+        return fn(entity, ctx, machine)
+    if n == 2:
+        return fn(entity, ctx)
+    if n == 1:
+        return fn(entity)
+    return fn()
+
+
+class StateMachine:
+    """A finite state machine for one entity: it's always in exactly one
+    state, and each state has its own ``update`` (plus optional ``enter``
+    and ``exit``). Make one per entity in ``start`` and keep it in
+    ``entity.state``::
+
+        def patrol(entity, ctx):
+            ...
+            if ctx.ai.can_see(entity, "Player"):
+                return "chase"          # returning a name switches state
+
+        def chase(entity, ctx):
+            entity.nav.go("Player")
+
+        def start(entity, ctx):
+            entity.state["brain"] = ctx.ai.state_machine(
+                {"patrol": patrol, "chase": chase}, initial="patrol")
+
+        def update(entity, ctx):
+            entity.state["brain"].update(entity, ctx)
+
+    A state is a function (its ``update``), or a dict or object with
+    ``enter``, ``update`` and ``exit`` (any may be missing). Each is called
+    with ``(entity, ctx)``, or ``(entity, ctx, machine)`` if it takes three
+    arguments. Whatever ``update`` returns that's a state name switches to
+    it (``exit`` of the old, then ``enter`` of the new, in the same frame).
+    """
+
+    def __init__(self, states: dict | None = None, initial: str | None = None,
+                 on_change: Callable | None = None):
+        self._states = {}
+        self._transitions = []
+        for name, spec in (states or {}).items():
+            self.add(name, spec)
+        if initial is not None and initial not in self._states:
+            raise KeyError(f"no state named {initial!r}{_did_you_mean(initial, self._states)}")
+        self._initial = initial if initial is not None else next(iter(self._states), None)
+        #: Called as ``on_change(entity, ctx, old, new)`` on every switch.
+        self.on_change = on_change
+        self._state = None
+        self._previous = None
+        self._since = 0.0
+        self._entered = False
+        self._pending = None
+        self._entity = None
+        self._ctx = None
+        self._history = []
+
+    def add(self, name: str, spec=None, *, enter=None, update=None, exit=None) -> "StateMachine":
+        """Adds (or replaces) a state. ``spec`` is a function (the state's
+        update), or a dict or object with ``enter``/``update``/``exit``.
+        Returns the machine, so adds chain."""
+        if not isinstance(name, str) or not name:
+            raise TypeError(f"state names are non-empty strings, not {name!r}")
+        parts = {"enter": None, "update": None, "exit": None}
+        if callable(spec) and not isinstance(spec, type):
+            parts["update"] = spec
+        elif isinstance(spec, dict):
+            unknown = set(spec) - set(parts)
+            if unknown:
+                raise KeyError(f"state {name!r}: unknown keys {sorted(unknown)} "
+                               "(use enter, update, exit)")
+            parts.update(spec)
+        elif spec is not None:
+            for k in parts:
+                parts[k] = getattr(spec, k, None)
+        for k, v in (("enter", enter), ("update", update), ("exit", exit)):
+            if v is not None:
+                parts[k] = v
+        self._states[name] = parts
+        if getattr(self, "_initial", None) is None:
+            self._initial = name
+        return self
+
+    def when(self, source: str, target: str, condition: Callable) -> "StateMachine":
+        """Switches from ``source`` (``"*"``: any state) to ``target``
+        whenever ``condition(entity, ctx)`` is true, checked in order before
+        the state's update. Returns the machine."""
+        for s in (source, target):
+            if s != "*" and s not in self._states:
+                raise KeyError(f"no state named {s!r}{_did_you_mean(s, self._states)}")
+        if target == "*":
+            raise ValueError("a transition's target must be a state, not '*'")
+        self._transitions.append((source, target, condition))
+        return self
+
+    @property
+    def state(self) -> str | None:
+        """The current state's name (None before the first update)."""
+        return self._state if self._entered else self._initial
+
+    @property
+    def previous(self) -> str | None:
+        """The state before this one, or None."""
+        return self._previous
+
+    @property
+    def time(self) -> float:
+        """Seconds spent in the current state."""
+        return self._since
+
+    @property
+    def states(self) -> list[str]:
+        return list(self._states)
+
+    @property
+    def history(self) -> list[str]:
+        """The last few states entered, oldest first (for debugging)."""
+        return list(self._history)
+
+    def is_in(self, *names: str) -> bool:
+        """True when the current state is one of ``names``."""
+        return self.state in names
+
+    def go(self, name: str) -> None:
+        """Switches to ``name`` now (from inside a state, or from outside
+        after the first update); before the first update, starts there."""
+        if name not in self._states:
+            raise KeyError(f"no state named {name!r}{_did_you_mean(name, self._states)}")
+        if not self._entered:
+            self._initial = name
+            return
+        self._switch(name)
+
+    def _switch(self, name):
+        entity, ctx = self._entity, self._ctx
+        old = self._state
+        _call_state_fn(self._states[old]["exit"], entity, ctx, self)
+        self._previous, self._state, self._since = old, name, 0.0
+        self._history = (self._history + [name])[-16:]
+        if self.on_change is not None:
+            self.on_change(entity, ctx, old, name)
+        _call_state_fn(self._states[name]["enter"], entity, ctx, self)
+
+    def update(self, entity, ctx) -> str | None:
+        """Runs one frame: the first update enters the initial state, then
+        the transitions are checked and the current state's ``update``
+        runs. Returns the state it's in afterwards."""
+        self._entity, self._ctx = entity, ctx
+        if not self._states:
+            return None
+        if not self._entered:
+            self._entered = True
+            self._state = self._initial
+            self._history = [self._initial]
+            _call_state_fn(self._states[self._state]["enter"], entity, ctx, self)
+        else:
+            self._since += float(getattr(getattr(ctx, "time", None), "delta", 0.0) or 0.0)
+        for source, target, condition in self._transitions:
+            if (source == "*" or source == self._state) and target != self._state:
+                if condition(entity, ctx):
+                    self._switch(target)
+                    break
+        result = _call_state_fn(self._states[self._state]["update"], entity, ctx, self)
+        if isinstance(result, str) and result != self._state:
+            if result not in self._states:
+                raise KeyError(f"state {self._state!r} returned {result!r}, which isn't a state"
+                               f"{_did_you_mean(result, self._states)}")
+            self._switch(result)
+        return self._state
+
+    def __repr__(self):
+        return f"StateMachine(state={self.state!r}, states={self.states!r})"
+
+
+def _status(value, where):
+    if value is True or value is None:
+        return SUCCESS
+    if value is False:
+        return FAILURE
+    if value in _STATUSES:
+        return value
+    raise ValueError(f"{where} returned {value!r}: return SUCCESS, FAILURE, RUNNING, "
+                     "True/False or nothing")
+
+
+class Node:
+    """A behaviour tree node. ``tick(entity, ctx)`` runs it for a frame and
+    returns ``SUCCESS``, ``FAILURE`` or ``RUNNING``; ``reset()`` forgets
+    anything half done. Nodes remember what they were doing, so build one
+    tree per entity (in ``start``)."""
+
+    def tick(self, entity, ctx) -> str:
+        raise NotImplementedError
+
+    def reset(self) -> None:
+        """Forgets running children and timers."""
+
+    #: The status of the last tick (None before the first).
+    status: str | None = None
+
+    def _done(self, status):
+        self.status = status
+        return status
+
+    def describe(self, depth=0) -> str:
+        """The tree as indented text, with each node's last status."""
+        return "  " * depth + f"{self!r} -> {self.status}"
+
+
+def _node(x):
+    if isinstance(x, Node):
+        return x
+    if callable(x):
+        return Action(x)
+    raise TypeError(f"behaviour tree children are nodes or functions, not {x!r}")
+
+
+class Action(Node):
+    """Calls ``fn(entity, ctx)``, which returns ``SUCCESS``, ``FAILURE``
+    or ``RUNNING`` (or True / False, or nothing for success)."""
+
+    def __init__(self, fn: Callable, name: str | None = None):
+        if not callable(fn):
+            raise TypeError(f"Action needs a function, not {fn!r}")
+        self.fn = fn
+        self.name = name or getattr(fn, "__name__", "action")
+
+    def tick(self, entity, ctx):
+        return self._done(_status(self.fn(entity, ctx), f"action {self.name!r}"))
+
+    def __repr__(self):
+        return f"Action({self.name})"
+
+
+class Condition(Action):
+    """``fn(entity, ctx)`` is a yes/no question: true is ``SUCCESS``,
+    false ``FAILURE``. It never runs over frames."""
+
+    def tick(self, entity, ctx):
+        return self._done(SUCCESS if self.fn(entity, ctx) else FAILURE)
+
+    def __repr__(self):
+        return f"Condition({self.name})"
+
+
+class _Composite(Node):
+    def __init__(self, *children):
+        if len(children) == 1 and isinstance(children[0], (list, tuple)):
+            children = tuple(children[0])
+        self.children = [_node(c) for c in children]
+        self._index = 0
+
+    def reset(self):
+        self._index = 0
+        for c in self.children:
+            c.reset()
+
+    def describe(self, depth=0):
+        lines = [super().describe(depth)]
+        lines += [c.describe(depth + 1) for c in self.children]
+        return "\n".join(lines)
+
+    def __repr__(self):
+        return type(self).__name__
+
+
+class Sequence(_Composite):
+    """Runs its children in order while they succeed: ``FAILURE`` as soon
+    as one fails, ``SUCCESS`` when all have. A child that's ``RUNNING``
+    carries on from there next frame ("do this, then that")."""
+
+    def tick(self, entity, ctx):
+        while self._index < len(self.children):
+            s = self.children[self._index].tick(entity, ctx)
+            if s == RUNNING:
+                return self._done(RUNNING)
+            if s == FAILURE:
+                self.reset()
+                return self._done(FAILURE)
+            self._index += 1
+        self.reset()
+        return self._done(SUCCESS)
+
+
+class Selector(_Composite):
+    """Tries its children in order until one doesn't fail: ``SUCCESS``
+    with the first that succeeds, ``FAILURE`` if all fail ("try this, or
+    else that"). Each frame it starts again from the first child, so a
+    higher-priority branch (attack) interrupts a lower one (patrol)."""
+
+    def tick(self, entity, ctx):
+        for i, child in enumerate(self.children):
+            s = child.tick(entity, ctx)
+            if s != FAILURE:
+                # Whatever was running further down is interrupted.
+                for other in self.children[i + 1:]:
+                    other.reset()
+                return self._done(s)
+        return self._done(FAILURE)
+
+
+class Parallel(_Composite):
+    """Ticks every child each frame. ``need="all"``: ``SUCCESS`` once all
+    have succeeded, ``FAILURE`` as soon as one fails. ``need="one"``:
+    ``SUCCESS`` as soon as one succeeds, ``FAILURE`` once all have failed.
+    Otherwise ``RUNNING``."""
+
+    def __init__(self, *children, need: str = "all"):
+        super().__init__(*children)
+        if need not in ("all", "one"):
+            raise ValueError(f"need is 'all' or 'one', not {need!r}")
+        self.need = need
+        self._finished = {}
+
+    def reset(self):
+        super().reset()
+        self._finished = {}
+
+    def tick(self, entity, ctx):
+        for i, child in enumerate(self.children):
+            if i in self._finished:
+                continue
+            s = child.tick(entity, ctx)
+            if s != RUNNING:
+                self._finished[i] = s
+        results = list(self._finished.values())
+        if self.need == "all":
+            if FAILURE in results:
+                self.reset()
+                return self._done(FAILURE)
+            if len(results) == len(self.children):
+                self.reset()
+                return self._done(SUCCESS)
+        else:
+            if SUCCESS in results:
+                self.reset()
+                return self._done(SUCCESS)
+            if len(results) == len(self.children):
+                self.reset()
+                return self._done(FAILURE)
+        return self._done(RUNNING)
+
+
+class _Decorator(Node):
+    def __init__(self, child):
+        self.child = _node(child)
+
+    def reset(self):
+        self.child.reset()
+
+    def describe(self, depth=0):
+        return super().describe(depth) + "\n" + self.child.describe(depth + 1)
+
+    def __repr__(self):
+        return type(self).__name__
+
+
+class Invert(_Decorator):
+    """Swaps its child's ``SUCCESS`` and ``FAILURE`` ("not")."""
+
+    def tick(self, entity, ctx):
+        s = self.child.tick(entity, ctx)
+        return self._done({SUCCESS: FAILURE, FAILURE: SUCCESS}.get(s, s))
+
+
+class Succeed(_Decorator):
+    """Runs its child but always succeeds once it's done (an optional
+    step in a sequence)."""
+
+    def tick(self, entity, ctx):
+        s = self.child.tick(entity, ctx)
+        return self._done(RUNNING if s == RUNNING else SUCCESS)
+
+
+class Repeat(_Decorator):
+    """Runs its child again and again: ``times`` successes in a row for
+    ``SUCCESS`` (forever with None), ``FAILURE`` as soon as it fails. One
+    repeat per frame at most."""
+
+    def __init__(self, child, times: int | None = None):
+        super().__init__(child)
+        if times is not None and int(times) < 1:
+            raise ValueError("times must be at least 1 (or None for forever)")
+        self.times = None if times is None else int(times)
+        self._count = 0
+
+    def reset(self):
+        super().reset()
+        self._count = 0
+
+    def tick(self, entity, ctx):
+        s = self.child.tick(entity, ctx)
+        if s == FAILURE:
+            self.reset()
+            return self._done(FAILURE)
+        if s == SUCCESS:
+            self._count += 1
+            self.child.reset()
+            if self.times is not None and self._count >= self.times:
+                self._count = 0
+                return self._done(SUCCESS)
+        return self._done(RUNNING)
+
+
+def _now(ctx):
+    return float(getattr(getattr(ctx, "time", None), "elapsed", 0.0) or 0.0)
+
+
+class Wait(Node):
+    """``RUNNING`` for ``seconds`` of game time, then ``SUCCESS``."""
+
+    def __init__(self, seconds: float):
+        self.seconds = float(seconds)
+        self._until = None
+
+    def reset(self):
+        self._until = None
+
+    def tick(self, entity, ctx):
+        now = _now(ctx)
+        if self._until is None:
+            self._until = now + self.seconds
+        if now + 1e-9 >= self._until:
+            self._until = None
+            return self._done(SUCCESS)
+        return self._done(RUNNING)
+
+    def __repr__(self):
+        return f"Wait({self.seconds:g}s)"
+
+
+class Cooldown(_Decorator):
+    """Runs its child at most once every ``seconds``: after the child
+    succeeds, it fails straight away until the time is up (a shot, a
+    shout)."""
+
+    def __init__(self, seconds: float, child):
+        super().__init__(child)
+        self.seconds = float(seconds)
+        self._ready_at = -math.inf
+
+    def tick(self, entity, ctx):
+        now = _now(ctx)
+        if now < self._ready_at:
+            return self._done(FAILURE)
+        s = self.child.tick(entity, ctx)
+        if s == SUCCESS:
+            self._ready_at = now + self.seconds
+        return self._done(s)
+
+    def __repr__(self):
+        return f"Cooldown({self.seconds:g}s)"
+
+
+def _rotate_euler(v, euler):
+    """``v`` turned by an XYZ Euler rotation (radians), as transforms use."""
+    rx, ry, rz = euler
+    x, y, z = v
+    c, s = math.cos(rz), math.sin(rz)
+    x, y = x * c - y * s, x * s + y * c
+    c, s = math.cos(ry), math.sin(ry)
+    x, z = x * c + z * s, -x * s + z * c
+    c, s = math.cos(rx), math.sin(rx)
+    y, z = y * c - z * s, y * s + z * c
+    return (x, y, z)
+
+
+class Noise:
+    """A sound an AI can hear (``ctx.ai.noise``): ``position``, ``radius``
+    (how far it carries, m), ``kind`` (your label: "shot", "footstep"),
+    ``source`` (the entity's name, or None), ``time`` (``ctx.time.elapsed``
+    when made) and, from ``hear``, ``distance`` from the listener."""
+
+    __slots__ = ("position", "radius", "kind", "source", "time", "distance", "_id", "_frame",
+                 "_heard")
+
+    def __init__(self, position, radius, kind, source, time_, frame, nid):
+        self.position = position
+        self.radius = radius
+        self.kind = kind
+        self.source = source
+        self.time = time_
+        self.distance = 0.0
+        self._id = nid
+        self._frame = frame
+        self._heard = set()
+
+    def _for(self, distance):
+        n = Noise(self.position, self.radius, self.kind, self.source, self.time, self._frame,
+                  self._id)
+        n.distance = distance
+        return n
+
+    def __repr__(self):
+        return (f"Noise({self.kind!r}, position={tuple(round(v, 2) for v in self.position)}, "
+                f"radius={self.radius:g}, source={self.source!r})")
+
+
+class AI:
+    """``ctx.ai``: helpers for enemies and other characters that think for
+    themselves.
+
+    - **Senses:** ``can_see`` (a cone of vision blocked by walls),
+      ``visible``, ``noise`` and ``hear``.
+    - **Brains:** ``state_machine`` and behaviour tree nodes
+      (``selector``, ``sequence``, ``action``, ``condition``, ``wait``,
+      ...), with ``SUCCESS``, ``FAILURE`` and ``RUNNING``.
+
+    The same classes are ``automata.ai`` in Python games.
+    """
+
+    SUCCESS = SUCCESS
+    FAILURE = FAILURE
+    RUNNING = RUNNING
+    StateMachine = StateMachine
+    Node = Node
+
+    def __init__(self, ctx):
+        self._ctx = ctx
+        self._noises = []
+        self._next_noise = 1
+
+    # -- Brains -------------------------------------------------------------
+
+    def state_machine(self, states: dict | None = None, initial: str | None = None,
+                      on_change: Callable | None = None) -> StateMachine:
+        """A new :class:`StateMachine` (one per entity: keep it in
+        ``entity.state``)."""
+        return StateMachine(states, initial, on_change)
+
+    def sequence(self, *children) -> Sequence:
+        """Children in order while they succeed (see :class:`Sequence`)."""
+        return Sequence(*children)
+
+    def selector(self, *children) -> Selector:
+        """The first child that doesn't fail (see :class:`Selector`)."""
+        return Selector(*children)
+
+    def parallel(self, *children, need: str = "all") -> Parallel:
+        """Every child at once (see :class:`Parallel`)."""
+        return Parallel(*children, need=need)
+
+    def action(self, fn: Callable, name: str | None = None) -> Action:
+        return Action(fn, name)
+
+    def condition(self, fn: Callable, name: str | None = None) -> Condition:
+        return Condition(fn, name)
+
+    def wait(self, seconds: float) -> Wait:
+        return Wait(seconds)
+
+    def invert(self, child) -> Invert:
+        return Invert(child)
+
+    def succeed(self, child) -> Succeed:
+        return Succeed(child)
+
+    def repeat(self, child, times: int | None = None) -> Repeat:
+        return Repeat(child, times)
+
+    def cooldown(self, seconds: float, child) -> Cooldown:
+        return Cooldown(seconds, child)
+
+    # -- Sight --------------------------------------------------------------
+
+    def _entity(self, x, what):
+        if isinstance(x, str):
+            e = self._ctx.scene.find(x)
+            if e is None:
+                return None
+            return e
+        return x
+
+    @staticmethod
+    def _position(x):
+        if isinstance(x, (tuple, list)):
+            return _vec(tuple(x)[:3], 3)
+        return tuple(x.transform.position)
+
+    def can_see(self, viewer, target, fov: float = 120.0, distance: float = 20.0,
+                eye: float = 1.6, aim: float = 1.0, forward: Iterable[float] = (0.0, 0.0, -1.0),
+                walls: bool = True) -> bool:
+        """True when ``viewer`` (an entity) can see ``target`` (an entity,
+        its name, or a point): within ``distance`` metres, inside a cone
+        ``fov`` degrees wide around the way it faces, and (with ``walls``)
+        no collider in between.
+
+        ``eye`` is the eyes' height above the viewer's origin and ``aim``
+        the height looked at on the target (both m; ignored for a point).
+        ``forward`` is the way the viewer's model faces before it's
+        turned: ``(0, 0, -1)`` for most models and cameras, ``(0, 0, 1)``
+        for models that face +Z."""
+        return self._sight(viewer, target, fov, distance, eye, aim, forward, walls) is not None
+
+    def _sight(self, viewer, target, fov, distance, eye, aim, forward, walls):
+        viewer = self._entity(viewer, "viewer")
+        target = self._entity(target, "target")
+        if viewer is None or target is None:
+            return None
+        vx, vy, vz = self._position(viewer)
+        origin = (vx, vy + float(eye), vz)
+        if isinstance(target, (tuple, list)):
+            point = self._position(target)
+            target_id = None
+        else:
+            if getattr(target, "id", None) == getattr(viewer, "id", None):
+                return None
+            tx, ty, tz = self._position(target)
+            point = (tx, ty + float(aim), tz)
+            target_id = target.id
+        d = tuple(p - o for p, o in zip(point, origin))
+        dist = math.sqrt(sum(c * c for c in d))
+        if dist > float(distance):
+            return None
+        if dist > 1e-6 and float(fov) < 360.0:
+            rot = getattr(viewer.transform, "rotation_euler", (0.0, 0.0, 0.0))
+            f = _rotate_euler(_vec(tuple(forward)[:3], 3), rot)
+            fl = math.sqrt(sum(c * c for c in f))
+            if fl < 1e-9:
+                return None
+            cos = sum(a * b for a, b in zip(f, d)) / (fl * dist)
+            if cos < math.cos(math.radians(min(float(fov), 360.0)) / 2.0):
+                return None
+        if walls and dist > 1e-6:
+            direction = tuple(c / dist for c in d)
+            hit = self._ctx.physics.raycast(origin, direction, dist, ignore=viewer)
+            if hit is not None and hit.distance < dist - 0.25:
+                if target_id is None:
+                    return None
+                if hit.entity is not None:
+                    if hit.entity.id != target_id:
+                        return None
+                elif math.dist(hit.point, point) > 0.75:
+                    # Something unnamed, not at the target: a wall.
+                    return None
+        return dist
+
+    def visible(self, viewer, targets=None, fov: float = 120.0, distance: float = 20.0,
+                eye: float = 1.6, aim: float = 1.0, forward: Iterable[float] = (0.0, 0.0, -1.0),
+                walls: bool = True) -> list:
+        """The entities in ``targets`` (names or entities; None: every
+        entity in the scene) that ``viewer`` can see, nearest first (see
+        ``can_see``)."""
+        viewer = self._entity(viewer, "viewer")
+        if viewer is None:
+            return []
+        if targets is None:
+            pool = list(self._ctx.scene)
+        elif isinstance(targets, str):
+            pool = [targets]
+        else:
+            pool = list(targets)
+        seen = []
+        for t in pool:
+            t = self._entity(t, "target")
+            if t is None or getattr(t, "id", None) == getattr(viewer, "id", None):
+                continue
+            d = self._sight(viewer, t, fov, distance, eye, aim, forward, walls)
+            if d is not None:
+                seen.append((d, t))
+        seen.sort(key=lambda p: p[0])
+        return [t for _, t in seen]
+
+    # -- Hearing ------------------------------------------------------------
+
+    def _frame(self):
+        return int(getattr(getattr(self._ctx, "time", None), "frame", 0) or 0)
+
+    def noise(self, position, radius: float = 10.0, kind: str = "noise", source=None) -> Noise:
+        """Makes a sound AIs can ``hear``: at ``position`` (a point or an
+        entity), carrying ``radius`` metres. ``kind`` labels it, ``source``
+        (an entity or name) says who made it, so they don't hear
+        themselves. Every listener in range hears it once, this frame or
+        the next."""
+        if not isinstance(position, (tuple, list)) and source is None:
+            source = position
+        p = self._position(self._entity(position, "position")) if position is not None else None
+        if p is None:
+            raise ValueError("a noise needs a position")
+        r = float(radius)
+        if not math.isfinite(r) or r < 0:
+            raise ValueError(f"radius must be a positive number, not {radius!r}")
+        name = source if isinstance(source, str) or source is None else getattr(source, "name", None)
+        n = Noise(p, r, str(kind), name, _now(self._ctx), self._frame(), self._next_noise)
+        self._next_noise += 1
+        self._noises.append(n)
+        return n
+
+    def _live_noises(self):
+        frame = self._frame()
+        self._noises = [n for n in self._noises if n._frame >= frame - 1]
+        return self._noises
+
+    @property
+    def noises(self) -> list:
+        """Every noise made this frame or the last."""
+        return list(self._live_noises())
+
+    def hear(self, listener, hearing: float = 1.0, kinds=None) -> list:
+        """The noises ``listener`` hasn't heard yet that reach it, loudest
+        (nearest for its radius) first. A noise reaches when the listener
+        is within its radius times ``hearing`` (2.0: sharp ears).
+        ``kinds`` keeps only those labels."""
+        listener = self._entity(listener, "listener")
+        if listener is None:
+            return []
+        here = self._position(listener)
+        name = getattr(listener, "name", None)
+        lid = getattr(listener, "id", id(listener))
+        if isinstance(kinds, str):
+            kinds = (kinds,)
+        out = []
+        for n in self._live_noises():
+            if lid in n._heard or (name and n.source == name):
+                continue
+            if kinds is not None and n.kind not in kinds:
+                continue
+            d = math.dist(here, n.position)
+            if d <= n.radius * float(hearing):
+                n._heard.add(lid)
+                out.append(n._for(d))
+        out.sort(key=lambda n: n.distance / max(n.radius, 1e-6))
+        return out
+
+    def __repr__(self):
+        return f"AI(noises={len(self._noises)})"
 
 
 class Water:
@@ -6255,6 +7025,8 @@ class Context:
         self.water = Water(host)
         #: Path finding over the navigation mesh (see :class:`Nav`).
         self.nav = Nav(host)
+        #: Sight, hearing, state machines and behaviour trees (see :class:`AI`).
+        self.ai = AI(self)
         self.particles = Particles(host)
         self.scene = SceneView(host)
         self.audio = Audio(host)

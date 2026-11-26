@@ -40,7 +40,7 @@ automata-cli build examples/oberon/fps --target all
 | --- | --- |
 | `level.ron` | The scene: platforms, walls, grass, clouds, drones (Nav Agents), the navigation settings, the player and both weapons. |
 | `scripts/player.py` | Mouse look, movement, double jump, shooting, weapon switching, health and the HUD. |
-| `scripts/enemy.py` | Drones turn to face you, bob in the air and shoot when they can see you. Come close or shoot one and its Nav Agent chases you round the walls. |
+| `scripts/enemy.py` | Drones bob in the air and look around. A state machine (`ctx.ai.state_machine`) moves each one between idle, chase and search: it chases when it sees you (`ctx.ai.can_see`, a cone blocked by walls), searches where it heard a shot (`ctx.ai.hear`) or was hit, and shoots when it has a clear shot. Its Nav Agent flies it round the walls. |
 | `scripts/cloud.py` | Clouds drift up and down. |
 | `models/` | Kenney GLB models. The `.glb.import.ron` files hold import settings (Inspector → Import). |
 | `sounds/`, `sprites/` | Sound effects and the crosshair and hit-marker images. |
