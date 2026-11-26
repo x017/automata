@@ -633,7 +633,10 @@ attachments and IK ✅ (Attach To Bone, Feet On Ground, reach and look-at)
 C4 navigation ✅ (baked navmeshes, Nav Agents, `ctx.nav.path`; the FPS
 drones chase you round the walls) and C5 AI helpers ✅ (`ctx.ai` state
 machines, behaviour trees, sight cones and hearing; the FPS drones now
-look, listen, chase and search).
+look, listen, chase and search). A13 terrain ✅ came next: a sculpted,
+splat-painted heightmap with a heightfield collider, grass that stands on
+it, and an island made only with Oberon's brushes
+(`examples/oberon/island`).
 
 ## Process note
 

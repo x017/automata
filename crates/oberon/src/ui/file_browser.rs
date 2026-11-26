@@ -149,6 +149,7 @@ impl FileDialog {
             DialogKind::ImportSound(None) => "Import Sound",
             DialogKind::ImportSound(Some(_)) => "Choose Sound",
             DialogKind::ImportFont => "Import Font",
+            DialogKind::ImportHeightmap(_) => "Import Heightmap",
             DialogKind::BuildScene => "Choose Start Scene",
             DialogKind::BuildOutput => "Choose Output Folder",
             DialogKind::BuildKey => "Choose Android Release Key",
@@ -168,7 +169,7 @@ impl FileDialog {
             DialogKind::NewUiScreen => "ui.ron",
             DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => "mat.ron",
             DialogKind::ChooseAnimGraph(_) => "anim.ron",
-            DialogKind::ChooseMaterialMap(_) => "png",
+            DialogKind::ChooseMaterialMap(_) | DialogKind::ImportHeightmap(_) => "png",
             DialogKind::BuildOutput | DialogKind::PythonInterpreter => "",
             DialogKind::BuildKey => "pem",
             _ => "ron",
@@ -184,7 +185,7 @@ impl FileDialog {
             DialogKind::NewUiScreen => ".ui.ron",
             DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => ".mat.ron",
             DialogKind::ChooseAnimGraph(_) => ".anim.ron",
-            DialogKind::ChooseMaterialMap(_) => ".png .jpg",
+            DialogKind::ChooseMaterialMap(_) | DialogKind::ImportHeightmap(_) => ".png .jpg",
             DialogKind::SavePrefab(_) | DialogKind::InstantiatePrefab => ".prefab",
             DialogKind::OpenScript | DialogKind::NewScript | DialogKind::AttachScript(_) => ".py",
             DialogKind::BuildOutput => "folders",
@@ -211,7 +212,7 @@ impl FileDialog {
             DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => {
                 automata_assets::is_material_path(Path::new(name))
             }
-            DialogKind::ChooseMaterialMap(_) => {
+            DialogKind::ChooseMaterialMap(_) | DialogKind::ImportHeightmap(_) => {
                 automata_assets::material::is_image_path(Path::new(name))
             }
             DialogKind::ChooseAnimGraph(_) => {
@@ -260,6 +261,7 @@ impl FileDialog {
                 | DialogKind::PythonInterpreter
                 | DialogKind::ChooseMaterial(_)
                 | DialogKind::ChooseMaterialMap(_)
+                | DialogKind::ImportHeightmap(_)
         )
     }
 
@@ -280,6 +282,7 @@ impl FileDialog {
             DialogKind::AttachScript(_) => "Attach",
             DialogKind::ImportModel(None)
             | DialogKind::ImportSound(None)
+            | DialogKind::ImportHeightmap(_)
             | DialogKind::ImportFont => "Import",
             DialogKind::ImportModel(Some(_))
             | DialogKind::ImportSound(Some(_))
@@ -1338,6 +1341,7 @@ impl Ui {
             DialogKind::ImportSound(None) => Intent::AddSound { path, at: None },
             DialogKind::ImportSound(Some(id)) => Intent::SetAudioClip { id, path },
             DialogKind::ImportFont => Intent::ImportFont(path),
+            DialogKind::ImportHeightmap(id) => Intent::ImportHeightmap { id, path },
             DialogKind::BuildScene | DialogKind::BuildOutput => {
                 let which = if fd.kind == DialogKind::BuildScene {
                     SettingText::BuildScene

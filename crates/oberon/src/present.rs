@@ -517,12 +517,14 @@ impl EditorApp {
         match intent {
             Intent::Brush {
                 id,
+                tool,
                 point,
                 normal,
                 radius,
                 strength,
+                anchor,
             } => {
-                doc.brush(id, point, normal, radius, strength);
+                doc.brush(id, tool, point, normal, radius, strength, anchor);
             }
             Intent::Select(id) => {
                 doc.select(id);
@@ -742,6 +744,24 @@ impl EditorApp {
                         l.to.clone_from(&to);
                     }
                 });
+            }
+            Intent::AutoPaintTerrain(id) => {
+                doc.auto_paint_terrain(id, 1.5, 38.0);
+            }
+            Intent::ImportHeightmap { id, path } => {
+                match std::fs::read(&path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|bytes| doc.import_heightmap(id, &bytes))
+                {
+                    Ok(()) => self.ui.log(
+                        LogLevel::Info,
+                        format!("Terrain heights from {}", path.display()),
+                    ),
+                    Err(e) => self.ui.log(
+                        LogLevel::Error,
+                        format!("Couldn't import {}: {e}", path.display()),
+                    ),
+                }
             }
             Intent::BakeNav(id) => match PlaySession::bake_nav_to_file(doc, id) {
                 Ok((path, mesh)) => {

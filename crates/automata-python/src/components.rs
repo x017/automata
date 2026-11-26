@@ -1883,6 +1883,8 @@ pub enum StagedComponent {
     Grass(automata_scene::Grass),
     /// Draws the entity's model at many spots on the ground.
     Scatter(automata_scene::Scatter),
+    /// A heightmap ground.
+    Terrain(automata_scene::Terrain),
     /// Holds the entity's body to another's (or the world).
     Joint(automata_physics::Joint),
     /// Follows a bone of another entity (the transform is its offset).
@@ -1967,6 +1969,9 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(n) = obj.cast::<crate::nav::PyNavigation>() {
         return Ok(StagedComponent::Navigation(n.get().inner.clone()));
     }
+    if let Ok(t) = obj.cast::<crate::terrain::PyTerrain>() {
+        return Ok(StagedComponent::Terrain(t.get().inner()));
+    }
     if let Ok(l) = obj.cast::<crate::nav::PyNavLink>() {
         return Ok(StagedComponent::NavLink(l.get().inner.clone()));
     }
@@ -1975,8 +1980,8 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
          MeshRenderer, DirectionalLight, PointLight, SpotLight, Environment, Water, \
-         AudioSource, ParticleEmitter, Animation, Grass, Scatter, Joint, Attach, \
-         NavAgent, Navigation, or NavLink"
+         AudioSource, ParticleEmitter, Animation, Grass, Scatter, Terrain, Joint, \
+         Attach, NavAgent, Navigation, or NavLink"
     )))
 }
 

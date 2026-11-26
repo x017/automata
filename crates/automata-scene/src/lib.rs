@@ -18,6 +18,7 @@
 //! - [`ParticleEmitter`] and [`simulate_particles`] — CPU particles.
 //! - [`Grass`] and [`Scatter`] — fields of blades and scattered models,
 //!   painted onto the ground.
+//! - [`Terrain`] — a heightmap ground, sculpted and painted with brushes.
 //!
 //! All ECS types needed for common game code (`Entity`, queries) are
 //! re-exported; `hecs` remains available for advanced use.
@@ -34,6 +35,7 @@ mod render;
 mod resources;
 mod scene;
 mod springs;
+pub mod terrain;
 mod transform;
 
 pub use anim_graph::{GraphLayerState, GraphParam, GraphPlayer, GraphState};
@@ -62,6 +64,10 @@ pub use render::{
 pub use resources::Resources;
 pub use scene::{EntityId, Name, Scene, SceneWorld};
 pub use springs::SpringSim;
+pub use terrain::{
+    default_layers as default_terrain_layers, Sculpt, Terrain, TerrainLayer,
+    MAX_TERRAIN_RESOLUTION, MAX_TERRAIN_SIZE, MIN_TERRAIN_RESOLUTION, TERRAIN_LAYERS,
+};
 pub use transform::{propagate_transforms, GlobalTransform, Parent, Transform};
 
 pub use hecs::Entity;

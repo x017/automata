@@ -33,7 +33,10 @@ Z, centred on it. It's filled at full density; `(0, 0)` means no
 rectangle at all, only what you paint. The blades stand on the entity's
 XZ plane, so move or tilt the entity to move the field. Brush strokes
 carry their own height and surface normal, so painted grass follows
-slopes and stands on top of whatever you painted onto.
+slopes and stands on top of whatever you painted onto. Over a
+[`Terrain`](../oberon/terrain.md) the blades stand on its surface instead,
+and keep following it when it's sculpted (`follow_terrain=False` turns
+that off).
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -165,5 +168,6 @@ paint more.
 ## See also
 
 - [Oberon → Grass & foliage](../oberon/foliage.md): the brush
+- [Oberon → Terrain](../oberon/terrain.md): ground to grow it on
 - [Rendering & Lights → Environment](rendering-and-lights.md#environment)
 - [Physics → Character controller](physics.md)

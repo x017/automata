@@ -230,6 +230,9 @@ impl PyEntity {
                     StagedComponent::Scatter(v) => {
                         Py::new(py, crate::foliage::PyScatter::from_inner(v.clone()))?.into_any()
                     }
+                    StagedComponent::Terrain(v) => {
+                        Py::new(py, crate::terrain::PyTerrain::from_inner(v.clone()))?.into_any()
+                    }
                     StagedComponent::Joint(v) => {
                         Py::new(py, crate::joints::PyJoint::from_inner(v.clone()))?.into_any()
                     }
@@ -484,24 +487,17 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
             StagedComponent::ParticleEmitter(c) => {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }
-            StagedComponent::Environment(c) => {
-                let _ = scene.world_mut().insert_one(id, *c);
-            }
-            StagedComponent::Water(c) => {
-                let _ = scene.world_mut().insert_one(id, *c);
-            }
+            StagedComponent::Environment(c) => drop(scene.world_mut().insert_one(id, *c)),
+            StagedComponent::Water(c) => drop(scene.world_mut().insert_one(id, *c)),
             StagedComponent::AudioSource(c) => {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }
             StagedComponent::Animation(c) => {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }
-            StagedComponent::Grass(c) => {
-                let _ = scene.world_mut().insert_one(id, c.clone());
-            }
-            StagedComponent::Scatter(c) => {
-                let _ = scene.world_mut().insert_one(id, c.clone());
-            }
+            StagedComponent::Grass(c) => drop(scene.world_mut().insert_one(id, c.clone())),
+            StagedComponent::Scatter(c) => drop(scene.world_mut().insert_one(id, c.clone())),
+            StagedComponent::Terrain(c) => drop(scene.world_mut().insert_one(id, c.clone())),
             StagedComponent::Joint(c) => {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }

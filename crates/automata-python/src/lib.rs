@@ -36,6 +36,7 @@ mod scene;
 mod screen;
 mod serialize;
 mod stepped;
+mod terrain;
 
 pub use stepped::{install_step_driver, step_running_game, StepDriver};
 
@@ -115,6 +116,8 @@ pub fn init_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<components::PyWater>()?;
     m.add_class::<foliage::PyGrass>()?;
     m.add_class::<foliage::PyScatter>()?;
+    m.add_class::<terrain::PyTerrain>()?;
+    m.add_class::<terrain::PyTerrainLayer>()?;
     m.add_class::<components::PyAudioSource>()?;
     m.add_class::<animation::PyAnimation>()?;
     m.add_class::<animation::PyAttach>()?;

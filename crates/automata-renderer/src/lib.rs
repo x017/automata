@@ -45,7 +45,9 @@ pub use grass::{
 pub use light::{
     PointLight, SpotCone, Sun, DEFAULT_SHADOW_DISTANCE, MAX_POINT_LIGHTS, MAX_POINT_SHADOWS,
 };
-pub use material::{Material, MaterialParams, MaterialTextures, DEFAULT_ROUGHNESS};
+pub use material::{
+    Material, MaterialParams, MaterialTextures, TerrainMaterial, DEFAULT_ROUGHNESS,
+};
 pub use mesh::{Mesh, MeshData, SkinVertex, Vertex};
 pub use particles::{
     sheet_cell, ParticleBatch, ParticleBlend, ParticleInstance, ParticleSprite,

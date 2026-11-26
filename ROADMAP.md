@@ -347,15 +347,37 @@ drop. On a real GPU a frame's grass is one draw per visible chunk with no
 uploads, but "no frame drop on High" still needs checking on real
 hardware. Not done yet: a brush stroke regrows and rebakes the whole
 field (fine at this size, a hitch on huge fields), and painting doesn't
-follow terrain until A13.
+follow terrain until A13 (now it does).
 
-### A13. Terrain ⬜ L
-- A `Terrain` component: a heightmap with sculpt brushes in Oberon
-  (raise, lower, smooth, flatten, noise) and 4-layer texture painting.
-- A Rapier heightfield collider and water-level integration.
-- Grass and foliage painting (A12) follow the terrain.
-- **Done when:** an island with beaches, cliffs and grassy hills is
-  sculpted entirely in Oberon.
+### A13. Terrain ✅ L
+- ✅ A `Terrain` component: a square heightmap (33 to 1025 heights a side,
+  resampled when changed) centred on its entity, drawn in 32-cell chunks
+  (a stroke rebuilds only the chunks it touched) with a 4-layer splat
+  material (grass, rock, sand, dirt: colour, optional
+  texture, tile size). Oberon's Inspector has sculpt brushes (Raise,
+  Lower, Smooth, Flatten to where the stroke began, Noise) and layer
+  paint brushes in four sizes and three strengths, one undo step a
+  stroke, in the entity's space. Plus Auto Paint (by height and slope)
+  and Import Heightmap (greyscale PNG/JPEG). Create → Terrain makes one.
+  Saved as two base64 PNGs (a 129² terrain is about 35 KB).
+- ✅ A Rapier heightfield collider, rebuilt when sculpted and moved with
+  its entity. Ray casts hit it, in games, in scripts during Oberon's Play,
+  and under the editor's brush.
+  Water: Auto Paint reads the first Water's height for the beach line,
+  and the Water's shoreline foam and depth colour meet the ground.
+- ✅ Grass and Scatter over a terrain stand on its surface and follow it
+  when it's re-sculpted (`follow_terrain`, on by default).
+- ✅ Python: `at.Terrain` (`sculpt`, `paint`, `auto_paint`, `shape`,
+  `load_heightmap`, `height_at`, `normal_at`, `weights_at`) and
+  `at.TerrainLayer`.
+- ✅ **Done:** `examples/oberon/island`, a 128 m island with a beach and a
+  cove, two grassy hills, a dirt path and a cliff headland. Every height
+  and colour comes from Oberon's brushes and Auto Paint:
+  `crates/oberon/tests/island.rs` replays the strokes through the
+  editor's own calls and checks the level still matches. Manual:
+  [Terrain](docs/wiki/oberon/terrain.md). Not done yet: no terrain LOD
+  (every chunk at full detail, so 1025² is heavy), and Grass/Scatter have no
+  Follow Terrain toggle in the Inspector (Python and scene files only).
 
 ---
 
@@ -1195,7 +1217,7 @@ per effort. Reorder any time by telling me.
 | 30 | C4 Navigation | L | ✅ |
 | 31 | C5 AI helpers | S | ✅ |
 | 32 | D5 Material assets and editor | M | ✅ |
-| 33 | A13 Terrain | L | ⬜ |
+| 33 | A13 Terrain | L | ✅ |
 | 34 | B6 Ragdolls | M | ⬜ |
 | 35 | C6 2D toolkit | L | ⬜ |
 | 36 | D6 Editor workflow | M | ✅ |

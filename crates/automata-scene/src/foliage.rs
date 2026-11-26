@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
+use crate::terrain::TerrainGround;
 use automata_renderer::{DrawList, GrassBlade, GrassChunk, GrassField, GrassLook, MeshData};
 use glam::{Mat3, Mat4, Quat, Vec2, Vec3};
 use hecs::Entity;
@@ -344,6 +345,11 @@ impl KeyHasher {
         self
     }
 
+    fn word(&mut self, value: u64) -> &mut Self {
+        value.hash(&mut self.0);
+        self
+    }
+
     fn finish(&self) -> u64 {
         self.0.finish()
     }
@@ -383,10 +389,24 @@ pub struct Grass {
     /// Brush strokes, in the entity's space, in the order painted.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub strokes: Vec<Dab>,
+    /// Whether blades over a [`crate::Terrain`] grow on its surface (so
+    /// they follow it when it's sculpted) rather than where they were
+    /// painted.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub follow_terrain: bool,
     /// What it grew last (a cache; leave it to `..Default::default()`).
     #[doc(hidden)]
     #[serde(skip)]
     pub grown: Grown<Vec<Arc<GrassChunk>>>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's signature
+fn is_true(v: &bool) -> bool {
+    *v
 }
 
 impl Default for Grass {
@@ -404,6 +424,7 @@ impl Default for Grass {
             seed: 0,
             area: [0.0, 0.0],
             strokes: Vec::new(),
+            follow_terrain: true,
             grown: Grown::default(),
         }
     }
@@ -433,6 +454,16 @@ impl Grass {
     /// and whenever anything that shapes them changes).
     #[must_use]
     pub fn chunks(&self, model: Mat4) -> Arc<Vec<Arc<GrassChunk>>> {
+        self.chunks_on(model, &TerrainGround::none())
+    }
+
+    /// [`Self::chunks`], standing blades on `ground`'s terrains.
+    pub(crate) fn chunks_on(
+        &self,
+        model: Mat4,
+        ground: &TerrainGround,
+    ) -> Arc<Vec<Arc<GrassChunk>>> {
+        let follow = self.follow_terrain && !ground.is_empty();
         let key = KeyHasher::default()
             .floats(&model.to_cols_array())
             .floats(&[
@@ -444,8 +475,10 @@ impl Grass {
             ])
             .floats(&[f32::from_bits(self.seed)])
             .strokes(self.area, &self.strokes)
+            .word(if follow { ground.key() } else { 0 })
             .finish();
-        self.grown.get_or(key, || self.grow(model))
+        self.grown
+            .get_or(key, || self.grow(model, follow.then_some(ground)))
     }
 
     /// How many blades it has at `model`.
@@ -455,7 +488,7 @@ impl Grass {
     }
 
     /// Grows its blades for an entity at `model`, chunked and shuffled.
-    fn grow(&self, model: Mat4) -> Vec<Arc<GrassChunk>> {
+    fn grow(&self, model: Mat4, ground: Option<&TerrainGround>) -> Vec<Arc<GrassChunk>> {
         /// One blade before it's ranked in its chunk.
         struct Sprout {
             root: Vec3,
@@ -479,8 +512,13 @@ impl Grass {
             self.seed,
             MAX_BLADES,
             |local, normal, coverage, rng| {
-                let root = model.transform_point3(local);
-                let ground = (normals * normal).try_normalize().unwrap_or(Vec3::Y);
+                let mut root = model.transform_point3(local);
+                let mut up = (normals * normal).try_normalize().unwrap_or(Vec3::Y);
+                if let Some((y, n)) = ground.and_then(|g| g.under(root)) {
+                    root.y = y;
+                    up = n;
+                }
+                let ground = up;
                 #[allow(clippy::cast_possible_truncation)]
                 let key = (
                     (root.x / CHUNK_SIZE).floor() as i32,
@@ -555,6 +593,10 @@ pub struct Scatter {
     /// Brush strokes, in the entity's space (as [`Grass::strokes`]).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub strokes: Vec<Dab>,
+    /// Whether copies over a [`crate::Terrain`] stand on it (as
+    /// [`Grass::follow_terrain`]).
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub follow_terrain: bool,
     /// What it grew last (a cache; leave it to `..Default::default()`).
     #[doc(hidden)]
     #[serde(skip)]
@@ -570,6 +612,7 @@ impl Default for Scatter {
             seed: 0,
             area: [0.0, 0.0],
             strokes: Vec::new(),
+            follow_terrain: true,
             grown: Grown::default(),
         }
     }
@@ -590,11 +633,35 @@ impl Scatter {
     /// matrix).
     #[must_use]
     pub fn placements(&self) -> Arc<Vec<Mat4>> {
-        let key = KeyHasher::default()
-            .floats(&[self.density, self.scale[0], self.scale[1], self.align])
+        self.placements_on(Mat4::IDENTITY, &TerrainGround::none())
+    }
+
+    /// [`Self::placements`] for an entity at `model`, standing copies on
+    /// `ground`'s terrains.
+    pub(crate) fn placements_on(&self, model: Mat4, ground: &TerrainGround) -> Arc<Vec<Mat4>> {
+        let follow = self.follow_terrain && !ground.is_empty() && model.determinant().abs() > 1e-12;
+        let mut key = KeyHasher::default();
+        key.floats(&[self.density, self.scale[0], self.scale[1], self.align])
             .floats(&[f32::from_bits(self.seed)])
-            .strokes(self.area, &self.strokes)
-            .finish();
+            .strokes(self.area, &self.strokes);
+        if follow {
+            key.floats(&model.to_cols_array()).word(ground.key());
+        }
+        let key = key.finish();
+        let inverse = model.inverse();
+        let snap = |at: Vec3, normal: Vec3| -> (Vec3, Vec3) {
+            if !follow {
+                return (at, normal);
+            }
+            let world = model.transform_point3(at);
+            match ground.under(world) {
+                Some((y, n)) => (
+                    inverse.transform_point3(Vec3::new(world.x, y, world.z)),
+                    (Mat3::from_mat4(model).transpose() * n).normalize_or(Vec3::Y),
+                ),
+                None => (at, normal),
+            }
+        };
         self.grown.get_or(key, || {
             let mut out = Vec::new();
             let align = self.align.clamp(0.0, 1.0);
@@ -605,6 +672,7 @@ impl Scatter {
                 self.seed,
                 MAX_SCATTERED,
                 |at, normal, _, rng| {
+                    let (at, normal) = snap(at, normal);
                     let tilt = Quat::from_rotation_arc(Vec3::Y, normal);
                     let rotation = Quat::IDENTITY.slerp(tilt, align)
                         * Quat::from_rotation_y(rng.next() * std::f32::consts::TAU);
@@ -623,8 +691,9 @@ impl Scatter {
 
 /// Hands every [`Grass`] field to the renderer.
 pub(crate) fn record_grass(world: &SceneWorld, draw: &mut DrawList) {
+    let ground = TerrainGround::of(world);
     for (grass, global) in &mut world.query::<(&Grass, &GlobalTransform)>() {
-        let chunks = grass.chunks(global.matrix());
+        let chunks = grass.chunks_on(global.matrix(), &ground);
         if chunks.is_empty() {
             continue;
         }
@@ -712,6 +781,17 @@ pub(crate) fn raycast_surfaces_except(
                 distance: t,
             });
         }
+    }
+    let limit = best.as_ref().map_or(max_distance, |b| b.distance);
+    if let Some((entity, t, normal)) =
+        crate::terrain::raycast_terrains(world, origin, dir, limit, skip)
+    {
+        best = Some(SurfaceHit {
+            entity,
+            point: origin + dir * t,
+            normal,
+            distance: t,
+        });
     }
     best
 }

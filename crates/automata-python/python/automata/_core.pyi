@@ -609,6 +609,9 @@ class Grass:
     """Metres from the camera it's drawn to (60; 0 = any distance)."""
     seed: int
     """Picks which random field grows."""
+    follow_terrain: bool
+    """Whether blades stand on a ``Terrain`` under them (True) instead of
+    on the entity's own plane."""
     strokes: int
     """How many brush strokes (paint and erase dabs) it has."""
     def __init__(
@@ -623,6 +626,7 @@ class Grass:
         color_variation: Optional[float] = None,
         draw_distance: Optional[float] = None,
         seed: Optional[int] = None,
+        follow_terrain: Optional[bool] = None,
     ) -> None: ...
     def paint(
         self,
@@ -658,6 +662,8 @@ class Scatter:
     """0 = upright, 1 = following the ground's slope (0.3)."""
     seed: int
     """Picks where the copies go."""
+    follow_terrain: bool
+    """Whether copies stand on a ``Terrain`` under them (True)."""
     strokes: int
     """How many brush strokes it has."""
     def __init__(
@@ -667,6 +673,7 @@ class Scatter:
         scale: Optional[tuple[float, float]] = None,
         align: Optional[float] = None,
         seed: Optional[int] = None,
+        follow_terrain: Optional[bool] = None,
     ) -> None: ...
     def paint(
         self,
@@ -684,6 +691,98 @@ class Scatter:
         ...
     def count(self) -> int:
         """How many copies it places."""
+        ...
+
+class TerrainLayer:
+    """One of a terrain's four ground materials: a colour, optionally an
+    image tiled across the ground every ``tile`` metres."""
+
+    color: tuple[float, float, float]
+    """Its colour (linear RGB), multiplying the texture."""
+    texture: str
+    """An image path relative to the asset root (empty for a plain colour)."""
+    tile: float
+    """How wide one repeat is (metres)."""
+    def __init__(
+        self,
+        color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        texture: str = "",
+        tile: float = 4.0,
+    ) -> None: ...
+
+class Terrain:
+    """A heightmap ground ``size`` metres a side, centred on the entity,
+    painted with four blended layers (grass, rock, sand, dirt to start).
+    Solid when ``collide`` is on; ``Grass`` and ``Scatter`` over it follow
+    its surface. Every brush returns a changed copy."""
+
+    size: float
+    """The side of the square (metres)."""
+    resolution: int
+    """Height samples a side."""
+    spacing: float
+    """Metres between neighbouring samples."""
+    heights: list[float]
+    """Every height, row by row (rows along Z, from ``-size/2``)."""
+    height_range: tuple[float, float]
+    """The lowest and highest heights."""
+    layers: list[TerrainLayer]
+    """The four layers."""
+    roughness: float
+    """Lighting roughness (0 shiny .. 1 matte)."""
+    collide: bool
+    """Whether it's solid."""
+    def __init__(
+        self,
+        size: float = 64.0,
+        resolution: int = 129,
+        layers: Optional[list[TerrainLayer]] = None,
+        roughness: float = 0.9,
+        collide: bool = True,
+    ) -> None: ...
+    def shape(self, height: Callable[[float, float], float]) -> Terrain:
+        """A copy with every height set by ``height(x, z)``."""
+        ...
+    def sculpt(
+        self,
+        tool: str,
+        center: tuple[float, float],
+        radius: float = 4.0,
+        amount: float = 1.0,
+        height: Optional[float] = None,
+    ) -> Terrain:
+        """A copy with one brush dab: ``"raise"``, ``"lower"``, ``"smooth"``,
+        ``"flatten"`` (towards ``height``) or ``"noise"``."""
+        ...
+    def paint(
+        self,
+        layer: Union[int, str],
+        center: tuple[float, float],
+        radius: float = 4.0,
+        strength: float = 1.0,
+    ) -> Terrain:
+        """A copy with a layer (0..3, or "grass", "rock", "sand", "dirt")
+        painted in a soft disc."""
+        ...
+    def auto_paint(
+        self, water_level: float = 0.0, beach: float = 1.5, cliff: float = 38.0
+    ) -> Terrain:
+        """A copy painted by shape: sand by the water, rock on cliffs."""
+        ...
+    def load_heightmap(self, path: str, low: float = 0.0, high: float = 10.0) -> Terrain:
+        """A copy with heights from a greyscale image (black ``low``, white ``high``)."""
+        ...
+    def with_resolution(self, resolution: int) -> Terrain:
+        """A copy resampled to ``resolution`` samples a side."""
+        ...
+    def height_at(self, x: float, z: float) -> float:
+        """The ground's height at ``(x, z)`` in the entity's space."""
+        ...
+    def normal_at(self, x: float, z: float) -> tuple[float, float, float]:
+        """The ground's normal at ``(x, z)``."""
+        ...
+    def weights_at(self, x: float, z: float) -> tuple[float, float, float, float]:
+        """How much of each layer shows at ``(x, z)``."""
         ...
 
 class Entity:

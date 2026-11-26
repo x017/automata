@@ -352,9 +352,16 @@ impl PlaySession {
                             std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
                             std::collections::hash_map::Entry::Vacant(e) => {
                                 let (vertices, triangles) = snapshot.mesh_triangles(mesh)?;
+                                // Terrains travel as their grid alone.
+                                let grid = snapshot.mesh_grid(mesh);
                                 let tris = MeshTris {
                                     vertices: vertices.iter().map(glam::Vec3::to_array).collect(),
-                                    triangles,
+                                    triangles: if grid.is_some() {
+                                        Vec::new()
+                                    } else {
+                                        triangles
+                                    },
+                                    grid,
                                 };
                                 e.insert(std::sync::Arc::new(tris)).clone()
                             }

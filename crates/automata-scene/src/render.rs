@@ -371,6 +371,7 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
         draw.set_clear_color(env.clear_color());
     }
 
+    let ground = crate::terrain::TerrainGround::of(world);
     for (renderer, global, scatter) in
         &mut world.query::<(&MeshRenderer, &GlobalTransform, Option<&crate::Scatter>)>()
     {
@@ -391,13 +392,14 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
         // A scattered model draws at every spot it's scattered to instead.
         match scatter {
             Some(scatter) => {
-                for spot in scatter.placements().iter() {
+                for spot in scatter.placements_on(model, &ground).iter() {
                     record(model * *spot);
                 }
             }
             None => record(model),
         }
     }
+    crate::terrain::record_terrains(world, draw);
     crate::foliage::record_grass(world, draw);
 
     // Placed lights: at the entity's position; spots shine along its
@@ -789,6 +791,8 @@ pub fn materialize_visuals(
     world: &mut SceneWorld,
     renderer: &automata_renderer::Renderer,
 ) -> usize {
+    // Terrains keep their own GPU chunks up to date (cheap when unchanged).
+    crate::terrain::prepare_terrains(world, renderer);
     let mut materialized = 0;
     for entity in pending_visuals(world) {
         // Scope the hecs Ref borrow: it has a Drop impl, so without the

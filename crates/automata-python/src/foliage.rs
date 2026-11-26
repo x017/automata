@@ -70,6 +70,7 @@ impl PyGrass {
         color_variation=None,
         draw_distance=None,
         seed=None,
+        follow_terrain=None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -83,6 +84,7 @@ impl PyGrass {
         color_variation: Option<f32>,
         draw_distance: Option<f32>,
         seed: Option<u32>,
+        follow_terrain: Option<bool>,
     ) -> Self {
         let d = Grass::default();
         Self {
@@ -98,6 +100,7 @@ impl PyGrass {
                 color_variation: color_variation.map_or(d.color_variation, |v| v.clamp(0.0, 1.0)),
                 draw_distance: draw_distance.map_or(d.draw_distance, |v| v.max(0.0)),
                 seed: seed.unwrap_or(d.seed),
+                follow_terrain: follow_terrain.unwrap_or(d.follow_terrain),
                 ..d
             },
         }
@@ -189,6 +192,13 @@ impl PyGrass {
         self.inner.seed
     }
 
+    /// Whether blades stand on a ``Terrain`` under them (the default)
+    /// instead of on the entity's own plane.
+    #[getter]
+    fn follow_terrain(&self) -> bool {
+        self.inner.follow_terrain
+    }
+
     /// How many brush strokes (paint and erase dabs) it has.
     #[getter]
     fn strokes(&self) -> usize {
@@ -253,13 +263,21 @@ pub struct PyScatter {
 impl PyScatter {
     /// Creates a scatter; unspecified settings use the defaults.
     #[new]
-    #[pyo3(signature = (area=None, density=None, scale=None, align=None, seed=None))]
+    #[pyo3(signature = (
+        area=None,
+        density=None,
+        scale=None,
+        align=None,
+        seed=None,
+        follow_terrain=None,
+    ))]
     fn new(
         area: Option<(f32, f32)>,
         density: Option<f32>,
         scale: Option<(f32, f32)>,
         align: Option<f32>,
         seed: Option<u32>,
+        follow_terrain: Option<bool>,
     ) -> Self {
         let d = Scatter::default();
         Self {
@@ -269,6 +287,7 @@ impl PyScatter {
                 scale: scale.map_or(d.scale, |(lo, hi)| [lo.max(0.01), hi.max(lo.max(0.01))]),
                 align: align.map_or(d.align, |v| v.clamp(0.0, 1.0)),
                 seed: seed.unwrap_or(d.seed),
+                follow_terrain: follow_terrain.unwrap_or(d.follow_terrain),
                 ..d
             },
         }
@@ -326,6 +345,12 @@ impl PyScatter {
     #[getter]
     fn seed(&self) -> u32 {
         self.inner.seed
+    }
+
+    /// Whether copies stand on a ``Terrain`` under them (the default).
+    #[getter]
+    fn follow_terrain(&self) -> bool {
+        self.inner.follow_terrain
     }
 
     /// How many brush strokes it has.

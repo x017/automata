@@ -25,6 +25,9 @@ mod water;
 #[path = "joints3d.rs"]
 mod joints;
 
+#[path = "terrain3d.rs"]
+mod terrain;
+
 use crate::components::{
     BodyType, CharacterController, CharacterVelocity, Collider3D, RigidBody, Shape3D,
 };
@@ -90,6 +93,8 @@ pub struct PhysicsWorld3D {
     ground: Option<r3::dynamics::RigidBodyHandle>,
     /// Joints already warned about (no body, no such partner).
     joint_warned: std::collections::HashSet<Entity>,
+    /// Each colliding terrain's heightfield body.
+    terrains: HashMap<Entity, terrain::TerrainBody>,
 }
 
 /// What a built model shape depends on: the loaded model (by identity, so
@@ -173,6 +178,7 @@ impl PhysicsWorld3D {
             joints: HashMap::new(),
             ground: None,
             joint_warned: std::collections::HashSet::new(),
+            terrains: HashMap::new(),
         }
     }
 
@@ -216,6 +222,7 @@ impl PhysicsWorld3D {
         self.spawn_missing(scene);
         self.update_existing(scene);
         self.despawn_removed(scene);
+        self.sync_terrains(scene);
         mark_characters(scene);
         self.sync_joints(scene);
     }
@@ -1067,6 +1074,37 @@ fn shape_triangles(
     triangles.extend(tris.into_iter().map(|t| t.map(|i| i + base)));
 }
 
+/// A heightfield's triangles in its local space, vertices row by row
+/// (rows along Z, columns along X), each cell split the way parry splits
+/// it (see [`ColliderSnapshot::mesh_grid`]).
+fn grid_triangles(h: &r3::parry::shape::HeightField) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+    let heights = h.heights();
+    let (rows, cols) = (heights.nrows(), heights.ncols());
+    let scale = h.scale();
+    let step = |n: usize| 1.0 / (n.max(2) - 1) as f32;
+    let (sx, sz) = (step(cols), step(rows));
+    let mut vertices = Vec::with_capacity(rows * cols);
+    for z in 0..rows {
+        for x in 0..cols {
+            vertices.push(Vec3::new(
+                (x as f32 * sx - 0.5) * scale.x,
+                heights[(z, x)] * scale.y,
+                (z as f32 * sz - 0.5) * scale.z,
+            ));
+        }
+    }
+    let at = |x: usize, z: usize| u32::try_from(z * cols + x).unwrap_or(u32::MAX);
+    let mut triangles = Vec::with_capacity(2 * rows.saturating_sub(1) * cols.saturating_sub(1));
+    for z in 0..rows.saturating_sub(1) {
+        for x in 0..cols.saturating_sub(1) {
+            let (p00, p01, p10, p11) = (at(x, z), at(x, z + 1), at(x + 1, z), at(x + 1, z + 1));
+            triangles.push([p00, p01, p11]);
+            triangles.push([p00, p11, p10]);
+        }
+    }
+    (vertices, triangles)
+}
+
 /// The key of a shape's shared geometry (its allocation address, stable
 /// for as long as any collider holds the shape).
 fn shape_key(shape: &r3::geometry::SharedShape) -> u64 {
@@ -1150,13 +1188,35 @@ impl ColliderSnapshot {
             .shape;
         if let Some(t) = shape.as_trimesh() {
             Some((t.vertices().to_vec(), t.indices().to_vec()))
+        } else if let Some(h) = shape.as_heightfield() {
+            Some(grid_triangles(h))
         } else {
             Some(shape.as_convex_polyhedron()?.to_trimesh())
         }
     }
 
+    /// For a [`WorldShape::Mesh`] that is a heightfield (a terrain): its
+    /// grid's `[columns, rows]`. Its [`Self::mesh_triangles`] vertices are
+    /// then laid out row by row (rows along Z, columns along X), so ray
+    /// tests can walk the grid instead of testing every triangle.
+    #[must_use]
+    pub fn mesh_grid(&self, mesh: u64) -> Option<[u32; 2]> {
+        let h = self
+            .colliders
+            .iter()
+            .find(|c| shape_key(&c.shape) == mesh)?
+            .shape
+            .as_heightfield()?;
+        let heights = h.heights();
+        Some([
+            u32::try_from(heights.ncols()).ok()?,
+            u32::try_from(heights.nrows()).ok()?,
+        ])
+    }
+
     /// Every collider as `(entity, world shape, sensor)`. Shapes other
-    /// than boxes, balls, capsules, meshes and convex hulls are skipped.
+    /// than boxes, balls, capsules, meshes, convex hulls and heightfields
+    /// (terrains, as meshes) are skipped.
     #[must_use]
     pub fn shapes(&self) -> Vec<(Entity, WorldShape, bool)> {
         self.colliders
@@ -1182,7 +1242,9 @@ impl ColliderSnapshot {
                         half_height: cap.half_height(),
                         radius: cap.radius,
                     }
-                } else if c.shape.as_trimesh().is_some() || c.shape.as_convex_polyhedron().is_some()
+                } else if c.shape.as_trimesh().is_some()
+                    || c.shape.as_convex_polyhedron().is_some()
+                    || c.shape.as_heightfield().is_some()
                 {
                     WorldShape::Mesh {
                         center,

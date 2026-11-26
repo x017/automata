@@ -143,9 +143,13 @@ def _ray_capsule(o, d, hh, r):
 
 
 class Mesh:
-    """Collision triangles in a collider's local space, plus their bounds."""
+    """Collision triangles in a collider's local space, plus their bounds.
 
-    def __init__(self, flat_vertices, flat_indices):
+    A terrain comes as a ``grid`` of ``(columns, rows)`` vertices laid out
+    row by row (rows along Z), without triangles: rays walk its cells."""
+
+    def __init__(self, flat_vertices, flat_indices, grid=None):
+        self.grid = tuple(grid) if grid else None
         v = flat_vertices
         self.vertices = [(v[i], v[i + 1], v[i + 2]) for i in range(0, len(v) - 2, 3)]
         n = len(self.vertices)
@@ -163,42 +167,114 @@ class Mesh:
         self.half = tuple((b - a) * 0.5 + 1e-4 for a, b in zip(lo, hi))
 
 
+def _ray_tri(o, d, a, b, cc, limit):
+    """Ray against one triangle (both faces), nearer than ``limit``:
+    ``(t, normal facing the ray)`` or None. Moller-Trumbore."""
+    e1 = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+    e2 = (cc[0] - a[0], cc[1] - a[1], cc[2] - a[2])
+    p = (d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0])
+    det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2]
+    if abs(det) < 1e-12:
+        return None
+    inv = 1.0 / det
+    s = (o[0] - a[0], o[1] - a[1], o[2] - a[2])
+    u = (s[0] * p[0] + s[1] * p[1] + s[2] * p[2]) * inv
+    if u < 0.0 or u > 1.0:
+        return None
+    q = (s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0])
+    v = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) * inv
+    if v < 0.0 or u + v > 1.0:
+        return None
+    t = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv
+    if t < 0.0 or (limit is not None and t >= limit):
+        return None
+    n = (e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0])
+    length = math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) or 1.0
+    n = (n[0] / length, n[1] / length, n[2] / length)
+    if n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0:
+        n = (-n[0], -n[1], -n[2])
+    return t, n
+
+
+def _ray_grid(o, d, mesh):
+    """A terrain grid: walk the cells under the ray (2D DDA over X/Z) and
+    test each one's two triangles, nearest cell first."""
+    cols, rows = mesh.grid
+    verts = mesh.vertices
+    if cols < 2 or rows < 2 or len(verts) < cols * rows:
+        return None
+    x0, z0 = verts[0][0], verts[0][2]
+    dx = (verts[cols - 1][0] - x0) / (cols - 1)
+    dz = (verts[(rows - 1) * cols][2] - z0) / (rows - 1)
+    if dx <= 0 or dz <= 0:
+        return None
+    # Where the ray is inside the grid's bounds.
+    c, h = mesh.center, mesh.half
+    t0, t1 = 0.0, math.inf
+    for k in range(3):
+        if abs(d[k]) < 1e-12:
+            if abs(o[k] - c[k]) > h[k]:
+                return None
+            continue
+        a = (c[k] - h[k] - o[k]) / d[k]
+        b = (c[k] + h[k] - o[k]) / d[k]
+        if a > b:
+            a, b = b, a
+        t0, t1 = max(t0, a), min(t1, b)
+        if t0 > t1:
+            return None
+    px, pz = o[0] + d[0] * t0, o[2] + d[2] * t0
+    ix = min(max(int((px - x0) / dx), 0), cols - 2)
+    iz = min(max(int((pz - z0) / dz), 0), rows - 2)
+    step_x = 1 if d[0] > 0 else -1
+    step_z = 1 if d[2] > 0 else -1
+    if abs(d[0]) > 1e-12:
+        edge = x0 + (ix + (1 if step_x > 0 else 0)) * dx
+        next_x, delta_x = (edge - o[0]) / d[0], dx / abs(d[0])
+    else:
+        next_x = delta_x = math.inf
+    if abs(d[2]) > 1e-12:
+        edge = z0 + (iz + (1 if step_z > 0 else 0)) * dz
+        next_z, delta_z = (edge - o[2]) / d[2], dz / abs(d[2])
+    else:
+        next_z = delta_z = math.inf
+    while 0 <= ix < cols - 1 and 0 <= iz < rows - 1:
+        p00 = verts[iz * cols + ix]
+        p10 = verts[iz * cols + ix + 1]
+        p01 = verts[(iz + 1) * cols + ix]
+        p11 = verts[(iz + 1) * cols + ix + 1]
+        best = _ray_tri(o, d, p00, p01, p11, None)
+        other = _ray_tri(o, d, p00, p11, p10, best[0] if best else None)
+        if other:
+            best = other
+        if best:
+            return best
+        if min(next_x, next_z) > t1:
+            return None
+        if next_x < next_z:
+            ix += step_x
+            next_x += delta_x
+        else:
+            iz += step_z
+            next_z += delta_z
+    return None
+
+
 def _ray_mesh(o, d, mesh):
     """Closest triangle hit (both faces) in mesh space: (t, normal) or None."""
     if mesh is None:
         return None
+    if mesh.grid:
+        return _ray_grid(o, d, mesh)
     c = mesh.center
     if _ray_box((o[0] - c[0], o[1] - c[1], o[2] - c[2]), d, mesh.half) is None:
         return None
     best = None
     verts = mesh.vertices
     for i, j, k in mesh.triangles:
-        a, b, cc = verts[i], verts[j], verts[k]
-        e1 = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
-        e2 = (cc[0] - a[0], cc[1] - a[1], cc[2] - a[2])
-        # Moller-Trumbore.
-        p = (d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0])
-        det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2]
-        if abs(det) < 1e-12:
-            continue
-        inv = 1.0 / det
-        s = (o[0] - a[0], o[1] - a[1], o[2] - a[2])
-        u = (s[0] * p[0] + s[1] * p[1] + s[2] * p[2]) * inv
-        if u < 0.0 or u > 1.0:
-            continue
-        q = (s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0])
-        v = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) * inv
-        if v < 0.0 or u + v > 1.0:
-            continue
-        t = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv
-        if t < 0.0 or (best is not None and t >= best[0]):
-            continue
-        n = (e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0])
-        length = math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) or 1.0
-        n = (n[0] / length, n[1] / length, n[2] / length)
-        if n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0:  # face the ray
-            n = (-n[0], -n[1], -n[2])
-        best = (t, n)
+        hit = _ray_tri(o, d, verts[i], verts[j], verts[k], best[0] if best else None)
+        if hit:
+            best = hit
     return best
 
 
@@ -490,8 +566,8 @@ class Runner:
             mouse.get("pos"),
         )
         # Mesh geometry arrives once per session, keyed for "mesh" shapes.
-        for key, verts, indices in msg.get("meshes", []):
-            self.backend.meshes[key] = Mesh(verts, indices)
+        for key, verts, indices, *grid in msg.get("meshes", []):
+            self.backend.meshes[key] = Mesh(verts, indices, grid[0] if grid else None)
         self.backend.set_shapes(msg.get("cols", []))
         # The navigation mesh arrives when it changes (null: none).
         if "navmesh" in msg:

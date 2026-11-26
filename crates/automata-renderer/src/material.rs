@@ -141,6 +141,33 @@ pub(crate) struct MaterialUniform {
 pub(crate) const MAP_NORMAL: u32 = 1;
 pub(crate) const MAP_METAL_ROUGH: u32 = 2;
 pub(crate) const MAP_EMISSIVE: u32 = 4;
+/// A terrain material: the base texture is a 2 × 2 atlas of layers, the
+/// emissive slot the splat map, and the uniform's emissive the layers'
+/// tile sizes (see [`TerrainMaterial`]).
+pub(crate) const MAP_TERRAIN: u32 = 8;
+
+/// A terrain's ground material, for
+/// [`Renderer::create_terrain_material`](crate::Renderer::create_terrain_material).
+///
+/// Meshes drawn with it need UVs running 0..1 across the whole terrain:
+/// the splat map is spread over them, and each layer repeats every
+/// `tiles[i]` metres of the `size`-metre square.
+#[derive(Debug, Clone)]
+pub struct TerrainMaterial {
+    /// The four layers in a 2 × 2 atlas (sRGB, mipmapped): each 512-pixel
+    /// cell holds a 448-pixel tile wrapped into a 32-pixel gutter.
+    pub layers: Texture,
+    /// The splat map (linear RGBA): how much of each layer shows.
+    pub splat: Texture,
+    /// The splat map's side (texels).
+    pub splat_texels: u32,
+    /// The terrain's side (metres).
+    pub size: f32,
+    /// How wide each layer's repeat is (metres).
+    pub tiles: [f32; 4],
+    /// Surface roughness, 0..1.
+    pub roughness: f32,
+}
 
 impl MaterialUniform {
     pub(crate) fn new(p: &MaterialParams, maps: u32) -> Self {

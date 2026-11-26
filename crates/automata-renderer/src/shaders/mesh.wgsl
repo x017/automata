@@ -59,6 +59,11 @@ struct MaterialData {
 const MAP_NORMAL: u32 = 1u;
 const MAP_METAL_ROUGH: u32 = 2u;
 const MAP_EMISSIVE: u32 = 4u;
+// A terrain (automata-scene's terrain.rs): `material_texture` is a 2 x 2
+// atlas of ground layers, `emissive_map` the splat map saying how much of
+// each shows, `material.emissive` each layer's repeat (metres) and
+// `material.uv` the terrain's size (xy) and half a splat texel (zw).
+const MAP_TERRAIN: u32 = 8u;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -245,7 +250,55 @@ fn perturb_normal(n: vec3<f32>, p: vec3<f32>, uv: vec2<f32>, ts: vec3<f32>) -> v
     return normalize(t * inv * ts.x + b * inv * ts.y + n * ts.z);
 }
 
+// One terrain layer at tile coordinates `t` (gradients `gx`, `gy`): its
+// atlas cell, sampled inside the cell's wrapped gutter so neither
+// filtering nor mipmaps reach the neighbouring layer.
+fn terrain_layer(k: u32, t: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec3<f32> {
+    let cell = vec2<f32>(f32(k & 1u), f32(k >> 1u));
+    let uv = (cell * 512.0 + vec2<f32>(32.0) + fract(t) * 448.0) / 1024.0;
+    let s = 448.0 / 1024.0;
+    return textureSampleGrad(material_texture, material_sampler, uv, gx * s, gy * s).rgb;
+}
+
+// A terrain's surface: the four layers, each repeating at its own scale,
+// mixed by the splat map.
+fn terrain_surface(in: VertexOutput) -> Surface {
+    var out: Surface;
+    let local = in.uv * material.uv.xy;
+    let dx = dpdx(local);
+    let dy = dpdy(local);
+    let st = clamp(in.uv, material.uv.zw, vec2<f32>(1.0) - material.uv.zw);
+    let w = textureSample(emissive_map, map_sampler, st);
+    let tiles = max(material.emissive, vec4<f32>(0.05));
+    var base = vec3<f32>(0.0);
+    if w.x > 0.004 {
+        base += terrain_layer(0u, local / tiles.x, dx / tiles.x, dy / tiles.x) * w.x;
+    }
+    if w.y > 0.004 {
+        base += terrain_layer(1u, local / tiles.y, dx / tiles.y, dy / tiles.y) * w.y;
+    }
+    if w.z > 0.004 {
+        base += terrain_layer(2u, local / tiles.z, dx / tiles.z, dy / tiles.z) * w.z;
+    }
+    if w.w > 0.004 {
+        base += terrain_layer(3u, local / tiles.w, dx / tiles.w, dy / tiles.w) * w.w;
+    }
+    let total = max(w.x + w.y + w.z + w.w, 1e-3);
+    out.p = in.world_position;
+    out.n = normalize(in.normal);
+    out.l = normalize(-light.direction.xyz);
+    out.v = normalize(camera.view_pos.xyz - in.world_position);
+    out.base = vec4<f32>(base / total, 1.0) * material.color;
+    out.roughness = material.params.x;
+    out.metallic = 0.0;
+    out.emissive = vec3<f32>(0.0);
+    return out;
+}
+
 fn surface(in: VertexOutput) -> Surface {
+    if (u32(material.params.w) & MAP_TERRAIN) != 0u {
+        return terrain_surface(in);
+    }
     if FADING {
         // Interleaved gradient noise: a fine, even dither that thins the
         // mesh out as `fade` drops.

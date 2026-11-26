@@ -35,6 +35,7 @@ pub fn staged_to_entity_data(entity: &StagedEntity) -> EntityData {
             StagedComponent::Animation(a) => data.animation = Some(a.clone()),
             StagedComponent::Grass(g) => data.grass = Some(g.clone()),
             StagedComponent::Scatter(s) => data.scatter = Some(s.clone()),
+            StagedComponent::Terrain(t) => data.terrain = Some(t.clone()),
             StagedComponent::Joint(j) => data.joint = Some(j.clone()),
             StagedComponent::Attach(a) => data.attach = Some(a.clone()),
             StagedComponent::NavAgent(a) => data.nav_agent = Some(a.clone()),
@@ -90,6 +91,9 @@ pub fn entity_data_to_staged(data: &EntityData) -> StagedEntity {
     }
     if let Some(s) = &data.scatter {
         components.push(StagedComponent::Scatter(s.clone()));
+    }
+    if let Some(t) = &data.terrain {
+        components.push(StagedComponent::Terrain(t.clone()));
     }
     if let Some(j) = &data.joint {
         components.push(StagedComponent::Joint(j.clone()));

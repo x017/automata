@@ -649,7 +649,6 @@ impl Renderer {
         params: &crate::MaterialParams,
         textures: crate::MaterialTextures,
     ) -> Material {
-        let device = self.ctx.device();
         let maps = [
             (textures.normal.is_some(), crate::material::MAP_NORMAL),
             (
@@ -662,9 +661,44 @@ impl Renderer {
         .filter(|(on, _)| *on)
         .fold(0, |bits, (_, bit)| bits | bit);
         let uniform = MaterialUniform::new(params, maps);
+        self.build_material(params, &uniform, textures)
+    }
+
+    /// Creates a terrain's ground material: four layers from an atlas,
+    /// blended by a splat map (see [`crate::TerrainMaterial`]).
+    #[must_use]
+    pub fn create_terrain_material(&self, terrain: &crate::TerrainMaterial) -> Material {
+        let params = crate::MaterialParams {
+            roughness: terrain.roughness,
+            ..crate::MaterialParams::default()
+        };
+        let mut uniform = MaterialUniform::new(&params, crate::material::MAP_TERRAIN);
+        uniform.emissive = terrain.tiles;
+        #[allow(clippy::cast_precision_loss)]
+        let half_texel = 0.5 / terrain.splat_texels.max(1) as f32;
+        uniform.uv = [terrain.size, terrain.size, half_texel, half_texel];
+        self.build_material(
+            &params,
+            &uniform,
+            crate::MaterialTextures {
+                base: Some(terrain.layers.clone()),
+                emissive: Some(terrain.splat.clone()),
+                ..crate::MaterialTextures::default()
+            },
+        )
+    }
+
+    /// The bind group and identity of a material with this uniform.
+    fn build_material(
+        &self,
+        params: &crate::MaterialParams,
+        uniform: &MaterialUniform,
+        textures: crate::MaterialTextures,
+    ) -> Material {
+        let device = self.ctx.device();
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("material"),
-            contents: bytemuck::bytes_of(&uniform),
+            contents: bytemuck::bytes_of(uniform),
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let base = textures.base.unwrap_or_else(|| self.white_texture.clone());
@@ -699,10 +733,8 @@ impl Renderer {
                 },
             ],
         });
-        let key = crate::material::content_key(
-            &uniform,
-            [&base, &normal, &metallic_roughness, &emissive],
-        );
+        let key =
+            crate::material::content_key(uniform, [&base, &normal, &metallic_roughness, &emissive]);
         Material {
             inner: Arc::new(MaterialInner {
                 bind_group,

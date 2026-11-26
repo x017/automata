@@ -83,3 +83,47 @@ def test_axis_aligned_rays_walk_the_grid():
     hit = bridge.raycast_shapes(shapes, (200.0, 0.0, 0.0), (-1, 0, 0), 150.0, ignore_id=49, index=index)
     assert hit[0] == 48 and math.isclose(hit[3], 200.0 - 96.0 - 0.5)
     assert bridge.raycast_shapes(shapes, (0.0, 5.0, 0.0), (1, 0, 0), 100.0, index=index) is None
+
+
+def terrain_mesh(bridge, cols, rows, size_x, size_z, height):
+    """A grid mesh as Oberon sends a terrain, and the same surface as plain
+    triangles (split the way the physics world splits its cells)."""
+    verts = []
+    for j in range(rows):
+        for i in range(cols):
+            x = (i / (cols - 1) - 0.5) * size_x
+            z = (j / (rows - 1) - 0.5) * size_z
+            verts += [x, height(x, z), z]
+    tris = []
+    for j in range(rows - 1):
+        for i in range(cols - 1):
+            p00, p10 = j * cols + i, j * cols + i + 1
+            p01, p11 = (j + 1) * cols + i, (j + 1) * cols + i + 1
+            tris += [p00, p01, p11, p00, p11, p10]
+    return bridge.Mesh(verts, [], (cols, rows)), bridge.Mesh(verts, tris)
+
+
+def test_terrain_grids_are_walked_cell_by_cell():
+    bridge = load_bridge()
+    rng = random.Random(7)
+    grid, plain = terrain_mesh(
+        bridge, 17, 13, 32.0, 24.0, lambda x, z: 3.0 * math.sin(x * 0.4) * math.cos(z * 0.3) + 0.1 * x
+    )
+    shape = [5, "mesh", 2.0, 1.0, -3.0, 0.0, 0.0, 0.0, 1.0, "t"]
+    hits = 0
+    for n in range(400):
+        o = (rng.uniform(-25, 25), rng.uniform(-6, 12), rng.uniform(-20, 20))
+        if n % 4 == 0:  # straight down, the common case
+            d = (0.0, -1.0, 0.0)
+        else:
+            d = (rng.uniform(-1, 1), rng.uniform(-1, 0.3), rng.uniform(-1, 1))
+            length = math.sqrt(sum(c * c for c in d))
+            d = tuple(c / length for c in d)
+        a = bridge._hit_shape(shape, o, d, {"t": grid})
+        b = bridge._hit_shape(shape, o, d, {"t": plain})
+        assert (a is None) == (b is None), (o, d, a, b)
+        if a is not None:
+            hits += 1
+            assert math.isclose(a[0], b[0], abs_tol=1e-6), (o, d, a, b)
+            assert all(math.isclose(p, q, abs_tol=1e-6) for p, q in zip(a[1], b[1]))
+    assert hits > 60

@@ -302,6 +302,7 @@ version = "0.1.0"
 dependencies = [
  "automata-assets",
  "automata-renderer",
+ "base64",
  "glam 0.33.12",
  "hecs",
  "image",

@@ -155,6 +155,14 @@ pub enum Field {
     ScatterAlign,
     /// Where scattered copies go.
     ScatterSeed,
+    /// The terrain's side (metres).
+    TerrainSize,
+    /// The terrain's lighting roughness.
+    TerrainRoughness,
+    /// A terrain layer's colour: `layer * 3 + channel` (0..12).
+    TerrainColor(u8),
+    /// How wide a terrain layer's repeat is (metres), layer 0..4.
+    TerrainTile(u8),
     /// Point light color channel 0..3 (RGB, 0..1).
     PointColor(u8),
     /// Point light brightness.
@@ -478,6 +486,8 @@ pub enum Flag {
     NavTurn,
     /// Agents may take the nav link both ways.
     NavLinkTwoWay,
+    /// The terrain is solid.
+    TerrainCollide,
 }
 
 /// An enumerated property of an entity (cycled by a dropdown-style button).
@@ -505,7 +515,19 @@ pub enum Choice {
     ParticleSprite,
     /// Hinge → Ball → Slider → Fixed → Rope → Spring.
     JointKind,
+    /// A terrain's height samples a side: 33, 65 … 1025.
+    TerrainResolution,
 }
+
+/// The terrain resolutions offered, as labels and values.
+const TERRAIN_RESOLUTIONS: [(&str, u32); 6] = [
+    ("33", 33),
+    ("65", 65),
+    ("129", 129),
+    ("257", 257),
+    ("513", 513),
+    ("1025", 1025),
+];
 
 fn axis(i: u8) -> usize {
     usize::from(i.min(2))
@@ -612,6 +634,13 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         | F::ScatterScale(_)
         | F::ScatterAlign
         | F::ScatterSeed => scatter_get(data.scatter.as_ref()?, field)?,
+        F::TerrainSize => data.terrain.as_ref()?.size,
+        F::TerrainRoughness => data.terrain.as_ref()?.roughness,
+        F::TerrainColor(i) => {
+            let (layer, channel) = terrain_slot(i);
+            data.terrain.as_ref()?.layers[layer].color[channel]
+        }
+        F::TerrainTile(i) => data.terrain.as_ref()?.layers[usize::from(i.min(3))].tile,
         F::ParticleRate
         | F::ParticleBurst
         | F::ParticleDuration
@@ -756,6 +785,12 @@ fn joint_set(j: &mut automata_physics::Joint, field: Field, v: f32) -> bool {
     true
 }
 
+/// A [`Field::TerrainColor`] index as `(layer, channel)`.
+fn terrain_slot(i: u8) -> (usize, usize) {
+    let i = usize::from(i.min(11));
+    (i / 3, i % 3)
+}
+
 #[allow(clippy::cast_precision_loss)] // seeds stay far below 2^24
 fn grass_get(g: &automata_scene::Grass, field: Field) -> Option<f32> {
     use Field as F;
@@ -861,7 +896,11 @@ pub fn range(field: Field) -> (f32, f32) {
         | F::GrassTip(_)
         | F::GrassColorVariation
         | F::GrassHeightVariation
+        | F::TerrainColor(_)
+        | F::TerrainRoughness
         | F::ScatterAlign => (0.0, 1.0),
+        F::TerrainSize => (1.0, automata_scene::MAX_TERRAIN_SIZE),
+        F::TerrainTile(_) => (0.05, 1_000.0),
         F::GrassArea(_) | F::ScatterArea(_) => (0.0, automata_scene::MAX_AREA),
         F::GrassHeight => (0.01, 10.0),
         F::GrassWidth => (0.002, 1.0),
@@ -1034,6 +1073,8 @@ pub fn scrub_step(field: Field) -> f32 {
         | F::ScatterAlign
         | F::ScatterDensity
         | F::ScatterScale(_)
+        | F::TerrainColor(_)
+        | F::TerrainRoughness
         | F::WaterCaustics
         | F::WaterWaveHeight
         | F::AudioVolume
@@ -1240,6 +1281,24 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
             Some(scatter) => scatter_set(scatter, field, v),
             None => return false,
         },
+        F::TerrainSize | F::TerrainRoughness | F::TerrainColor(_) | F::TerrainTile(_) => {
+            let Some(t) = &mut data.terrain else {
+                return false;
+            };
+            match field {
+                F::TerrainSize => t.size = v,
+                F::TerrainRoughness => t.roughness = v,
+                F::TerrainColor(i) => {
+                    let (layer, channel) = terrain_slot(i);
+                    t.layers[layer].color[channel] = v;
+                }
+                _ => {
+                    if let F::TerrainTile(i) = field {
+                        t.layers[usize::from(i.min(3))].tile = v;
+                    }
+                }
+            }
+        }
         F::WaterSize(_)
         | F::WaterDeep(_)
         | F::WaterShallow(_)
@@ -1452,6 +1511,7 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::NavAvoid => data.nav_agent.as_ref()?.avoid,
         Flag::NavTurn => data.nav_agent.as_ref()?.turn,
         Flag::NavLinkTwoWay => data.nav_link.as_ref()?.two_way,
+        Flag::TerrainCollide => data.terrain.as_ref()?.collide,
     })
 }
 
@@ -1561,6 +1621,10 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
             Some(l) => l.two_way = !l.two_way,
             None => return false,
         },
+        Flag::TerrainCollide => match &mut data.terrain {
+            Some(t) => t.collide = !t.collide,
+            None => return false,
+        },
         Flag::JointEnabled
         | Flag::JointCollide
         | Flag::JointLimits
@@ -1638,6 +1702,13 @@ pub fn choice_label(data: &EntityData, choice: Choice) -> Option<&'static str> {
         Choice::ParticleBlend => automata_scene::blend_label(data.particle_emitter.as_ref()?.blend),
         Choice::ParticleSprite => data.particle_emitter.as_ref()?.sprite.label(),
         Choice::JointKind => data.joint.as_ref()?.kind.label(),
+        Choice::TerrainResolution => {
+            let r = data.terrain.as_ref()?.resolution();
+            TERRAIN_RESOLUTIONS
+                .iter()
+                .find(|(_, v)| *v == r)
+                .map_or("Custom", |(label, _)| label)
+        }
     })
 }
 
@@ -1807,6 +1878,19 @@ pub fn cycle(data: &mut EntityData, choice: Choice) -> bool {
                     e.sprite = all[next(all.iter().position(|s| *s == e.sprite), all.len())];
                 }
             }
+        }
+        Choice::TerrainResolution => {
+            let Some(t) = &mut data.terrain else {
+                return false;
+            };
+            // The next size up, wrapping round to the smallest.
+            let r = t.resolution();
+            let next = TERRAIN_RESOLUTIONS
+                .iter()
+                .find(|(_, v)| *v > r)
+                .unwrap_or(&TERRAIN_RESOLUTIONS[0])
+                .1;
+            t.set_resolution(next);
         }
         Choice::JointKind => {
             use automata_physics::JointKind as K;

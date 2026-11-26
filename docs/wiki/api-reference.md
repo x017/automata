@@ -288,12 +288,45 @@ All arguments are readable as properties, and it's saved in scene files.
 Guides: [Rendering & Lights](guides/rendering-and-lights.md#water),
 [Physics](guides/physics.md#water).
 
+### Terrain
+
+```python
+at.Terrain(size=64.0, resolution=129, layers=None, roughness=0.9, collide=True)
+t.shape(lambda x, z: height) -> Terrain       # every height from a function
+t.sculpt(tool, (x, z), radius=4.0, amount=1.0, height=None) -> Terrain
+t.paint(layer, (x, z), radius=4.0, strength=1.0) -> Terrain
+t.auto_paint(water_level=0.0, beach=1.5, cliff=38.0) -> Terrain
+t.load_heightmap(path, low=0.0, high=10.0) -> Terrain
+t.with_resolution(resolution) -> Terrain     # resampled, same shape
+t.height_at(x, z) -> float
+t.normal_at(x, z) -> (x, y, z)
+t.weights_at(x, z) -> (grass, rock, sand, dirt)
+t.size, t.resolution, t.spacing, t.heights, t.height_range, t.layers,
+t.roughness, t.collide
+
+at.TerrainLayer(color=(1, 1, 1), texture="", tile=4.0)
+```
+
+Heightmap ground over a square `size` metres a side, centred on the
+entity, with `resolution` heights a side (3 to 1025). Positions are
+`(x, z)` in the entity's space. `sculpt` tools: `"raise"` and `"lower"`
+(by `amount` metres at the centre), `"smooth"` (`amount` 0..1),
+`"flatten"` (toward `height`, by default the ground's height at the
+centre) and `"noise"`. `layer` is 0..3 or `"grass"`, `"rock"`, `"sand"`,
+`"dirt"`. `auto_paint` puts sand up to `beach` metres above
+`water_level`, rock on slopes steeper than `cliff` degrees, dirt just
+below that and grass elsewhere. Every method returns a changed copy.
+With `collide` it's a fixed heightfield collider: bodies, characters and
+ray casts meet it. `Grass` and `Scatter` over it stand on it. Saved in
+scene files as two base64 PNGs.
+Guide: [Terrain](oberon/terrain.md#from-python).
+
 ### Grass
 
 ```python
 at.Grass(area=(0, 0), density=60.0, height=0.6, height_variation=0.45,
          width=0.07, base_color=(...), tip_color=(...), color_variation=0.3,
-         draw_distance=60.0, seed=0)
+         draw_distance=60.0, seed=0, follow_terrain=True)
 grass.paint(position, radius=2.0, normal=(0, 1, 0), strength=1.0) -> Grass
 grass.erase(position, radius=2.0, strength=1.0) -> Grass
 grass.blade_count() -> int
@@ -304,13 +337,15 @@ A field of blades over `area` (metres along the entity's X and Z,
 centred on it) plus brush strokes in the entity's space. `paint` and
 `erase` return changed copies. The blades sway in the Environment's
 `wind`, bend away from characters and moving bodies, and thin out toward
-`draw_distance`. Saved in scene files with its strokes.
+`draw_distance`. With `follow_terrain` (the default) blades stand on a
+`Terrain` under them. Saved in scene files with its strokes.
 Guide: [Grass & Foliage](guides/grass-and-foliage.md).
 
 ### Scatter
 
 ```python
-at.Scatter(area=(0, 0), density=0.2, scale=(0.7, 1.3), align=0.3, seed=0)
+at.Scatter(area=(0, 0), density=0.2, scale=(0.7, 1.3), align=0.3, seed=0,
+           follow_terrain=True)
 scatter.paint(...) / scatter.erase(...)  # as Grass
 scatter.count() -> int
 ```

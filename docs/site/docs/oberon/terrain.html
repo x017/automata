@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terrain · AUTOMATA docs</title>
+<meta name="description" content="A Terrain is ground you sculpt: hills, valleys, beaches and cliffs over a square of heights, painted with four blended layers (grass, rock, sand and dirt to start with). It&#x27;s solid, so characters…">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../../dither.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../tutorials/fps.html">A first-person shooter</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="index.html">Introduction</a></li><li><a href="interface.html">The interface</a></li><li><a href="command-line.html">The oberon command</a></li><li><a href="scripting.html">Scripting</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="graphics.html">Graphics</a></li><li><a href="code-editor.html">The code editor</a></li><li><a href="ui-editor.html">The UI editor</a></li><li><a href="materials.html">Materials</a></li><li><a href="models.html">Models</a></li><li><a href="animation-graphs.html">Animation graphs</a></li><li><a href="attachments-and-ik.html">Attachments &amp; IK</a></li><li><a href="navigation.html">Navigation</a></li><li><a href="ai.html">AI</a></li><li><a href="terrain.html" aria-current="page">Terrain</a></li><li><a href="foliage.html">Grass &amp; foliage</a></li><li><a href="audio.html">Audio</a></li><li><a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="editor-workflow.html">Editor workflow</a></li><li><a href="exporting.html">Exporting your game</a></li><li><a href="shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/grass-and-foliage.html">Grass &amp; foliage</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/touch-controls.html">Touch controls</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li><li><a href="../guides/performance.html">Performance</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Terrain</h1>
+<p>A <strong>Terrain</strong> is ground you sculpt: hills, valleys, beaches and cliffs
+over a square of heights, painted with four blended layers (grass, rock,
+sand and dirt to start with). It's solid, so characters walk on it and
+bodies land on it. Grass and scattered models painted over it stand on its
+surface.</p>
+<p><img src="../../../assets/oberon/terrain.png" alt="The Island example: a beach, grassy hills and a cliff headland, all sculpted and painted with Oberon's Terrain brushes" loading="lazy" decoding="async"></p>
+<p>The Island example (<code>examples/oberon/island</code>) was made this way, with the
+brushes on this page only.</p>
+<h2 id="making-one">Making one<a class="anchor" href="#making-one" aria-label="Link to this section">#</a></h2>
+<p><strong>Create → Terrain</strong> adds a flat 64 × 64 m terrain at the origin. Select it
+and the Inspector shows a <strong>Terrain</strong> section:</p>
+<div class="table"><table><thead><tr><th>Row</th><th>Meaning</th></tr></thead><tbody><tr><td>Sculpt</td><td><strong>Raise</strong>, <strong>Lower</strong>, <strong>Smooth</strong>, <strong>Flatten</strong>, <strong>Noise</strong>: brushes that change the shape</td></tr><tr><td>Paint</td><td><strong>Grass</strong>, <strong>Rock</strong>, <strong>Sand</strong>, <strong>Dirt</strong>: brushes that paint a layer</td></tr><tr><td>Size</td><td>The brush: 2, 5, 10 or 20 m across</td></tr><tr><td>Strength</td><td>25 %, 50 % or 100 %</td></tr><tr><td>Resolution</td><td>Heights along each side: 33 up to 1025. Changing it keeps the shape</td></tr><tr><td>Size</td><td>The terrain's width and depth, metres</td></tr><tr><td>Solid</td><td>Whether it's ground for physics and ray casts (on)</td></tr><tr><td>Roughness</td><td>How shiny the ground is: 1 is matte</td></tr><tr><td>Grass, Rock, Sand, Dirt</td><td>Each layer's colour</td></tr><tr><td>… Tile</td><td>Metres one repeat of the layer's texture covers</td></tr></tbody></table></div>
+<p>The note at the bottom gives the grid, the gap between heights and the
+lowest and highest point.</p>
+<h2 id="sculpting">Sculpting<a class="anchor" href="#sculpting" aria-label="Link to this section">#</a></h2>
+<p>Click a Sculpt brush, then drag over the terrain in the scene view. A ring
+shows where it lands. The move gizmo steps aside while a brush is on.
+Click the brush again to turn it off.</p>
+<div class="table"><table><thead><tr><th>Brush</th><th>What a drag does</th></tr></thead><tbody><tr><td><strong>Raise</strong></td><td>Lifts the ground under the ring, most at the centre. Keep dragging to go higher</td></tr><tr><td><strong>Lower</strong></td><td>Digs down the same way</td></tr><tr><td><strong>Smooth</strong></td><td>Evens out bumps and softens edges</td></tr><tr><td><strong>Flatten</strong></td><td>Levels the ground to the height where the drag <strong>began</strong>. Start on a beach and drag across to make a flat shelf at that height</td></tr><tr><td><strong>Noise</strong></td><td>Adds rough bumps so the ground doesn't look moulded</td></tr></tbody></table></div>
+<p>A bigger brush moves more ground per drag. Each drag is <strong>one undo step</strong>
+(Ctrl+Z). The brushes work in the entity's own space, so a stretched or
+moved terrain sculpts the same way.</p>
+<p>Tips:</p>
+<ul><li>Rough out big shapes first with the 20 m brush, then <strong>Smooth</strong>, then
+add details with smaller brushes.</li><li>For a <strong>cliff</strong>, raise hard with a small brush along the top, then
+<strong>Lower</strong> along the foot. Steep ground there turns to rock when you
+Auto Paint.</li><li>For a <strong>beach</strong>, start a <strong>Flatten</strong> drag on ground just above the
+water and sweep along the shore.</li></ul>
+<h2 id="painting">Painting<a class="anchor" href="#painting" aria-label="Link to this section">#</a></h2>
+<p>Click a Paint brush (<strong>Grass</strong>, <strong>Rock</strong>, <strong>Sand</strong> or <strong>Dirt</strong>) and drag.
+Layers blend into each other at the ring's soft edge. Lower strengths
+blend in part of a layer.</p>
+<p><strong>Auto Paint</strong> repaints the whole terrain by its shape:</p>
+<ul><li>sand along the water's edge (it reads the height of the first
+<strong>Water</strong> in the scene) and on the sea bed;</li><li>rock on slopes steeper than about 38°;</li><li>dirt on the slopes just below that;</li><li>grass everywhere else.</li></ul>
+<p>Auto Paint first, then touch up by hand. Paths, patches and extra
+rock go on top with the Paint brushes.</p>
+<p>Each layer's colour tints its texture. To give a layer a texture, set it
+from Python (<code>at.TerrainLayer(color, texture=&quot;textures/rock.png&quot;, tile=5)</code>)
+or in the scene file. With no texture, the layer is its plain colour with
+a little variation.</p>
+<h2 id="heightmaps">Heightmaps<a class="anchor" href="#heightmaps" aria-label="Link to this section">#</a></h2>
+<p><strong>Import Heightmap</strong> loads a greyscale PNG or JPEG: black is the lowest
+point, white the highest (a quarter of the terrain's size above it). The
+image is stretched over the terrain, and the paint is kept.</p>
+<h2 id="grass-and-scattered-models-on-it">Grass and scattered models on it<a class="anchor" href="#grass-and-scattered-models-on-it" aria-label="Link to this section">#</a></h2>
+<p>Grass and Scatter painted over a terrain stand on its surface, and follow
+it when you sculpt more. Paint them as usual (see
+<a href="foliage.html">Grass &amp; foliage</a>): the brush lands on the terrain under the
+cursor. In Python, <code>follow_terrain=False</code> keeps a field on its entity's
+own flat plane instead.</p>
+<h2 id="water">Water<a class="anchor" href="#water" aria-label="Link to this section">#</a></h2>
+<p>Put a <strong>Water</strong> over the terrain for a sea or a lake. Its shoreline foam
+and depth colour follow where the ground meets it, and <strong>Auto Paint</strong>
+puts the beach there. Bodies on the terrain that roll into the water
+float as usual.</p>
+<h2 id="physics">Physics<a class="anchor" href="#physics" aria-label="Link to this section">#</a></h2>
+<p>A Solid terrain is a Rapier heightfield: fixed ground for rigid bodies,
+characters and ray casts. It's rebuilt when you sculpt and moved with its
+entity, so Play right after sculpting.</p>
+<h2 id="from-python">From Python<a class="anchor" href="#from-python" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>island = at.Terrain(size=<span class="tok-n">96</span>, resolution=<span class="tok-n">129</span>)
+island = island.sculpt(<span class="tok-s">&quot;raise&quot;</span>, (<span class="tok-n">0</span>, <span class="tok-n">0</span>), radius=<span class="tok-n">30</span>, amount=<span class="tok-n">12</span>)
+island = island.sculpt(<span class="tok-s">&quot;noise&quot;</span>, (<span class="tok-n">0</span>, <span class="tok-n">0</span>), radius=<span class="tok-n">40</span>, amount=<span class="tok-n">2</span>)
+island = island.auto_paint(water_level=<span class="tok-n">0.0</span>)
+scene.add(at.Entity(<span class="tok-s">&quot;island&quot;</span>).add(at.Transform(position=(<span class="tok-n">0</span>, -<span class="tok-n">2</span>, <span class="tok-n">0</span>))).add(island))</code></pre></div>
+<p>Every method returns a changed copy. The whole list is in the
+<a href="../api-reference.html#terrain">API reference</a>.</p>
+<h2 id="saving">Saving<a class="anchor" href="#saving" aria-label="Link to this section">#</a></h2>
+<p>The heights and paint are saved in the scene file as two small PNG images
+(base64 text), so a 129 × 129 terrain adds about 35 KB.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="ai.html"><small>Previous</small>AI</a><a class="next" href="foliage.html"><small>Next</small>Grass &amp; foliage</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/terrain.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#making-one">Making one</a></li><li class="l2"><a href="#sculpting">Sculpting</a></li><li class="l2"><a href="#painting">Painting</a></li><li class="l2"><a href="#heightmaps">Heightmaps</a></li><li class="l2"><a href="#grass-and-scattered-models-on-it">Grass and scattered models on it</a></li><li class="l2"><a href="#water">Water</a></li><li class="l2"><a href="#physics">Physics</a></li><li class="l2"><a href="#from-python">From Python</a></li><li class="l2"><a href="#saving">Saving</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

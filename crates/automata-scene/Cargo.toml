@@ -14,11 +14,12 @@ workspace = true
 [dependencies]
 automata-assets.workspace = true
 automata-renderer.workspace = true
+base64 = "0.21.7"
 glam.workspace = true
 hecs.workspace = true
+image.workspace = true
 serde.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-image.workspace = true
 pollster.workspace = true

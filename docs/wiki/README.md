@@ -58,6 +58,7 @@ hours.
 | Save progress, and let players set volume, graphics and keys | [Save games](oberon/scripting.md#save-games) and [Player settings](oberon/scripting.md#player-settings) |
 | Place and drive cameras | [Cameras](oberon/cameras.md) |
 | Tune lighting, fog, and tone mapping, and test graphics | [Graphics](oberon/graphics.md) |
+| Sculpt and paint hills, cliffs and beaches | [Terrain](oberon/terrain.md) |
 | Paint grass, flowers and rocks onto the ground | [Grass & foliage](oberon/foliage.md) |
 | Use the built-in code editor and language servers | [The code editor](oberon/code-editor.md) |
 | Lay out game menus and HUDs in Oberon | [The UI editor](oberon/ui-editor.md) |

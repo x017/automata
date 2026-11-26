@@ -93,6 +93,9 @@ pub struct EntityData {
     /// once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scatter: Option<automata_scene::Scatter>,
+    /// A sculpted, painted heightmap ground.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terrain: Option<automata_scene::Terrain>,
     /// Primitive mesh visual.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh_visual: Option<MeshVisualData>,
@@ -391,12 +394,9 @@ impl SceneFile {
             if let Some(water) = eref.get::<&Water>() {
                 data.water = Some(*water);
             }
-            if let Some(grass) = eref.get::<&automata_scene::Grass>() {
-                data.grass = Some(automata_scene::Grass::clone(&grass));
-            }
-            if let Some(scatter) = eref.get::<&automata_scene::Scatter>() {
-                data.scatter = Some(automata_scene::Scatter::clone(&scatter));
-            }
+            data.grass = eref.get::<&automata_scene::Grass>().map(|g| (*g).clone());
+            data.terrain = eref.get::<&automata_scene::Terrain>().map(|t| (*t).clone());
+            data.scatter = eref.get::<&automata_scene::Scatter>().map(|s| (*s).clone());
             if let Some(visual) = eref.get::<&MeshVisual>() {
                 data.mesh_visual = Some(MeshVisualData::from(&*visual));
             }
@@ -500,6 +500,9 @@ impl SceneFile {
             }
             if let Some(grass) = &data.grass {
                 let _ = world.insert_one(entity, grass.clone());
+            }
+            if let Some(terrain) = &data.terrain {
+                let _ = world.insert_one(entity, terrain.clone());
             }
             if let Some(scatter) = &data.scatter {
                 let _ = world.insert_one(entity, scatter.clone());
@@ -1054,6 +1057,34 @@ mod tests {
         let mut world = automata_scene::SceneWorld::new();
         partial.apply_to_world(&mut world);
         assert_eq!(world.query::<&automata_scene::Grass>().iter().count(), 1);
+    }
+
+    #[test]
+    fn terrains_round_trip_compactly() {
+        let mut terrain = automata_scene::Terrain::new(64.0, 65);
+        terrain.set_heights_with(|x, z| 6.0 * automata_scene::terrain::fbm(x * 0.05, z * 0.05));
+        terrain.auto_paint(0.5, 1.0, 35.0);
+        let mut world = SceneWorld::new();
+        world.spawn((Transform::default(), terrain.clone()));
+        let ron = SceneFile::from_world(&world).to_ron().unwrap();
+        // Heights and paint travel as PNGs, not as thousands of numbers.
+        assert!(ron.len() < 40_000, "{} bytes", ron.len());
+        let back = SceneFile::from_ron(&ron).unwrap();
+        let loaded = back.entities[0].terrain.clone().unwrap();
+        assert_eq!(loaded.resolution(), 65);
+        let (lo, hi) = terrain.height_range();
+        let step = (hi - lo) / 65535.0;
+        for (a, b) in loaded.heights().iter().zip(terrain.heights()) {
+            assert!((a - b).abs() <= step, "{a} vs {b}");
+        }
+        assert_eq!(loaded.splat(), terrain.splat());
+        let mut world = SceneWorld::new();
+        back.apply_to_world(&mut world);
+        assert_eq!(world.query::<&automata_scene::Terrain>().iter().count(), 1);
+        // A bare entry is a flat default terrain.
+        let flat = SceneFile::from_ron("(version: 1, entities: [(terrain: Some(()))])").unwrap();
+        let flat = flat.entities[0].terrain.clone().unwrap();
+        assert!(flat.heights().iter().all(|h| h.abs() < f32::EPSILON));
     }
 
     #[test]

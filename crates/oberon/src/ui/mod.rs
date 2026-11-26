@@ -310,14 +310,18 @@ pub enum Intent {
     Brush {
         /// Entity id.
         id: u64,
+        /// What the dab does.
+        tool: crate::doc::BrushTool,
         /// The dab's centre on the surface (world space).
         point: [f32; 3],
         /// The surface's normal there.
         normal: [f32; 3],
         /// The brush's radius (metres).
         radius: f32,
-        /// -1..1: positive paints, negative erases.
+        /// 0..1: how far it goes.
         strength: f32,
+        /// Where the stroke began (world space; what Flatten levels to).
+        anchor: [f32; 3],
     },
     /// Create a new entity.
     Create(CreateKind),
@@ -428,6 +432,16 @@ pub enum Intent {
     /// Bake the scene's navigation mesh from its static colliders and
     /// save it next to the scene (the Navigation component's Bake).
     BakeNav(u64),
+    /// Paint an entity's Terrain by its shape (sand by the water, rock on
+    /// cliffs).
+    AutoPaintTerrain(u64),
+    /// Replace an entity's Terrain heights with a greyscale image.
+    ImportHeightmap {
+        /// Entity id.
+        id: u64,
+        /// The image.
+        path: PathBuf,
+    },
     /// Point a Nav Link at another entity by name.
     SetNavLink {
         /// Entity id.
@@ -2886,6 +2900,14 @@ impl Ui {
                 y = self.float_row(canvas, x, y, w, e, "Seed", Field::ScatterSeed);
                 y = self.foliage_note(canvas, x, y, w, e, false);
                 y += 6.0;
+            }
+        }
+        if d.terrain.is_some() {
+            let kind = ComponentKind::Terrain;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                y = self.terrain_rows(canvas, x, y, w, e);
             }
         }
         if let Some(emitter) = &d.particle_emitter {

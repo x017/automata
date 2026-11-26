@@ -148,6 +148,9 @@ pub struct MeshTris {
     pub vertices: Vec<[f32; 3]>,
     /// Triangles as vertex indices.
     pub triangles: Vec<[u32; 3]>,
+    /// A terrain's grid, `[columns, rows]`: the vertices are laid out row
+    /// by row and `triangles` left empty, scripts walking the grid instead.
+    pub grid: Option<[u32; 2]>,
 }
 
 /// Everything besides entities that a frame tells scripts.
@@ -799,7 +802,7 @@ fn collider_json(c: &ColliderShape) -> Json {
 #[allow(clippy::cast_possible_wrap)]
 fn mesh_json(key: u64, tris: &MeshTris) -> Json {
     let verts: Vec<f32> = tris.vertices.iter().flatten().copied().collect();
-    Json::Arr(vec![
+    let mut parts = vec![
         Json::Int(key as i64),
         Json::floats(&verts),
         Json::Arr(
@@ -809,7 +812,14 @@ fn mesh_json(key: u64, tris: &MeshTris) -> Json {
                 .map(|&i| Json::Int(i64::from(i)))
                 .collect(),
         ),
-    ])
+    ];
+    if let Some([columns, rows]) = tris.grid {
+        parts.push(Json::Arr(vec![
+            Json::Int(i64::from(columns)),
+            Json::Int(i64::from(rows)),
+        ]));
+    }
+    Json::Arr(parts)
 }
 
 #[allow(clippy::cast_possible_wrap)]

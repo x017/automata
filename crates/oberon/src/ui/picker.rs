@@ -46,6 +46,8 @@ pub enum ColorTarget {
     GrassBase,
     /// Grass colour at the tip (RGB).
     GrassTip,
+    /// A terrain layer's colour (RGB), layer 0..4.
+    TerrainLayer(u8),
     /// Particle color at birth (RGBA, before its glow).
     ParticleColor,
     /// Particle color at death (RGBA, before its glow).
@@ -75,6 +77,9 @@ impl ColorTarget {
             Self::WaterShallow => (0..3).map(Field::WaterShallow).collect(),
             Self::GrassBase => (0..3).map(Field::GrassBase).collect(),
             Self::GrassTip => (0..3).map(Field::GrassTip).collect(),
+            Self::TerrainLayer(l) => (0..3)
+                .map(|c| Field::TerrainColor(l.min(3) * 3 + c))
+                .collect(),
             Self::ParticleColor => (0..4).map(Field::ParticleColor).collect(),
             Self::ParticleEndColor => (0..4).map(Field::ParticleEndColor).collect(),
             Self::Attribute(_) => Vec::new(),

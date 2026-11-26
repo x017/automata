@@ -74,6 +74,8 @@ pub enum DialogKind {
     ImportSound(Option<u64>),
     /// Import a font file (from anywhere) into the project's `fonts/`.
     ImportFont,
+    /// Pick a greyscale image for an entity's Terrain heights.
+    ImportHeightmap(u64),
     /// Settings ▸ Build: pick the start scene.
     BuildScene,
     /// Settings ▸ Build: pick the output folder.

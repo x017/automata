@@ -48,6 +48,8 @@ Select the entity. Under its Grass or Scatter section in the Inspector:
 4. Drag over the ground in the scene view. A ring shows where the brush
    will land. It sits on whatever surface is under the cursor (terrain,
    rocks, a roof) and falls back to the ground plane at height 0.
+   Grass and scattered models painted over a [Terrain](terrain.md)
+   stand on it, and follow it when it's sculpted more.
 
 Each drag is **one undo step** (Ctrl+Z). Click Paint or Erase again to
 turn the brush off. It's also off during Play.

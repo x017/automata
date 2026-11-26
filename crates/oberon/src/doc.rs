@@ -205,6 +205,8 @@ pub enum CreateKind {
     Water,
     /// A 10 m field of grass to paint more onto.
     Grass,
+    /// A 64 m flat terrain to sculpt and paint.
+    Terrain,
     /// A particle emitter (a campfire's flames to start with).
     Particles,
     /// A cube with a dynamic rigid body and a box collider.
@@ -218,7 +220,7 @@ pub enum CreateKind {
 
 impl CreateKind {
     /// Every kind, in menu order.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Empty,
         Self::Cube,
         Self::Sphere,
@@ -230,6 +232,7 @@ impl CreateKind {
         Self::Environment,
         Self::Water,
         Self::Grass,
+        Self::Terrain,
         Self::Particles,
         Self::PhysicsCube,
         Self::Player,
@@ -250,6 +253,7 @@ impl CreateKind {
             Self::Environment => "Environment",
             Self::Water => "Water",
             Self::Grass => "Grass",
+            Self::Terrain => "Terrain",
             Self::Particles => "Particles",
             Self::PhysicsCube => "Physics Cube",
             Self::Player => "Player",
@@ -280,6 +284,8 @@ pub enum ComponentKind {
     Grass,
     /// Draws the entity's model at many spots on the ground.
     Scatter,
+    /// A heightmap ground, sculpted and painted with brushes.
+    Terrain,
     /// Particle emitter: fire, smoke, sparks, dust …
     Particles,
     /// Rigid body.
@@ -304,7 +310,7 @@ pub enum ComponentKind {
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Mesh,
         Self::Animation,
         Self::Light,
@@ -315,6 +321,7 @@ impl ComponentKind {
         Self::Water,
         Self::Grass,
         Self::Scatter,
+        Self::Terrain,
         Self::Particles,
         Self::RigidBody,
         Self::Collider,
@@ -341,6 +348,7 @@ impl ComponentKind {
             Self::Water => "Water",
             Self::Grass => "Grass",
             Self::Scatter => "Scatter",
+            Self::Terrain => "Terrain",
             Self::Particles => "Particle Emitter",
             Self::RigidBody => "Rigidbody",
             Self::Collider => "Collider",
@@ -368,6 +376,7 @@ impl ComponentKind {
             Self::Water => data.water.is_some(),
             Self::Grass => data.grass.is_some(),
             Self::Scatter => data.scatter.is_some(),
+            Self::Terrain => data.terrain.is_some(),
             Self::Particles => data.particle_emitter.is_some(),
             Self::RigidBody => data.rigid_body.is_some(),
             Self::Collider => data.collider_3d.is_some(),
@@ -433,6 +442,10 @@ impl ComponentKind {
             Self::Scatter => {
                 data.scatter
                     .get_or_insert_with(|| automata_scene::Scatter::area(10.0, 10.0));
+            }
+            Self::Terrain => {
+                data.terrain
+                    .get_or_insert_with(automata_scene::Terrain::default);
             }
             Self::Particles => {
                 data.particle_emitter.get_or_insert_with(|| {
@@ -510,6 +523,7 @@ impl ComponentKind {
             Self::Water => dst.water = src.water,
             Self::Grass => dst.grass.clone_from(&src.grass),
             Self::Scatter => dst.scatter.clone_from(&src.scatter),
+            Self::Terrain => dst.terrain.clone_from(&src.terrain),
             Self::Particles => dst.particle_emitter.clone_from(&src.particle_emitter),
             Self::RigidBody => dst.rigid_body.clone_from(&src.rigid_body),
             Self::Collider => dst.collider_3d.clone_from(&src.collider_3d),
@@ -540,6 +554,7 @@ impl ComponentKind {
             Self::Water => data.water = None,
             Self::Grass => data.grass = None,
             Self::Scatter => data.scatter = None,
+            Self::Terrain => data.terrain = None,
             Self::Particles => data.particle_emitter = None,
             Self::RigidBody => data.rigid_body = None,
             Self::Collider => data.collider_3d = None,
@@ -554,6 +569,109 @@ impl ComponentKind {
             Self::Navigation => data.navigation = None,
             Self::NavLink => data.nav_link = None,
         }
+    }
+}
+
+/// What a brush stroke does: paint or erase foliage, or sculpt or paint a
+/// terrain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BrushTool {
+    /// Paints Grass (or a Scatter's copies) on.
+    Paint,
+    /// Cuts it away.
+    Erase,
+    /// Raises the terrain.
+    Raise,
+    /// Lowers it.
+    Lower,
+    /// Evens out its bumps.
+    Smooth,
+    /// Levels it to where the stroke began.
+    Flatten,
+    /// Roughens it.
+    Noise,
+    /// Paints one of its four layers (0..3).
+    Layer(u8),
+}
+
+impl BrushTool {
+    /// The terrain sculpting tools, in Inspector order.
+    pub const SCULPT: [Self; 5] = [
+        Self::Raise,
+        Self::Lower,
+        Self::Smooth,
+        Self::Flatten,
+        Self::Noise,
+    ];
+
+    /// Whether it works on a Terrain (rather than Grass or a Scatter).
+    #[must_use]
+    pub fn is_terrain(self) -> bool {
+        !matches!(self, Self::Paint | Self::Erase)
+    }
+
+    /// Its button label.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Paint => "Paint",
+            Self::Erase => "Erase",
+            Self::Raise => "Raise",
+            Self::Lower => "Lower",
+            Self::Smooth => "Smooth",
+            Self::Flatten => "Flatten",
+            Self::Noise => "Noise",
+            Self::Layer(i) => ["Grass", "Rock", "Sand", "Dirt"][usize::from(i.min(3))],
+        }
+    }
+}
+
+/// One terrain brush dab at world `point` (see [`Document::brush`]): how
+/// far each tool goes per dab scales with the brush, so strokes feel the
+/// same at any size.
+fn terrain_dab(
+    terrain: &mut automata_scene::Terrain,
+    model: glam::Mat4,
+    tool: BrushTool,
+    point: glam::Vec3,
+    radius: f32,
+    strength: f32,
+    anchor: glam::Vec3,
+) {
+    use automata_scene::Sculpt;
+    let local = model.inverse();
+    let p = local.transform_point3(point);
+    let (scale, _, _) = model.to_scale_rotation_translation();
+    let spread = f32::midpoint(scale.x.abs(), scale.z.abs()).max(1e-3);
+    let up = scale.y.abs().max(1e-3);
+    let strength = strength.clamp(0.0, 1.0);
+    // How far a full-strength dab moves the ground at its centre: 2% of
+    // the (world) radius, so a drag five brushes long lifts about half a
+    // radius, whatever the brush size. In the entity's space.
+    let lift = radius * 0.02 * strength / up;
+    let radius = radius / spread;
+    let centre = glam::Vec2::new(p.x, p.z);
+    match tool {
+        BrushTool::Raise => {
+            terrain.sculpt(Sculpt::Raise, centre, radius, lift);
+        }
+        BrushTool::Lower => {
+            terrain.sculpt(Sculpt::Lower, centre, radius, lift);
+        }
+        BrushTool::Smooth => {
+            terrain.sculpt(Sculpt::Smooth, centre, radius, strength * 0.6);
+        }
+        BrushTool::Flatten => {
+            let level = local.transform_point3(anchor).y;
+            terrain.sculpt(Sculpt::Flatten(level), centre, radius, strength * 0.5);
+        }
+        BrushTool::Noise => {
+            terrain.sculpt(Sculpt::Noise, centre, radius, lift * 0.5);
+        }
+        BrushTool::Layer(i) => {
+            terrain.paint(usize::from(i.min(3)), centre, radius, strength);
+        }
+        BrushTool::Paint | BrushTool::Erase => {}
     }
 }
 
@@ -1298,17 +1416,22 @@ impl Document {
         true
     }
 
-    /// Lays a foliage brush dab (world-space `point` on a surface facing
-    /// `normal`, `radius` metres, `strength` -1..1 with negative erasing)
-    /// on entity `id`'s Grass, or else its Scatter, in the entity's own
-    /// space. Part of a stroke: one undo step per stroke.
+    /// Lays a brush dab (world-space `point` on a surface facing
+    /// `normal`, `radius` metres, `strength` 0..1) with `tool` on entity
+    /// `id`, in the entity's own space: foliage tools paint or erase its
+    /// Grass, or else its Scatter; terrain tools sculpt or paint its
+    /// Terrain (Flatten levels to the height of `anchor`, where the
+    /// stroke began). Part of a stroke: one undo step per stroke.
+    #[allow(clippy::too_many_arguments)]
     pub fn brush(
         &mut self,
         id: u64,
+        tool: BrushTool,
         point: [f32; 3],
         normal: [f32; 3],
         radius: f32,
         strength: f32,
+        anchor: [f32; 3],
     ) -> bool {
         self.modify(id, true, |d| {
             let model = d
@@ -1319,6 +1442,25 @@ impl Document {
                 return;
             }
             let local = model.inverse();
+            if tool.is_terrain() {
+                if let Some(terrain) = &mut d.terrain {
+                    terrain_dab(
+                        terrain,
+                        model,
+                        tool,
+                        point.into(),
+                        radius,
+                        strength,
+                        anchor.into(),
+                    );
+                }
+                return;
+            }
+            let strength = if tool == BrushTool::Erase {
+                -strength.abs()
+            } else {
+                strength.abs()
+            };
             let normal = (glam::Mat3::from_mat4(model).transpose() * glam::Vec3::from(normal))
                 .try_normalize()
                 .unwrap_or(glam::Vec3::Y);
@@ -1337,6 +1479,59 @@ impl Document {
                 scatter.strokes.push(dab);
             }
         })
+    }
+
+    /// Paints entity `id`'s Terrain by its shape: sand along the scene's
+    /// water (its first Water's height, else y = 0) up to `beach` metres
+    /// above it, rock on slopes over `cliff` degrees, dirt below those,
+    /// grass elsewhere. One undo step.
+    pub fn auto_paint_terrain(&mut self, id: u64, beach: f32, cliff: f32) -> bool {
+        let water = self
+            .entities
+            .iter()
+            .find(|e| e.data.water.is_some())
+            .and_then(|e| self.world_matrix(e))
+            .map_or(0.0, |m| m.w_axis.y);
+        let Some(model) = self.index_of(id).map(|i| {
+            self.world_matrix(&self.entities[i])
+                .unwrap_or(glam::Mat4::IDENTITY)
+        }) else {
+            return false;
+        };
+        // The water's height in the terrain's space (straight down).
+        let level = model
+            .inverse()
+            .transform_point3(glam::Vec3::new(model.w_axis.x, water, model.w_axis.z))
+            .y;
+        self.modify(id, false, |d| {
+            if let Some(t) = &mut d.terrain {
+                t.auto_paint(level, beach, cliff);
+            }
+        })
+    }
+
+    /// Replaces entity `id`'s Terrain heights with a greyscale image
+    /// (black at 0, white at a quarter of the terrain's size, in its
+    /// space). One undo step.
+    ///
+    /// # Errors
+    /// When the image can't be read.
+    pub fn import_heightmap(&mut self, id: u64, image: &[u8]) -> Result<(), String> {
+        let Some(terrain) = self
+            .index_of(id)
+            .and_then(|i| self.entities[i].data.terrain.clone())
+        else {
+            return Err(String::from("the entity has no Terrain"));
+        };
+        let mut loaded = terrain;
+        let high = loaded.size * 0.25;
+        loaded.load_heightmap(image, 0.0, high)?;
+        self.modify(id, false, |d| {
+            if let Some(t) = &mut d.terrain {
+                *t = loaded;
+            }
+        });
+        Ok(())
     }
 
     /// Creates an entity showing the model at `rel` (scene-relative), named
@@ -1594,6 +1789,9 @@ impl Document {
             }
             CreateKind::Grass => {
                 ComponentKind::Grass.add_to(&mut data);
+            }
+            CreateKind::Terrain => {
+                ComponentKind::Terrain.add_to(&mut data);
             }
             CreateKind::Particles => {
                 ComponentKind::Particles.add_to(&mut data);
@@ -2714,6 +2912,86 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn terrains_sculpt_paint_and_import_in_the_entitys_space() {
+        let mut doc = Document::new();
+        let id = doc.create(CreateKind::Terrain);
+        let data = |doc: &Document| doc.entities[doc.index_of(id).unwrap()].data.clone();
+        assert!(ComponentKind::Terrain.present_in(&data(&doc)));
+        // Stretched ×2 across and lifted 3 m: brushes work in its space.
+        doc.modify(id, false, |d| {
+            let t = d.transform.as_mut().unwrap();
+            t.position = [10.0, 3.0, 0.0];
+            t.scale = [2.0, 1.0, 2.0];
+        });
+        let up = [0.0, 1.0, 0.0];
+        let at = [14.0, 3.0, 0.0]; // local (2, 0, 0)
+        for _ in 0..20 {
+            assert!(doc.brush(id, BrushTool::Raise, at, up, 10.0, 1.0, at));
+        }
+        doc.end_gesture();
+        let t = data(&doc).terrain.unwrap();
+        let peak = t.height_at(2.0, 0.0);
+        assert!(peak > 1.0, "raised: {peak}");
+        assert!(t.height_at(-20.0, 0.0).abs() < 1e-4, "out of reach");
+        // One stroke, one undo step.
+        assert!(doc.undo());
+        assert!(data(&doc).terrain.unwrap().height_at(2.0, 0.0).abs() < 1e-4);
+        assert!(doc.redo());
+        // Flatten levels to where the stroke began (world y 3 = local 0).
+        let start = [14.0, 3.0 + peak, 0.0];
+        for _ in 0..12 {
+            doc.brush(
+                id,
+                BrushTool::Flatten,
+                start,
+                up,
+                10.0,
+                1.0,
+                [30.0, 3.0, 0.0],
+            );
+        }
+        doc.end_gesture();
+        assert!(data(&doc).terrain.unwrap().height_at(2.0, 0.0) < peak * 0.2);
+        // Painting puts a layer down; Paint (foliage) leaves it alone.
+        doc.brush(id, BrushTool::Layer(1), at, up, 6.0, 1.0, at);
+        doc.brush(id, BrushTool::Paint, at, up, 6.0, 1.0, at);
+        doc.end_gesture();
+        assert!(data(&doc).terrain.unwrap().weights_at(2.0, 0.0)[1] > 0.9);
+
+        // Auto Paint reads the Water's height: a beach along it.
+        let water = doc.create(CreateKind::Water);
+        doc.modify(water, false, |d| {
+            d.transform.as_mut().unwrap().position[1] = 4.0;
+        });
+        doc.modify(id, false, |d| {
+            d.terrain.as_mut().unwrap().set_heights_with(|x, _| x * 0.1);
+        });
+        assert!(doc.auto_paint_terrain(id, 1.0, 40.0));
+        let t = data(&doc).terrain.unwrap();
+        // Local x = 10 is 1 m up: world 4 m, the waterline.
+        assert!(t.weights_at(10.0, 0.0)[2] > 0.5, "sand at the waterline");
+        assert!(t.weights_at(-25.0, 0.0)[2] > 0.5, "a sandy seabed under it");
+        assert!(t.weights_at(28.0, 0.0)[0] > 0.5, "grass above the beach");
+
+        // A heightmap: a greyscale image, black left, white right.
+        let mut png = Vec::new();
+        let pixels = [[0u8; 4], [255; 4]].concat().repeat(2);
+        image::GrayImage::from_raw(8, 2, pixels)
+            .unwrap()
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        assert!(doc.import_heightmap(id, &png).is_ok());
+        let t = data(&doc).terrain.unwrap();
+        assert!(t.height_at(-30.0, 0.0).abs() < 0.1);
+        assert!(
+            (t.height_at(30.0, 0.0) - 16.0).abs() < 0.1,
+            "a quarter of 64 m"
+        );
+        assert!(doc.import_heightmap(id, b"not an image").is_err());
+        assert!(doc.import_heightmap(water, &png).is_err());
+    }
+
+    #[test]
     fn test_scenes_add_and_clear_in_single_undo_steps() {
         let mut doc = Document::starter();
         let before = doc.entities.len();
@@ -2786,8 +3064,24 @@ pub(crate) mod tests {
                 t.scale = [2.0, 1.0, 2.0];
             }
         });
-        assert!(doc.brush(id, [14.0, 1.0, 0.0], [0.0, 1.0, 0.0], 3.0, 1.0));
-        assert!(doc.brush(id, [16.0, 1.0, 0.0], [0.0, 1.0, 0.0], 3.0, -0.5));
+        assert!(doc.brush(
+            id,
+            BrushTool::Paint,
+            [14.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            3.0,
+            1.0,
+            [0.0; 3]
+        ));
+        assert!(doc.brush(
+            id,
+            BrushTool::Erase,
+            [16.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            3.0,
+            0.5,
+            [0.0; 3]
+        ));
         doc.end_gesture();
         let grass = doc.entities[doc.index_of(id).unwrap()]
             .data
@@ -2811,10 +3105,26 @@ pub(crate) mod tests {
         assert_eq!(after.grass.unwrap().strokes.len(), 0);
         // Without Grass, a Scatter takes the dab; with neither, nothing.
         let cube = doc.create(CreateKind::Cube);
-        assert!(!doc.brush(cube, [0.0; 3], [0.0, 1.0, 0.0], 1.0, 1.0));
+        assert!(!doc.brush(
+            cube,
+            BrushTool::Paint,
+            [0.0; 3],
+            [0.0, 1.0, 0.0],
+            1.0,
+            1.0,
+            [0.0; 3]
+        ));
         let at = doc.index_of(cube).unwrap();
         ComponentKind::Scatter.add_to(&mut doc.entities[at].data);
-        assert!(doc.brush(cube, [0.0; 3], [0.0, 1.0, 0.0], 1.0, 1.0));
+        assert!(doc.brush(
+            cube,
+            BrushTool::Paint,
+            [0.0; 3],
+            [0.0, 1.0, 0.0],
+            1.0,
+            1.0,
+            [0.0; 3]
+        ));
     }
 
     #[test]
