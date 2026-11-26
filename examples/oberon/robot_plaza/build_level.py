@@ -7,8 +7,9 @@
 A small town square with five copies of one animated robot. You drive one
 of them; the others each show a different way to use an Animation:
 
-- **Robot** (yours): ``scripts/player.py`` blends between Idle, Walking,
-  Running, Jump and Wave as you move.
+- **Robot** (yours): an animation graph, ``anims/robot.anim.ron``, blends
+  Idle, Walking and Running by speed, plays Jump, and waves with the upper
+  body only. ``scripts/player.py`` just sets the graph's parameters.
 - **Greeter**: ``scripts/greeter.py`` plays Wave once when you walk up.
 - **Dancer**: just an Animation set to Dance. No script needed.
 - **Sitter**: Sitting with Loop off. One-shot clips hold their last frame.
@@ -125,7 +126,7 @@ def build():
 
     # You.
     player = (
-        robot("Robot", (0, 0, 3), 180, at.Animation("Idle"))
+        robot("Robot", (0, 0, 3), 180, at.Animation("Idle", graph="anims/robot.anim.ron"))
         .add(at.RigidBody.kinematic_position())
         .add(at.Collider3D.capsule(0.55, 0.32))
         .add(at.CharacterController(snap_to_ground=0.3))

@@ -502,11 +502,13 @@ layers with bone masks).
   blend space, speed, loop), and transitions (conditions, triggers, exit
   time, fade, Any State). The `Animator` runs it; `Animation.graph` names
   the file. Manual: [`animation-graphs.md`](docs/wiki/oberon/animation-graphs.md).
-- ⬜ Scripts and Play: `entity.animation.set` / `get` / `trigger` /
-  `state` / `layer_weight`, `at.Animation(graph=…)`, graph state over
-  Oberon's bridge, the Inspector's Graph field, `automata-cli check`
-  validating graphs, and Robot Plaza's player driven by a graph (waving
-  on an upper-body layer).
+- ✅ Scripts and Play: `entity.animation.set` / `get` / `trigger` /
+  `state` / `layer_state` / `layer_weight` / `play_state` (the same on
+  `view.animation`), `at.Animation(graph=…)`, graph state and requests
+  over Oberon's bridge, the Inspector's Graph row (pick, make from the
+  model's clips, or drop a `.anim.ron`), `automata-cli check` validating
+  graphs against the model, and Robot Plaza's player driven by
+  `anims/robot.anim.ron` (waving on a `["Torso"]` layer while it walks).
 - ⬜ The Oberon graph editor: `.anim.ron` files open in a tab with a node
   canvas for states and transitions, panels for conditions, parameters,
   layers and masks, 1D and 2D blend space editors, and during Play the

@@ -1,10 +1,15 @@
-"""player: walk the robot around and pick the clip that fits what it's doing.
+"""player: walk the robot around; its animation graph picks the clips.
 
-W A S D (or the arrows) walk, Shift runs, Space jumps and F waves. Walking
-works like Coin Run's player script. On top of that, ``choose_clip`` looks
-at what the robot is doing each frame and ``entity.animation.play`` blends
-to the matching clip. Asking for the clip that's already playing does
-nothing, so it's safe to call every frame.
+W A S D (or the arrows) walk, Shift runs, Space jumps and F waves (even
+while walking: waving only moves the arms). Walking works like Coin Run's
+player script.
+
+This script never names a clip. It tells the robot's animation graph,
+``anims/robot.anim.ron``, what the robot is doing: how fast it goes,
+whether it's on the ground, and when it jumps or waves. The graph blends
+Idle, Walking and Running by speed, plays Jump and goes back when the
+robot lands, and lays Wave over the upper body. Open the graph in Oberon
+to see it, and watch it light up while you play.
 """
 
 import math
@@ -15,26 +20,20 @@ JUMP = 6.5
 GRAVITY = 20.0
 TURN = 12.0  # how fast the robot turns to face where it walks
 
-# How long each kind of change takes to blend in, in seconds.
-FADES = {"Idle": 0.3, "Walking": 0.2, "Running": 0.2, "Jump": 0.1, "Wave": 0.2}
 
+def animate(anim, speed, grounded, jumped, waved):
+    """Tells the animation graph what the robot is doing this frame.
 
-def choose_clip(grounded, speed, current, current_playing, wave_pressed):
-    """The clip the robot should be playing.
-
-    ``speed`` is the ground speed in m/s. ``current`` is the clip playing
-    now; ``current_playing`` is False once a one-shot (Jump, Wave) ends.
-    Returns ``(clip, loop)``.
+    ``speed`` is the ground speed in m/s, ``grounded`` whether the robot
+    stands on something, ``jumped`` and ``waved`` whether it took off or
+    F was pressed this frame.
     """
-    if not grounded:
-        return "Jump", False
-    if speed > (WALK + RUN) / 2:
-        return "Running", True
-    if speed > 0.2:
-        return "Walking", True
-    if wave_pressed or (current == "Wave" and current_playing):
-        return "Wave", False
-    return "Idle", True
+    anim.set("speed", speed)
+    anim.set("grounded", grounded)
+    if jumped:
+        anim.trigger("jump")
+    if waved:
+        anim.trigger("wave")
 
 
 def turn_towards(yaw, goal, rate, dt):
@@ -85,12 +84,11 @@ def update(entity, ctx):
         entity.transform.rotation_euler = (0.0, entity.state["yaw"], 0.0)
 
     # Jumping counts from the take-off frame, before the ground lets go.
-    anim = entity.animation
-    clip, loop = choose_clip(
-        grounded and vy <= 0.0,
+    jumped = grounded and vy > 0.0
+    animate(
+        entity.animation,
         math.hypot(vx, vz),
-        anim.clip,
-        anim.playing,
+        grounded and vy <= 0.0,
+        jumped,
         keys.just_pressed("f"),
     )
-    anim.play(clip, loop=loop, fade=FADES[clip])

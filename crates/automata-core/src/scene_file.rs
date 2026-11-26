@@ -14,10 +14,10 @@
 
 use automata_renderer::{Camera2D, Camera3D, Environment, MeshData, Water};
 /// A mesh's roughness / metalness / glow overrides (saved with its visual).
-pub use automata_scene::Surface;
+pub use automata_scene::{Animation, Surface};
 use automata_scene::{
-    Animation, DirectionalLight, Entity, MeshVisual, MeshVisualKind, Name, ParticleEmitter,
-    PointLight, SceneWorld, SpotLight, Transform,
+    DirectionalLight, Entity, MeshVisual, MeshVisualKind, Name, ParticleEmitter, PointLight,
+    SceneWorld, SpotLight, Transform,
 };
 use glam::EulerRot;
 use serde::{Deserialize, Serialize};

@@ -139,6 +139,28 @@ ones below. An <code>Empty</code> state switches the layer off, and fading to or
 one fades the layer out or in. That makes "Off" plus a one-shot clip the
 usual shape for an upper-body layer: wave, salute, reload.</p>
 <p>The first layer always shows fully and ignores its weight.</p>
+<h2 id="from-a-script">From a script<a class="anchor" href="#from-a-script" aria-label="Link to this section">#</a></h2>
+<p>A script only tells the graph what's going on. It never names a clip:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    anim = entity.animation
+    anim.<span class="tok-b">set</span>(<span class="tok-s">&quot;speed&quot;</span>, speed)            <span class="tok-c"># Float and Int parameters</span>
+    anim.<span class="tok-b">set</span>(<span class="tok-s">&quot;grounded&quot;</span>, on_ground)     <span class="tok-c"># Bool parameters</span>
+    <span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;space&quot;</span>):
+        anim.trigger(<span class="tok-s">&quot;jump&quot;</span>)            <span class="tok-c"># Trigger parameters</span></code></pre></div>
+<div class="table"><table><thead><tr><th>Call</th><th>What it does</th></tr></thead><tbody><tr><td><code>anim.set(name, value)</code></td><td>Sets a Float, Int (rounded) or Bool parameter. An unknown name raises <code>KeyError</code>; a trigger raises <code>TypeError</code></td></tr><tr><td><code>anim.trigger(name)</code> / <code>anim.reset_trigger(name)</code></td><td>Turns a trigger on (until a transition uses it) or off again</td></tr><tr><td><code>anim.get(name)</code> / <code>anim.parameters</code></td><td>One parameter's value, or all of them as a dict</td></tr><tr><td><code>anim.state</code> / <code>anim.layer_state(layer)</code></td><td>The state the first layer (or <code>layer</code>) is in. During a fade, the one it's fading to</td></tr><tr><td><code>anim.state_time</code> / <code>anim.in_transition</code></td><td>Seconds in the current state, and whether the first layer is fading</td></tr><tr><td><code>anim.layers</code> / <code>anim.layer_weight(layer)</code> / <code>anim.set_layer_weight(layer, w)</code></td><td>The layers, and how strongly one shows</td></tr><tr><td><code>anim.play_state(state, layer=None, fade=0)</code></td><td>Jumps straight to a state (a cutscene, a respawn)</td></tr><tr><td><code>anim.graph</code></td><td>The graph's path. Assign another to switch, or <code>None</code> to go back to clips</td></tr></tbody></table></div>
+<p>Reads see your own requests at once, so <code>anim.set(&quot;speed&quot;, 2)</code> followed by
+<code>anim.get(&quot;speed&quot;)</code> gives 2. A trigger shows as <code>True</code> until a transition
+uses it. These calls raise <code>RuntimeError</code> when the Animation has no graph.
+With a graph running, <code>anim.play(&quot;Dance&quot;)</code> jumps to the first layer's
+state called Dance.</p>
+<h2 id="in-oberon">In Oberon<a class="anchor" href="#in-oberon" aria-label="Link to this section">#</a></h2>
+<p>Select an animated model and click the Animation section's <strong>Graph</strong> row.
+Pick a graph, or type a new name: Oberon makes the file in <code>anims/</code>,
+starting with one state per clip of the model. You can also drag a
+<code>.anim.ron</code> from the Files panel onto the model. <strong>Edit</strong> opens the file;
+<strong>×</strong> goes back to playing the Clip.</p>
+<p><code>automata-cli check</code> (and Build) checks every graph the start scene uses
+against its model: clips and bones it doesn't have show up as warnings.</p>
 <h2 id="when-somethings-wrong">When something's wrong<a class="anchor" href="#when-somethings-wrong" aria-label="Link to this section">#</a></h2>
 <p>A graph with mistakes still runs: transitions to states that don't exist,
 conditions on unknown parameters, and clips the model doesn't have are
@@ -149,7 +171,7 @@ Animation plays its <strong>Clip</strong> instead.</p>
     <footer class="pager"><a class="prev" href="models.html"><small>Previous</small>Models</a><a class="next" href="foliage.html"><small>Next</small>Grass &amp; foliage</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/animation-graphs.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#whats-in-a-graph">What's in a graph</a></li><li class="l2"><a href="#states-and-motions">States and motions</a></li><li class="l3"><a href="#blend-spaces">Blend spaces</a></li><li class="l2"><a href="#transitions">Transitions</a></li><li class="l2"><a href="#layers-and-masks">Layers and masks</a></li><li class="l2"><a href="#when-somethings-wrong">When something's wrong</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#whats-in-a-graph">What's in a graph</a></li><li class="l2"><a href="#states-and-motions">States and motions</a></li><li class="l3"><a href="#blend-spaces">Blend spaces</a></li><li class="l2"><a href="#transitions">Transitions</a></li><li class="l2"><a href="#layers-and-masks">Layers and masks</a></li><li class="l2"><a href="#from-a-script">From a script</a></li><li class="l2"><a href="#in-oberon">In Oberon</a></li><li class="l2"><a href="#when-somethings-wrong">When something's wrong</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

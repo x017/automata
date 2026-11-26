@@ -868,6 +868,7 @@ impl EditorApp {
                 }
             }
             Intent::SetMaterial { id, path } => self.set_material(id, path.as_deref()),
+            Intent::SetAnimGraph { id, path } => self.set_anim_graph(id, path),
             Intent::NewMaterial(path) => {
                 if let Some(path) = self.ensure_material(path) {
                     self.ui.files_changed(Some(&path));
@@ -1415,6 +1416,87 @@ impl EditorApp {
         }
         if self.doc.set_material(id, &rel) {
             self.ui.log(LogLevel::Info, format!("{who} now uses {rel}"));
+        }
+    }
+
+    /// Points an entity's Animation at a graph (making the file from the
+    /// model's clips if it doesn't exist), or back at its clip (`None`).
+    fn set_anim_graph(&mut self, id: u64, path: Option<std::path::PathBuf>) {
+        let Some(index) = self.doc.index_of(id) else {
+            return;
+        };
+        let who = self.doc.entities[index].name().to_string();
+        let Some(path) = path else {
+            let changed = self.doc.modify(id, false, |d| {
+                if let Some(a) = &mut d.animation {
+                    a.graph.clear();
+                }
+            });
+            if changed {
+                self.ui
+                    .log(LogLevel::Info, format!("{who} plays its clip again"));
+            }
+            return;
+        };
+        let path = if automata_assets::anim_graph::is_anim_graph_path(&path) {
+            path
+        } else {
+            let name = path
+                .file_name()
+                .map_or_else(|| "character".into(), |s| s.to_string_lossy().into_owned());
+            let stem = name
+                .strip_suffix(".ron")
+                .or_else(|| name.strip_suffix(".anim"))
+                .unwrap_or(&name)
+                .to_string();
+            path.with_file_name(format!("{stem}.anim.ron"))
+        };
+        let rig = crate::doc::model_rig(&self.doc.entities[index].data);
+        if rig.as_ref().is_none_or(|r| r.clips.is_empty()) {
+            self.ui.log(
+                LogLevel::Warn,
+                format!("{who} needs an animated model (a .glb or .gltf with clips) for a graph"),
+            );
+            return;
+        }
+        let rel = self.doc.relative(&path);
+        if std::path::Path::new(&rel).is_absolute() {
+            self.ui.log(
+                LogLevel::Warn,
+                format!(
+                    "{} is outside the scene's folder and won't ship with the game: \
+                     move it into the project",
+                    path.display()
+                ),
+            );
+            return;
+        }
+        if !path.exists() {
+            let clips = rig.as_ref().map(|r| r.clip_names()).unwrap_or_default();
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if let Err(e) = automata_assets::AnimGraph::starter(&clips).save(&path, &name) {
+                self.ui.log(
+                    LogLevel::Error,
+                    format!("Couldn't create {}: {e}", path.display()),
+                );
+                return;
+            }
+            self.ui.files_changed(Some(&path));
+            self.ui.log(
+                LogLevel::Info,
+                format!("Created {rel} from the model's clips · edit it to add transitions"),
+            );
+        }
+        let fresh = crate::doc::default_animation(&self.doc.entities[index].data);
+        let changed = self.doc.modify(id, false, |d| {
+            d.animation.get_or_insert(fresh).graph.clone_from(&rel);
+        });
+        if changed {
+            self.ui
+                .log(LogLevel::Info, format!("{who} is animated by {rel}"));
         }
     }
 

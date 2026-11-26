@@ -133,6 +133,8 @@ pub enum AssetKind {
     Material,
     /// An image (`.png`, `.jpg`): material textures, sprites.
     Image,
+    /// An animation graph (`.anim.ron`), dragged onto animated models.
+    AnimGraph,
     /// Anything else.
     Other,
 }
@@ -156,6 +158,9 @@ pub fn asset_kind(path: &Path, dir: bool) -> AssetKind {
     }
     if automata_assets::is_material_path(path) {
         return AssetKind::Material;
+    }
+    if automata_assets::anim_graph::is_anim_graph_path(path) {
+        return AssetKind::AnimGraph;
     }
     if automata_assets::material::is_image_path(path) {
         return AssetKind::Image;
@@ -182,7 +187,7 @@ pub fn open_intent(path: &Path, dir: bool) -> Option<Intent> {
     match asset_kind(path, dir) {
         AssetKind::Scene => Some(Intent::Open(path.to_path_buf())),
         AssetKind::Prefab => Some(Intent::InstantiatePrefab(path.to_path_buf())),
-        AssetKind::Script | AssetKind::UiScreen | AssetKind::Material => {
+        AssetKind::Script | AssetKind::UiScreen | AssetKind::Material | AssetKind::AnimGraph => {
             Some(Intent::OpenScript(path.to_path_buf()))
         }
         AssetKind::Model => Some(Intent::AddModel {
@@ -632,6 +637,21 @@ impl Ui {
                     });
                 }
             }
+            AssetKind::AnimGraph => {
+                menu.push(item_menu("Edit Graph", open_intent(&item.path, false)));
+                if let Some(i) = doc.selected_index() {
+                    let e = &doc.entities[i];
+                    menu.push(MenuItem {
+                        label: format!("Animate {}", e.name()),
+                        shortcut: "",
+                        action: Some(Action::Intent(Intent::SetAnimGraph {
+                            id: e.id,
+                            path: Some(item.path.clone()),
+                        })),
+                        enabled: editing && e.data.animation.is_some(),
+                    });
+                }
+            }
             AssetKind::Script => {
                 menu.push(item_menu("Edit Script", open_intent(&item.path, false)));
                 if let Some(i) = doc.selected_index() {
@@ -1062,6 +1082,7 @@ pub fn draw_tree_icon(canvas: &mut Canvas, kind: AssetKind, cx: f32, cy: f32) {
         AssetKind::Audio => draw_sound_icon(canvas, cx, cy, color::accent_soft()),
         AssetKind::Font => draw_font_icon(canvas, cx, cy, color::accent_soft()),
         AssetKind::Material => draw_material_icon(canvas, cx, cy),
+        AssetKind::AnimGraph => draw_anim_graph_icon(canvas, cx, cy, color::accent_soft()),
         AssetKind::Image => {
             let c = color::accent_soft();
             canvas.stroke_rounded(cx - 6.5, cy - 5.0, 13.0, 10.0, 1.5, c, 1.2);
@@ -1079,6 +1100,16 @@ pub fn draw_tree_icon(canvas: &mut Canvas, kind: AssetKind, cx: f32, cy: f32) {
         }
         AssetKind::Other => super::draw_small_file_icon(canvas, cx, cy, false),
     }
+}
+
+/// An animation graph's icon: three states joined by arrows.
+pub(crate) fn draw_anim_graph_icon(canvas: &mut Canvas, cx: f32, cy: f32, c: tiny_skia::Color) {
+    canvas.line(cx - 4.0, cy + 3.0, cx, cy - 3.5, c, 1.0);
+    canvas.line(cx, cy - 3.5, cx + 4.0, cy + 3.0, c, 1.0);
+    canvas.line(cx - 4.0, cy + 3.0, cx + 4.0, cy + 3.0, c, 1.0);
+    canvas.fill_rounded(cx - 6.5, cy + 1.0, 5.0, 4.0, 1.0, c);
+    canvas.fill_rounded(cx + 1.5, cy + 1.0, 5.0, 4.0, 1.0, c);
+    canvas.fill_rounded(cx - 2.5, cy - 5.5, 5.0, 4.0, 1.0, c);
 }
 
 /// A shaded ball: the material file icon.
@@ -1211,6 +1242,11 @@ mod tests {
             AssetKind::Image
         );
         assert!(open_intent(Path::new("textures/brick.png"), false).is_none());
+        // An animation graph isn't a scene either.
+        assert_eq!(
+            asset_kind(Path::new("anims/robot.anim.ron"), false),
+            AssetKind::AnimGraph
+        );
         assert!(matches!(
             open_intent(Path::new("x.py"), false),
             Some(Intent::OpenScript(_))

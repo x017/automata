@@ -777,6 +777,7 @@
                 speed: 1.0,
                 looping: true,
                 play_on_start: true,
+                graph: "anims/robot.anim.ron",
             )),
             rigid_body: Some((
                 body_type: KinematicPosition,

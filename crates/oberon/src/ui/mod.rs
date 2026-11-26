@@ -403,6 +403,15 @@ pub enum Intent {
         /// The clip's name.
         clip: String,
     },
+    /// Drive an entity's Animation with an animation graph (`None`: play
+    /// its clip again). A graph file that doesn't exist yet is made,
+    /// starting from the model's clips.
+    SetAnimGraph {
+        /// Entity id.
+        id: u64,
+        /// The `.anim.ron` file.
+        path: Option<PathBuf>,
+    },
     /// Point an entity's Joint at another entity by name (`None`: the world).
     SetJointTarget {
         /// Entity id.
@@ -613,6 +622,7 @@ impl Intent {
             | Self::Cycle { id, .. }
             | Self::SetTransform { id, .. }
             | Self::SetAnimationClip { id, .. }
+            | Self::SetAnimGraph { id, .. }
             | Self::SetJointTarget { id, .. }
             | Self::PasteComponent { id, .. }
             | Self::SetAttribute { id, .. }
@@ -646,6 +656,7 @@ impl Intent {
             | Self::SetColor { id, .. }
             | Self::SetChoice { id, .. }
             | Self::SetAnimationClip { id, .. }
+            | Self::SetAnimGraph { id, .. }
             | Self::SetJointTarget { id, .. }
             | Self::PasteComponent { id, .. }
             | Self::SetAttribute { id, .. }
@@ -1690,7 +1701,10 @@ impl Ui {
                 t @ (FileDrop::Scene(_) | FileDrop::Entity(..)),
                 AssetKind::Model | AssetKind::Audio,
             )
-            | (t @ FileDrop::Entity(..), AssetKind::Material | AssetKind::Script)
+            | (
+                t @ FileDrop::Entity(..),
+                AssetKind::Material | AssetKind::Script | AssetKind::AnimGraph,
+            )
             | (t @ FileDrop::Scene(_), AssetKind::Prefab) => t,
             _ => FileDrop::Nothing,
         };
@@ -1729,6 +1743,10 @@ impl Ui {
                     id,
                     path: Some(path),
                 }),
+                (FileDrop::Entity(id, _), AssetKind::AnimGraph) => Some(Intent::SetAnimGraph {
+                    id,
+                    path: Some(path),
+                }),
                 (FileDrop::Entity(id, _), _) => Some(Intent::SetModel { id, path }),
                 (FileDrop::Nothing, _) => None,
             };
@@ -1760,6 +1778,7 @@ impl Ui {
                 let what = match kind {
                     AssetKind::Audio => format!("Play from {who}"),
                     AssetKind::Script => format!("Attach to {who}"),
+                    AssetKind::AnimGraph => format!("Animate {who}"),
                     _ => format!("Use on {who}"),
                 };
                 if r.h < 60.0 {
@@ -2643,7 +2662,7 @@ impl Ui {
             let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
             y = ny;
             if open {
-                y = self.animation_rows(canvas, x, y, w, e);
+                y = self.animation_rows(canvas, doc, x, y, w, e);
                 y += 6.0;
             }
         }
@@ -3538,6 +3557,7 @@ impl Ui {
     fn animation_rows(
         &mut self,
         canvas: &mut Canvas,
+        doc: &Document,
         x: f32,
         mut y: f32,
         w: f32,
@@ -3622,10 +3642,108 @@ impl Ui {
                 "Let the clip's own steps move the entity (through its Character Controller, if it has one)",
             );
         }
+        y = self.anim_graph_row(canvas, doc, x, y, w, e);
         if let (true, Some(clip)) = (editing, clip) {
             y = self.anim_preview_row(canvas, x, y, w, e.id, clip);
         }
         y
+    }
+
+    /// The Animation's Graph: the `.anim.ron` file picking its clips from
+    /// script parameters. Click to choose or make one, double-click (or
+    /// Edit) to open it, × to play the clip again.
+    fn anim_graph_row(
+        &mut self,
+        canvas: &mut Canvas,
+        doc: &Document,
+        x: f32,
+        y: f32,
+        w: f32,
+        e: &EntityEntry,
+    ) -> f32 {
+        let Some(anim) = e.data.animation.as_ref() else {
+            return y;
+        };
+        let rect = Rect::new(x, y, w, layout::FIELD_H);
+        if !self.row_visible(rect) {
+            return y + layout::ROW_STEP;
+        }
+        let editing = self.play == PlayState::Editing;
+        let rel = anim.graph.trim();
+        let file = (!rel.is_empty()).then(|| doc.resolve(rel));
+        self.row_label(canvas, x, y, "Graph");
+        let extra = if rel.is_empty() { 0.0 } else { 40.0 + 26.0 };
+        let r = Rect::new(
+            x + layout::LABEL_W,
+            y,
+            w - layout::LABEL_W - extra,
+            layout::FIELD_H,
+        );
+        let hot = editing && self.hot(r);
+        canvas.fill_rounded(
+            r.x,
+            r.y,
+            r.w,
+            r.h,
+            3.0,
+            if hot { color::hover() } else { color::field() },
+        );
+        canvas.stroke_rounded(r.x, r.y, r.w, r.h, 3.0, color::border(), 1.0);
+        let (text, tint) = if rel.is_empty() {
+            ("None · plays the clip".to_string(), color::text_faint())
+        } else if file.as_ref().is_some_and(|f| f.is_file())
+            && automata_assets::load_anim_graph(rel).is_ok()
+        {
+            (rel.to_string(), color::accent_soft())
+        } else {
+            (rel.to_string(), color::danger())
+        };
+        canvas.text_clipped(
+            r.x + 6.0,
+            r.y + 3.0,
+            layout::FONT_SIZE,
+            &text,
+            tint,
+            r.w - 12.0,
+        );
+        self.tip(
+            r,
+            "An animation graph (.anim.ron) picks the clips from parameters your script \
+             sets · click to choose or make one · double-click to edit",
+        );
+        if hot {
+            self.cursor = CursorHint::Pointer;
+            if self.p.double_click {
+                if let Some(f) = file.as_ref().filter(|f| f.exists()) {
+                    self.out.push(Intent::OpenScript(f.clone()));
+                }
+            } else if self.p.pressed {
+                self.open_file_dialog(menus::DialogKind::ChooseAnimGraph(e.id), Some(doc));
+            }
+        }
+        if !rel.is_empty() {
+            let style = if editing {
+                ButtonStyle::Ghost
+            } else {
+                ButtonStyle::Disabled
+            };
+            let edit = Rect::new(r.x + r.w + 2.0, y, 38.0, layout::FIELD_H);
+            if self.button(canvas, edit, "Edit", style) {
+                if let Some(f) = file.as_ref().filter(|f| f.exists()) {
+                    self.out.push(Intent::OpenScript(f.clone()));
+                }
+            }
+            self.tip(edit, "Edit the graph");
+            let clear = Rect::new(edit.x + 40.0, y, 24.0, layout::FIELD_H);
+            if self.button(canvas, clear, "×", style) {
+                self.out.push(Intent::SetAnimGraph {
+                    id: e.id,
+                    path: None,
+                });
+            }
+            self.tip(clear, "Play the clip instead");
+        }
+        y + layout::ROW_STEP
     }
 
     /// Play/pause and a time bar for the Animation preview, with a tick
@@ -6491,15 +6609,26 @@ mod tests {
         let p = ui.anim_preview.unwrap();
         assert!(!p.playing, "{p:?}");
         assert!((p.time - 3.3333 * 0.5).abs() < 0.1, "half of Idle: {p:?}");
-        // Five rows up (past Speed, Loop, Play On Start and Root
-        // Motion), the clip menu lists the model's clips.
+        // One row up, the Graph row offers a graph for the robot.
         ui.menu = None;
         click(
             &mut ui,
             &mut c,
             &doc,
             value_x + 40.0,
-            button_y - 5.0 * layout::ROW_STEP,
+            button_y - layout::ROW_STEP,
+        );
+        assert!(ui.file_dialog_open(), "the graph picker");
+        assert_eq!(ui.file_dialog_name(), Some("robot.anim.ron"));
+        ui.close_file_dialog();
+        // Six rows up (past Graph, Root Motion, Play On Start, Loop and
+        // Speed), the clip menu lists the model's clips.
+        click(
+            &mut ui,
+            &mut c,
+            &doc,
+            value_x + 40.0,
+            button_y - 6.0 * layout::ROW_STEP,
         );
         let menu = ui.menu.as_ref().expect("the clip menu");
         let labels: Vec<&str> = menu.items.iter().map(|i| i.label.trim()).collect();

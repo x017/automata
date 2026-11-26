@@ -154,6 +154,19 @@ pub struct GraphLayerState {
     pub fade: f32,
     /// The layer's weight.
     pub weight: f32,
+    /// Every state the layer has.
+    pub states: Vec<String>,
+}
+
+/// A graph parameter's value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphParam {
+    /// Its name.
+    pub name: String,
+    /// `"float"`, `"int"`, `"bool"` or `"trigger"`.
+    pub kind: &'static str,
+    /// Its value (bools and triggers as 0 or 1).
+    pub value: f32,
 }
 
 /// A graph's playback, as scripts and the editor see it.
@@ -161,8 +174,8 @@ pub struct GraphLayerState {
 pub struct GraphState {
     /// Every layer's, bottom first.
     pub layers: Vec<GraphLayerState>,
-    /// Every parameter's value (bools and triggers as 0 or 1).
-    pub params: Vec<(String, f32)>,
+    /// Every parameter, in the graph's order.
+    pub params: Vec<GraphParam>,
 }
 
 /// Plays an [`AnimGraph`] on a rig (see the module docs).
@@ -647,6 +660,7 @@ impl GraphPlayer {
                     .as_ref()
                     .map_or(1.0, |f| (f.elapsed / f.duration).clamp(0.0, 1.0)),
                 weight: run.weight,
+                states: g.states.iter().map(|s| s.name.clone()).collect(),
             })
             .collect();
         let params = self
@@ -654,7 +668,11 @@ impl GraphPlayer {
             .parameters
             .iter()
             .zip(&self.params)
-            .map(|(p, v)| (p.name.clone(), *v))
+            .map(|(p, v)| GraphParam {
+                name: p.name.clone(),
+                kind: p.kind.label(),
+                value: *v,
+            })
             .collect();
         GraphState { layers, params }
     }

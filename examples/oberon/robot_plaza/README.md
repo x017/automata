@@ -5,7 +5,7 @@ them. The others each show a different way to set up an Animation:
 
 | Robot | What it shows |
 | --- | --- |
-| **Robot** (you) | `scripts/player.py` blends between Idle, Walking, Running, Jump and Wave as you move. |
+| **Robot** (you) | An [animation graph](../../../docs/wiki/oberon/animation-graphs.md), `anims/robot.anim.ron`, blends Idle, Walking and Running by speed, plays Jump, and waves with the upper body only, even mid-stride. `scripts/player.py` just sets its parameters. |
 | **Greeter** | `scripts/greeter.py` plays Wave once when you walk up, then blends back to Idle. |
 | **Dancer** | An Animation set to Dance. No script needed. |
 | **Sitter** | Sitting with **Loop** off. One-shot clips hold their last frame. |
@@ -25,14 +25,16 @@ cargo run -p oberon --release examples/oberon/robot_plaza/level.ron
 pytest examples/oberon/robot_plaza/tests
 ```
 
-The heart of `player.py` is a few lines. It works out which clip fits what
-the robot is doing, then asks for it every frame. Asking for the clip that's
-already playing does nothing, so the clip only changes when the choice does,
-and `fade` blends the two over a fraction of a second:
+`player.py` never names a clip. Each frame it tells the robot's graph what
+the robot is doing, and the graph picks and blends the clips:
 
 ```python
-clip, loop = choose_clip(grounded, speed, anim.clip, anim.playing, keys.just_pressed("f"))
-anim.play(clip, loop=loop, fade=FADES[clip])
+anim.set("speed", speed)        # 0 = Idle, 2.2 = Walking, 5 = Running, blended between
+anim.set("grounded", grounded)  # Jump goes back to moving once this is True
+if jumped:
+    anim.trigger("jump")
+if waved:
+    anim.trigger("wave")        # the Arms layer waves over whatever the legs do
 ```
 
 Things to try in Oberon:
@@ -43,7 +45,10 @@ Things to try in Oberon:
 - Set **Slowpoke**'s **Speed** to -1 to make it walk backwards.
 - Drop `models/robot.glb` into the scene from the Assets panel. Oberon adds an
   Animation set to its Idle clip.
-- In `player.py`, change the `FADES` to 0 and see how much the blends matter.
+- Open `anims/robot.anim.ron` (double-click it in Files, or **Edit** next to
+  the Robot's **Graph**). Change the Arms layer's mask from `["Torso"]` to
+  `["Shoulder.R"]` and only the right arm waves; set the fades to 0 and see
+  how much the blends matter.
 
 `models/robot.glb.import.ron` scales the model to 1.8 m and moves its origin
 to the middle, so it fits the Character Controller's capsule.
@@ -51,4 +56,4 @@ to the middle, so it fits the Character Controller's capsule.
 The robot is RobotExpressive by Tomás Laulhé (Quaternius), CC0. See
 [CREDITS.md](CREDITS.md).
 
-Guide: [Models & Animation](../../../docs/wiki/guides/models-and-animation.md).
+Guides: [Models & Animation](../../../docs/wiki/oberon/models.md) and [Animation graphs](../../../docs/wiki/oberon/animation-graphs.md).

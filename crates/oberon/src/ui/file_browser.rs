@@ -141,6 +141,7 @@ impl FileDialog {
             DialogKind::NewUiScreen => "New UI Screen",
             DialogKind::NewMaterial => "New Material",
             DialogKind::ChooseMaterial(_) => "Choose Material",
+            DialogKind::ChooseAnimGraph(_) => "Animation Graph — pick one or name a new one",
             DialogKind::ChooseMaterialMap(_) => "Choose Texture",
             DialogKind::AttachScript(_) => "Attach Script — pick one or name a new .py",
             DialogKind::ImportModel(None) => "Import Model",
@@ -166,6 +167,7 @@ impl FileDialog {
             DialogKind::ImportFont => "ttf",
             DialogKind::NewUiScreen => "ui.ron",
             DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => "mat.ron",
+            DialogKind::ChooseAnimGraph(_) => "anim.ron",
             DialogKind::ChooseMaterialMap(_) => "png",
             DialogKind::BuildOutput | DialogKind::PythonInterpreter => "",
             DialogKind::BuildKey => "pem",
@@ -181,6 +183,7 @@ impl FileDialog {
             DialogKind::ImportFont => ".ttf .otf",
             DialogKind::NewUiScreen => ".ui.ron",
             DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => ".mat.ron",
+            DialogKind::ChooseAnimGraph(_) => ".anim.ron",
             DialogKind::ChooseMaterialMap(_) => ".png .jpg",
             DialogKind::SavePrefab(_) | DialogKind::InstantiatePrefab => ".prefab",
             DialogKind::OpenScript | DialogKind::NewScript | DialogKind::AttachScript(_) => ".py",
@@ -211,6 +214,9 @@ impl FileDialog {
             DialogKind::ChooseMaterialMap(_) => {
                 automata_assets::material::is_image_path(Path::new(name))
             }
+            DialogKind::ChooseAnimGraph(_) => {
+                automata_assets::anim_graph::is_anim_graph_path(Path::new(name))
+            }
             _ => {
                 let lower = name.to_ascii_lowercase();
                 Path::new(name)
@@ -219,6 +225,7 @@ impl FileDialog {
                     && !lower.ends_with(".import.ron")
                     && !lower.ends_with(".ui.ron")
                     && !lower.ends_with(".mat.ron")
+                    && !lower.ends_with(".anim.ron")
                     && lower != "build.ron"
             }
         }
@@ -267,7 +274,9 @@ impl FileDialog {
             DialogKind::OpenScene | DialogKind::OpenScript => "Open",
             DialogKind::InstantiatePrefab => "Instantiate",
             DialogKind::NewScript | DialogKind::NewUiScreen | DialogKind::NewMaterial => "Create",
-            DialogKind::ChooseMaterial(_) | DialogKind::ChooseMaterialMap(_) => "Use",
+            DialogKind::ChooseMaterial(_)
+            | DialogKind::ChooseMaterialMap(_)
+            | DialogKind::ChooseAnimGraph(_) => "Use",
             DialogKind::AttachScript(_) => "Attach",
             DialogKind::ImportModel(None)
             | DialogKind::ImportSound(None)
@@ -643,6 +652,7 @@ impl Ui {
                 }
                 Some(MATERIALS_DIR)
             }
+            DialogKind::ChooseAnimGraph(_) => Some(automata_assets::anim_graph::ANIMS_DIR),
             DialogKind::ChooseMaterialMap(_) => {
                 // Next to the material, or a `textures/` folder beside it.
                 if let Some(dir) = self.material_editor_path().and_then(|p| {
@@ -727,6 +737,23 @@ impl Ui {
             DialogKind::NewMaterial => {
                 let dir = self.start_dir_for(kind);
                 (unique_child(&dir, "material.mat.ron"), None)
+            }
+            DialogKind::ChooseAnimGraph(id) => {
+                let current = entity(id)
+                    .and_then(|e| e.data.animation.as_ref())
+                    .filter(|a| !a.graph.trim().is_empty())
+                    .map(|a| base.join(a.graph.trim()));
+                let name = if current.is_some() {
+                    String::new()
+                } else {
+                    let stem = entity(id).map_or("character", |e| e.name()).to_lowercase();
+                    let stem: String = stem
+                        .chars()
+                        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+                        .collect();
+                    unique_child(&self.start_dir_for(kind), &format!("{stem}.anim.ron"))
+                };
+                (name, current)
             }
             DialogKind::ChooseMaterial(id) => {
                 let current = entity(id)
@@ -1293,6 +1320,10 @@ impl Ui {
             DialogKind::NewUiScreen => Intent::NewUiScreen(path),
             DialogKind::NewMaterial => Intent::NewMaterial(path),
             DialogKind::ChooseMaterial(id) => Intent::SetMaterial {
+                id,
+                path: Some(path),
+            },
+            DialogKind::ChooseAnimGraph(id) => Intent::SetAnimGraph {
                 id,
                 path: Some(path),
             },

@@ -59,6 +59,8 @@ pub enum DialogKind {
     NewMaterial,
     /// Pick the material file for an entity's Mesh Renderer.
     ChooseMaterial(u64),
+    /// Pick (or name a new) animation graph for an entity's Animation.
+    ChooseAnimGraph(u64),
     /// Pick the image for a texture slot of the material being edited
     /// (index into [`automata_assets::MapSlot::ALL`]).
     ChooseMaterialMap(usize),

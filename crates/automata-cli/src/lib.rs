@@ -637,48 +637,7 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
                     Ok(file) => {
                         let base = path.parent().unwrap_or(project);
                         for entity in &file.entities {
-                            if let Some(script) = &entity.script {
-                                if !base.join(&script.path).is_file() {
-                                    out.push(Message::error(format!(
-                                        "{}: script {} not found",
-                                        entity.name.as_deref().unwrap_or("an entity"),
-                                        script.path
-                                    )));
-                                }
-                            }
-                            if let Some(automata_core::scene_file::PrimitiveData::Model { path }) =
-                                entity.mesh_visual.as_ref().map(|m| &m.primitive)
-                            {
-                                let who = entity.name.as_deref().unwrap_or("an entity");
-                                check_model(project, base, who, path, &mut out);
-                            }
-                            if let Some(material) = entity
-                                .mesh_visual
-                                .as_ref()
-                                .map(|m| m.material.trim())
-                                .filter(|m| !m.is_empty())
-                            {
-                                let who = entity.name.as_deref().unwrap_or("an entity");
-                                check_material(project, base, who, material, &mut out);
-                            }
-                            if let Some(source) = &entity.audio_source {
-                                let who = entity.name.as_deref().unwrap_or("an entity");
-                                check_sound(project, base, who, &source.clip, &mut out);
-                            }
-                            if let Some(collider) = &entity.collider_3d {
-                                let who = entity.name.as_deref().unwrap_or("an entity");
-                                let body = entity.rigid_body.as_ref().map(|b| b.body_type);
-                                if let Some(problem) =
-                                    automata_physics::collider_problem(&collider.shape, body)
-                                {
-                                    out.push(Message::error(format!("{who}: {problem}")));
-                                } else if let Some(model) = collider.shape.model() {
-                                    check_model(project, base, who, model, &mut out);
-                                }
-                            }
-                            if let Some(joint) = &entity.joint {
-                                check_joint(&file, entity, joint, &mut out);
-                            }
+                            check_entity(project, base, &file, entity, &mut out);
                         }
                     }
                 },
@@ -710,6 +669,70 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
         }
     }
     out
+}
+
+/// Checks what one entity of the start scene names: its script, model,
+/// material, sound, animation graph, collider and joint.
+fn check_entity(
+    project: &Path,
+    base: &Path,
+    file: &automata_core::scene_file::SceneFile,
+    entity: &automata_core::scene_file::EntityData,
+    out: &mut Vec<Message>,
+) {
+    if let Some(script) = &entity.script {
+        if !base.join(&script.path).is_file() {
+            out.push(Message::error(format!(
+                "{}: script {} not found",
+                entity.name.as_deref().unwrap_or("an entity"),
+                script.path
+            )));
+        }
+    }
+    if let Some(automata_core::scene_file::PrimitiveData::Model { path }) =
+        entity.mesh_visual.as_ref().map(|m| &m.primitive)
+    {
+        let who = entity.name.as_deref().unwrap_or("an entity");
+        check_model(project, base, who, path, out);
+    }
+    if let Some(material) = entity
+        .mesh_visual
+        .as_ref()
+        .map(|m| m.material.trim())
+        .filter(|m| !m.is_empty())
+    {
+        let who = entity.name.as_deref().unwrap_or("an entity");
+        check_material(project, base, who, material, out);
+    }
+    if let Some(source) = &entity.audio_source {
+        let who = entity.name.as_deref().unwrap_or("an entity");
+        check_sound(project, base, who, &source.clip, out);
+    }
+    if let Some(graph) = entity
+        .animation
+        .as_ref()
+        .map(|a| a.graph.trim())
+        .filter(|g| !g.is_empty())
+    {
+        let who = entity.name.as_deref().unwrap_or("an entity");
+        let model = match entity.mesh_visual.as_ref().map(|m| &m.primitive) {
+            Some(automata_core::scene_file::PrimitiveData::Model { path }) => Some(path.as_str()),
+            _ => None,
+        };
+        check_anim_graph(project, base, who, graph, model, out);
+    }
+    if let Some(collider) = &entity.collider_3d {
+        let who = entity.name.as_deref().unwrap_or("an entity");
+        let body = entity.rigid_body.as_ref().map(|b| b.body_type);
+        if let Some(problem) = automata_physics::collider_problem(&collider.shape, body) {
+            out.push(Message::error(format!("{who}: {problem}")));
+        } else if let Some(model) = collider.shape.model() {
+            check_model(project, base, who, model, out);
+        }
+    }
+    if let Some(joint) = &entity.joint {
+        check_joint(file, entity, joint, out);
+    }
 }
 
 /// Checks the fonts scripts name: every string literal ending in `.ttf` or
@@ -1100,6 +1123,61 @@ fn check_material(project: &Path, base: &Path, who: &str, rel: &str, out: &mut V
                 "{who}: material {rel} uses {shown}, outside the project; it won't ship"
             )));
         }
+    }
+}
+
+/// Checks an Animation's graph: the file exists inside the project, reads,
+/// and makes sense for the entity's model (its clips and bones).
+fn check_anim_graph(
+    project: &Path,
+    base: &Path,
+    who: &str,
+    rel: &str,
+    model: Option<&str>,
+    out: &mut Vec<Message>,
+) {
+    let join = |rel: &str| {
+        if Path::new(rel).is_absolute() {
+            PathBuf::from(rel)
+        } else {
+            automata_assets::join_relative(base, rel)
+        }
+    };
+    let file = join(rel);
+    let Ok(text) = std::fs::read_to_string(&file) else {
+        out.push(Message::error(format!(
+            "{who}: animation graph {rel} not found"
+        )));
+        return;
+    };
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if !canon(&file).starts_with(canon(project)) {
+        out.push(Message::error(format!(
+            "{who}: animation graph {rel} is outside the project folder and won't ship"
+        )));
+        return;
+    }
+    let graph = match automata_assets::AnimGraph::parse(&text) {
+        Ok(graph) => graph,
+        Err(e) => {
+            out.push(Message::error(format!(
+                "{who}: animation graph {rel} doesn't read: {e}"
+            )));
+            return;
+        }
+    };
+    let rig = model
+        .map(join)
+        .and_then(|m| automata_assets::load(m.to_str()?).ok())
+        .and_then(|m| m.rig.clone());
+    let clips = rig.as_ref().map(|r| r.clip_names());
+    let bones: Option<Vec<&str>> = rig
+        .as_ref()
+        .map(|r| r.nodes.iter().map(|n| n.name.as_str()).collect());
+    for problem in graph.problems(clips.as_deref(), bones.as_deref()) {
+        out.push(Message::warn(format!(
+            "{who}: animation graph {rel}: {problem}"
+        )));
     }
 }
 
@@ -2189,6 +2267,75 @@ mod tests {
             "{texts:#?}"
         );
         assert!(!has("Plain"), "{texts:#?}");
+    }
+
+    #[test]
+    fn validation_checks_animation_graphs_against_the_model() {
+        use automata_core::scene_file::{EntityData, MeshVisualData, PrimitiveData, SceneFile};
+        let dir = project("anim_graphs");
+        std::fs::create_dir_all(dir.join("anims")).unwrap();
+        std::fs::create_dir_all(dir.join("models")).unwrap();
+        let robot = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/oberon/robot_plaza/models/robot.glb");
+        std::fs::copy(robot, dir.join("models/robot.glb")).unwrap();
+        let good = automata_assets::AnimGraph::starter(&["Idle", "Walking"]);
+        good.save(&dir.join("anims/good.anim.ron"), "good.anim.ron")
+            .unwrap();
+        let typo = automata_assets::AnimGraph::starter(&["Idle", "Moonwalk"]);
+        typo.save(&dir.join("anims/typo.anim.ron"), "typo.anim.ron")
+            .unwrap();
+        std::fs::write(dir.join("anims/bad.anim.ron"), "(layers: oops)").unwrap();
+        let bot = |name: &str, graph: &str| EntityData {
+            name: Some(name.into()),
+            mesh_visual: Some(MeshVisualData {
+                primitive: PrimitiveData::Model {
+                    path: "models/robot.glb".into(),
+                },
+                color: [1.0; 4],
+                surface: automata_core::scene_file::Surface::default(),
+                draw_distance: 0.0,
+                material: String::new(),
+            }),
+            animation: Some(automata_core::scene_file::Animation {
+                graph: graph.into(),
+                ..automata_core::scene_file::Animation::default()
+            }),
+            ..Default::default()
+        };
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                bot("Good", "anims/good.anim.ron"),
+                bot("Typo", "anims/typo.anim.ron"),
+                bot("Bad", "anims/bad.anim.ron"),
+                bot("Ghost", "anims/ghost.anim.ron"),
+                bot("Plain", ""),
+            ],
+        };
+        std::fs::write(dir.join("bots.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            name: "Bots".into(),
+            start_scene: Some("bots.ron".into()),
+            ..BuildConfig::default()
+        };
+        let texts: Vec<String> = validate(&dir, &cfg)
+            .iter()
+            .map(|m| format!("{:?} {}", m.level, m.text))
+            .collect();
+        let has = |s: &str| texts.iter().any(|t| t.contains(s));
+        assert!(!has("Good") && !has("Plain"), "{texts:#?}");
+        assert!(
+            has("Warning Typo: animation graph anims/typo.anim.ron:") && has("Moonwalk"),
+            "{texts:#?}"
+        );
+        assert!(
+            has("Error Bad: animation graph anims/bad.anim.ron doesn't read"),
+            "{texts:#?}"
+        );
+        assert!(
+            has("Error Ghost: animation graph anims/ghost.anim.ron not found"),
+            "{texts:#?}"
+        );
     }
 
     #[test]

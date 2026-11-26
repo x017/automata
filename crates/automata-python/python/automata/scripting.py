@@ -102,6 +102,24 @@ def _pad_keys(gamepads: Any) -> frozenset[str]:
     return frozenset(held)
 
 
+def _graph_cmd(anim: Any, cmd: list) -> None:
+    """Applies one animation graph request from the script API (which
+    already checked it) to an engine ``AnimationRef``."""
+    try:
+        if cmd[0] == "set":
+            anim.set(cmd[1], cmd[2])
+        elif cmd[0] == "trigger":
+            anim.trigger(cmd[1])
+        elif cmd[0] == "reset_trigger":
+            anim.reset_trigger(cmd[1])
+        elif cmd[0] == "layer_weight":
+            anim.set_layer_weight(cmd[1], cmd[2])
+        elif cmd[0] == "play_state":
+            anim.play_state(cmd[2], cmd[1] or None, cmd[3])
+    except (KeyError, TypeError, ValueError, RuntimeError):
+        pass  # the script already heard about it
+
+
 class _EngineKeys:
     """The engine's input, as the shared API's key source."""
 
@@ -206,12 +224,17 @@ class _ViewRecord:
             if a is None:
                 return None
             clips = a.clips
-            return {
+            rec = {
                 "clip": a.clip, "time": a.time, "len": a.duration, "playing": a.playing,
                 "speed": a.speed, "loop": a.looping, "clips": clips,
                 "lens": [a.length(c) for c in clips], "springs": a.springs,
                 "rm": a.root_motion, "ev": a.recent_events,
             }
+            if a.graph is not None:
+                rec["graph"] = a.graph
+                rec["gl"] = [list(row) for row in a._graph_layers]
+                rec["gp"] = [list(row) for row in a._graph_params]
+            return rec
         if key == "joint":
             j = v.joint
             if j is None:
@@ -315,6 +338,10 @@ class _EngineBackend(api.Backend):
                     anim.reset_springs()
                 elif cmd[0] == "root_motion":
                     anim.root_motion = cmd[1]
+                elif cmd[0] == "graph":
+                    anim.graph = cmd[1] or None
+                elif cmd[0] in ("set", "trigger", "reset_trigger", "layer_weight", "play_state"):
+                    _graph_cmd(anim, cmd)
             if w.get("despawn"):
                 view.despawn()
         for path, volume, pitch, pos in out.sounds:

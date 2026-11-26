@@ -348,6 +348,10 @@ class EntityAnimation:
     ``play("Walking", fade=0.2)`` crossfades to a clip; calling it every
     frame with the same clip keeps it going. Reads see this frame's own
     requests (``play`` then ``clip`` gives the new clip).
+
+    With an animation graph (``graph``), scripts set its parameters
+    instead (``set("speed", 3.0)``, ``trigger("jump")``) and the graph
+    picks the clips; ``state`` says where it is.
     """
 
     __slots__ = ("_e",)
@@ -370,9 +374,15 @@ class EntityAnimation:
         seconds. Playing the clip that's already playing keeps it going
         unless ``restart``; ``speed`` (if given) sets the playback rate.
         ``loop=False`` plays it once and holds the last frame. Raises
-        ``KeyError`` when the model has no such clip."""
+        ``KeyError`` when the model has no such clip.
+
+        With an animation graph, ``clip`` names a state of its first layer
+        and the graph goes straight there (``play_state``)."""
         st = self._st()
         clip = str(clip)
+        if st.get("graph"):
+            self.play_state(clip, fade=fade)
+            return
         clips = list(st.get("clips") or ())
         if clip not in clips:
             raise KeyError(f"the model has no clip {clip!r}; it has: {', '.join(clips)}")
@@ -389,9 +399,10 @@ class EntityAnimation:
         st["time"] = length if float(st.get("speed") or 1.0) < 0 else 0.0
 
     def stop(self, fade: float = 0.0) -> None:
-        """Stops, fading back to the rest pose over ``fade`` seconds."""
+        """Stops, fading back to the rest pose over ``fade`` seconds. An
+        animation graph stops running too."""
         self._e._anim_cmd(["stop", max(0.0, float(fade))])
-        self._st().update(clip=None, time=0.0, len=0.0, playing=False)
+        self._st().update(clip=None, time=0.0, len=0.0, playing=False, graph=None, gl=[], gp=[])
 
     @property
     def clip(self) -> str | None:
@@ -476,7 +487,201 @@ class EntityAnimation:
             raise KeyError(f"the model has no clip {clip!r}")
         return float((st.get("lens") or [0.0] * len(clips))[clips.index(clip)])
 
+    # --- Animation graphs ------------------------------------------------
+
+    @property
+    def graph(self) -> str | None:
+        """The animation graph (a ``.anim.ron`` path) picking the clips, or
+        None. Set a path to run one, None to go back to clips. A new
+        graph's parameters can be set at once; they're checked from the
+        next frame."""
+        return self._st().get("graph") or None
+
+    @graph.setter
+    def graph(self, path: str | None) -> None:
+        path = "" if path is None else str(path)
+        self._e._anim_cmd(["graph", path])
+        # Its states and parameters arrive next frame; None means unknown.
+        self._st().update(graph=path or None, gl=None if path else [], gp=None if path else [])
+
+    def _graph_st(self, what: str):
+        st = self._st()
+        if not st.get("graph"):
+            raise RuntimeError(
+                f"{what} needs an animation graph; set entity.animation.graph "
+                "(or the Animation's Graph in the Inspector) first. If one is "
+                "set, it didn't load: the log says why"
+            )
+        return st
+
+    def _param(self, name: str, what: str):
+        """The parameter's row ``[name, kind, value]``, or None while a new
+        graph's parameters aren't known yet."""
+        st = self._graph_st(what)
+        rows = st.get("gp")
+        if rows is None:
+            return None
+        for row in rows:
+            if row[0] == name:
+                return row
+        names = ", ".join(r[0] for r in rows) or "none"
+        raise KeyError(f"the graph has no parameter {name!r}; it has: {names}")
+
+    def _layer(self, layer: str | None, what: str):
+        """The layer's row ``[name, state, time, from, fade, weight,
+        states]`` (None: the first), or None while unknown."""
+        st = self._graph_st(what)
+        rows = st.get("gl")
+        if rows is None:
+            return None
+        if layer is None:
+            return rows[0] if rows else None
+        for row in rows:
+            if row[0] == layer:
+                return row
+        names = ", ".join(r[0] for r in rows) or "none"
+        raise KeyError(f"the graph has no layer {layer!r}; it has: {names}")
+
+    def set(self, name: str, value) -> None:
+        """Sets a graph parameter: a number for a float or an int (rounded),
+        True/False for a bool. Raises ``KeyError`` for an unknown name and
+        ``TypeError`` for a trigger (use ``trigger``)."""
+        name = str(name)
+        row = self._param(name, "set()")
+        kind = row[1] if row is not None else None
+        if kind == "trigger":
+            raise TypeError(f"{name!r} is a trigger; use trigger({name!r})")
+        if kind == "bool" or isinstance(value, bool):
+            value = bool(value)
+            stored = 1.0 if value else 0.0
+        else:
+            value = float(value)
+            if value != value or value in (float("inf"), float("-inf")):
+                raise ValueError(f"{name!r} must be a finite number")
+            if kind == "int":
+                value = float(round(value))
+            stored = value
+        self._e._anim_cmd(["set", name, value])
+        if row is not None:
+            row[2] = stored
+
+    def get(self, name: str):
+        """A graph parameter's value: a float, an int, or a bool (bools and
+        triggers). Raises ``KeyError`` for an unknown name."""
+        name = str(name)
+        row = self._param(name, "get()")
+        if row is None:
+            raise KeyError(f"the graph's parameters arrive next frame; {name!r} isn't known yet")
+        kind, value = row[1], float(row[2])
+        if kind in ("bool", "trigger"):
+            return value >= 0.5
+        if kind == "int":
+            return int(round(value))
+        return value
+
+    def trigger(self, name: str) -> None:
+        """Sets a trigger: the next transition that tests it fires (and
+        clears it). Raises ``KeyError`` for an unknown name and
+        ``TypeError`` for a number."""
+        name = str(name)
+        row = self._param(name, "trigger()")
+        if row is not None and row[1] not in ("trigger", "bool"):
+            raise TypeError(f"{name!r} is a {row[1]}; use set({name!r}, value)")
+        self._e._anim_cmd(["trigger", name])
+        if row is not None:
+            row[2] = 1.0
+
+    def reset_trigger(self, name: str) -> None:
+        """Clears a trigger no transition has used yet."""
+        name = str(name)
+        row = self._param(name, "reset_trigger()")
+        if row is not None and row[1] != "trigger":
+            raise TypeError(f"{name!r} is a {row[1]}, not a trigger")
+        self._e._anim_cmd(["reset_trigger", name])
+        if row is not None:
+            row[2] = 0.0
+
+    @property
+    def parameters(self) -> dict:
+        """Every graph parameter and its value (empty without a graph)."""
+        st = self._st()
+        if not st.get("graph"):
+            return {}
+        return {row[0]: self.get(row[0]) for row in st.get("gp") or ()}
+
+    @property
+    def state(self) -> str | None:
+        """The state the graph's first layer is in (or fading to), or None
+        without a graph."""
+        st = self._st()
+        if not st.get("graph"):
+            return None
+        rows = st.get("gl") or ()
+        return rows[0][1] if rows else None
+
+    @property
+    def state_time(self) -> float:
+        """How far through its motion the first layer's state is, 0 to 1."""
+        st = self._st()
+        rows = st.get("gl") or () if st.get("graph") else ()
+        return float(rows[0][2]) if rows else 0.0
+
+    @property
+    def in_transition(self) -> bool:
+        """Whether the first layer is crossfading between states."""
+        st = self._st()
+        rows = st.get("gl") or () if st.get("graph") else ()
+        return bool(rows) and rows[0][3] is not None
+
+    @property
+    def layers(self) -> tuple[str, ...]:
+        """The graph's layer names, bottom first (empty without a graph)."""
+        st = self._st()
+        return tuple(r[0] for r in st.get("gl") or ()) if st.get("graph") else ()
+
+    def layer_state(self, layer: str) -> str:
+        """The state a graph layer is in. Raises ``KeyError`` for an unknown
+        layer."""
+        row = self._layer(str(layer), "layer_state()")
+        if row is None:
+            raise KeyError(f"the graph's layers arrive next frame; {layer!r} isn't known yet")
+        return row[1]
+
+    def layer_weight(self, layer: str) -> float:
+        """How strongly a graph layer shows over the ones below, 0 to 1."""
+        row = self._layer(str(layer), "layer_weight()")
+        return 1.0 if row is None else float(row[5])
+
+    def set_layer_weight(self, layer: str, weight: float) -> None:
+        """Fades a graph layer in or out (0 hides it, 1 shows it fully).
+        The first layer always shows fully."""
+        layer = str(layer)
+        weight = min(max(float(weight), 0.0), 1.0)
+        row = self._layer(layer, "set_layer_weight()")
+        self._e._anim_cmd(["layer_weight", layer, weight])
+        if row is not None:
+            row[5] = weight
+
+    def play_state(self, state: str, layer: str | None = None, fade: float = 0.0) -> None:
+        """Sends a graph layer (default: the first) straight to ``state``,
+        crossfading over ``fade`` seconds, whatever its transitions say.
+        Raises ``KeyError`` for an unknown layer or state."""
+        state = str(state)
+        fade = max(0.0, float(fade))
+        row = self._layer(None if layer is None else str(layer), "play_state()")
+        if row is not None:
+            if state not in row[6]:
+                raise KeyError(
+                    f"the layer {row[0]!r} has no state {state!r}; it has: {', '.join(row[6])}"
+                )
+            row[3] = row[1] if fade > 0 else None  # fading from
+            row[4] = 0.0 if fade > 0 else 1.0
+            row[1], row[2] = state, 0.0
+        self._e._anim_cmd(["play_state", "" if layer is None else str(layer), state, fade])
+
     def __repr__(self):
+        if self.graph:
+            return f"Animation({self._e.name!r}, graph={self.graph!r}, state={self.state!r})"
         return f"Animation({self._e.name!r}, clip={self.clip!r})"
 
 
@@ -721,14 +926,23 @@ class Entity:
     def animation(self) -> EntityAnimation | None:
         """This entity's animated model: ``play(clip, loop=True, fade=0,
         speed=None)``, ``stop(fade=0)``, ``clip``, ``time``, ``playing``,
-        ``speed``, ``clips``. None when its mesh isn't animated."""
+        ``speed``, ``clips``. With an animation graph, ``set(name, value)``
+        and ``trigger(name)`` steer it and ``state`` / ``layer_state(layer)``
+        say where it is. None when its mesh isn't animated."""
         return EntityAnimation(self) if self._anim_state() is not None else None
 
     def _anim_state(self):
         """This frame's playback (a dict our own requests update), or None."""
         if self._anim_st is None:
             rec = self._record.get("anim")
-            self._anim_st = False if rec is None else dict(rec)
+            if rec is None:
+                self._anim_st = False
+            else:
+                st = dict(rec)
+                for key in ("gl", "gp"):  # our requests edit these rows
+                    if st.get(key) is not None:
+                        st[key] = [list(row) for row in st[key]]
+                self._anim_st = st
         return self._anim_st if self._anim_st is not False else None
 
     def _anim_cmd(self, cmd):
@@ -3810,6 +4024,8 @@ _ANIMATION_FIELDS = {
     "duration": (lambda a: a.duration, None),
     "clips": (lambda a: a.clips, None),
     "springs": (lambda a: a.springs, None),
+    "graph": (lambda a: a.graph, lambda a, v: _set_attr(a, "graph", v)),
+    "state": (lambda a: a.state, None),
 }
 _TRANSFORM_FIELDS = {
     "position": (lambda t: t.position, lambda t, v: _set_attr(t, "position", v)),

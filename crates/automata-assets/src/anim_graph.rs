@@ -35,6 +35,9 @@ pub const ANY_STATE: &str = "*";
 /// The file extension of animation graphs (after the name: `x.anim.ron`).
 pub const EXTENSION: &str = ".anim.ron";
 
+/// The project folder new graphs go in.
+pub const ANIMS_DIR: &str = "anims";
+
 /// Whether `path` names an animation graph (`*.anim.ron`).
 #[must_use]
 pub fn is_anim_graph_path(path: &Path) -> bool {

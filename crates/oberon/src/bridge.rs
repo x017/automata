@@ -911,8 +911,10 @@ fn parse_joint(v: &Json) -> Option<automata_physics::JointEdit> {
 }
 
 /// `{"clip", "time", "len", "playing", "speed", "loop", "clips", "lens",
-/// "springs"}`
-/// (see the script API's frame model).
+/// "springs", "rm", "ev"}`, plus with an animation graph `"graph"` (its
+/// path), `"gl"` (layers: `[name, state, time, from or null, fade,
+/// weight, [states]]`) and `"gp"` (parameters: `[name, kind, value]`).
+/// See the script API's frame model.
 fn anim_json(a: &automata_scene::AnimationState) -> Json {
     let events = a.events.iter().map(|e| {
         let seq = Json::Int(i64::try_from(e.seq).unwrap_or(i64::MAX));
@@ -922,7 +924,7 @@ fn anim_json(a: &automata_scene::AnimationState) -> Json {
             Json::from(e.name.as_str()),
         ])
     });
-    Json::obj([
+    let mut out = Json::obj([
         ("clip", a.clip.as_deref().map_or(Json::Null, Json::from)),
         ("time", Json::Float(f64::from(a.time))),
         ("len", Json::Float(f64::from(a.duration))),
@@ -938,16 +940,50 @@ fn anim_json(a: &automata_scene::AnimationState) -> Json {
         ("rm", Json::Bool(a.root_motion)),
         // The latest events passed: [seq, clip, name], oldest first.
         ("ev", Json::Arr(events.collect())),
-    ])
+    ]);
+    if let (Some(path), Some(graph)) = (&a.graph_path, &a.graph) {
+        out.set("graph", Json::from(path.as_str()));
+        out.set("gl", graph_layers_json(graph));
+        let params = graph.params.iter().map(|p| {
+            Json::Arr(vec![
+                Json::from(p.name.as_str()),
+                Json::from(p.kind),
+                Json::Float(f64::from(p.value)),
+            ])
+        });
+        out.set("gp", Json::Arr(params.collect()));
+    }
+    out
+}
+
+/// A graph's layers for the script API: `[name, state, time, from or
+/// null, fade, weight, [states]]` each.
+fn graph_layers_json(graph: &automata_scene::GraphState) -> Json {
+    let layers = graph.layers.iter().map(|l| {
+        Json::Arr(vec![
+            Json::from(l.name.as_str()),
+            Json::from(l.state.as_str()),
+            Json::Float(f64::from(l.time)),
+            l.from.as_deref().map_or(Json::Null, Json::from),
+            Json::Float(f64::from(l.fade)),
+            Json::Float(f64::from(l.weight)),
+            Json::Arr(l.states.iter().map(|s| Json::from(s.as_str())).collect()),
+        ])
+    });
+    Json::Arr(layers.collect())
 }
 
 /// One `entity.animation` request: `["play", clip, loop, fade, speed or
 /// null, restart]`, `["stop", fade]`, `["seek", t]`, `["speed", s]`,
-/// `["reset_springs"]` or `["root_motion", on]`.
+/// `["reset_springs"]`, `["root_motion", on]`, or for animation graphs
+/// `["graph", path]`, `["set", name, value]`, `["trigger", name]`,
+/// `["reset_trigger", name]`, `["layer_weight", layer, weight]` and
+/// `["play_state", layer, state, fade]`.
 fn parse_anim(v: &Json) -> Option<automata_scene::AnimationCommand> {
     use automata_scene::{AnimationCommand as C, PlayOptions};
     let a = v.as_arr()?;
     let n = |i: usize| a.get(i).and_then(num).filter(|x| x.is_finite());
+    let text = |i: usize| a.get(i).and_then(Json::as_str).map(str::to_string);
     Some(match a.first()?.as_str()? {
         "play" => C::Play {
             clip: a.get(1)?.as_str()?.to_string(),
@@ -963,6 +999,22 @@ fn parse_anim(v: &Json) -> Option<automata_scene::AnimationCommand> {
         "speed" => C::Speed(n(1)?),
         "reset_springs" => C::ResetSprings,
         "root_motion" => C::RootMotion(a.get(1)?.as_bool()?),
+        "graph" => C::Graph(text(1)?),
+        "set" => C::Set(
+            text(1)?,
+            match a.get(2)? {
+                Json::Bool(b) => f32::from(u8::from(*b)),
+                _ => n(2)?,
+            },
+        ),
+        "trigger" => C::Trigger(text(1)?),
+        "reset_trigger" => C::ResetTrigger(text(1)?),
+        "layer_weight" => C::LayerWeight(text(1)?, n(2)?),
+        "play_state" => C::PlayState {
+            layer: text(1)?,
+            state: text(2)?,
+            fade: n(3).unwrap_or(0.0).max(0.0),
+        },
         _ => return None,
     })
 }
@@ -1442,6 +1494,86 @@ mod tests {
             "{json}"
         );
         assert!(!state_json(&EntityState::default()).dump().contains("anim"));
+    }
+
+    #[test]
+    fn animation_graph_requests_and_state_cross_the_bridge() {
+        use automata_scene::{
+            AnimationCommand as C, AnimationState, GraphLayerState, GraphParam, GraphState,
+        };
+        let msg = parse_msg(concat!(
+            r#"{"op":"frame","frame":1,"writes":[{"id":3,"anim":["#,
+            r#"["graph","anims/robot.anim.ron"],["graph",""],["set","speed",2.5],"#,
+            r#"["set","grounded",false],["set","speed"],["trigger","jump"],"#,
+            r#"["reset_trigger","jump"],["layer_weight","Arms",0.5],"#,
+            r#"["play_state","Arms","Wave",0.2],["play_state","","Move"]]}]}"#
+        ));
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(
+            writes[0].anim,
+            vec![
+                C::Graph("anims/robot.anim.ron".into()),
+                C::Graph(String::new()),
+                C::Set("speed".into(), 2.5),
+                C::Set("grounded".into(), 0.0),
+                C::Trigger("jump".into()),
+                C::ResetTrigger("jump".into()),
+                C::LayerWeight("Arms".into(), 0.5),
+                C::PlayState {
+                    layer: "Arms".into(),
+                    state: "Wave".into(),
+                    fade: 0.2
+                },
+                C::PlayState {
+                    layer: String::new(),
+                    state: "Move".into(),
+                    fade: 0.0
+                },
+            ]
+        );
+        let graph = GraphState {
+            layers: vec![GraphLayerState {
+                name: "Base".into(),
+                state: "Jump".into(),
+                time: 0.5,
+                from: Some("Move".into()),
+                fade: 0.25,
+                weight: 1.0,
+                states: vec!["Move".into(), "Jump".into()],
+            }],
+            params: vec![GraphParam {
+                name: "jump".into(),
+                kind: "trigger",
+                value: 0.0,
+            }],
+        };
+        let state = EntityState {
+            anim: Some(AnimationState {
+                clip: Some("Jump".into()),
+                time: 0.5,
+                duration: 1.0,
+                playing: true,
+                speed: 1.0,
+                looping: true,
+                clips: vec!["Jump".into()],
+                lengths: vec![1.0],
+                springs: false,
+                root_motion: false,
+                events: Vec::new(),
+                graph_path: Some("anims/robot.anim.ron".into()),
+                graph: Some(graph),
+            }),
+            ..EntityState::default()
+        };
+        let json = state_json(&state).dump();
+        assert!(
+            json.contains(r#""graph":"anims/robot.anim.ron""#)
+                && json.contains(r#""gl":[["Base","Jump",0.5,"Move",0.25,1.0,["Move","Jump"]]]"#)
+                && json.contains(r#""gp":[["jump","trigger",0.0]]"#),
+            "{json}"
+        );
     }
 
     #[test]

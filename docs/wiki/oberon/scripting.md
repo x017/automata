@@ -114,6 +114,8 @@ for `entity` and `ctx`.
 | `entity.animation.play("Running", loop=True, fade=0.2)` | Blend to a clip of the entity's animated model over `fade` seconds. An unknown clip raises `KeyError`. Asking for the clip that's already playing does nothing, so it's safe every frame ([Animation](models.md#animation)) |
 | `entity.animation.stop(fade=0)` | Blend back to the rest pose |
 | `entity.animation.clip` / `.time` / `.playing` / `.clips` | The current clip, seconds into it (assign to jump), whether it's playing (False once a one-shot ends), and every clip name. `.speed` and `.root_motion` can be set too |
+| `entity.animation.set("speed", 3.0)` / `.trigger("jump")` | Steer the entity's [animation graph](animation-graphs.md): set a parameter, or fire a trigger. Unknown names raise `KeyError`, the wrong kind `TypeError` |
+| `entity.animation.state` / `.layer_state("Arms")` / `.get("speed")` | Where the graph is (its first layer's state, or another layer's) and a parameter's value. Also `.parameters`, `.layers`, `.in_transition`, `.state_time`, `.graph` (assign a path to switch graphs) and `.play_state("Dance", layer=None, fade=0.2)` |
 | `entity.joint` | The entity's Joint while it runs, or `None`: `.angle`, `.value`, `.force`, `.attached`, `.broken`; set `.motor_target`, `.motor_speed`, `.limits`, `.enabled`, `.connected`. `on_joint_broken(entity, ctx)` runs when it snaps ([Physics → Joints](../guides/physics.md#joints)) |
 | `entity.despawn()` | Remove the entity until Play stops |
 | `entity.state` | A dict of your own that persists between frames (not saved) |
@@ -532,7 +534,7 @@ ctx.keys("Player:attr:*")                    # ["Player:attr:health", ...]
 
 | Component | Fields |
 |---|---|
-| `animation` | `clip` (setting it plays that clip), `time`, `speed`, `root_motion`; read-only `playing`, `looping`, `duration`, `clips`, `springs` |
+| `animation` | `clip` (setting it plays that clip), `time`, `speed`, `root_motion`, `graph`; read-only `playing`, `looping`, `duration`, `clips`, `springs`, `state` |
 | `transform` | `position`, `rotation` (radians, same as `rotation_euler`), `scale` |
 | `joint` | `motor_speed`, `motor_target`, `limits`, `enabled`, `connected`, `break_force`; read-only `angle`, `value`, `force`, `attached`, `broken`, `kind` |
 | `attr` | The entity's [attributes](prefabs-and-attributes.md), by name |

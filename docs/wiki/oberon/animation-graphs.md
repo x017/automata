@@ -161,6 +161,47 @@ usual shape for an upper-body layer: wave, salute, reload.
 
 The first layer always shows fully and ignores its weight.
 
+## From a script
+
+A script only tells the graph what's going on. It never names a clip:
+
+```python
+def update(entity, ctx):
+    anim = entity.animation
+    anim.set("speed", speed)            # Float and Int parameters
+    anim.set("grounded", on_ground)     # Bool parameters
+    if ctx.input.just_pressed("space"):
+        anim.trigger("jump")            # Trigger parameters
+```
+
+| Call | What it does |
+|---|---|
+| `anim.set(name, value)` | Sets a Float, Int (rounded) or Bool parameter. An unknown name raises `KeyError`; a trigger raises `TypeError` |
+| `anim.trigger(name)` / `anim.reset_trigger(name)` | Turns a trigger on (until a transition uses it) or off again |
+| `anim.get(name)` / `anim.parameters` | One parameter's value, or all of them as a dict |
+| `anim.state` / `anim.layer_state(layer)` | The state the first layer (or `layer`) is in. During a fade, the one it's fading to |
+| `anim.state_time` / `anim.in_transition` | Seconds in the current state, and whether the first layer is fading |
+| `anim.layers` / `anim.layer_weight(layer)` / `anim.set_layer_weight(layer, w)` | The layers, and how strongly one shows |
+| `anim.play_state(state, layer=None, fade=0)` | Jumps straight to a state (a cutscene, a respawn) |
+| `anim.graph` | The graph's path. Assign another to switch, or `None` to go back to clips |
+
+Reads see your own requests at once, so `anim.set("speed", 2)` followed by
+`anim.get("speed")` gives 2. A trigger shows as `True` until a transition
+uses it. These calls raise `RuntimeError` when the Animation has no graph.
+With a graph running, `anim.play("Dance")` jumps to the first layer's
+state called Dance.
+
+## In Oberon
+
+Select an animated model and click the Animation section's **Graph** row.
+Pick a graph, or type a new name: Oberon makes the file in `anims/`,
+starting with one state per clip of the model. You can also drag a
+`.anim.ron` from the Files panel onto the model. **Edit** opens the file;
+**×** goes back to playing the Clip.
+
+`automata-cli check` (and Build) checks every graph the start scene uses
+against its model: clips and bones it doesn't have show up as warnings.
+
 ## When something's wrong
 
 A graph with mistakes still runs: transitions to states that don't exist,

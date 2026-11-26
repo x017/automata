@@ -34,7 +34,7 @@ mod scene;
 mod springs;
 mod transform;
 
-pub use anim_graph::{GraphLayerState, GraphPlayer, GraphState};
+pub use anim_graph::{GraphLayerState, GraphParam, GraphPlayer, GraphState};
 pub use animation::{
     animate, animation_state, attach_animators, command_animation, Animation, AnimationCommand,
     AnimationState, Animator, CharacterMotion, FiredEvent, PlayOptions, END_EVENT,

@@ -33,7 +33,7 @@ def test_level_runs_and_every_robot_animates():
 
     frames = at.run_scene(LEVEL, headless=True, max_frames=90, update=after, fixed_delta=1 / 60)
     assert frames == 90
-    assert seen["Robot"][:2] == ("Idle", True)
+    assert seen["Robot"][:2] == ("Idle", True), "the graph starts standing still"
     assert seen["Dancer"][:2] == ("Dance", True)
     # Sitting is a 0.42 s one-shot: by 1.5 s it's over and holds its last frame.
     assert seen["Sitter"][0] == "Sitting" and not seen["Sitter"][1]
@@ -53,8 +53,8 @@ def test_the_player_stands_on_the_plaza():
 
 
 def test_the_greeter_waves_when_the_player_walks_up(tmp_path):
-    shutil.copytree(os.path.join(GAME, "scripts"), tmp_path / "scripts")
-    shutil.copytree(os.path.join(GAME, "models"), tmp_path / "models")
+    for folder in ("models", "anims", "scripts"):
+        shutil.copytree(os.path.join(GAME, folder), tmp_path / folder)
     original = list(build_level.CROWD)
     # Put the Greeter right next to where the player starts.
     build_level.CROWD[0] = ("Greeter", (1.5, 0.0, 3.0), -90, at.Animation("Idle"))
@@ -76,21 +76,72 @@ def test_the_greeter_waves_when_the_player_walks_up(tmp_path):
     assert after.waves == 1, "only once per visit"
 
 
+class FakeAnimation:
+    """Records what a script asks of ``entity.animation``."""
+
+    def __init__(self):
+        self.params, self.triggers = {}, []
+
+    def set(self, name, value):
+        self.params[name] = value
+
+    def trigger(self, name):
+        self.triggers.append(name)
+
+
 @pytest.mark.parametrize(
-    ("grounded", "speed", "current", "playing", "wave", "expected"),
+    ("speed", "grounded", "jumped", "waved", "triggers"),
     [
-        (True, 0.0, "Idle", True, False, ("Idle", True)),
-        (True, 2.2, "Idle", True, False, ("Walking", True)),
-        (True, 5.0, "Walking", True, False, ("Running", True)),
-        (False, 2.2, "Walking", True, False, ("Jump", False)),
-        (True, 0.0, "Idle", True, True, ("Wave", False)),
-        (True, 0.0, "Wave", True, False, ("Wave", False)),
-        (True, 0.0, "Wave", False, False, ("Idle", True)),
-        (True, 2.2, "Wave", True, False, ("Walking", True)),
+        (0.0, True, False, False, []),
+        (5.0, True, False, True, ["wave"]),
+        (2.2, False, True, False, ["jump"]),
+        (2.2, False, True, True, ["jump", "wave"]),
     ],
 )
-def test_choose_clip(grounded, speed, current, playing, wave, expected):
-    assert player.choose_clip(grounded, speed, current, playing, wave) == expected
+def test_the_player_only_sets_parameters(speed, grounded, jumped, waved, triggers):
+    anim = FakeAnimation()
+    player.animate(anim, speed, grounded, jumped, waved)
+    assert anim.params == {"speed": speed, "grounded": grounded}
+    assert anim.triggers == triggers
+
+
+def test_the_robot_graph_walks_jumps_and_waves(tmp_path):
+    """The real graph, driven the way scripts/player.py drives it."""
+    for folder in ("models", "anims", "scripts"):
+        shutil.copytree(os.path.join(GAME, folder), tmp_path / folder)
+    (tmp_path / "scripts" / "player.py").write_text(
+        "def update(entity, ctx):\n"
+        "    anim, f, seen = entity.animation, ctx.time.frame, entity.attributes\n"
+        "    if f == 2:\n"
+        "        seen['start'] = ','.join([anim.state, anim.clip, *anim.layers])\n"
+        "        anim.set('speed', 5.0)\n"
+        "    if f == 30:\n"
+        "        seen['running'] = anim.clip\n"
+        "        anim.trigger('wave')\n"
+        "    if f == 40:\n"
+        "        seen['wave'] = anim.state + ',' + anim.layer_state('Arms')\n"
+        "        anim.set('grounded', False)\n"
+        "        anim.trigger('jump')\n"
+        "    if f == 45:\n"
+        "        seen['jump'] = anim.state\n"
+        "        anim.set('grounded', True)\n"
+        "    if f == 150:\n"
+        "        seen['landed'] = anim.state + ',' + anim.layer_state('Arms')\n"
+    )
+    build_level.build().save(str(tmp_path / "level.ron"))
+    seen = {}
+    at.run_scene(
+        str(tmp_path / "level.ron"),
+        headless=True,
+        max_frames=152,
+        fixed_delta=1 / 60,
+        update=lambda ctx: seen.update(ctx.scene["Robot"].attributes),
+    )
+    assert seen["start"] == "Move,Idle,Base,Arms"
+    assert seen["running"] == "Running", "speed 5 is all Running"
+    assert seen["wave"] == "Move,Wave", "the arms wave; the legs keep running"
+    assert seen["jump"] == "Jump"
+    assert seen["landed"] == "Move,Off", "back on its feet, the wave over"
 
 
 def test_turn_towards_takes_the_short_way_round():
