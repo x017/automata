@@ -168,6 +168,20 @@ browser, so desktop CI catches what WebGL2 can't do, and the smoke test
 switches the test game to Beautiful and back (`beautiful.png` in the
 artifact).
 
+Two traps of wgpu's GL backend, both found by the Coin Run test:
+
+- **Slots are numbered per pipeline.** Each pipeline numbers its uniform
+  buffers and textures across all its bind groups, so the light group sits
+  in different slots for the sky (camera, -, -, light) than for meshes.
+  wgpu skips setting a bind group that's already set, and a mesh-to-sky
+  switch doesn't rebind group 3, so the sky read a mesh's 64-byte model
+  matrix where its 4 KB light block should be, and WebGL2 refused the draw
+  (no sky on the web). The sky now gets a light group of its own.
+- **A texture's view type is guessed from its layer count.** One layer
+  makes a 2D texture, a multiple of six a cube; the shadow arrays sample as
+  2D arrays, so on wasm they get a spare layer when they'd hit either
+  (`allocated_layers`).
+
 ## Building
 
 Only CI builds it (`.github/workflows/web.yml`); locally you'd need the
@@ -205,6 +219,6 @@ a reload F2 must go on from the saved preset and the best run must be
 remembered. With `?touch=1` the touch controls must show. A probe also
 compares every draw's uniform blocks with the buffers bound to them
 (WebGL2 refuses a draw whose buffer is too small) and names any that
-don't fit. It posts `web: coin run` and `web: coin run screenshot`.
+don't fit, and fails on wgpu's texture view guesses. It posts `web: coin run` and `web: coin run screenshot`.
 
 [Pyodide]: https://pyodide.org

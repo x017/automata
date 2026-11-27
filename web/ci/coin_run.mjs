@@ -15,7 +15,7 @@
 // 6. with ?touch=1 (a phone) the touch controls show by themselves.
 //
 // It also checks every draw's uniform buffers are as big as the shader
-// expects (soft). Writes report.txt, stats.json, console.txt and
+// expects, and that no texture is sampled as something it isn't. Writes report.txt, stats.json, console.txt and
 // screenshots (1-start, 2-walked, 3-touch) to OUT
 // (default web/dist/coin_run/).
 //
@@ -205,8 +205,11 @@ check(
   "uniform buffers fit their blocks",
   uniformProblems.length === 0,
   uniformProblems.length ? uniformProblems.map((p) => JSON.stringify(p)).join("; ") : "every draw",
-  true,
 );
+// wgpu's GL backend guesses a texture's view type from its layer count and
+// logs when a view disagrees (an array sampled as a 2D texture).
+const guesses = lines.filter((l) => l.includes("wgpu-hal heuristics assumed"));
+check("textures are what the shaders sample", guesses.length === 0, guesses[0] ?? "no view guesses");
 await browser.close();
 
 check("no errors", !s?.error && !lines.some((l) => l.startsWith("[pageerror]")), s?.error ?? "none");

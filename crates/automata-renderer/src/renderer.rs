@@ -71,6 +71,15 @@ struct PreparedFrame {
     cascade_batches: Vec<Vec<crate::batch::Batch>>,
     sprite_runs: Vec<SpriteRun>,
     light_bind: wgpu::BindGroup,
+    /// The same light group again, for the sky only. On WebGL2 (wgpu's GL
+    /// backend) each pipeline numbers its uniform and texture slots across
+    /// all its groups, so the light sits in different slots for the sky
+    /// (camera, -, -, light) than for meshes. wgpu skips re-setting a bind
+    /// group that's already set, and a mesh-to-sky switch doesn't make it
+    /// rebind group 3, so with the same group the sky would read the slots
+    /// a mesh left behind (its 64-byte model matrix), and WebGL2 refuses
+    /// the draw. A group of its own is always bound for the sky's layout.
+    sky_light_bind: wgpu::BindGroup,
     /// The light group plus the screen-space occlusion (Beautiful meshes).
     beautiful_light_bind: Option<wgpu::BindGroup>,
     shadows: ShadowCascades,
@@ -381,7 +390,8 @@ impl Renderer {
     /// leaving Beautiful frees its HDR targets).
     pub fn set_quality(&mut self, quality: GraphicsQuality) {
         let layers = self.shadow_texture.depth_or_array_layers();
-        if quality.shadow_map_size() != self.shadow_map_size || quality.shadow_cascades() != layers
+        if quality.shadow_map_size() != self.shadow_map_size
+            || allocated_layers(quality.shadow_cascades().max(1), GL_GUESSES_VIEWS) != layers
         {
             let shadow = ShadowResources::new(self.ctx.device(), quality);
             self.shadow_texture = shadow.texture;
@@ -1311,7 +1321,7 @@ impl Renderer {
         };
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &prepared.camera_3d_bind, &[]);
-        pass.set_bind_group(3, &prepared.light_bind, &[]);
+        pass.set_bind_group(3, &prepared.sky_light_bind, &[]);
         pass.draw(0..3, 0..1);
     }
 
@@ -2158,7 +2168,7 @@ impl Renderer {
             self.quality.max_point_lights(),
             self.quality.point_shadows(),
         );
-        let (light_bind, beautiful_light_bind) =
+        let (light_bind, sky_light_bind, beautiful_light_bind) =
             self.light_bind_group(&sun, &env, &shadows, render_shadows, &frame, &points);
         self.upload_ripples(draw.ripples.as_ref());
         let water_binds = self.water_bind_groups(draw, beautiful, time);
@@ -2181,6 +2191,7 @@ impl Renderer {
             cascade_batches,
             sprite_runs,
             light_bind,
+            sky_light_bind,
             beautiful_light_bind,
             shadows,
             mesh_spheres,
@@ -2197,7 +2208,8 @@ impl Renderer {
     /// comparison sampler). `render_shadows` gates shadow sampling in the
     /// shader — when false the shadow maps are bound but never read. On
     /// Beautiful, also a second group sharing it that adds the screen-space
-    /// occlusion for meshes.
+    /// occlusion for meshes. Returns (meshes, the sky, Beautiful meshes):
+    /// the sky gets a copy of its own (see [`PreparedFrame::sky_light_bind`]).
     fn light_bind_group(
         &self,
         sun: &Sun,
@@ -2206,7 +2218,7 @@ impl Renderer {
         render_shadows: bool,
         frame: &FrameView,
         points: &[crate::light::FramePoint],
-    ) -> (wgpu::BindGroup, Option<wgpu::BindGroup>) {
+    ) -> (wgpu::BindGroup, wgpu::BindGroup, Option<wgpu::BindGroup>) {
         let device = self.ctx.device();
         let light_uniform = LightUniform::new(
             &Sun {
@@ -2248,6 +2260,11 @@ impl Renderer {
             layout: &self.shared.light_layout,
             entries: &entries,
         });
+        let sky_light = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("sky light"),
+            layout: &self.shared.light_layout,
+            entries: &entries,
+        });
         let occlusion = self.ssao.output_view().filter(|_| frame.beautiful);
         let beautiful = occlusion.as_ref().map(|view| {
             entries.push(wgpu::BindGroupEntry {
@@ -2260,7 +2277,7 @@ impl Renderer {
                 entries: &entries,
             })
         });
-        (light, beautiful)
+        (light, sky_light, beautiful)
     }
 
     /// Records the depth-only shadow passes: per cascade, every mesh that
@@ -2815,10 +2832,7 @@ impl DepthArray {
     fn for_point_shadows(device: &wgpu::Device, quality: GraphicsQuality) -> Self {
         let size = quality.point_shadow_size().max(1);
         let layers = u32::try_from(Self::point_layers(quality)).unwrap_or(1);
-        // wgpu's GL backend makes any square texture with a multiple of six
-        // layers a cube (array) texture, and WebGL2 has no cube arrays: an
-        // unused extra layer keeps it a plain 2D array there.
-        let allocated = layers + u32::from(cfg!(target_arch = "wasm32") && layers % 6 == 0);
+        let allocated = allocated_layers(layers, GL_GUESSES_VIEWS);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("point shadow maps"),
             size: wgpu::Extent3d {
@@ -2857,6 +2871,24 @@ impl DepthArray {
     }
 }
 
+/// Whether textures get a view type from their layer count: wgpu's GL
+/// backend (WebGL2 in the browser) decides it when a texture is made, not
+/// per view.
+const GL_GUESSES_VIEWS: bool = cfg!(target_arch = "wasm32");
+
+/// The layers to allocate for a 2D array texture of `layers` layers. Where
+/// the backend guesses (`gl`), one layer makes a plain 2D texture and a
+/// multiple of six a cube (array), which the shaders' `texture_depth_2d_array`
+/// can't sample (WebGL2 has no cube arrays at all), so an unused extra layer
+/// keeps it an array.
+fn allocated_layers(layers: u32, gl: bool) -> u32 {
+    if gl && (layers == 1 || layers % 6 == 0) {
+        layers + 1
+    } else {
+        layers
+    }
+}
+
 /// The shadow map array (one layer per cascade), its views and comparison
 /// sampler.
 struct ShadowResources {
@@ -2875,7 +2907,7 @@ impl ShadowResources {
             size: wgpu::Extent3d {
                 width: size,
                 height: size,
-                depth_or_array_layers: layers,
+                depth_or_array_layers: allocated_layers(layers, GL_GUESSES_VIEWS),
             },
             mip_level_count: 1,
             sample_count: 1,
@@ -3507,6 +3539,18 @@ mod tests {
     use crate::draw::Sprite;
     use crate::mesh::MeshData;
     use crate::Color;
+
+    #[test]
+    fn shadow_arrays_stay_arrays_where_gl_guesses_the_view() {
+        // WebGL2: never one layer (a 2D texture) or a multiple of six (a cube).
+        for (layers, want) in [(1, 2), (2, 2), (4, 4), (6, 7), (12, 13), (13, 13)] {
+            assert_eq!(allocated_layers(layers, true), want, "{layers} layers");
+        }
+        // Elsewhere views say what they are: allocate what's used.
+        for layers in [1, 4, 6, 12] {
+            assert_eq!(allocated_layers(layers, false), layers);
+        }
+    }
 
     /// Creates an offscreen renderer, or `None` when no GPU/software adapter
     /// exists (CI/sandbox without lavapipe).
