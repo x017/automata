@@ -157,12 +157,12 @@ jobs:
           (cd web/dist/coin_run_site && python -m http.server 8001 --bind 127.0.0.1 > ../coin_server.log 2>&1 &)
           sleep 1
           NODE_PATH=web/ci/node_modules node web/ci/coin_run.mjs http://127.0.0.1:8001/ || s=1
-          python3 web/ci/check_screenshot.py --any web/dist/coin_run/1-playing.png | tee -a web/dist/coin_run/report.txt || s=1
+          python3 web/ci/check_screenshot.py --any web/dist/coin_run/1-start.png | tee -a web/dist/coin_run/report.txt || s=1
           { echo '### Coin Run (web)'; echo '```'; head -20 web/dist/coin_run/report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           python3 android/ci/report.py "web: coin run" --log web/dist/coin_run/report.txt --lines 400 \
             --conclusion $([ $s = 0 ] && echo neutral || echo failure)
-          if [ -f web/dist/coin_run/2-touch.jpg ]; then
-            python3 android/ci/report.py "web: coin run screenshot" --image web/dist/coin_run/2-touch.jpg
+          if [ -f web/dist/coin_run/3-touch.jpg ]; then
+            python3 android/ci/report.py "web: coin run screenshot" --image web/dist/coin_run/3-touch.jpg
           fi
           exit $s
 

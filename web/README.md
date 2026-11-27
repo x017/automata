@@ -199,9 +199,12 @@ console) and `web: screenshot`. `INPUT=0` skips the input checks.
 Then it packages Coin Run from `game.zip` and plays it (`coin_run.mjs`,
 the browser twin of the Android emulator test): it must start with
 keyboard controls, F2 must change the graphics preset, the setting must
-reach IndexedDB, walking forward should pick up a coin (soft: SwiftShader
-is slow), and after a reload F2 must go on from the saved preset (and the
-best run be remembered). With `?touch=1` the touch controls must show. It
-posts `web: coin run` and `web: coin run screenshot`.
+reach IndexedDB, and at the low preset (SwiftShader draws on the CPU),
+once the intro is over, walking forward must pick up the coin ahead. After
+a reload F2 must go on from the saved preset and the best run must be
+remembered. With `?touch=1` the touch controls must show. A probe also
+compares every draw's uniform blocks with the buffers bound to them
+(WebGL2 refuses a draw whose buffer is too small) and names any that
+don't fit. It posts `web: coin run` and `web: coin run screenshot`.
 
 [Pyodide]: https://pyodide.org

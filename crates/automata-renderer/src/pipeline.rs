@@ -1020,17 +1020,7 @@ mod tests {
     /// browser build): no depth texel reads, nothing GLSL ES 3.00 lacks.
     #[test]
     fn every_shader_translates_for_webgl2() {
-        let shaders = [
-            ("sprite", SPRITE_SHADER),
-            ("mesh", MESH_SHADER),
-            ("water", WATER_SHADER),
-            ("post", POST_SHADER),
-            ("sky", SKY_SHADER),
-            ("shadow", SHADOW_SHADER),
-            ("composite", crate::composite::COMPOSITE_SHADER),
-            ("particles", crate::particles::PARTICLE_SHADER),
-            ("ssao", crate::ssao::SSAO_SHADER),
-        ];
+        let shaders = all_shaders();
         let mut failures = Vec::new();
         let mut count = 0;
         for (name, source) in shaders {
@@ -1044,6 +1034,49 @@ mod tests {
         }
         assert!(count > 30, "only {count} entry points");
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// Every uniform block is a whole number of 16-byte rows. GLSL lays
+    /// uniform blocks out as std140, which rounds a block up to 16 bytes;
+    /// WGSL doesn't, so a buffer sized for the WGSL struct (say 4 bytes for
+    /// one `f32`) is "too small" for WebGL2, which then refuses the draw.
+    #[test]
+    fn uniform_blocks_fill_whole_rows_for_webgl2() {
+        let mut short = Vec::new();
+        for (name, source) in all_shaders() {
+            let module = naga::front::wgsl::parse_str(source).unwrap();
+            let mut layouter = naga::proc::Layouter::default();
+            layouter.update(module.to_ctx()).unwrap();
+            for (_, var) in module.global_variables.iter() {
+                if var.space != naga::AddressSpace::Uniform {
+                    continue;
+                }
+                let size = layouter[var.ty].size;
+                if size % 16 != 0 {
+                    let var_name = var.name.as_deref().unwrap_or("?");
+                    short.push(format!("{name}: `{var_name}` is {size} bytes"));
+                }
+            }
+        }
+        assert!(
+            short.is_empty(),
+            "pad these to a multiple of 16 bytes:\n{}",
+            short.join("\n")
+        );
+    }
+
+    fn all_shaders() -> [(&'static str, &'static str); 9] {
+        [
+            ("sprite", SPRITE_SHADER),
+            ("mesh", MESH_SHADER),
+            ("water", WATER_SHADER),
+            ("post", POST_SHADER),
+            ("sky", SKY_SHADER),
+            ("shadow", SHADOW_SHADER),
+            ("composite", crate::composite::COMPOSITE_SHADER),
+            ("particles", crate::particles::PARTICLE_SHADER),
+            ("ssao", crate::ssao::SSAO_SHADER),
+        ]
     }
 
     #[test]
