@@ -103,6 +103,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "cython<3.2" \
             "python-for-android @ git+https://github.com/kivy/python-for-android@${P4A_REF}"
+          # Gradle: Maven Central through Google's mirror first (429s).
+          mkdir -p ~/.gradle/init.d
+          cp android/ci/maven-mirror.gradle ~/.gradle/init.d/
 
       - name: Android NDK
         env:
