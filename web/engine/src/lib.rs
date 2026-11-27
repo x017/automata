@@ -139,7 +139,7 @@ fn web_resume() {
 #[pyfunction]
 fn web_gamepads(pads: Vec<Bound<'_, PyAny>>) -> PyResult<()> {
     let mut snapshots = Vec::with_capacity(pads.len());
-    for pad in &pads {
+    for pad in pads {
         snapshots.push(automata_input::PadSnapshot {
             index: pad.get_item(0)?.extract()?,
             name: pad.get_item(1)?.extract()?,
