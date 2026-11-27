@@ -87,7 +87,8 @@ kira mixes as on desktop, but into the `stream` backend
 (`automata_audio::stream`): each frame the engine renders that frame's
 worth of sound (48 kHz stereo) where the game runs, and the page takes it
 with `web_audio()` and posts it to an AudioWorklet (`audio-worklet.js`).
-The worklet plays it after a ~50 ms buffer, fills gaps with silence, and
+The worklet plays it after a short buffer (50 ms, or one and a half
+frames' worth when frames are slower), fills gaps with silence, and
 keeps the delay under 250 ms by dropping the oldest sound. Rendering
 follows frame time, so sound positions and states behave as on desktop,
 and while the tab is hidden (no frames) sound waits. Browsers start sound

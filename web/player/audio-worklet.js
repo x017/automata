@@ -6,9 +6,11 @@
 // dropping the oldest sound when too much piles up (a frame hitch, a tab
 // coming back).
 
-// Start (or restart after running dry) once this much is queued: enough
-// to ride out a slow frame without stuttering.
+// Start (or restart after running dry) once this much is queued, or one
+// and a half frames' worth when frames are slower than that (a phone, a
+// software renderer), so the next frame's sound arrives in time.
 const START_SECONDS = 0.05;
+const START_MAX_SECONDS = 0.2;
 // Never lag the game by more than this.
 const MAX_SECONDS = 0.25;
 
@@ -23,6 +25,7 @@ class AutomataOutput extends AudioWorkletProcessor {
     this.dropped = 0;
     this.underruns = 0;
     this.lastReport = 0;
+    this.frameFrames = 0; // how much sound a game frame brings, smoothed
     this.port.onmessage = (event) => this.push(event.data);
   }
 
@@ -30,6 +33,7 @@ class AutomataOutput extends AudioWorkletProcessor {
     if (!(chunk instanceof Float32Array) || chunk.length < 2) return;
     this.chunks.push(chunk);
     this.queued += chunk.length / 2;
+    this.frameFrames = this.frameFrames * 0.9 + (chunk.length / 2) * 0.1;
     const max = MAX_SECONDS * sampleRate;
     while (this.queued > max && this.chunks.length > 1) {
       const old = this.chunks.shift();
@@ -45,7 +49,8 @@ class AutomataOutput extends AudioWorkletProcessor {
     const left = channels[0];
     const right = channels[1] ?? channels[0];
     const frames = left.length;
-    if (!this.playing && this.queued >= START_SECONDS * sampleRate) this.playing = true;
+    const start = Math.min(Math.max(START_SECONDS * sampleRate, this.frameFrames * 1.5), START_MAX_SECONDS * sampleRate);
+    if (!this.playing && this.queued >= start) this.playing = true;
     let i = 0;
     if (this.playing) {
       while (i < frames && this.chunks.length) {
@@ -79,6 +84,7 @@ class AutomataOutput extends AudioWorkletProcessor {
         queued: this.queued,
         dropped: this.dropped,
         underruns: this.underruns,
+        buffer: Math.round(start),
       });
     }
     return true;

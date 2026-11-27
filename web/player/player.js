@@ -281,10 +281,9 @@ function installInput(pyodide, core) {
     lockPending = false;
     stats.pointer.locked = document.pointerLockElement === canvas;
   });
-  document.addEventListener("pointerlockerror", () => {
-    lockPending = false;
-    stats.pointer.errors += 1;
-  });
+  // (Refusals are counted where the request's promise fails, not on
+  // `pointerlockerror`: a browser without raw mouse movement refuses the
+  // first try, then locks.)
   const syncPointerLock = () => {
     const wanted = Boolean(core.web_cursor_locked());
     stats.pointer.wanted = wanted;
