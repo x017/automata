@@ -99,7 +99,8 @@ Templates are downloaded once per engine version. **Build** fetches a
 missing template by itself, or you can use **Build ▸ Download Export
 Templates** or the **Download** buttons on the Build page. The Linux
 template is about 75 MB and the Windows one about 25 MB. The macOS one
-holds Python twice, for Apple Silicon and for Intel. The Android
+is about 100 MB, because it holds Python twice, for Apple Silicon and for
+Intel. The Android
 template is an APK for phones (`arm64-v8a`) and emulators (`x86_64`).
 
 While the repository is private, the plain download link needs you to be
