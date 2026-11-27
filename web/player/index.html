@@ -13,11 +13,19 @@
       white-space: pre-wrap; text-align: center; padding: 2em;
     }
     #status.error { color: #ff8c8c; align-items: flex-start; text-align: left; font-family: monospace; }
+    #fullscreen {
+      position: fixed; right: 12px; bottom: 12px; width: 36px; height: 36px; padding: 0;
+      border: 0; border-radius: 6px; background: rgba(20, 24, 36, 0.55); color: #c8cede;
+      font: 20px/36px system-ui, sans-serif; cursor: pointer; opacity: 0.6;
+    }
+    #fullscreen:hover { opacity: 1; }
+    #fullscreen[hidden], :fullscreen #fullscreen { display: none; }
   </style>
 </head>
 <body>
   <canvas id="canvas" tabindex="0"></canvas>
   <div id="status">Loading…</div>
+  <button id="fullscreen" title="Full screen" aria-label="Full screen" hidden>⛶</button>
   <script type="module" src="player.js"></script>
 </body>
 </html>

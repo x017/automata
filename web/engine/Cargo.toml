@@ -17,6 +17,7 @@ name = "automata_web"
 crate-type = ["cdylib"]
 
 [dependencies]
+automata-audio = { path = "../../crates/automata-audio", default-features = false }
 automata-core = { path = "../../crates/automata-core" }
 automata-input = { path = "../../crates/automata-input" }
 # Its `module` feature (the desktop entry point) stays off: this crate

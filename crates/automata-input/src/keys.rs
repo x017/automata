@@ -31,6 +31,15 @@ macro_rules! key_codes {
                     $( KeyCode::$variant => $name, )*
                 }
             }
+
+            /// The key's W3C `KeyboardEvent.code`: `"KeyA"`,
+            /// `"ArrowLeft"`, `"F1"`, `"Numpad5"`.
+            #[must_use]
+            pub const fn code(self) -> &'static str {
+                match self {
+                    $( KeyCode::$variant => stringify!($variant), )*
+                }
+            }
         }
     };
 }
@@ -253,6 +262,18 @@ impl KeyCode {
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
         Self::ALL.iter().copied().find(|k| k.name() == name)
+    }
+
+    /// The key a browser's `KeyboardEvent.code` names (see
+    /// [`code`](Self::code)), taking the Windows/Command keys' other
+    /// spellings too (`"MetaLeft"`, and older Firefox's `"OSLeft"`).
+    #[must_use]
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "MetaLeft" | "OSLeft" => Some(Self::SuperLeft),
+            "MetaRight" | "OSRight" => Some(Self::SuperRight),
+            _ => Self::ALL.iter().copied().find(|k| k.code() == code),
+        }
     }
 }
 
@@ -484,6 +505,18 @@ mod tests {
         );
         assert_eq!(KeyCode::from_name("not_a_key"), None);
         assert!(KeyCode::ALL.len() > 100);
+    }
+
+    #[test]
+    fn browser_codes_round_trip() {
+        for &k in KeyCode::ALL {
+            assert_eq!(KeyCode::from_code(k.code()), Some(k));
+        }
+        assert_eq!(KeyCode::from_code("KeyW"), Some(KeyCode::KeyW));
+        assert_eq!(KeyCode::from_code("Numpad5"), Some(KeyCode::Numpad5));
+        assert_eq!(KeyCode::from_code("MetaLeft"), Some(KeyCode::SuperLeft));
+        assert_eq!(KeyCode::from_code("OSRight"), Some(KeyCode::SuperRight));
+        assert_eq!(KeyCode::from_code("IntlBackslash"), None);
     }
 
     #[test]

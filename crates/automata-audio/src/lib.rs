@@ -16,6 +16,10 @@
 //! ([`AudioEngine::pump_frame`]), keeping playback queries deterministic
 //! without an audio thread.
 //!
+//! In the browser (`wasm32-unknown-emscripten`) the frame loop pumps a
+//! [`stream`] backend instead, which keeps what it mixes for the page to
+//! play ([`stream::take_output`]).
+//!
 //! Volume is expressed as a linear amplitude (`1.0` = unity gain, `0.0` =
 //! silence) at the engine boundary and converted to decibels internally.
 
@@ -29,6 +33,8 @@ use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
 use kira::sound::PlaybackState;
 use kira::track::MainTrackBuilder;
 use kira::{AudioManager, AudioManagerSettings, Decibels, Mix, Tween};
+
+pub mod stream;
 
 /// Errors raised by the audio engine.
 #[derive(Debug, thiserror::Error)]
@@ -242,6 +248,8 @@ enum Manager {
     Device(Box<AudioManager<kira::backend::cpal::CpalBackend>>),
     /// Silent backend: no device, deterministic advancement.
     Silent(Box<AudioManager<kira::backend::mock::MockBackend>>),
+    /// Mixed each frame for a page to play (the browser build).
+    Stream(Box<AudioManager<stream::StreamBackend>>),
 }
 
 impl fmt::Debug for AudioEngine {
@@ -268,7 +276,40 @@ impl AudioEngine {
     /// starts the silent backend directly at 44 100 Hz.
     #[must_use]
     pub fn new() -> Self {
-        Self::with_sample_rate(44_100)
+        if cfg!(target_os = "emscripten") {
+            Self::streaming()
+        } else {
+            Self::with_sample_rate(44_100)
+        }
+    }
+
+    /// Creates the audio engine over the [`stream`] backend: each
+    /// [`pump_frame`](Self::pump_frame) mixes that frame's sound for
+    /// [`stream::take_output`]. The browser build's default.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the stream backend cannot fail to start.
+    #[must_use]
+    pub fn streaming() -> Self {
+        let (main_track_builder, filter) = filtered_main_track();
+        let settings = AudioManagerSettings {
+            backend_settings: stream::StreamBackendSettings::default(),
+            main_track_builder,
+            ..AudioManagerSettings::default()
+        };
+        // The stream backend cannot fail to start.
+        let manager = AudioManager::<stream::StreamBackend>::new(settings)
+            .expect("failed to create the streaming audio manager");
+        Self {
+            manager: Manager::Stream(Box::new(manager)),
+            sounds: HashMap::new(),
+            next_id: 1,
+            sample_rate: stream::STREAM_SAMPLE_RATE,
+            cache: HashMap::new(),
+            filter,
+            low_pass: None,
+        }
     }
 
     /// Creates the audio engine, overriding the silent-backend sample rate.
@@ -297,6 +338,7 @@ impl AudioEngine {
             #[cfg(feature = "cpal")]
             Manager::Device(_) => "cpal",
             Manager::Silent(_) => "silent",
+            Manager::Stream(_) => "stream",
         }
     }
 
@@ -341,47 +383,18 @@ impl AudioEngine {
         (Box::new(manager), filter)
     }
 
-    /// The silent manager, when the silent backend is active.
-    #[cfg(feature = "cpal")]
-    fn silent_manager_mut(
-        &mut self,
-    ) -> Option<&mut AudioManager<kira::backend::mock::MockBackend>> {
+    /// Advances playback by one frame's worth of audio: the silent backend
+    /// steps silently, the stream backend mixes the frame for the page, and
+    /// a real device (which advances itself) ignores it. The frame loop
+    /// calls this once per frame.
+    pub fn pump_frame(&mut self, delta_seconds: f64) {
+        let sample_rate = self.sample_rate;
         match &mut self.manager {
-            Manager::Device(_) => None,
-            Manager::Silent(manager) => Some(&mut **manager),
+            #[cfg(feature = "cpal")]
+            Manager::Device(_) => {}
+            Manager::Silent(manager) => pump_silent(manager, sample_rate, delta_seconds),
+            Manager::Stream(manager) => manager.backend_mut().render(delta_seconds),
         }
-    }
-
-    /// The silent manager (the only backend without the `cpal` feature).
-    #[cfg(not(feature = "cpal"))]
-    fn silent_manager_mut(&mut self) -> &mut AudioManager<kira::backend::mock::MockBackend> {
-        let Manager::Silent(manager) = &mut self.manager;
-        manager
-    }
-
-    /// Advances the silent backend by one frame's worth of audio.
-    ///
-    /// Only meaningful on the silent backend; with a real device this is a
-    /// no-op. The frame loop calls this once per frame so playback positions
-    /// advance deterministically.
-    #[cfg(feature = "cpal")]
-    pub fn pump_frame(&mut self, delta_seconds: f64) {
-        let sample_rate = self.sample_rate;
-        let Some(manager) = self.silent_manager_mut() else {
-            return; // real device backend: it advances itself
-        };
-        pump_silent(manager, sample_rate, delta_seconds);
-    }
-
-    /// Advances the silent backend by one frame's worth of audio.
-    ///
-    /// Without the `cpal` feature the silent backend is the only one, so this
-    /// always pumps. The frame loop calls this once per frame so playback
-    /// positions advance deterministically.
-    #[cfg(not(feature = "cpal"))]
-    pub fn pump_frame(&mut self, delta_seconds: f64) {
-        let sample_rate = self.sample_rate;
-        pump_silent(self.silent_manager_mut(), sample_rate, delta_seconds);
     }
 
     /// Loads a sound file and starts playing it.
@@ -415,6 +428,7 @@ impl AudioEngine {
             #[cfg(feature = "cpal")]
             Manager::Device(manager) => manager.play(data),
             Manager::Silent(manager) => manager.play(data),
+            Manager::Stream(manager) => manager.play(data),
         }
         .map_err(|err| AudioError::Play(format!("{err}")))?;
         let id = self.next_id;
@@ -490,6 +504,7 @@ impl AudioEngine {
             #[cfg(feature = "cpal")]
             Manager::Device(manager) => manager.main_track().set_volume(db, tween),
             Manager::Silent(manager) => manager.main_track().set_volume(db, tween),
+            Manager::Stream(manager) => manager.main_track().set_volume(db, tween),
         }
     }
 
@@ -670,6 +685,35 @@ mod tests {
         }
         let pos = engine.position(id).unwrap();
         assert!(pos > 0.05, "expected position to advance, got {pos}");
+    }
+
+    #[test]
+    fn stream_backend_mixes_frames_for_the_page() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("automata_audio_stream.wav");
+        write_wav(&path, 1.0, 440.0);
+        let mut engine = AudioEngine::streaming();
+        assert_eq!(engine.backend_name(), "stream");
+        let mut out = Vec::new();
+        stream::take_output(&mut out); // nothing left over from elsewhere
+        out.clear();
+        let id = engine
+            .play(PlayOptions::once(path.to_str().unwrap()))
+            .unwrap();
+        for _ in 0..6 {
+            engine.pump_frame(1.0 / 60.0);
+        }
+        stream::take_output(&mut out);
+        // A tenth of a second of stereo at 48 kHz, and the tone is in it.
+        assert_eq!(out.len(), 4800 * 2);
+        let peak = out.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
+        assert!(peak > 0.3, "expected the tone in the mix, peak {peak}");
+        assert!(engine.position(id).unwrap() > 0.05);
+        // A long stall renders at most a tenth of a second.
+        out.clear();
+        engine.pump_frame(5.0);
+        stream::take_output(&mut out);
+        assert_eq!(out.len(), 4800 * 2);
     }
 
     #[test]

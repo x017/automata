@@ -86,3 +86,24 @@ def test_on_finish_outside_a_stepped_run_calls_at_once():
     called = []
     game.on_finish(lambda: called.append(True))
     assert called == [True]
+
+
+def test_a_stall_counts_as_a_quarter_second_at_most(stepped):
+    """A long gap between frames (a hidden browser tab, a debugger break)
+    doesn't make one huge frame."""
+    import time
+
+    game = at.Game(title="stall", target_fps=None)
+    deltas = []
+
+    def update(ctx):
+        deltas.append(ctx.time.delta)
+        if len(deltas) == 3:
+            ctx.quit()
+
+    game.run(update)
+    assert _core.step_running_game()
+    time.sleep(0.4)
+    assert _core.step_running_game()
+    assert not _core.step_running_game()
+    assert 0.2 <= deltas[1] <= 0.2501, deltas

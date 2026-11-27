@@ -77,7 +77,20 @@ pub trait Host {
     fn render(&mut self) -> Result<()>;
     /// Whether the game wants the cursor hidden and captured.
     fn cursor_locked(&self) -> bool;
+    /// The time since the last frame wasn't play (a hidden browser tab, a
+    /// paused app): the next frame counts as the first after a fresh
+    /// start, not as one long frame.
+    fn skip_time(&mut self);
+    /// The gamepads the browser reports this frame (the page polls
+    /// `navigator.getGamepads()`; see `automata_input::Gamepads::feed`).
+    #[cfg(target_os = "emscripten")]
+    fn feed_gamepads(&mut self, pads: &[automata_input::PadSnapshot]);
 }
+
+/// The longest a frame counts for: after a stall (a debugger break, a
+/// dragged window, a slow load) the game carries on from where it was
+/// instead of leaping ahead and running physics flat out to catch up.
+pub(crate) const MAX_FRAME_DELTA: Duration = Duration::from_millis(250);
 
 /// What a windowed run keeps from one frame to the next.
 pub(crate) struct RunState {
@@ -147,7 +160,8 @@ impl<'a, F: FnMut(&mut AppContext<'_>)> Runtime<'a, F> {
         let delta = self
             .state
             .last_frame_start
-            .map_or(Duration::ZERO, |start| now.saturating_duration_since(start));
+            .map_or(Duration::ZERO, |start| now.saturating_duration_since(start))
+            .min(MAX_FRAME_DELTA);
         self.state.last_frame_start = Some(now);
         self.time.advance(delta);
         self.world.events_mut().update();
@@ -286,5 +300,14 @@ impl<F: FnMut(&mut AppContext<'_>)> Host for Runtime<'_, F> {
 
     fn cursor_locked(&self) -> bool {
         self.world.cursor_locked()
+    }
+
+    fn skip_time(&mut self) {
+        self.state.last_frame_start = None;
+    }
+
+    #[cfg(target_os = "emscripten")]
+    fn feed_gamepads(&mut self, pads: &[automata_input::PadSnapshot]) {
+        self.state.gamepads.feed(pads);
     }
 }

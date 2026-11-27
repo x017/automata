@@ -21,7 +21,7 @@ fi
 for f in pyodide.mjs pyodide.asm.mjs pyodide.asm.wasm python_stdlib.zip pyodide-lock.json package.json; do
   cp "$dist/pyodide-npm/package/$f" "$site/pyodide/"
 done
-cp "$repo/web/player/index.html" "$repo/web/player/player.js" "$site/"
+cp "$repo/web/player/index.html" "$repo/web/player/player.js" "$repo/web/player/audio-worklet.js" "$site/"
 wheel="$(basename "$(ls "$dist"/wheel/*.whl | head -1)")"
 cp "$dist/wheel/$wheel" "$site/"
 # The module must only import what Pyodide provides.

@@ -199,7 +199,7 @@ Other Android work:
 
 ### Web, next
 
-Decided and planned in [#7](#7-web-export--decided-phase-1-done).
+Decided and planned in [#7](#7-web-export--decided-phases-12-done).
 
 ---
 
@@ -521,7 +521,7 @@ tracking or failures).
 
 ---
 
-## 7. Web export 🟢 decided (phase 1 done)
+## 7. Web export 🟢 decided (phases 1–2 done)
 
 ROADMAP E3. Games run in the browser with the same Python scripts as on
 desktop and Android.
@@ -565,10 +565,13 @@ gamepads from `navigator.getGamepads()`, resize and device pixel ratio,
 tab hidden or shown) are queued in JavaScript and handed to the engine at
 the start of each frame.
 
+**Audio** (phase 2): cpal has no emscripten backend, so kira mixes into a
+`stream` backend: each frame renders that frame's sound where the game
+runs, the page takes it (`web_audio()`) and posts it to an AudioWorklet,
+which plays it after a ~50 ms buffer. The page starts sound on the first
+click, key or tap, as browsers require. See `web/README.md`.
+
 Still to do:
-- **Audio:** cpal has no emscripten backend. The engine's mixer fills a
-  buffer each frame, and an AudioWorklet plays it. The browser only allows
-  sound after the first click or key.
 - **Saves and settings:** in IndexedDB (emscripten's IDBFS), synced after
   writes.
 - **The template:** Pyodide's core files, the engine wheel, `index.html`
@@ -582,9 +585,10 @@ Still to do:
    loads it in headless Chromium, checks frames run and a screenshot shows
    the cube, and reports download size and startup time (the prototype
    NEXT_PLANS #1 asked for).
-2. **Input and lifecycle:** keyboard, mouse (pointer lock for mouse look),
+2. ✅ **Input and lifecycle:** keyboard, mouse (pointer lock for mouse look),
    wheel, touch, gamepads, resizing and high-DPI, pausing in a hidden tab,
-   fullscreen. Audio through an AudioWorklet.
+   fullscreen. Audio through an AudioWorklet. CI drives the test game with
+   fake keys, mouse, touches and a fake gamepad (`web/ci/input_checks.mjs`).
 3. **Real games:** the player runs a game from `game.zip`, with saves and
    settings in IndexedDB. Coin Run plays in CI: keys reach scripts, the
    setting survives a reload, and touch controls work under touch
@@ -642,7 +646,12 @@ stand back up where they fell with a blend (`entity.ragdoll`; Robot
 Plaza's Wobbly falls over when you bump into it). C6 2D toolkit ✅ came
 next: sprites with clips, painted tilemaps with auto-tiles and colliders, a
 2D follow camera, Oberon's 2D view and tile brush, and *Pixel Peaks*
-(`examples/oberon/platformer`).
+(`examples/oberon/platformer`). E2 macOS export ✅ followed: a universal
+`.app` (Apple Silicon and Intel) from `automata-cli build --target macos`
+and Oberon, signed and notarized when a Developer ID is set up. Then E3
+web export phase 2 ✅ (#7): keys, mouse and pointer lock, touch, gamepads,
+resizing, hidden tabs and full screen in the browser, and sound through an
+AudioWorklet, all driven with fake input in CI.
 
 ## Process note
 

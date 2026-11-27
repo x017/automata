@@ -1,5 +1,7 @@
 // Loads the web player in headless Chromium (WebGL2 on SwiftShader) and
-// checks that the game runs: frames advance, no errors. Writes what it saw
+// checks that the game runs: frames advance, no errors. Then (INPUT=1, the
+// default) drives the test game with fake keys, mouse, touches and a
+// gamepad and checks it saw them (input_checks.mjs). Writes what it saw
 // to OUT (default web/dist/smoke/): console.txt, stats.json, report.txt,
 // screenshot.png and a small screenshot.jpg for the check run.
 //
@@ -8,17 +10,27 @@ import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
+import { fakeGamepadScript, runInputChecks } from "./input_checks.mjs";
 
 const url = process.argv[2] ?? "http://127.0.0.1:8000/";
 const site = process.argv[3];
 const out = process.env.OUT ?? "web/dist/smoke";
 const wantFrames = Number(process.env.WANT_FRAMES ?? 180);
+const inputChecks = (process.env.INPUT ?? "1") !== "0";
 fs.mkdirSync(out, { recursive: true });
 
 const browser = await chromium.launch({
-  args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
+  args: [
+    "--use-angle=swiftshader",
+    "--enable-unsafe-swiftshader",
+    "--ignore-gpu-blocklist",
+    // Sound may start without a click (the checks press keys anyway).
+    "--autoplay-policy=no-user-gesture-required",
+  ],
 });
-const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
+const context = await browser.newContext({ viewport: { width: 960, height: 540 }, hasTouch: true });
+await context.addInitScript(fakeGamepadScript);
+const page = await context.newPage();
 const consoleLines = [];
 page.on("console", (m) => consoleLines.push(`[${m.type()}] ${m.text()}`));
 page.on("pageerror", (e) => consoleLines.push(`[pageerror] ${e.message}`));
@@ -43,6 +55,11 @@ if (stats && stats.phase === "running") {
   await page.waitForTimeout(2000);
   const after = await page.evaluate(() => window.automata.frames);
   fps = (after - before) / 2;
+  stats = await page.evaluate(() => window.automata);
+}
+let checks = [];
+if (inputChecks && stats && stats.phase === "running") {
+  checks = await runInputChecks(page);
   stats = await page.evaluate(() => window.automata);
 }
 const webgl = await page.evaluate(() => {
@@ -72,7 +89,8 @@ const mb = (n) => (n / 1e6).toFixed(2);
 const total = sizes.reduce((s, f) => s + f.bytes, 0);
 const totalGz = sizes.reduce((s, f) => s + f.gzip, 0);
 
-const ok = Boolean(stats && stats.frames >= Math.min(wantFrames, 60) && !stats.error);
+const checksOk = checks.every((c) => c.ok || c.soft);
+const ok = Boolean(stats && stats.frames >= Math.min(wantFrames, 60) && !stats.error && checksOk);
 const report = [
   `result: ${ok ? "ok" : "FAILED"}`,
   `phase: ${stats?.phase}   frames: ${stats?.frames}   fps (SwiftShader): ${fps}`,
@@ -81,6 +99,11 @@ const report = [
   `timings (ms since navigation): ${JSON.stringify(stats?.timings ?? {})}`,
   `wall clock to the end of the check: ${Date.now() - started} ms`,
   "",
+  `input checks: ${checks.length ? `${checks.filter((c) => c.ok).length}/${checks.length} passed` : "not run"}`,
+  ...checks.map((c) => `  ${c.ok ? "ok  " : c.soft ? "warn" : "FAIL"}  ${c.name}: ${c.detail}`),
+  `audio: ${JSON.stringify(stats?.audio ?? {})}`,
+  `pointer: ${JSON.stringify(stats?.pointer ?? {})}   input: ${JSON.stringify(stats?.input ?? {})}`,
+  "",
   `download: ${mb(total)} MB (${mb(totalGz)} MB gzipped), ${sizes.length} files`,
   ...sizes.slice(0, 12).map((f) => `  ${f.name.padEnd(48)} ${mb(f.bytes).padStart(7)} MB  gz ${mb(f.gzip).padStart(7)} MB`),
   "",
@@ -88,7 +111,7 @@ const report = [
   ...consoleLines.slice(-150),
 ].join("\n");
 fs.writeFileSync(path.join(out, "console.txt"), consoleLines.join("\n"));
-fs.writeFileSync(path.join(out, "stats.json"), JSON.stringify({ ok, stats, fps, webgl, sizes, total, totalGz }, null, 2));
+fs.writeFileSync(path.join(out, "stats.json"), JSON.stringify({ ok, stats, fps, checks, webgl, sizes, total, totalGz }, null, 2));
 fs.writeFileSync(path.join(out, "report.txt"), report);
 console.log(report);
 process.exit(ok ? 0 : 1);
