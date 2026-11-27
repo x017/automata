@@ -60,7 +60,7 @@ jobs:
           # The macOS halves; `macos-universal` below merges them.
           - target: macos
             arch: arm64
-            os: macos-14
+            os: macos-15
             triple: aarch64-apple-darwin
             python: runtime/bin/python3
             player: automata-player
@@ -177,7 +177,10 @@ jobs:
           set -e
           cat run.txt
           # (An app run without a terminal writes everything to its log.)
-          if [ "${{ matrix.target }}" = macos ]; then cat "$log"; fi
+          if [ "${{ matrix.target }}" = macos ]; then
+            cat "$log"
+            [ $code -ne 0 ] || grep -q "ran 30 frames" "$log" || code=1
+          fi
           if [ $code -ne 0 ]; then
             # Surface the failure as annotations (readable without the logs).
             for f in run.txt "$log"; do
@@ -201,7 +204,7 @@ jobs:
   macos-universal:
     name: template (macos universal)
     needs: template
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
