@@ -121,9 +121,13 @@ The renderer works within WebGL2's limits: the surface allows only
 bind it as unfilterable float (GLSL can't load from depth textures), and
 the point shadow array gets a spare layer on wasm so wgpu's GL backend
 doesn't make it a cube-map array, which WebGL2 lacks. The Beautiful
-preset's soft sun shadows still `textureLoad` the shadow cascades, so
-Beautiful won't build its pipelines on WebGL2 until that's reworked (phase
-2); the default High and the other presets do.
+preset's soft sun shadows find their blockers with depth compares only
+(GLSL can't read depth texels either), so every preset builds on WebGL2.
+`every_shader_translates_for_webgl2` (in `automata-renderer`) translates
+every entry point of every shader to GLSL ES 3.00 as wgpu does in the
+browser, so desktop CI catches what WebGL2 can't do, and the smoke test
+switches the test game to Beautiful and back (`beautiful.png` in the
+artifact).
 
 ## Building
 
@@ -146,7 +150,8 @@ SwiftShader, waits for 180 frames, drives the test game with fake input
 (`input_checks.mjs`: keys and Shift, letting go on blur, the cursor in
 canvas pixels, a click, the wheel, a tap, a fake standard gamepad plugged
 in, pushed, pressed and pulled out, a beep reaching the page and the
-worklet, pointer lock asked for and given back, a hidden tab, a resize),
+worklet, pointer lock asked for and given back, a hidden tab, the
+Beautiful preset, a resize),
 and checks the screenshot. It posts check runs: `web: smoke` (frames,
 frame rate, timings, every input check, download size per file, the
 console) and `web: screenshot`. `INPUT=0` skips the input checks.

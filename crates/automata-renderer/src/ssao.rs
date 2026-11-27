@@ -14,7 +14,7 @@ use crate::pipeline::HDR_DEPTH_FORMAT;
 use crate::post::{fullscreen_pass, fullscreen_pipeline};
 
 /// WGSL source of the occlusion passes.
-const SSAO_SHADER: &str = include_str!("shaders/ssao.wgsl");
+pub(crate) const SSAO_SHADER: &str = include_str!("shaders/ssao.wgsl");
 
 /// The occlusion texture: r ambient occlusion, g contact shadow, b view
 /// depth (for the depth-aware blur and upsampling).

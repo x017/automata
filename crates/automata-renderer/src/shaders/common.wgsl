@@ -89,6 +89,8 @@ const SOFT_TAPS: i32 = 12;
 // it shadows before the penumbra stops widening (m).
 const PCSS_SEARCH_TAPS: i32 = 8;
 const PCSS_MAX_CASTER_DISTANCE: f32 = 10.0;
+// The blocker search's depth steps toward the sun (see `sample_cascade`).
+const PCSS_LEVELS: i32 = 3;
 
 // 16-point Poisson disk in the unit circle (the soft filter uses the first
 // SOFT_TAPS, which cover it evenly).
@@ -186,9 +188,12 @@ fn shadow_forward(world: vec3<f32>, n: vec3<f32>, l: vec3<f32>) -> f32 {
 // meets the ground and widen with the distance to whatever casts them, as
 // much as the sun's apparent size (and the sun's softness) says.
 //
-// 1. Blocker search: 8 depth reads over the widest penumbra find the
-//    average depth of whatever lies between the surface and the sun (none:
-//    fully lit, done).
+// 1. Blocker search, by depth compares alone (WebGL2 can't read depth
+//    texels): 8 taps over the widest penumbra find how much lies between
+//    the surface and the sun (none: fully lit, done), then the same taps at
+//    3 steps toward the sun (1/6, 1/2 and 5/6 of PCSS_MAX_CASTER_DISTANCE)
+//    find how far in front it lies on average (a distance's mean is the
+//    integral of how much lies beyond each step).
 // 2. Filter: 12 bilinear 2x2 compares on a per-pixel rotated Poisson disk
 //    as wide as that blocker distance casts the penumbra.
 fn sample_cascade(i: i32, world: vec3<f32>, n: vec3<f32>, ndotl: f32, frag: vec2<f32>) -> f32 {
@@ -209,22 +214,24 @@ fn sample_cascade(i: i32, world: vec3<f32>, n: vec3<f32>, ndotl: f32, frag: vec2
     let rot = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
     let depth = c.z;
 
-    let dims = vec2<f32>(textureDimensions(shadow_map));
-    var blockers = 0.0;
-    var blocker_depth = 0.0;
+    var blocked = 0.0;
     for (var k = 0; k < PCSS_SEARCH_TAPS; k = k + 1) {
         let p = uv + rot * POISSON[k * 2 + 1] * max_radius;
-        let texel_pos = clamp(vec2<i32>(p * dims), vec2<i32>(0), vec2<i32>(dims) - 1);
-        let d = textureLoad(shadow_map, texel_pos, i, 0);
-        if d < depth {
-            blockers += 1.0;
-            blocker_depth += d;
-        }
+        blocked += 1.0 - textureSampleCompareLevel(shadow_map, shadow_sampler, p, i, depth);
     }
-    if blockers == 0.0 {
+    if blocked <= 0.0 {
         return 1.0;
     }
-    let caster_distance = max(depth - blocker_depth / blockers, 0.0) * depth_range;
+    let reach = PCSS_MAX_CASTER_DISTANCE / depth_range; // in depth units
+    var beyond = 0.0;
+    for (var level = 0; level < PCSS_LEVELS; level = level + 1) {
+        let step_depth = depth - reach * (f32(level) + 0.5) / f32(PCSS_LEVELS);
+        for (var k = 0; k < PCSS_SEARCH_TAPS; k = k + 1) {
+            let p = uv + rot * POISSON[k * 2 + 1] * max_radius;
+            beyond += 1.0 - textureSampleCompareLevel(shadow_map, shadow_sampler, p, i, step_depth);
+        }
+    }
+    let caster_distance = PCSS_MAX_CASTER_DISTANCE * beyond / (f32(PCSS_LEVELS) * blocked);
     let radius = clamp(spread * caster_distance / width, texel, max_radius);
 
     var sum = 0.0;

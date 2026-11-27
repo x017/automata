@@ -27,6 +27,7 @@ wgpu.workspace = true
 wgpu = { workspace = true, features = ["fragile-send-sync-non-atomic-wasm"] }
 
 [dev-dependencies]
-naga = { workspace = true, features = ["wgsl-in"] }
+# `glsl-out`: tests translate the shaders as WebGL2 would get them.
+naga = { workspace = true, features = ["wgsl-in", "glsl-out"] }
 pollster.workspace = true
 ron.workspace = true

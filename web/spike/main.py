@@ -7,7 +7,8 @@ answers every kind of input the web player passes on:
 - a click or a tap changes the colour of the marker in the corner (and
   puts a dot where it landed), the wheel zooms the camera;
 - Space (or the pad's south button) plays a beep, L locks the pointer
-  (mouse movement then turns the cube).
+  (mouse movement then turns the cube), G switches between the High and
+  Beautiful graphics presets.
 
 CI (web/ci/smoke.mjs) loads it in headless Chromium, drives it with fake
 keys, mouse, touches and a fake gamepad, and reads what the game saw from
@@ -94,6 +95,8 @@ seen = {
     "beeps": 0,
     "cursor_locked": False,
     "shift": False,
+    "graphics": "",
+    "graphics_frames": 0,
 }
 seen_keys = set()
 held = {"south": False}
@@ -132,7 +135,7 @@ def update(ctx):
     seen["x"] = max(-5.0, min(5.0, seen["x"] + move_x * 3.0 * dt))
     seen["z"] = max(-5.0, min(5.0, seen["z"] + move_z * 3.0 * dt))
 
-    for key in ("w", "a", "s", "d", "arrow_left", "arrow_right", "space", "l", "shift_left"):
+    for key in ("w", "a", "s", "d", "arrow_left", "arrow_right", "space", "l", "g", "shift_left"):
         if inp.just_pressed(key) and key not in seen_keys:
             seen_keys.add(key)
             seen["keys"] = sorted(seen_keys)
@@ -166,6 +169,13 @@ def update(ctx):
     if inp.just_pressed("l"):
         ctx.screen.lock_cursor(not ctx.screen.cursor_locked)
     seen["cursor_locked"] = ctx.screen.cursor_locked
+    if inp.just_pressed("g"):
+        ctx.screen.set_graphics("high" if ctx.screen.graphics == "beautiful" else "beautiful")
+    graphics = ctx.screen.graphics
+    if graphics != seen["graphics"]:
+        seen["graphics"] = graphics
+        seen["graphics_frames"] = 0
+    seen["graphics_frames"] += 1  # frames run on this preset
 
     seen["spin"] += dt * 1.2
     cube = ctx.scene["cube"].transform
@@ -190,7 +200,8 @@ def update(ctx):
         24.0, 76.0, size=18.0, shadow=shadow,
     )
     ctx.screen.text(
-        "WASD / arrows / stick: move   click, tap: colour   wheel: zoom   Space: beep   L: lock pointer",
+        f"WASD / arrows / stick: move   click, tap: colour   wheel: zoom   Space: beep   "
+        f"L: lock pointer   G: graphics ({seen['graphics']})",
         24.0, height - 28.0, size=16.0, color=(0.75, 0.8, 0.9, 1.0), shadow=shadow,
     )
     marker = COLOURS[seen["clicks"] % len(COLOURS)]

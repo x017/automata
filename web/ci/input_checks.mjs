@@ -214,6 +214,19 @@ export async function runInputChecks(page) {
     };
   });
 
+  await check("Beautiful graphics build and draw on WebGL2 (G)", async () => {
+    await page.keyboard.press("KeyG");
+    const r = await until((s, g) => g.graphics === "beautiful" && g.graphics_frames > 10, 60_000);
+    const error = r.stats.error;
+    await page.screenshot({ path: `${process.env.OUT ?? "web/dist/smoke"}/beautiful.png` });
+    await page.keyboard.press("KeyG");
+    const back = await until((s, g) => g.graphics === "high" && g.graphics_frames > 3, 60_000);
+    return {
+      ok: r.ok && back.ok && !error,
+      detail: `beautiful ${r.ok} (${r.game?.graphics_frames} frames), back to high ${back.ok}, error ${error ?? "none"}`,
+    };
+  });
+
   await check("resize follows the window", async () => {
     await page.setViewportSize({ width: 800, height: 600 });
     const r = await until((s, g) => g.size[0] === 800 && g.size[1] === 600);

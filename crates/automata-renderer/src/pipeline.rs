@@ -974,6 +974,78 @@ mod tests {
         validate_wgsl("sprite", SPRITE_SHADER).unwrap();
     }
 
+    /// Translates one entry point to GLSL ES 3.00 for WebGL2, as wgpu's GL
+    /// backend does in the browser (overrides at their defaults).
+    fn webgl2(source: &str, stage: naga::ShaderStage, entry: &str) -> Result<(), String> {
+        let module = naga::front::wgsl::parse_str(source).map_err(|e| e.emit_to_string(source))?;
+        let info = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .map_err(|e| format!("{e:?}"))?;
+        let (module, info) = naga::back::pipeline_constants::process_overrides(
+            &module,
+            &info,
+            Some((stage, entry)),
+            &naga::back::PipelineConstants::default(),
+        )
+        .map_err(|e| format!("{entry}: {e}"))?;
+        let options = naga::back::glsl::Options {
+            version: naga::back::glsl::Version::Embedded {
+                version: 300,
+                is_webgl: true,
+            },
+            ..naga::back::glsl::Options::default()
+        };
+        let pipeline = naga::back::glsl::PipelineOptions {
+            shader_stage: stage,
+            entry_point: entry.to_owned(),
+            multiview: None,
+        };
+        let mut out = String::new();
+        naga::back::glsl::Writer::new(
+            &mut out,
+            &module,
+            &info,
+            &options,
+            &pipeline,
+            naga::proc::BoundsCheckPolicies::default(),
+        )
+        .and_then(|mut writer| writer.write().map(|_| ()))
+        .map_err(|e| format!("{entry}: {e}"))
+    }
+
+    /// Every shader, every entry point, every preset builds for WebGL2 (the
+    /// browser build): no depth texel reads, nothing GLSL ES 3.00 lacks.
+    #[test]
+    fn every_shader_translates_for_webgl2() {
+        let shaders = [
+            ("sprite", SPRITE_SHADER),
+            ("mesh", MESH_SHADER),
+            ("water", WATER_SHADER),
+            ("post", POST_SHADER),
+            ("sky", SKY_SHADER),
+            ("shadow", SHADOW_SHADER),
+            ("composite", crate::composite::COMPOSITE_SHADER),
+            ("particles", crate::particles::PARTICLE_SHADER),
+            ("ssao", crate::ssao::SSAO_SHADER),
+        ];
+        let mut failures = Vec::new();
+        let mut count = 0;
+        for (name, source) in shaders {
+            let module = naga::front::wgsl::parse_str(source).unwrap();
+            for entry in &module.entry_points {
+                count += 1;
+                if let Err(e) = webgl2(source, entry.stage, &entry.name) {
+                    failures.push(format!("{name}: {e}"));
+                }
+            }
+        }
+        assert!(count > 30, "only {count} entry points");
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
     #[test]
     fn mesh_wgsl_is_valid() {
         validate_wgsl("mesh", MESH_SHADER).unwrap();
