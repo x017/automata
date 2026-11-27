@@ -1218,7 +1218,10 @@ bundled in every export, and it targets desktop and phone browsers.
   screens. CI plays Coin Run from the repo's `game.zip`: keys, a coin, the
   setting and the best run surviving a reload, touch controls. `game.apk`
   beside it is the same game for Android, committed by the Android
-  workflow after its emulator test.
+  workflow after its emulator test. Playing a real level found two WebGL2
+  traps of wgpu's GL backend, now fixed and checked: the sky read a mesh's
+  uniform slot (and wasn't drawn), and one-layer shadow arrays were taken
+  for 2D textures.
 - ⬜ The `web` template, `automata-cli build --target web` and Oberon's
   **Build for Web** (folder plus an itch.io zip).
 - ⬜ Size and startup budget.

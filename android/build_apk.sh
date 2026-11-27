@@ -60,25 +60,42 @@ mkdir -p "$repo/dist"
 cd "$repo/dist"
 # Scripts ship as source: the engine loads behaviour scripts from their .py
 # files, as on desktop.
-p4a apk \
-  --private "$private" \
-  --no-byte-compile-python \
-  --package "${AUTOMATA_PACKAGE:-org.automata.spike}" \
-  --name "${AUTOMATA_NAME:-AUTOMATA}" \
-  --version "${AUTOMATA_VERSION:-0.1.0}" \
-  --bootstrap sdl3 \
-  --requirements python3,automata \
-  --local-recipes "$repo/android/recipes" \
-  --add-source "$repo/android/java" \
-  --android-entrypoint org.automata.AutomataActivity \
-  "${arch_args[@]}" \
-  --orientation landscape \
-  --android-api "${ANDROID_API:-35}" \
-  --ndk-api 24 \
-  --sdk-dir "${ANDROID_HOME:?set ANDROID_HOME}" \
-  --ndk-dir "${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME}" \
-  --dist-name "automata-${arch//,/-}" \
+p4a_args=(
+  --private "$private"
+  --no-byte-compile-python
+  --package "${AUTOMATA_PACKAGE:-org.automata.spike}"
+  --name "${AUTOMATA_NAME:-AUTOMATA}"
+  --version "${AUTOMATA_VERSION:-0.1.0}"
+  --bootstrap sdl3
+  --requirements python3,automata
+  --local-recipes "$repo/android/recipes"
+  --add-source "$repo/android/java"
+  --android-entrypoint org.automata.AutomataActivity
+  "${arch_args[@]}"
+  --orientation landscape
+  --android-api "${ANDROID_API:-35}"
+  --ndk-api 24
+  --sdk-dir "${ANDROID_HOME:?set ANDROID_HOME}"
+  --ndk-dir "${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME}"
+  --dist-name "automata-${arch//,/-}"
   --skip-prebuilt
+)
+# Gradle downloads its dependencies from Maven Central, which sometimes
+# turns CI away (429 Too Many Requests) or drops a connection. Try again
+# then (the compiled recipes are kept, so a retry takes a minute or so);
+# any other failure ends the build.
+for attempt in 1 2 3; do
+  p4a_log="$(mktemp)"
+  status=0
+  p4a apk "${p4a_args[@]}" 2>&1 | tee "$p4a_log" || status=${PIPESTATUS[0]}
+  [ "$status" = 0 ] && break
+  if [ "$attempt" -lt 3 ] && grep -qE "Could not (GET|HEAD|resolve|download)|status code (429|5[0-9][0-9])|Connection reset|Read timed out" "$p4a_log"; then
+    echo "[WARNING]: a download failed (attempt $attempt of 3); trying again in $((attempt * 60)) s"
+    sleep $((attempt * 60))
+    continue
+  fi
+  exit "$status"
+done
 
 # Name the APK after its package, so several builds can sit side by side.
 built=$(ls -t ./*.apk | head -1)
