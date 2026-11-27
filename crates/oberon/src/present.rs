@@ -232,6 +232,7 @@ impl EditorApp {
         ui.recent = prefs.existing_recent();
         ui.prefs = prefs;
         ui.project_root = doc.base_dir();
+        ui.camera.set_two_d(crate::doc::scene_is_2d(&doc));
         ui.log(
             LogLevel::Info,
             "Oberon ready. Click an object to select it; drag the gizmo to move it.",
@@ -555,6 +556,15 @@ impl EditorApp {
                 } else {
                     doc.create(kind)
                 };
+                // The first 2D thing in a scene without meshes flips the
+                // view flat (the toolbar's 2D switch goes back).
+                if crate::doc::scene_is_2d(doc) && !self.ui.camera.two_d {
+                    if let Some(i) = doc.index_of(id) {
+                        if crate::doc::is_2d(&doc.entities[i].data) {
+                            self.ui.camera.set_two_d(true);
+                        }
+                    }
+                }
                 let name = doc.index_of(id).map(|i| doc.entities[i].name().to_string());
                 self.ui.log(
                     LogLevel::Info,
@@ -782,6 +792,11 @@ impl EditorApp {
                 }
                 Err(message) => self.ui.log(LogLevel::Error, message),
             },
+            Intent::Edit2D { id, edit } => {
+                doc.modify(id, false, |d| {
+                    edit.apply(d);
+                });
+            }
             Intent::SetJointTarget { id, target } => {
                 doc.modify(id, false, |d| {
                     if let Some(j) = &mut d.joint {
@@ -1067,6 +1082,7 @@ impl EditorApp {
                 self.ui.prefs.touch_recent(path);
                 self.ui.recent = self.ui.prefs.existing_recent();
                 self.ui.project_root = self.doc.base_dir();
+                self.ui.camera.set_two_d(crate::doc::scene_is_2d(&self.doc));
                 self.last_autosave = Instant::now();
                 self.save_prefs();
                 self.ui
@@ -2505,6 +2521,11 @@ impl EditorApp {
                 self.ui.gizmo = GizmoMode::Scale;
                 None
             }
+            (KeyCode::Digit2, false) => {
+                let on = !self.ui.camera.two_d;
+                self.ui.camera.set_two_d(on);
+                None
+            }
             _ => None,
         };
         if let Some(intent) = intent {
@@ -2527,6 +2548,16 @@ impl EditorApp {
         } else {
             0.25
         };
+        if self.ui.camera.two_d {
+            // The flat view: arrows move in the XY plane.
+            return Some(match code {
+                KeyCode::ArrowLeft => [-step, 0.0, 0.0],
+                KeyCode::ArrowRight => [step, 0.0, 0.0],
+                KeyCode::ArrowUp => [0.0, step, 0.0],
+                KeyCode::ArrowDown => [0.0, -step, 0.0],
+                _ => return None,
+            });
+        }
         let (sy, cy) = self.ui.camera.yaw.sin_cos();
         Some(match code {
             KeyCode::ArrowLeft => [-cy * step, 0.0, sy * step],
@@ -2779,9 +2810,14 @@ impl EditorApp {
                         doc.set_attach_frames(frames);
                     }
                     // The foliage brush paints on what's under the cursor.
-                    let hit = ui.brush_target(doc).and_then(|_| {
+                    let hit = ui.brush_target(doc).and_then(|id| {
                         let proj = crate::view::Projector::new(&ui.camera, view);
                         let (origin, dir) = proj.ray(pointer.x, pointer.y);
+                        // Tiles paint in the map's own plane.
+                        if let Some((hit, cell)) = crate::view::tile_hit(doc, id, origin, dir) {
+                            ui.brush.cell = cell;
+                            return Some(hit);
+                        }
                         viewport.surface_under(origin, dir)
                     });
                     ui.set_brush_hit(hit);

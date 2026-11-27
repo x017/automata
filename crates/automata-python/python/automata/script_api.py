@@ -926,6 +926,7 @@ class Entity:
         self._joint_was_broken = False
         self._nav_w: dict[str, Any] | None = None
         self._rag_w: dict[str, Any] | None = None
+        self._spr_w: dict[str, Any] | None = None
 
     def _begin(self, record):
         """Starts a frame from a fresh record."""
@@ -941,6 +942,7 @@ class Entity:
         self._joint_w = None
         self._nav_w = None
         self._rag_w = None
+        self._spr_w = None
         self.name = record.get("name") or ""
         self.script = record.get("script")
 
@@ -1123,6 +1125,12 @@ class Entity:
         bone)``, ``limp``, ``resting``, ``hips``. None without one."""
         return EntityRagdoll(self) if self._record.get("rag") is not None else None
 
+    @property
+    def sprite(self) -> "EntitySprite | None":
+        """This entity's Sprite: ``play(clip)``, ``stop()``, ``flip_x``,
+        ``frame``, ``color``, ``clip``, ``finished``. None without one."""
+        return EntitySprite(self) if self._record.get("spr") is not None else None
+
     def despawn(self) -> None:
         """Removes the entity from the running scene (after this frame)."""
         self._despawn = True
@@ -1145,6 +1153,8 @@ class Entity:
             w["nav"] = dict(self._nav_w)
         if self._rag_w:
             w["rag"] = dict(self._rag_w)
+        if self._spr_w:
+            w["spr"] = dict(self._spr_w)
         for key in ("p", "r", "s", "v", "cam"):
             if key in d and self._vals.get(key) is not None:
                 w[key] = self._vals[key]
@@ -2205,6 +2215,163 @@ class EntityRagdoll:
 
     def __repr__(self):
         return f"EntityRagdoll({self._e.name!r}, limp={self.limp})"
+
+
+class EntitySprite:
+    """``entity.sprite``: the entity's 2D image. Sprite sheets play their
+    clips (named in the Inspector or ``at.Sprite(clips=...)``). Reads show
+    the start of the frame (or what this frame set); changes apply after
+    it::
+
+        if abs(vx) > 0.1:
+            entity.sprite.play("run")
+            entity.sprite.flip_x = vx < 0
+        else:
+            entity.sprite.play("idle")
+    """
+
+    __slots__ = ("_e",)
+
+    def __init__(self, entity):
+        self._e = entity
+
+    def _rec(self):
+        return self._e._record.get("spr") or {}
+
+    def _set(self, key, value):
+        e = self._e
+        if e._spr_w is None:
+            e._spr_w = {}
+        e._spr_w[key] = value
+        e._dirty.add("spr")
+
+    def _get(self, key, rec_key, default):
+        w = self._e._spr_w
+        if w is not None and key in w:
+            return w[key]
+        return self._rec().get(rec_key, default)
+
+    def play(self, clip: str, restart: bool = False) -> None:
+        """Plays the clip called ``clip``. Asking for the clip that's
+        already playing carries on with it (call it every frame), unless
+        ``restart``."""
+        clip = str(clip)
+        clips = self.clips
+        if clips and clip not in clips:
+            raise ValueError(f"no clip {clip!r}; the sprite has {', '.join(clips)}")
+        w = self._e._spr_w
+        if w is not None:
+            w.pop("stop", None)
+            w.pop("frame", None)
+        self._set("play", [clip, bool(restart)])
+
+    def stop(self) -> None:
+        """Stops the clip, holding the frame it's on."""
+        w = self._e._spr_w
+        if w is not None:
+            w.pop("play", None)
+        self._set("stop", True)
+
+    @property
+    def clip(self) -> str | None:
+        """The clip playing (None when stopped)."""
+        w = self._e._spr_w or {}
+        if "play" in w:
+            return w["play"][0]
+        if "stop" in w or "frame" in w:
+            return None
+        return self._rec().get("clip")
+
+    @property
+    def clips(self) -> tuple[str, ...]:
+        """The names of the sprite's clips."""
+        return tuple(self._rec().get("clips") or ())
+
+    @property
+    def finished(self) -> bool:
+        """Whether a clip that doesn't loop has reached its end."""
+        return bool(self._rec().get("done", False))
+
+    @property
+    def frame(self) -> int:
+        """The frame shown (counting left to right, top to bottom).
+        Setting it stops the clip."""
+        return int(self._get("frame", "frame", 0))
+
+    @frame.setter
+    def frame(self, v: int) -> None:
+        v = int(v)
+        if v < 0:
+            raise ValueError("frame must be 0 or more")
+        w = self._e._spr_w
+        if w is not None:
+            w.pop("play", None)
+        self._set("frame", v)
+
+    @property
+    def flip_x(self) -> bool:
+        """Mirrored left to right (face the way you walk). Settable."""
+        return bool(self._get("flip_x", "fx", False))
+
+    @flip_x.setter
+    def flip_x(self, on: bool) -> None:
+        self._set("flip_x", bool(on))
+
+    @property
+    def flip_y(self) -> bool:
+        """Mirrored top to bottom. Settable."""
+        return bool(self._get("flip_y", "fy", False))
+
+    @flip_y.setter
+    def flip_y(self, on: bool) -> None:
+        self._set("flip_y", bool(on))
+
+    @property
+    def color(self) -> tuple:
+        """The tint ``(r, g, b, a)``; lower ``a`` to fade it. Settable."""
+        return tuple(self._get("color", "color", (1.0, 1.0, 1.0, 1.0)))
+
+    @color.setter
+    def color(self, c) -> None:
+        c = [float(v) for v in c]
+        if len(c) == 3:
+            c.append(1.0)
+        if len(c) != 4:
+            raise ValueError("color is (r, g, b) or (r, g, b, a)")
+        self._set("color", c)
+
+    @property
+    def layer(self) -> int:
+        """Drawing order (higher on top). Settable."""
+        return int(self._get("layer", "layer", 0))
+
+    @layer.setter
+    def layer(self, v: int) -> None:
+        self._set("layer", int(v))
+
+    @property
+    def image(self) -> str:
+        """The image file. Settable (another file from the project)."""
+        return str(self._get("image", "image", ""))
+
+    @image.setter
+    def image(self, path: str) -> None:
+        self._set("image", str(path))
+
+    @property
+    def size(self) -> tuple:
+        """Width and height in world units. Settable."""
+        return tuple(self._get("size", "size", (1.0, 1.0)))
+
+    @size.setter
+    def size(self, wh) -> None:
+        w, h = (float(v) for v in wh)
+        if not (w > 0 and h > 0 and math.isfinite(w) and math.isfinite(h)):
+            raise ValueError("a sprite's size must be positive")
+        self._set("size", [w, h])
+
+    def __repr__(self):
+        return f"EntitySprite({self._e.name!r}, clip={self.clip!r}, frame={self.frame})"
 
 
 class Nav:

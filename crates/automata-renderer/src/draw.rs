@@ -31,6 +31,8 @@ pub struct DrawList {
     pub(crate) sun: Option<crate::Sun>,
     pub(crate) environment: Option<crate::Environment>,
     pub(crate) sprites: Vec<Sprite>,
+    pub(crate) screen_sprites: Vec<Sprite>,
+    pub(crate) sprite_view: Option<Mat4>,
     pub(crate) meshes: Vec<MeshDraw>,
     pub(crate) waters: Vec<crate::water::WaterDraw>,
     pub(crate) point_lights: Vec<crate::PointLight>,
@@ -84,9 +86,24 @@ impl DrawList {
         self.environment = Some(environment);
     }
 
-    /// Draws a sprite. Sprites render after meshes and ignore depth.
+    /// Draws a sprite in the world (through the 2D camera). Sprites render
+    /// after meshes and ignore depth, in the order they were recorded.
     pub fn sprite(&mut self, sprite: Sprite) {
         self.sprites.push(sprite);
+    }
+
+    /// Draws a sprite in screen pixels (origin top-left, +Y down) whatever
+    /// the 2D camera: HUD images and text. Screen sprites draw over the
+    /// world's.
+    pub fn screen_sprite(&mut self, sprite: Sprite) {
+        self.screen_sprites.push(sprite);
+    }
+
+    /// Views the world's sprites through `view_proj` instead of the 2D
+    /// camera (the editor shows them through its own 3D view: sprites
+    /// lie on the z = 0 plane).
+    pub fn set_sprite_view(&mut self, view_proj: Mat4) {
+        self.sprite_view = Some(view_proj);
     }
 
     /// Draws a mesh with the given model transform and material.
@@ -214,10 +231,17 @@ impl DrawList {
         self.waters.len()
     }
 
-    /// The number of sprite draw commands recorded so far.
+    /// The number of sprite draw commands recorded so far (world and
+    /// screen).
     #[must_use]
     pub fn sprite_count(&self) -> usize {
-        self.sprites.len()
+        self.sprites.len() + self.screen_sprites.len()
+    }
+
+    /// The world sprites recorded so far, in drawing order.
+    #[must_use]
+    pub fn sprites(&self) -> &[Sprite] {
+        &self.sprites
     }
 
     /// The number of mesh draw commands recorded so far.
@@ -264,6 +288,8 @@ impl DrawList {
         self.sun = None;
         self.environment = None;
         self.sprites.clear();
+        self.screen_sprites.clear();
+        self.sprite_view = None;
         self.meshes.clear();
         self.waters.clear();
         self.point_lights.clear();
@@ -290,6 +316,8 @@ impl Default for DrawList {
             sun: None,
             environment: None,
             sprites: Vec::new(),
+            screen_sprites: Vec::new(),
+            sprite_view: None,
             meshes: Vec::new(),
             waters: Vec::new(),
             point_lights: Vec::new(),

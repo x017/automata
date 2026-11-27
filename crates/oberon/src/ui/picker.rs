@@ -54,6 +54,10 @@ pub enum ColorTarget {
     ParticleEndColor,
     /// A custom `Color` attribute, by key index in sorted order.
     Attribute(usize),
+    /// A sprite's tint (RGBA).
+    Sprite,
+    /// A tilemap's tint (RGBA).
+    Tilemap,
 }
 
 impl ColorTarget {
@@ -83,6 +87,12 @@ impl ColorTarget {
             Self::ParticleColor => (0..4).map(Field::ParticleColor).collect(),
             Self::ParticleEndColor => (0..4).map(Field::ParticleEndColor).collect(),
             Self::Attribute(_) => Vec::new(),
+            Self::Sprite => (0..4)
+                .map(|i| Field::TwoD(crate::fields2d::Field2D::SpriteColor(i)))
+                .collect(),
+            Self::Tilemap => (0..4)
+                .map(|i| Field::TwoD(crate::fields2d::Field2D::TileColor(i)))
+                .collect(),
         }
     }
 
@@ -91,7 +101,12 @@ impl ColorTarget {
     pub fn has_alpha(self) -> bool {
         matches!(
             self,
-            Self::Mesh | Self::Attribute(_) | Self::ParticleColor | Self::ParticleEndColor
+            Self::Mesh
+                | Self::Attribute(_)
+                | Self::ParticleColor
+                | Self::ParticleEndColor
+                | Self::Sprite
+                | Self::Tilemap
         )
     }
 

@@ -1897,6 +1897,12 @@ pub enum StagedComponent {
     NavLink(automata_nav::NavLink),
     /// The animated model can go limp.
     Ragdoll(automata_scene::Ragdoll),
+    /// A 2D image (or animated sprite-sheet frame).
+    Sprite(automata_scene::Sprite2D),
+    /// A grid of 2D tiles.
+    Tilemap(automata_scene::Tilemap),
+    /// Moves the entity's 2D camera after another entity.
+    CameraFollow2D(automata_scene::CameraFollow2D),
 }
 
 /// Extracts a staged component from an arbitrary Python object, raising a
@@ -1980,13 +1986,22 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(r) = obj.cast::<crate::ragdoll::PyRagdoll>() {
         return Ok(StagedComponent::Ragdoll(r.get().inner.clone()));
     }
+    if let Ok(s) = obj.cast::<crate::sprite2d::PySprite>() {
+        return Ok(StagedComponent::Sprite(s.get().inner.clone()));
+    }
+    if let Ok(t) = obj.cast::<crate::sprite2d::PyTilemap>() {
+        return Ok(StagedComponent::Tilemap(t.get().inner.clone()));
+    }
+    if let Ok(f) = obj.cast::<crate::sprite2d::PyCameraFollow2D>() {
+        return Ok(StagedComponent::CameraFollow2D(f.get().inner.clone()));
+    }
     let typename = obj.get_type().name()?.to_string();
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
          MeshRenderer, DirectionalLight, PointLight, SpotLight, Environment, Water, \
          AudioSource, ParticleEmitter, Animation, Grass, Scatter, Terrain, Joint, \
-         Attach, NavAgent, Navigation, NavLink, or Ragdoll"
+         Attach, NavAgent, Navigation, NavLink, Ragdoll, Sprite, Tilemap, or CameraFollow2D"
     )))
 }
 

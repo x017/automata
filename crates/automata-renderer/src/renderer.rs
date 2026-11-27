@@ -57,6 +57,8 @@ fn camera_in_water(draw: &DrawList) -> bool {
 /// Per-frame GPU resources derived from a draw list.
 struct PreparedFrame {
     camera_2d_bind: wgpu::BindGroup,
+    /// Screen pixels, origin top-left (HUD sprites).
+    screen_bind: wgpu::BindGroup,
     camera_3d_bind: wgpu::BindGroup,
     /// Per mesh draw: the skinned ones' model and joint bind groups.
     model_bind_groups: Vec<Option<wgpu::BindGroup>>,
@@ -1949,17 +1951,26 @@ impl Renderer {
         prepared: &PreparedFrame,
         pipeline: &wgpu::RenderPipeline,
     ) {
-        if draw.sprites.is_empty() {
+        if draw.sprites.is_empty() && draw.screen_sprites.is_empty() {
             return;
         }
         pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, &prepared.camera_2d_bind, &[]);
         pass.set_vertex_buffer(0, self.sprite_batch.vertex_buffer.slice(..));
         pass.set_index_buffer(
             self.sprite_batch.index_buffer.slice(..),
             wgpu::IndexFormat::Uint16,
         );
+        let mut bound_screen = None;
         for run in &prepared.sprite_runs {
+            if bound_screen != Some(run.screen) {
+                let bind = if run.screen {
+                    &prepared.screen_bind
+                } else {
+                    &prepared.camera_2d_bind
+                };
+                pass.set_bind_group(0, bind, &[]);
+                bound_screen = Some(run.screen);
+            }
             let texture_bind = self.sprite_batch.texture_bind_group(
                 self.ctx.device(),
                 &self.shared.texture_layout,
@@ -2067,14 +2078,15 @@ impl Renderer {
         viewport: (u32, u32),
         beautiful: bool,
     ) -> PreparedFrame {
+        let screen = camera::screen_space_camera(viewport);
         let camera_2d_bind = self.camera_bind_group(
-            draw.camera_2d.map_or_else(
-                || camera::screen_space_camera(viewport),
-                |c| c.view_proj(viewport),
-            ),
+            draw.sprite_view
+                .unwrap_or_else(|| draw.camera_2d.map_or(screen, |c| c.view_proj(viewport))),
             glam::Vec3::ZERO,
             &[0.0; GRASS_UNIFORM_FLOATS],
         );
+        let screen_bind =
+            self.camera_bind_group(screen, glam::Vec3::ZERO, &[0.0; GRASS_UNIFORM_FLOATS]);
         let camera_3d = draw.camera_3d.unwrap_or_default();
         let env = draw.environment.unwrap_or_default();
         let time = draw
@@ -2086,8 +2098,8 @@ impl Renderer {
             &grass_uniform(&env, time, &draw.grass_pushers, camera_3d.position),
         );
 
-        let sprite_runs = batch_sprites(&draw.sprites);
-        self.sprite_batch.write(self.ctx.queue(), &draw.sprites);
+        let (sprite_runs, sprites) = batch_sprites(&draw.sprites, &draw.screen_sprites);
+        self.sprite_batch.write(self.ctx.queue(), &sprites);
 
         // Skinned meshes' model and joint bind groups (shared by the shadow
         // and main passes); the rest draw instanced.
@@ -2161,6 +2173,7 @@ impl Renderer {
 
         PreparedFrame {
             camera_2d_bind,
+            screen_bind,
             camera_3d_bind,
             model_bind_groups,
             seen,
@@ -3234,27 +3247,42 @@ struct SpriteRun {
     texture: Texture,
     first_index: u32,
     index_count: u32,
+    /// Drawn in screen pixels rather than through the 2D camera.
+    screen: bool,
 }
 
-/// Groups consecutive sprites by texture identity to minimize bind group
-/// changes. Sprites with the same texture storage batch together.
-fn batch_sprites(sprites: &[Sprite]) -> Vec<SpriteRun> {
+/// The world sprites then the screen ones (as many as the batch holds),
+/// grouped into runs of consecutive sprites sharing a texture to
+/// minimize bind group changes.
+fn batch_sprites<'a>(
+    world: &'a [Sprite],
+    screen: &'a [Sprite],
+) -> (Vec<SpriteRun>, Vec<&'a Sprite>) {
+    let capacity = crate::SPRITE_VERTEX_CAPACITY / 4;
+    // The HUD keeps its room; the world gets what's left.
+    let screen = &screen[..screen.len().min(capacity)];
+    let world = &world[..world.len().min(capacity - screen.len())];
     let mut runs: Vec<SpriteRun> = Vec::new();
-    for (i, sprite) in sprites.iter().enumerate() {
+    let all = world
+        .iter()
+        .map(|s| (s, false))
+        .chain(screen.iter().map(|s| (s, true)));
+    for (i, (sprite, on_screen)) in all.enumerate() {
         let id = sprite.texture.batch_id();
         let first_index = u32::try_from(i * 6).expect("sprite batch fits u32");
         match runs.last_mut() {
-            Some(run) if run.texture.batch_id() == id => {
+            Some(run) if run.texture.batch_id() == id && run.screen == on_screen => {
                 run.index_count += 6;
             }
             _ => runs.push(SpriteRun {
                 texture: sprite.texture.clone(),
                 first_index,
                 index_count: 6,
+                screen: on_screen,
             }),
         }
     }
-    runs
+    (runs, world.iter().chain(screen).collect())
 }
 
 /// Reusable sprite batch buffers.
@@ -3293,7 +3321,7 @@ impl SpriteBatch {
     }
 
     /// Expands sprites into the shared vertex buffer.
-    fn write(&mut self, queue: &wgpu::Queue, sprites: &[Sprite]) {
+    fn write(&mut self, queue: &wgpu::Queue, sprites: &[&Sprite]) {
         let mut vertices = Vec::with_capacity(sprites.len() * 4);
         for sprite in sprites {
             vertices.extend_from_slice(&pipeline::expand_sprite(

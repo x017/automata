@@ -38,6 +38,8 @@ fn main() {
         automata_assets::set_root(Some(&dir));
     }
     let mut ui = Ui::new();
+    // A 2D scene opens in the flat view, as in the editor.
+    ui.camera.set_two_d(oberon::doc::scene_is_2d(&doc));
     if doc.path.is_some() {
         ui.project_root = doc.base_dir();
     }
@@ -60,6 +62,8 @@ fn main() {
                 pitch,
                 distance,
                 target: [x, y, z],
+                two_d: std::env::var("OBERON_2D").is_ok_and(|v| v == "1")
+                    || oberon::doc::scene_is_2d(&doc),
             };
         }
     }

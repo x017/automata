@@ -91,6 +91,8 @@ pub struct EntityState {
     pub nav: Option<automata_nav::NavAgent>,
     /// The entity's ragdoll and whether it's limp, if it has one.
     pub rag: Option<automata_scene::RagdollStatus>,
+    /// The entity's sprite (clip playing, frame, flips), if it has one.
+    pub spr: Option<automata_scene::Sprite2D>,
 }
 
 /// A collider as the runner sees it (for `ctx.physics.raycast`).
@@ -365,6 +367,8 @@ pub struct EntityWrite {
     pub nav: Option<automata_nav::NavEdit>,
     /// Changes to the entity's ragdoll (`entity.ragdoll.on()`, pushes).
     pub rag: Option<automata_scene::RagdollEdit>,
+    /// Changes to the entity's sprite (`entity.sprite.play("run")`, flips).
+    pub spr: Option<automata_scene::SpriteEdit>,
     /// Remove the entity from the running scene.
     pub despawn: bool,
 }
@@ -928,7 +932,75 @@ fn state_json(e: &EntityState) -> Json {
     if let Some(rag) = &e.rag {
         obj.set("rag", rag_state_json(rag));
     }
+    if let Some(spr) = &e.spr {
+        obj.set("spr", spr_state_json(spr));
+    }
     obj
+}
+
+/// A sprite's state: `{"clip", "frame", "done", "clips", "fx", "fy",
+/// "layer", "color", "image", "size"}` (see the script API's
+/// `EntitySprite`).
+fn spr_state_json(s: &automata_scene::Sprite2D) -> Json {
+    Json::obj([
+        (
+            "clip",
+            if s.playing.is_empty() {
+                Json::Null
+            } else {
+                Json::str(s.playing.as_str())
+            },
+        ),
+        ("frame", Json::Int(i64::from(s.frame))),
+        ("done", Json::Bool(s.finished)),
+        (
+            "clips",
+            Json::Arr(s.clips.iter().map(|c| Json::str(c.name.as_str())).collect()),
+        ),
+        ("fx", Json::Bool(s.flip_x)),
+        ("fy", Json::Bool(s.flip_y)),
+        ("layer", Json::Int(i64::from(s.layer))),
+        ("color", Json::floats(&s.color)),
+        ("image", Json::str(s.image.as_str())),
+        ("size", Json::floats(&s.size)),
+    ])
+}
+
+/// `{"play": [clip, restart], "stop", "frame", "flip_x", "flip_y",
+/// "color", "layer", "image", "size"}`; anything missing or malformed is
+/// left alone (non-positive sizes and negative frames too).
+fn parse_spr(v: &Json) -> Option<automata_scene::SpriteEdit> {
+    v.as_obj()?;
+    let play = v.get("play").and_then(Json::as_arr).and_then(|p| {
+        let clip = p.first()?.as_str()?.to_string();
+        Some((clip, p.get(1).and_then(Json::as_bool).unwrap_or(false)))
+    });
+    let color = v.get("color").and_then(|c| {
+        c.as_floats::<4>()
+            .or_else(|| c.as_floats::<3>().map(|[r, g, b]| [r, g, b, 1.0]))
+            .filter(|c| c.iter().all(|x| x.is_finite()))
+    });
+    let size = v
+        .get("size")
+        .and_then(Json::as_floats::<2>)
+        .filter(|s| s.iter().all(|x| x.is_finite() && *x > 0.0));
+    Some(automata_scene::SpriteEdit {
+        play,
+        stop: matches!(v.get("stop"), Some(Json::Bool(true))),
+        flip_x: v.get("flip_x").and_then(Json::as_bool),
+        flip_y: v.get("flip_y").and_then(Json::as_bool),
+        frame: v
+            .get("frame")
+            .and_then(Json::as_i64)
+            .and_then(|f| u32::try_from(f).ok()),
+        color,
+        layer: v
+            .get("layer")
+            .and_then(Json::as_i64)
+            .and_then(|l| i32::try_from(l).ok()),
+        image: v.get("image").and_then(Json::as_str).map(str::to_string),
+        size,
+    })
 }
 
 /// A ragdoll's state: `{"on", "mass", "stiff", "blend", "limp", "w",
@@ -1312,6 +1384,7 @@ fn parse_write(w: &Json) -> Option<EntityWrite> {
         attach: w.get("att").and_then(parse_attach),
         nav: w.get("nav").and_then(parse_nav),
         rag: w.get("rag").and_then(parse_rag),
+        spr: w.get("spr").and_then(parse_spr),
         despawn: matches!(w.get("despawn"), Some(Json::Bool(true))),
     })
 }
@@ -2253,6 +2326,91 @@ mod tests {
         );
         drop(bridge.stop());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `entity.sprite` reads the sprite's clip and flips; playing a clip
+    /// and flipping it come back as a sprite edit.
+    #[test]
+    fn scripts_play_sprite_clips_through_the_bridge() {
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("oberon_bridge_spr_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("hero.py");
+        std::fs::write(
+            &script,
+            "def update(entity, ctx):\n    \
+             spr = entity.sprite\n    \
+             entity.attributes['was'] = spr.clip\n    \
+             entity.attributes['n'] = len(spr.clips)\n    \
+             entity.attributes['fx'] = spr.flip_x\n    \
+             spr.play('run')\n    \
+             spr.flip_x = True\n    \
+             spr.color = (1, 0, 0)\n",
+        )
+        .unwrap();
+        let mut sprite = automata_scene::Sprite2D {
+            columns: 4,
+            clips: vec![
+                automata_scene::SpriteClip::new("idle", 0, 1, 8.0),
+                automata_scene::SpriteClip::new("run", 2, 3, 8.0),
+            ],
+            play: "idle".into(),
+            ..automata_scene::Sprite2D::default()
+        };
+        sprite.play_clip("idle", true);
+        let entities = vec![EntityState {
+            id: 1,
+            name: "Hero".into(),
+            script: Some(script.clone()),
+            scale: [1.0; 3],
+            spr: Some(sprite),
+            ..EntityState::default()
+        }];
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+        assert!(bridge.send_frame_with(0.016, 0.016, &[], &entities, &FrameInput::default()));
+        let msgs = pump(&mut bridge, |m| {
+            matches!(m, BridgeMsg::Frame(_) | BridgeMsg::Error { .. })
+        });
+        let reply = msgs
+            .iter()
+            .find_map(|m| match m {
+                BridgeMsg::Frame(r) => Some(r.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{msgs:?}"));
+        let w = reply.writes.iter().find(|w| w.id == 1).unwrap();
+        let attrs = w.attributes.as_ref().unwrap();
+        assert_eq!(attrs["was"], AttributeValue::Text("idle".into()));
+        assert_eq!(attrs["n"], AttributeValue::Int(2));
+        assert_eq!(attrs["fx"], AttributeValue::Bool(false));
+        let edit = w.spr.as_ref().unwrap();
+        assert_eq!(edit.play, Some(("run".into(), false)));
+        assert_eq!(edit.flip_x, Some(true));
+        assert_eq!(edit.color, Some([1.0, 0.0, 0.0, 1.0]));
+        assert!(!edit.stop);
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bad_sprite_writes_are_cleaned_up() {
+        let w = Json::parse(
+            r#"{"play": [3], "frame": -1, "size": [0, 2], "color": [1, 0, 0], "layer": 2, "flip_y": 1}"#,
+        )
+        .unwrap();
+        let edit = super::parse_spr(&w).unwrap();
+        assert_eq!(edit.play, None, "a clip is named");
+        assert_eq!(edit.frame, None, "no negative frames");
+        assert_eq!(edit.size, None, "sizes are positive");
+        assert_eq!(edit.color, Some([1.0, 0.0, 0.0, 1.0]));
+        assert_eq!(edit.layer, Some(2));
+        assert_eq!(edit.flip_y, None, "not a bool");
+        assert!(super::parse_spr(&Json::Int(1)).is_none());
     }
 
     #[test]

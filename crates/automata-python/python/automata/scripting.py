@@ -261,6 +261,8 @@ class _ViewRecord:
             return v.nav_state
         if key == "rag":
             return v.ragdoll_state
+        if key == "spr":
+            return v.sprite_state
         if key == "view":
             return v
         return None
@@ -331,6 +333,13 @@ class _EngineBackend(api.Backend):
                 changes = {k: val for k, val in rag.items() if k != "push"}
                 if changes:
                     view.ragdoll_edit(**changes)
+            spr = w.get("spr")
+            if spr:
+                if "play" in spr:
+                    spr = {**spr, "play": tuple(spr["play"])}
+                if "size" in spr:
+                    spr = {**spr, "size": tuple(spr["size"])}
+                view.sprite_edit(**spr)
             joint = view.joint if w.get("joint") else None
             if joint is not None:
                 for k, val in w["joint"].items():
@@ -458,7 +467,9 @@ class _EngineBackend(api.Backend):
 
     def grounded(self, entity: Any) -> bool:
         try:
-            return bool(self.ctx.physics.grounded(_unwrap(entity)))
+            e = _unwrap(entity)
+            # A 2D character (with a Collider2D) lives in the 2D world.
+            return bool(self.ctx.physics.grounded(e) or self.ctx.physics2d.grounded(e))
         except Exception:  # noqa: BLE001 - not a character
             return False
 

@@ -216,11 +216,20 @@ pub enum CreateKind {
     /// A playable character: WASD / arrows to move, Space to jump in Play
     /// mode.
     Player,
+    /// A 2D picture to set an image on.
+    Sprite,
+    /// A 16×9 tile grid with a floor painted, solid for 2D physics.
+    Tilemap,
+    /// A 2D camera following the entity called "Player".
+    Camera2D,
+    /// A 2D player: a sprite with a 2D collider and a character
+    /// controller (arrows / A, D to run, Space to jump in Play mode).
+    Player2D,
 }
 
 impl CreateKind {
     /// Every kind, in menu order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 19] = [
         Self::Empty,
         Self::Cube,
         Self::Sphere,
@@ -236,6 +245,10 @@ impl CreateKind {
         Self::Particles,
         Self::PhysicsCube,
         Self::Player,
+        Self::Sprite,
+        Self::Tilemap,
+        Self::Camera2D,
+        Self::Player2D,
     ];
 
     /// The menu label (also the base name of the new entity).
@@ -257,6 +270,10 @@ impl CreateKind {
             Self::Particles => "Particles",
             Self::PhysicsCube => "Physics Cube",
             Self::Player => "Player",
+            Self::Sprite => "Sprite",
+            Self::Tilemap => "Tilemap",
+            Self::Camera2D => "Camera 2D",
+            Self::Player2D => "2D Player",
         }
     }
 }
@@ -308,11 +325,21 @@ pub enum ComponentKind {
     Navigation,
     /// A hand-placed shortcut for nav agents to another entity.
     NavLink,
+    /// A 2D picture (or a frame of a sprite sheet) with animation clips.
+    Sprite,
+    /// A grid of tiles painted from a tileset; solid for 2D physics.
+    Tilemap,
+    /// A 2D (orthographic) camera looking down -Z.
+    Camera2D,
+    /// Moves the entity's 2D camera after a target, smoothly.
+    CameraFollow2D,
+    /// A 2D collider (box, circle or capsule in the XY plane).
+    Collider2D,
 }
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 27] = [
         Self::Mesh,
         Self::Animation,
         Self::Light,
@@ -335,6 +362,11 @@ impl ComponentKind {
         Self::NavAgent,
         Self::Navigation,
         Self::NavLink,
+        Self::Sprite,
+        Self::Tilemap,
+        Self::Camera2D,
+        Self::CameraFollow2D,
+        Self::Collider2D,
     ];
 
     /// The display name.
@@ -363,6 +395,11 @@ impl ComponentKind {
             Self::NavAgent => "Nav Agent",
             Self::Navigation => "Navigation",
             Self::NavLink => "Nav Link",
+            Self::Sprite => "Sprite",
+            Self::Tilemap => "Tilemap",
+            Self::Camera2D => "Camera 2D",
+            Self::CameraFollow2D => "Follow Camera 2D",
+            Self::Collider2D => "Collider 2D",
         }
     }
 
@@ -392,6 +429,11 @@ impl ComponentKind {
             Self::NavAgent => data.nav_agent.is_some(),
             Self::Navigation => data.navigation.is_some(),
             Self::NavLink => data.nav_link.is_some(),
+            Self::Sprite => data.sprite.is_some(),
+            Self::Tilemap => data.tilemap.is_some(),
+            Self::Camera2D => data.camera_2d.is_some(),
+            Self::CameraFollow2D => data.camera_follow_2d.is_some(),
+            Self::Collider2D => data.collider_2d.is_some(),
         }
     }
 
@@ -475,7 +517,11 @@ impl ComponentKind {
                 {
                     data.rigid_body = Some(automata_physics::RigidBody::kinematic_position());
                 }
-                Self::Collider.add_to(data);
+                if is_2d(data) {
+                    Self::Collider2D.add_to(data);
+                } else {
+                    Self::Collider.add_to(data);
+                }
                 data.character_controller.get_or_insert_with(|| {
                     automata_physics::CharacterController::new().snap_to_ground(0.3)
                 });
@@ -515,6 +561,34 @@ impl ComponentKind {
                 data.nav_link
                     .get_or_insert_with(automata_nav::NavLink::default);
             }
+            Self::Sprite => {
+                data.sprite
+                    .get_or_insert_with(automata_scene::Sprite2D::default);
+            }
+            Self::Tilemap => {
+                data.tilemap
+                    .get_or_insert_with(automata_scene::Tilemap::default);
+            }
+            Self::Camera2D => {
+                data.camera_2d
+                    .get_or_insert_with(|| automata_renderer::Camera2D::new(glam::Vec2::ZERO, 5.0));
+            }
+            Self::CameraFollow2D => {
+                Self::Camera2D.add_to(data);
+                data.camera_follow_2d
+                    .get_or_insert_with(automata_scene::CameraFollow2D::default);
+            }
+            Self::Collider2D => {
+                if data.collider_2d.is_none() {
+                    // Fits the sprite (a little narrower, so it doesn't
+                    // snag on walls by its transparent edges).
+                    let [w, h] = data.sprite.as_ref().map_or([1.0, 1.0], |s| s.size);
+                    data.collider_2d = Some(automata_physics::Collider2D::cuboid(
+                        (w * 0.8).max(0.05),
+                        h.max(0.05),
+                    ));
+                }
+            }
         }
     }
 
@@ -548,6 +622,11 @@ impl ComponentKind {
             Self::NavAgent => dst.nav_agent.clone_from(&src.nav_agent),
             Self::Navigation => dst.navigation.clone_from(&src.navigation),
             Self::NavLink => dst.nav_link.clone_from(&src.nav_link),
+            Self::Sprite => dst.sprite.clone_from(&src.sprite),
+            Self::Tilemap => dst.tilemap.clone_from(&src.tilemap),
+            Self::Camera2D => dst.camera_2d = src.camera_2d,
+            Self::CameraFollow2D => dst.camera_follow_2d.clone_from(&src.camera_follow_2d),
+            Self::Collider2D => dst.collider_2d.clone_from(&src.collider_2d),
         }
     }
 
@@ -579,8 +658,38 @@ impl ComponentKind {
             Self::NavAgent => data.nav_agent = None,
             Self::Navigation => data.navigation = None,
             Self::NavLink => data.nav_link = None,
+            Self::Sprite => data.sprite = None,
+            Self::Tilemap => data.tilemap = None,
+            Self::Camera2D => {
+                data.camera_2d = None;
+                data.camera_follow_2d = None;
+            }
+            Self::CameraFollow2D => data.camera_follow_2d = None,
+            Self::Collider2D => data.collider_2d = None,
         }
     }
+}
+
+/// Whether the scene is a 2D one: 2D entities and no meshes or terrain
+/// (opening it starts in the flat view).
+#[must_use]
+pub fn scene_is_2d(doc: &Document) -> bool {
+    doc.entities.iter().any(|e| is_2d(&e.data))
+        && !doc
+            .entities
+            .iter()
+            .any(|e| e.data.mesh_visual.is_some() || e.data.terrain.is_some())
+}
+
+/// Whether an entity belongs to the 2D world: it shows a sprite or a
+/// tilemap, or has a 2D collider or camera (and no 3D collider).
+#[must_use]
+pub fn is_2d(data: &EntityData) -> bool {
+    data.collider_3d.is_none()
+        && (data.sprite.is_some()
+            || data.tilemap.is_some()
+            || data.collider_2d.is_some()
+            || data.camera_2d.is_some())
 }
 
 /// What a brush stroke does: paint or erase foliage, or sculpt or paint a
@@ -603,6 +712,9 @@ pub enum BrushTool {
     Noise,
     /// Paints one of its four layers (0..3).
     Layer(u8),
+    /// Paints a tilemap's cells with this value (0 erases; n > 0 is
+    /// tile n-1, n < 0 auto-tile -n-1).
+    Tile(i32),
 }
 
 impl BrushTool {
@@ -618,7 +730,13 @@ impl BrushTool {
     /// Whether it works on a Terrain (rather than Grass or a Scatter).
     #[must_use]
     pub fn is_terrain(self) -> bool {
-        !matches!(self, Self::Paint | Self::Erase)
+        !matches!(self, Self::Paint | Self::Erase | Self::Tile(_))
+    }
+
+    /// Whether it paints a Tilemap's cells.
+    #[must_use]
+    pub fn is_tile(self) -> bool {
+        matches!(self, Self::Tile(_))
     }
 
     /// Its button label.
@@ -626,13 +744,14 @@ impl BrushTool {
     pub fn label(self) -> &'static str {
         match self {
             Self::Paint => "Paint",
-            Self::Erase => "Erase",
+            Self::Erase | Self::Tile(0) => "Erase",
             Self::Raise => "Raise",
             Self::Lower => "Lower",
             Self::Smooth => "Smooth",
             Self::Flatten => "Flatten",
             Self::Noise => "Noise",
             Self::Layer(i) => ["Grass", "Rock", "Sand", "Dirt"][usize::from(i.min(3))],
+            Self::Tile(_) => "Tile",
         }
     }
 }
@@ -682,7 +801,7 @@ fn terrain_dab(
         BrushTool::Layer(i) => {
             terrain.paint(usize::from(i.min(3)), centre, radius, strength);
         }
-        BrushTool::Paint | BrushTool::Erase => {}
+        BrushTool::Paint | BrushTool::Erase | BrushTool::Tile(_) => {}
     }
 }
 
@@ -1453,6 +1572,23 @@ impl Document {
                 return;
             }
             let local = model.inverse();
+            if let BrushTool::Tile(value) = tool {
+                if let Some(map) = &mut d.tilemap {
+                    // `radius` is the brush's side in cells, centred on
+                    // the cell under the point.
+                    let p = local.transform_point3(glam::Vec3::from(point));
+                    let (cx, cy) = map.cell_at(p.x, p.y);
+                    #[allow(clippy::cast_possible_truncation)]
+                    let side = (radius.round() as i64).clamp(1, 16);
+                    let lo = (side - 1) / 2;
+                    map.fill(
+                        (cx - lo, cy - lo),
+                        (cx - lo + side - 1, cy - lo + side - 1),
+                        value,
+                    );
+                }
+                return;
+            }
             if tool.is_terrain() {
                 if let Some(terrain) = &mut d.terrain {
                     terrain_dab(
@@ -1826,6 +1962,33 @@ impl Document {
                     surface: automata_scene::Surface::default(),
                     draw_distance: 0.0,
                     material: String::new(),
+                });
+                ComponentKind::Character.add_to(&mut data);
+            }
+            CreateKind::Sprite => {
+                ComponentKind::Sprite.add_to(&mut data);
+            }
+            CreateKind::Tilemap => {
+                if let Some(t) = &mut data.transform {
+                    // The grid grows right and up from its corner: centre
+                    // it on the origin, its floor just below.
+                    t.position = [-8.0, -2.0, 0.0];
+                }
+                let mut map = automata_scene::Tilemap::default();
+                map.fill((0, 0), (15, 0), 1);
+                data.tilemap = Some(map);
+            }
+            CreateKind::Camera2D => {
+                ComponentKind::CameraFollow2D.add_to(&mut data);
+            }
+            CreateKind::Player2D => {
+                if let Some(t) = &mut data.transform {
+                    t.position = [0.0, 0.0, 0.0];
+                }
+                data.name = Some(self.unique_name("Player"));
+                data.sprite = Some(automata_scene::Sprite2D {
+                    color: [1.0, 0.56, 0.24, 1.0],
+                    ..automata_scene::Sprite2D::default()
                 });
                 ComponentKind::Character.add_to(&mut data);
             }

@@ -24,6 +24,9 @@ pub struct ViewCamera {
     pub distance: f32,
     /// The pivot the camera orbits and looks at.
     pub target: [f32; 3],
+    /// 2D: looks straight down -Z without perspective (sprites and
+    /// tilemaps lie in the XY plane); dragging pans instead of orbiting.
+    pub two_d: bool,
 }
 
 impl Default for ViewCamera {
@@ -33,6 +36,7 @@ impl Default for ViewCamera {
             pitch: 0.45,
             distance: 11.0,
             target: [0.0, 0.5, 0.0],
+            two_d: false,
         }
     }
 }
@@ -41,6 +45,9 @@ impl ViewCamera {
     /// The camera's world-space eye position.
     #[must_use]
     pub fn eye(&self) -> Vec3 {
+        if self.two_d {
+            return Vec3::from(self.target) + Vec3::Z * self.distance;
+        }
         let (cy, sy) = (self.yaw.cos(), self.yaw.sin());
         let (cp, sp) = (self.pitch.cos(), self.pitch.sin());
         Vec3::from(self.target)
@@ -59,7 +66,31 @@ impl ViewCamera {
         // far views keep depth precision.
         cam.near = (self.distance * 0.01).clamp(0.01, 1.0);
         cam.far = (self.distance * 200.0).max(500.0);
+        if self.two_d {
+            // As much as the perspective view showed at the pivot. The
+            // eye backs off so what's in front of z = 0 isn't clipped.
+            cam.ortho = self.half_height();
+            cam.position = Vec3::from(self.target) + Vec3::Z * 500.0;
+            cam.near = 0.1;
+            cam.far = 2_000.0;
+        }
         cam
+    }
+
+    /// 2D: half the height seen, world units (zoom).
+    #[must_use]
+    pub fn half_height(&self) -> f32 {
+        self.distance * (30f32).to_radians().tan()
+    }
+
+    /// Switches between the 3D orbit view and the flat 2D view, keeping
+    /// the pivot and zoom.
+    pub fn set_two_d(&mut self, on: bool) {
+        self.two_d = on;
+        if on {
+            // Sprites live at z = 0.
+            self.target[2] = 0.0;
+        }
     }
 
     /// The orbit view that sees what `cam` sees (pivot at its look-at
@@ -82,17 +113,29 @@ impl ViewCamera {
             pitch,
             distance,
             target: cam.target.to_array(),
+            two_d: false,
         }
     }
 
     /// Orbits by a mouse delta in pixels.
     pub fn orbit(&mut self, dx: f32, dy: f32) {
+        if self.two_d {
+            // Nothing to orbit in 2D: the drag pans.
+            self.pan(dx, dy);
+            return;
+        }
         self.yaw -= dx * 0.008;
         self.pitch = (self.pitch + dy * 0.008).clamp(-1.54, 1.54);
     }
 
     /// Pans the pivot by a mouse delta in pixels (screen-space drag).
     pub fn pan(&mut self, dx: f32, dy: f32) {
+        if self.two_d {
+            let k = self.distance * 0.0016;
+            self.target[0] -= dx * k;
+            self.target[1] += dy * k;
+            return;
+        }
         let eye = self.eye();
         let forward = (Vec3::from(self.target) - eye).normalize_or_zero();
         let right = forward.cross(Vec3::Y).normalize_or_zero();
@@ -121,6 +164,7 @@ pub struct Projector {
     inv_view_proj: Mat4,
     rect: Rect,
     eye: Vec3,
+    flat: bool,
 }
 
 impl Projector {
@@ -133,8 +177,16 @@ impl Projector {
             view_proj,
             inv_view_proj: view_proj.inverse(),
             rect,
-            eye: cam.eye(),
+            // (In 2D the camera sits far back; it looks straight down -Z.)
+            eye: cam.to_camera3d().position,
+            flat: cam.two_d,
         }
+    }
+
+    /// Whether the view is the flat 2D one (looking down -Z).
+    #[must_use]
+    pub fn flat(&self) -> bool {
+        self.flat
     }
 
     /// The camera eye position.
@@ -180,6 +232,10 @@ impl Projector {
     #[must_use]
     pub fn ground_point(&self, sx: f32, sy: f32, fallback: f32) -> Vec3 {
         let (origin, dir) = self.ray(sx, sy);
+        if self.flat && dir.z.abs() > 1e-6 {
+            // The 2D view drops onto the sprites' plane, z = 0.
+            return origin + dir * (-origin.z / dir.z);
+        }
         if dir.y < -1e-3 {
             let t = -origin.y / dir.y;
             if t > 0.0 && t < 500.0 {
@@ -226,9 +282,31 @@ pub fn local_half_extents(data: &EntityData) -> Vec3 {
 /// box for mesh-less entities and models that failed to load.
 #[must_use]
 pub fn local_bounds(data: &EntityData) -> (Vec3, Vec3) {
-    crate::doc::mesh_bounds(data).map_or((Vec3::ZERO, Vec3::splat(0.3)), |(c, s)| {
+    visual_bounds(data).map_or((Vec3::ZERO, Vec3::splat(0.3)), |(c, s)| {
         (c, (s * 0.5).max(Vec3::splat(0.01)))
     })
+}
+
+/// What an entity shows, as a local box `(center, size)`: its mesh, else
+/// its sprite (centred on the entity) or tilemap (growing right and up
+/// from it). `None` for entities that show nothing.
+#[must_use]
+pub fn visual_bounds(data: &EntityData) -> Option<(Vec3, Vec3)> {
+    if data.mesh_visual.is_some() {
+        return crate::doc::mesh_bounds(data);
+    }
+    if let Some(s) = &data.sprite {
+        return Some((Vec3::ZERO, Vec3::new(s.size[0], s.size[1], 0.02)));
+    }
+    let [w, h] = data.tilemap.as_ref()?.extent();
+    Some((Vec3::new(w * 0.5, h * 0.5, 0.0), Vec3::new(w, h, 0.02)))
+}
+
+/// Whether an entity shows something with a size (a mesh, sprite or
+/// tilemap): it's picked by that, not by a marker.
+#[must_use]
+pub fn has_visual(data: &EntityData) -> bool {
+    data.mesh_visual.is_some() || data.sprite.is_some() || data.tilemap.is_some()
 }
 
 /// An entity's model matrix from its transform data.
@@ -321,7 +399,7 @@ pub fn pick_box(doc: &Document, proj: &Projector, a: (f32, f32), b: (f32, f32)) 
             let Some(model) = doc.world_matrix(e) else {
                 return false;
             };
-            let centre = if e.data.mesh_visual.is_some() {
+            let centre = if has_visual(&e.data) {
                 let (c, _) = local_bounds(&e.data);
                 model.transform_point3(c)
             } else {
@@ -334,6 +412,38 @@ pub fn pick_box(doc: &Document, proj: &Projector, a: (f32, f32), b: (f32, f32)) 
         .collect()
 }
 
+/// Where the world ray `origin` + t·`dir` meets entity `id`'s Tilemap
+/// plane, snapped to the middle of the cell there: the point, the plane's
+/// normal, and a cell's world size. `None` without a tilemap or when the
+/// ray runs along the plane.
+#[must_use]
+pub fn tile_hit(doc: &Document, id: u64, origin: Vec3, dir: Vec3) -> Option<((Vec3, Vec3), f32)> {
+    let e = &doc.entities[doc.index_of(id)?];
+    let map = e.data.tilemap.as_ref()?;
+    let model = doc.world_matrix(e).unwrap_or(Mat4::IDENTITY);
+    let det = model.determinant();
+    if !det.is_finite() || det.abs() < 1e-12 {
+        return None;
+    }
+    let inv = model.inverse();
+    let (o, d) = (inv.transform_point3(origin), inv.transform_vector3(dir));
+    if d.z.abs() < 1e-6 {
+        return None;
+    }
+    let t = -o.z / d.z;
+    if t < 0.0 {
+        return None;
+    }
+    let p = o + d * t;
+    let (cx, cy) = map.cell_at(p.x, p.y);
+    let size = map.tile_size;
+    #[allow(clippy::cast_precision_loss)] // cell indices are small
+    let centre = Vec3::new((cx as f32 + 0.5) * size, (cy as f32 + 0.5) * size, 0.0);
+    let normal = model.transform_vector3(Vec3::Z).normalize_or_zero();
+    let cell = (model.transform_vector3(Vec3::X).length() * size).max(1e-4);
+    Some(((model.transform_point3(centre), normal), cell))
+}
+
 /// Picks the nearest entity under screen point `(sx, sy)`.
 #[must_use]
 pub fn pick(doc: &Document, proj: &Projector, sx: f32, sy: f32) -> Option<u64> {
@@ -343,7 +453,7 @@ pub fn pick(doc: &Document, proj: &Projector, sx: f32, sy: f32) -> Option<u64> {
         let Some(world) = doc.world_matrix(entity) else {
             continue;
         };
-        let (model, half) = if entity.data.mesh_visual.is_some() {
+        let (model, half) = if has_visual(&entity.data) {
             let (center, half) = local_bounds(&entity.data);
             (world * Mat4::from_translation(center), half)
         } else {
@@ -356,7 +466,10 @@ pub fn pick(doc: &Document, proj: &Projector, sx: f32, sy: f32) -> Option<u64> {
         };
         if let Some(dist) = ray_box(origin, dir, model, half) {
             // Prefer small markers over the big meshes behind/around them.
-            let bias = if entity.data.mesh_visual.is_some() {
+            let bias = if entity.data.tilemap.is_some() {
+                // Sprites and markers in front of a tilemap win.
+                1.0
+            } else if has_visual(&entity.data) {
                 0.0
             } else {
                 -0.5
@@ -456,6 +569,23 @@ impl Gizmo {
                         }
                     }
                 }
+            }
+        }
+        // Handles pointing at the camera, and rings seen edge-on, can't be
+        // dragged sensibly (the Z axis in the 2D view): leave them out.
+        for tip in &mut tips {
+            if tip.is_some_and(|(x, y)| (x - origin.0).hypot(y - origin.1) < 4.0) {
+                *tip = None;
+            }
+        }
+        for ring in &mut rings {
+            let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
+            for &(x, y) in ring.iter() {
+                lo = (lo.0.min(x), lo.1.min(y));
+                hi = (hi.0.max(x), hi.1.max(y));
+            }
+            if (hi.0 - lo.0).min(hi.1 - lo.1) < 4.0 {
+                ring.clear();
             }
         }
         Some(Self {
@@ -712,6 +842,44 @@ pub fn camera_frustum(cam: &automata_renderer::Camera3D, aspect: f32, depth: f32
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The flat view looks straight at the XY plane: the centre of the
+    /// screen is the pivot, clicks land on z = 0, dragging pans, and the
+    /// Z handle (pointing at the camera) is left out of the gizmo.
+    #[test]
+    fn the_2d_view_is_flat_and_pans() {
+        let mut cam = ViewCamera {
+            target: [3.0, 2.0, 5.0],
+            ..ViewCamera::default()
+        };
+        cam.set_two_d(true);
+        assert_eq!(
+            cam.target,
+            [3.0, 2.0, 0.0],
+            "the pivot drops onto the sprites' plane"
+        );
+        let rect = Rect::new(0.0, 0.0, 800.0, 600.0);
+        let proj = Projector::new(&cam, rect);
+        assert!(proj.flat());
+        let c = proj.ground_point(400.0, 300.0, 0.0);
+        assert!((c - Vec3::new(3.0, 2.0, 0.0)).length() < 1e-3, "{c}");
+        let right = proj.ground_point(600.0, 300.0, 0.0);
+        let up = proj.ground_point(400.0, 100.0, 0.0);
+        assert!(right.x > c.x && (right.y - c.y).abs() < 1e-3, "{right}");
+        assert!(up.y > c.y && (up.x - c.x).abs() < 1e-3, "{up}");
+        // No perspective: a point near the camera projects where one far
+        // away does.
+        let near = proj.project(Vec3::new(4.0, 2.0, 3.0)).unwrap();
+        let far = proj.project(Vec3::new(4.0, 2.0, -3.0)).unwrap();
+        assert!((near.0 - far.0).abs() < 1e-2 && (near.1 - far.1).abs() < 1e-2);
+        cam.orbit(100.0, 0.0);
+        assert!(cam.target[0] < 3.0, "dragging right pans the view left");
+        assert!(cam.two_d && (cam.target[2]).abs() < 1e-6);
+        let t = TransformData::default();
+        let gizmo = Gizmo::build(GizmoMode::Move, &t, &proj).unwrap();
+        assert!(gizmo.tips[0].is_some() && gizmo.tips[1].is_some());
+        assert!(gizmo.tips[2].is_none(), "Z points at the camera");
+    }
 
     #[test]
     fn orbit_view_reproduces_a_scene_camera() {

@@ -43,6 +43,7 @@ pub mod cli;
 pub mod code;
 pub mod doc;
 pub mod fields;
+pub mod fields2d;
 pub mod files;
 pub mod fonts;
 pub mod json;

@@ -157,6 +157,7 @@ impl PyEntity {
 
     /// The staged components as fresh Python objects, for editors that need
     /// to inspect a scene's contents (Oberon). Each call rebuilds the list.
+    #[allow(clippy::too_many_lines)] // one step per kind of component
     fn components(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
         use crate::components::{
             PyCamera2D, PyCamera3D, PyDirectionalLight, PyMeshRenderer, PyTransform,
@@ -250,6 +251,16 @@ impl PyEntity {
                     }
                     StagedComponent::Ragdoll(v) => {
                         Py::new(py, crate::ragdoll::PyRagdoll { inner: v.clone() })?.into_any()
+                    }
+                    StagedComponent::Sprite(v) => {
+                        Py::new(py, crate::sprite2d::PySprite { inner: v.clone() })?.into_any()
+                    }
+                    StagedComponent::Tilemap(v) => {
+                        Py::new(py, crate::sprite2d::PyTilemap { inner: v.clone() })?.into_any()
+                    }
+                    StagedComponent::CameraFollow2D(v) => {
+                        Py::new(py, crate::sprite2d::PyCameraFollow2D { inner: v.clone() })?
+                            .into_any()
                     }
                 })
             })
@@ -444,6 +455,7 @@ pub fn load_staged(scene: &mut Scene, staged: &[StagedEntity]) {
 }
 
 /// Spawns one staged entity into the ECS scene.
+#[allow(clippy::too_many_lines)] // one step per kind of component
 fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
     let id = scene.spawn(());
     if let Some(name) = &staged.name {
@@ -528,6 +540,11 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
             StagedComponent::Ragdoll(c) => {
                 let _ = scene.world_mut().insert_one(id, c.sanitized());
             }
+            StagedComponent::Sprite(c) => drop(scene.world_mut().insert_one(id, c.clone())),
+            StagedComponent::Tilemap(c) => drop(scene.world_mut().insert_one(id, c.clone())),
+            StagedComponent::CameraFollow2D(c) => {
+                let _ = scene.world_mut().insert_one(id, c.clone());
+            }
         }
     }
     if !staged.attributes.is_empty() {
@@ -586,12 +603,15 @@ pub struct FrameWrites {
     pub navs: Vec<(u64, automata_nav::NavEdit)>,
     /// Ragdolls switched on or off, retuned and pushed, in call order.
     pub ragdolls: Vec<(u64, automata_scene::RagdollEdit)>,
+    /// Sprite clips played and sprites flipped or retinted, in call order.
+    pub sprites: Vec<(u64, automata_scene::SpriteEdit)>,
 }
 
 /// Shared write buffer between the per-frame views and the game loop.
 pub type WriteQueue = Rc<RefCell<FrameWrites>>;
 
 /// Applies buffered writes to the ECS scene.
+#[allow(clippy::too_many_lines)] // one step per kind of component
 pub fn apply_writes(scene: &mut Scene, writes: &WriteQueue) {
     let drained = {
         let mut writes = writes.borrow_mut();
@@ -681,6 +701,16 @@ pub fn apply_writes(scene: &mut Scene, writes: &WriteQueue) {
             edit.apply(scene.world_mut(), entity);
         }
     }
+    for (bits, edit) in drained.sprites {
+        if let Some(entity) = EntityId::from_bits(bits) {
+            if let Ok(mut sprite) = scene
+                .world_mut()
+                .get::<&mut automata_scene::Sprite2D>(entity)
+            {
+                edit.apply(&mut sprite);
+            }
+        }
+    }
     for entity in drained.despawns {
         if scene.world().contains(entity) {
             scene.despawn_recursive(entity);
@@ -704,6 +734,7 @@ struct EntitySnapshot {
     attached: Option<(String, String)>,
     nav_agent: Option<automata_nav::NavAgent>,
     ragdoll: Option<automata_scene::RagdollStatus>,
+    sprite: Option<automata_scene::Sprite2D>,
 }
 
 /// Read access to the scene during the update callback.
@@ -763,6 +794,10 @@ impl SceneView {
                             .ok()
                             .map(|a| (*a).clone()),
                         ragdoll: automata_scene::ragdoll_status(world, id),
+                        sprite: world
+                            .get::<&automata_scene::Sprite2D>(id)
+                            .ok()
+                            .map(|s| (*s).clone()),
                     }
                 },
             )
@@ -891,6 +926,7 @@ pub struct EntityView {
     attached: Option<(String, String)>,
     nav_agent: Option<automata_nav::NavAgent>,
     ragdoll: Option<automata_scene::RagdollStatus>,
+    sprite: Option<automata_scene::Sprite2D>,
     writes: WriteQueue,
 }
 
@@ -910,6 +946,7 @@ impl EntityView {
             attached: snapshot.attached.clone(),
             nav_agent: snapshot.nav_agent.clone(),
             ragdoll: snapshot.ragdoll.clone(),
+            sprite: snapshot.sprite.clone(),
             writes,
         }
     }
@@ -1175,6 +1212,32 @@ impl EntityView {
             }
         }
         self.writes.borrow_mut().ragdolls.push((self.id, edit));
+        Ok(())
+    }
+
+    /// The sprite's start-of-frame state as a dict (`clip` playing or
+    /// `None`, `frame`, `done` a one-shot clip ended, `clips` names, `fx` /
+    /// `fy` flips, `layer`, `color`, `image`, `size`), or `None` without a
+    /// `Sprite`. Behaviour scripts read it through `entity.sprite`.
+    #[getter]
+    fn sprite_state<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<Option<Bound<'py, pyo3::types::PyDict>>> {
+        self.sprite
+            .as_ref()
+            .map(|s| crate::sprite2d::state_dict(py, s))
+            .transpose()
+    }
+
+    /// Changes the sprite (applied after the callback returns): `play` is
+    /// `(clip, restart)`, `stop`, `frame`, `flip_x`, `flip_y`, `color`,
+    /// `layer`, `image`, `size`. Behaviour scripts use
+    /// `entity.sprite.play("run")` and the like.
+    #[pyo3(signature = (**changes))]
+    fn sprite_edit(&self, changes: Option<&Bound<'_, pyo3::types::PyDict>>) -> PyResult<()> {
+        let edit = crate::sprite2d::edit_from(changes)?;
+        self.writes.borrow_mut().sprites.push((self.id, edit));
         Ok(())
     }
 

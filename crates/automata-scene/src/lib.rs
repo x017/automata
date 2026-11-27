@@ -20,6 +20,7 @@
 //!   painted onto the ground.
 //! - [`Terrain`] — a heightmap ground, sculpted and painted with brushes.
 //! - [`Ragdoll`] — animated models going limp and blending back.
+//! - [`Sprite2D`], [`Tilemap`] and [`CameraFollow2D`] — 2D games.
 //!
 //! All ECS types needed for common game code (`Entity`, queries) are
 //! re-exported; `hecs` remains available for advanced use.
@@ -37,7 +38,9 @@ mod render;
 mod resources;
 mod scene;
 mod springs;
+mod sprite2d;
 pub mod terrain;
+pub mod tilemap;
 mod transform;
 
 pub use anim_graph::{GraphLayerState, GraphParam, GraphPlayer, GraphState};
@@ -70,10 +73,15 @@ pub use render::{
 pub use resources::Resources;
 pub use scene::{EntityId, Name, Scene, SceneWorld};
 pub use springs::SpringSim;
+pub use sprite2d::{
+    animate_sprites, follow_cameras_2d, ortho_camera_for, scene_camera_2d, CameraFollow2D,
+    Sprite2D, SpriteClip, SpriteEdit, SpriteTexture,
+};
 pub use terrain::{
     default_layers as default_terrain_layers, Sculpt, Terrain, TerrainLayer,
     MAX_TERRAIN_RESOLUTION, MAX_TERRAIN_SIZE, MIN_TERRAIN_RESOLUTION, TERRAIN_LAYERS,
 };
+pub use tilemap::{frame_uv, AutoTile, Tilemap, MAX_TILEMAP_SIDE};
 pub use transform::{propagate_transforms, GlobalTransform, Parent, Transform};
 
 pub use hecs::Entity;

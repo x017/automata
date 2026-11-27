@@ -323,6 +323,8 @@ pub enum Field {
     Nav(NavField),
     /// How the navigation mesh is baked.
     NavBake(NavBakeField),
+    /// A number of a 2D component (Sprite, Tilemap, Camera 2D …).
+    TwoD(crate::fields2d::Field2D),
 }
 
 /// A Nav Agent's numbers.
@@ -496,6 +498,8 @@ pub enum Flag {
     TerrainCollide,
     /// The ragdoll starts limp.
     RagdollActive,
+    /// A checkbox of a 2D component.
+    TwoD(crate::fields2d::Flag2D),
 }
 
 /// An enumerated property of an entity (cycled by a dropdown-style button).
@@ -525,6 +529,8 @@ pub enum Choice {
     JointKind,
     /// A terrain's height samples a side: 33, 65 … 1025.
     TerrainResolution,
+    /// Box → Circle → Capsule 2D collider shape.
+    Collider2DShape,
 }
 
 /// The terrain resolutions offered, as labels and values.
@@ -713,6 +719,7 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::AudioRange => data.audio_source.as_ref()?.range,
         F::AnimSpeed => data.animation.as_ref()?.speed,
         F::Nav(_) | F::NavBake(_) => return nav_get(data, field),
+        F::TwoD(f) => return crate::fields2d::get(data, f),
         F::JointAnchor(_)
         | F::JointAxis(_)
         | F::JointLimitMin
@@ -875,6 +882,7 @@ fn scatter_set(s: &mut automata_scene::Scatter, field: Field, v: f32) {
 pub fn range(field: Field) -> (f32, f32) {
     use Field as F;
     match field {
+        F::TwoD(f) => crate::fields2d::range(f),
         F::ParticleColor(_)
         | F::RagdollStiffness
         | F::ParticleEndColor(_)
@@ -1010,6 +1018,7 @@ pub fn range(field: Field) -> (f32, f32) {
 pub fn scrub_step(field: Field) -> f32 {
     use Field as F;
     match field {
+        F::TwoD(f) => crate::fields2d::scrub_step(f),
         F::Rotation(_)
         | F::CameraFov
         | F::CharacterSlope
@@ -1497,6 +1506,7 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
             None => return false,
         },
         F::Nav(_) | F::NavBake(_) => return nav_set(data, field, v),
+        F::TwoD(f) => return crate::fields2d::set(data, f, v),
     }
     true
 }
@@ -1538,6 +1548,7 @@ pub fn get_flag(data: &EntityData, flag: Flag) -> Option<bool> {
         Flag::NavLinkTwoWay => data.nav_link.as_ref()?.two_way,
         Flag::TerrainCollide => data.terrain.as_ref()?.collide,
         Flag::RagdollActive => data.ragdoll.as_ref()?.active,
+        Flag::TwoD(f) => return crate::fields2d::get_flag(data, f),
     })
 }
 
@@ -1651,6 +1662,7 @@ pub fn toggle(data: &mut EntityData, flag: Flag) -> bool {
             Some(r) => r.active = !r.active,
             None => return false,
         },
+        Flag::TwoD(f) => return crate::fields2d::toggle(data, f),
         Flag::TerrainCollide => match &mut data.terrain {
             Some(t) => t.collide = !t.collide,
             None => return false,
@@ -1739,6 +1751,7 @@ pub fn choice_label(data: &EntityData, choice: Choice) -> Option<&'static str> {
                 .find(|(_, v)| *v == r)
                 .map_or("Custom", |(label, _)| label)
         }
+        Choice::Collider2DShape => crate::fields2d::shape_label(data)?,
     })
 }
 
@@ -1922,6 +1935,7 @@ pub fn cycle(data: &mut EntityData, choice: Choice) -> bool {
                 .1;
             t.set_resolution(next);
         }
+        Choice::Collider2DShape => return crate::fields2d::cycle_shape(data),
         Choice::JointKind => {
             use automata_physics::JointKind as K;
             let Some(j) = &mut data.joint else {

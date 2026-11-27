@@ -40,6 +40,8 @@ pub struct Brush {
     last: Option<Vec3>,
     /// Where the stroke began (what Flatten levels to).
     anchor: Option<Vec3>,
+    /// A tile brush's cell: its world size (set with the hit).
+    pub cell: f32,
 }
 
 impl Default for Brush {
@@ -51,13 +53,16 @@ impl Default for Brush {
             hit: None,
             last: None,
             anchor: None,
+            cell: 1.0,
         }
     }
 }
 
 /// Whether `e` has something for `tool` to work on.
 fn paintable(e: &EntityEntry, tool: BrushTool) -> bool {
-    if tool.is_terrain() {
+    if tool.is_tile() {
+        e.data.tilemap.is_some()
+    } else if tool.is_terrain() {
         e.data.terrain.is_some()
     } else {
         e.data.grass.is_some() || e.data.scatter.is_some()
@@ -369,7 +374,12 @@ impl Ui {
         let (Some((point, normal)), Some(tool)) = (self.brush.hit, self.brush.tool) else {
             return;
         };
-        let spacing = self.brush.radius * if tool.is_terrain() { 0.2 } else { 0.3 };
+        let spacing = if tool.is_tile() {
+            // Every cell the cursor crosses (hits snap to cell centres).
+            self.brush.cell * 0.5
+        } else {
+            self.brush.radius * if tool.is_terrain() { 0.2 } else { 0.3 }
+        };
         if self.brush.last.is_some_and(|l| l.distance(point) < spacing) {
             return;
         }
@@ -397,7 +407,41 @@ impl Ui {
         let (Some((point, normal)), Some(tool)) = (self.brush.hit, self.brush.tool) else {
             return;
         };
-        let erase = matches!(tool, BrushTool::Erase | BrushTool::Lower);
+        let erase = matches!(
+            tool,
+            BrushTool::Erase | BrushTool::Lower | BrushTool::Tile(0)
+        );
+        if tool.is_tile() {
+            // The cells it paints: a square `radius` cells a side, lying in
+            // the map's plane (`normal`).
+            let n = normal.try_normalize().unwrap_or(Vec3::Z);
+            let u = if n.abs().dot(Vec3::Y) > 0.9 {
+                Vec3::X
+            } else {
+                Vec3::Y.cross(n).normalize_or_zero()
+            };
+            let v = n.cross(u);
+            let side = self.brush.radius.round().max(1.0);
+            let lo = ((side - 1.0) / 2.0).floor();
+            let (a, b) = (
+                -(lo + 0.5) * self.brush.cell,
+                (side - lo - 0.5) * self.brush.cell,
+            );
+            let corners = [(a, a), (b, a), (b, b), (a, b), (a, a)];
+            let pts: Vec<(f32, f32)> = corners
+                .iter()
+                .filter_map(|(x, y)| proj.project(point + u * *x + v * *y))
+                .collect();
+            let c = if erase {
+                color::danger()
+            } else {
+                color::accent()
+            };
+            if pts.len() == 5 {
+                canvas.polyline(&pts, c, 2.0);
+            }
+            return;
+        }
         let n = normal.try_normalize().unwrap_or(Vec3::Y);
         let u = n.any_orthonormal_vector();
         let v = n.cross(u);

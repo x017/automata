@@ -639,7 +639,10 @@ it, and an island made only with Oberon's brushes
 (`examples/oberon/island`). Then B6 ragdolls ✅: characters go limp
 with bodies and joints worked out from their skeletons, take pushes, and
 stand back up where they fell with a blend (`entity.ragdoll`; Robot
-Plaza's Wobbly falls over when you bump into it).
+Plaza's Wobbly falls over when you bump into it). C6 2D toolkit ✅ came
+next: sprites with clips, painted tilemaps with auto-tiles and colliders, a
+2D follow camera, Oberon's 2D view and tile brush, and *Pixel Peaks*
+(`examples/oberon/platformer`).
 
 ## Process note
 

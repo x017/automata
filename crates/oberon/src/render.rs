@@ -781,10 +781,12 @@ impl ViewportRenderer {
         // viewport is freely navigable regardless of scene contents.
         if let Some(camera) = camera {
             draw.set_camera_3d(camera);
+            // Sprites and tilemaps lie on z = 0 in the editor's view too.
+            draw.set_sprite_view(camera.view_proj(size));
         }
         // Script HUD sprites: screen pixels, drawn over the scene.
         for sprite in overlay {
-            draw.sprite(sprite);
+            draw.screen_sprite(sprite);
         }
         renderer.render_offscreen(&draw, texture);
         draw.mesh_count()
@@ -840,8 +842,13 @@ pub mod render_wireframe {
             h,
             proj,
         };
-        canvas.grid();
+        if !cam.two_d {
+            canvas.grid(); // (the 2D view's grid is an overlay)
+        }
         for entity in &doc.entities {
+            if canvas.flat_2d(doc, entity) {
+                continue;
+            }
             let corners = entity
                 .data
                 .mesh_visual
@@ -922,6 +929,53 @@ pub mod render_wireframe {
             if let (Some(pa), Some(pb)) = (self.proj.project(a), self.proj.project(b)) {
                 self.line(pa, pb, c);
             }
+        }
+
+        /// Sprites as their outline and tilemaps as their painted cells'
+        /// (in their tint). Whether `entity` was one.
+        fn flat_2d(&mut self, doc: &Document, entity: &crate::doc::EntityEntry) -> bool {
+            let data = &entity.data;
+            if data.sprite.is_none() && data.tilemap.is_none() {
+                return false;
+            }
+            let Some(model) = doc.world_matrix(entity) else {
+                return true;
+            };
+            let tint = |c: [f32; 4]| {
+                let k = |i: usize| (c[i].clamp(0.0, 1.0) * 255.0) as u8;
+                (k(0), k(1), k(2), 255)
+            };
+            let quad = |lines: &mut Self, x0: f32, y0: f32, x1: f32, y1: f32, c: Rgba| {
+                let p = |x: f32, y: f32| model.transform_point3(Vec3::new(x, y, 0.0));
+                let corners = [p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)];
+                for i in 0..4 {
+                    lines.edge(corners[i], corners[(i + 1) % 4], c);
+                }
+            };
+            if let Some(sprite) = &data.sprite {
+                let [w, h] = sprite.size;
+                quad(
+                    self,
+                    -w / 2.0,
+                    -h / 2.0,
+                    w / 2.0,
+                    h / 2.0,
+                    tint(sprite.color),
+                );
+            }
+            if let Some(map) = &data.tilemap {
+                let s = map.tile_size;
+                let c = tint(map.color);
+                for y in 0..map.height.min(256) {
+                    for x in 0..map.width.min(256) {
+                        if map.get(i64::from(x), i64::from(y)) != 0 {
+                            let (fx, fy) = (x as f32 * s, y as f32 * s);
+                            quad(self, fx, fy, fx + s, fy + s, c);
+                        }
+                    }
+                }
+            }
+            true
         }
 
         fn grid(&mut self) {

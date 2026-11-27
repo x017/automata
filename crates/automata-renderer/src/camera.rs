@@ -47,7 +47,7 @@ impl Camera2D {
     }
 }
 
-/// A 3D perspective camera.
+/// A 3D camera: perspective, or orthographic when `ortho` is set.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Camera3D {
     /// Camera position in world space.
@@ -63,6 +63,15 @@ pub struct Camera3D {
     pub near: f32,
     /// Far clip plane distance.
     pub far: f32,
+    /// Orthographic: half the vertical view extent in world units (no
+    /// perspective; `fov_y_degrees` is unused). 0 is a perspective camera.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub ortho: f32,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's signature
+fn is_zero(v: &f32) -> bool {
+    *v <= 0.0
 }
 
 impl Camera3D {
@@ -77,6 +86,7 @@ impl Camera3D {
             fov_y_degrees: 60.0,
             near: 0.1,
             far: 1000.0,
+            ortho: 0.0,
         }
     }
 
@@ -85,8 +95,12 @@ impl Camera3D {
     pub fn view_proj(&self, viewport: (u32, u32)) -> Mat4 {
         let aspect = viewport.0 as f32 / viewport.1.max(1) as f32;
         let view = view::look_at_mat4(self.position, self.target, self.up);
-        let proj =
-            directx::perspective(self.fov_y_degrees.to_radians(), aspect, self.near, self.far);
+        let proj = if self.ortho > 0.0 {
+            let (h, w) = (self.ortho, self.ortho * aspect);
+            directx::orthographic(-w, w, -h, h, self.near, self.far)
+        } else {
+            directx::perspective(self.fov_y_degrees.to_radians(), aspect, self.near, self.far)
+        };
         proj * view
     }
 }

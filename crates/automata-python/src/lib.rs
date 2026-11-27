@@ -36,6 +36,7 @@ mod ragdoll;
 mod scene;
 mod screen;
 mod serialize;
+mod sprite2d;
 mod stepped;
 mod terrain;
 
@@ -124,6 +125,11 @@ pub fn init_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<animation::PyAttach>()?;
     m.add_class::<nav::PyNavAgent>()?;
     m.add_class::<ragdoll::PyRagdoll>()?;
+    m.add_class::<sprite2d::PySprite>()?;
+    m.add_class::<sprite2d::PySpriteClip>()?;
+    m.add_class::<sprite2d::PyTilemap>()?;
+    m.add_class::<sprite2d::PyAutoTile>()?;
+    m.add_class::<sprite2d::PyCameraFollow2D>()?;
     m.add_class::<nav::PyNavigation>()?;
     m.add_class::<nav::PyNavLink>()?;
     m.add_class::<animation::PyAnimationRef>()?;

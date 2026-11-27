@@ -64,6 +64,9 @@ pub struct PlayInput {
 struct Character {
     entity: Entity,
     vertical: f32,
+    /// A 2D (side-view) character: walks along X, jumps along Y in the
+    /// 2D physics world.
+    two_d: bool,
 }
 
 /// A running simulation of a document.
@@ -72,6 +75,8 @@ pub struct PlaySession {
     pub doc: Document,
     scene: Scene,
     physics: PhysicsWorld3D,
+    /// Sprites' and tilemaps' world (entities with a 2D collider).
+    physics2d: automata_physics::PhysicsWorld2D,
     /// `(entity index in doc, ECS entity)` for every entity with a transform.
     map: Vec<(usize, Entity)>,
     accumulator: f32,
@@ -183,11 +188,17 @@ impl PlaySession {
             .map(|(entity, _)| Character {
                 entity,
                 vertical: 0.0,
+                two_d: scene
+                    .world()
+                    .get::<&automata_physics::Collider2D>(entity)
+                    .is_ok(),
             })
             .collect();
 
         let mut physics = PhysicsWorld3D::new();
         physics.sync_from_scene(scene.world_mut());
+        let mut physics2d = automata_physics::PhysicsWorld2D::new();
+        physics2d.sync_from_scene(scene.world_mut());
         let prepared = automata_nav::scene::prepare(scene.world(), &physics, Some(&doc.base_dir()));
         let (nav, nav_warning) = prepared.map_or((None, None), |p| {
             (p.mesh.map(std::sync::Arc::new), p.warning)
@@ -196,6 +207,7 @@ impl PlaySession {
             doc: display,
             scene,
             physics,
+            physics2d,
             map,
             accumulator: 0.0,
             paused: false,
@@ -556,7 +568,8 @@ impl PlaySession {
                     // script-set) scale; physics never changes it.
                     scale: entry.data.transform.map_or(t.scale, |d| d.scale),
                     velocity,
-                    grounded: character && self.physics.grounded(entity),
+                    grounded: character
+                        && (self.physics.grounded(entity) || self.physics2d.grounded(entity)),
                     attributes: entry.data.attributes.clone(),
                     camera: world.get::<&Camera3D>(entity).ok().map(|c| {
                         let (p, t) = (c.position, c.target);
@@ -580,6 +593,10 @@ impl PlaySession {
                         .ok()
                         .map(|a| (*a).clone()),
                     rag: automata_scene::ragdoll_status(world, entity),
+                    spr: world
+                        .get::<&automata_scene::Sprite2D>(entity)
+                        .ok()
+                        .map(|s| (*s).clone()),
                 })
             })
             .collect()
@@ -657,6 +674,11 @@ impl PlaySession {
             if let Some(edit) = &w.rag {
                 edit.clone().apply(world, entity);
             }
+            if let Some(edit) = &w.spr {
+                if let Ok(mut sprite) = world.get::<&mut automata_scene::Sprite2D>(entity) {
+                    edit.apply(&mut sprite);
+                }
+            }
             if w.position.is_some() || w.rotation.is_some() || w.scale.is_some() {
                 if let Ok(mut t) = world.get::<&mut Transform>(entity) {
                     let mut data = TransformData::from(*t);
@@ -726,12 +748,12 @@ impl PlaySession {
     /// currently has it (scripts may move it). Play mode renders through it.
     #[must_use]
     pub fn scene_camera(&self) -> Option<Camera3D> {
-        self.scene
-            .world()
-            .query::<&Camera3D>()
-            .iter()
-            .next()
-            .copied()
+        let world = self.scene.world();
+        let cam = world.query::<&Camera3D>().iter().next().copied();
+        // A 2D scene is seen through its 2D camera (as an ortho one).
+        cam.or_else(|| {
+            automata_scene::scene_camera_2d(world).map(|c| automata_scene::ortho_camera_for(&c))
+        })
     }
 
     /// Number of player-controllable characters.
@@ -784,6 +806,7 @@ impl PlaySession {
                 .map(|hit| (hit.point, hit.normal))
         };
         automata_scene::animate_on(self.scene.world_mut(), dt.clamp(0.0, 0.25), Some(&ground));
+        automata_scene::animate_sprites(self.scene.world_mut(), dt.clamp(0.0, 0.25));
         self.accumulator += dt.clamp(0.0, 0.25);
         let mut steps = 0;
         while self.accumulator >= TIMESTEP && steps < MAX_STEPS {
@@ -801,6 +824,9 @@ impl PlaySession {
             // The models moved: what's attached to them follows.
             automata_scene::attach_to_bones(self.scene.world_mut());
         }
+        // 2D cameras chase their targets where they ended up.
+        automata_scene::follow_cameras_2d(self.scene.world_mut(), dt.clamp(0.0, 0.25));
+        automata_scene::propagate_transforms(self.scene.world_mut());
     }
 
     /// Live particles in the play world (every emitter's, bursts included).
@@ -833,6 +859,9 @@ impl PlaySession {
         self.physics.sync_from_scene(world);
         self.physics.move_characters(world, TIMESTEP);
         let _tick = self.physics.step(world, TIMESTEP);
+        self.physics2d.sync_from_scene(world);
+        self.physics2d.move_characters(world, TIMESTEP);
+        let _tick = self.physics2d.step(world, TIMESTEP);
         self.elapsed += TIMESTEP;
         self.steps += 1;
     }
@@ -859,7 +888,11 @@ impl PlaySession {
             if self.scripted.contains(&c.entity) {
                 continue; // its script sets the velocity
             }
-            let grounded = self.physics.grounded(c.entity);
+            let grounded = if c.two_d {
+                self.physics2d.grounded(c.entity)
+            } else {
+                self.physics.grounded(c.entity)
+            };
             c.vertical = if grounded && input.jump {
                 JUMP_SPEED
             } else if grounded && c.vertical <= 0.0 {
@@ -867,7 +900,14 @@ impl PlaySession {
             } else {
                 (c.vertical - CHARACTER_GRAVITY * TIMESTEP).max(-50.0)
             };
-            let velocity = CharacterVelocity::new(wish * speed + Vec3::Y * c.vertical);
+            // Side view: left/right walks along X (forward/back does
+            // nothing), whichever way the camera looks.
+            let along = if c.two_d {
+                Vec3::X * input.right.clamp(-1.0, 1.0)
+            } else {
+                wish
+            };
+            let velocity = CharacterVelocity::new(along * speed + Vec3::Y * c.vertical);
             let _ = world.insert_one(c.entity, velocity);
         }
     }
@@ -1296,6 +1336,172 @@ pub(crate) mod tests {
             play.update(0.1);
         }
         assert!(!state(&play).playing, "a one-shot ends");
+    }
+
+    /// A 2D player lands on a tilemap's floor and walks along it with
+    /// the arrow keys; its sprite's clip plays, scripts switch it, and
+    /// the 2D camera follows.
+    #[test]
+    fn a_2d_player_walks_on_a_tilemap_and_the_camera_follows() {
+        let mut doc = Document::new();
+        let _map = doc.create(CreateKind::Tilemap);
+        let cam = doc.create(CreateKind::Camera2D);
+        let player = doc.create(CreateKind::Player2D);
+        {
+            let i = doc.index_of(player).unwrap();
+            let sprite = doc.entities[i].data.sprite.as_mut().unwrap();
+            sprite.columns = 4;
+            sprite.clips = vec![
+                automata_scene::SpriteClip::new("idle", 0, 1, 10.0),
+                automata_scene::SpriteClip::new("run", 2, 3, 10.0),
+            ];
+            sprite.play = "idle".into();
+        }
+        assert!(crate::doc::scene_is_2d(&doc));
+        let mut play = PlaySession::start(&doc);
+        assert!(
+            play.scene_camera().is_some_and(|c| c.ortho > 0.0),
+            "seen through the 2D camera"
+        );
+        let pos = |play: &PlaySession, id: u64| {
+            let i = play.doc.index_of(id).unwrap();
+            play.doc.entities[i].data.transform.unwrap().position
+        };
+        for _ in 0..60 {
+            play.update(1.0 / 60.0);
+        }
+        let landed = pos(&play, player);
+        // The floor row's top is at y = -1; the collider is 1 tall.
+        assert!(
+            (landed[1] - (-0.5)).abs() < 0.15,
+            "stands on the floor: {landed:?}"
+        );
+        let state = |play: &PlaySession| {
+            play.script_states(|p| PathBuf::from(p))
+                .into_iter()
+                .find(|s| s.id == player)
+                .unwrap()
+        };
+        let s = state(&play);
+        assert!(s.grounded, "grounded in the 2D world");
+        assert_eq!(s.spr.as_ref().unwrap().playing, "idle");
+        play.input.right = 1.0;
+        for _ in 0..60 {
+            play.update(1.0 / 60.0);
+        }
+        let walked = pos(&play, player);
+        assert!(
+            walked[0] > landed[0] + 2.0,
+            "walks right: {landed:?} -> {walked:?}"
+        );
+        assert!(
+            (walked[1] - landed[1]).abs() < 0.15,
+            "along the floor: {walked:?}"
+        );
+        let cam_at = pos(&play, cam);
+        assert!(cam_at[0] > 1.0, "the camera follows: {cam_at:?}");
+        play.apply_script_writes(&[EntityWrite {
+            id: player,
+            spr: Some(automata_scene::SpriteEdit {
+                play: Some(("run".into(), false)),
+                flip_x: Some(true),
+                ..automata_scene::SpriteEdit::default()
+            }),
+            ..EntityWrite::default()
+        }]);
+        play.update(0.25);
+        let spr = state(&play).spr.unwrap();
+        assert_eq!(spr.playing, "run");
+        assert!(spr.flip_x);
+        assert!((2..=3).contains(&spr.frame), "a run frame: {}", spr.frame);
+    }
+
+    /// The 2D platformer example plays in Oberon: holding right and
+    /// hopping, the player runs along the tilemap (its clips following),
+    /// the camera keeps up, and the HUD counts coins.
+    #[test]
+    fn the_platformer_example_plays() {
+        use crate::bridge::{BridgeMsg, HudKind, ScriptBridge};
+        let python = crate::bridge::default_python();
+        if std::process::Command::new(python)
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let game = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/oberon/platformer");
+        let doc = Document::load(&game.join("level.ron")).unwrap();
+        assert!(crate::doc::scene_is_2d(&doc), "opens in the 2D view");
+        let state = std::env::temp_dir().join(format!("oberon_platformer_{}", std::process::id()));
+        let mut play = PlaySession::start(&doc);
+        play.update(TIMESTEP);
+        let mut bridge = ScriptBridge::start(python, &state, &game).unwrap();
+        let player = |play: &PlaySession| {
+            play.script_states(|p| PathBuf::from(p))
+                .into_iter()
+                .find(|s| s.name == "Player")
+                .unwrap()
+        };
+        let start = player(&play).position;
+        let mut errors = Vec::new();
+        let mut clips = HashSet::new();
+        let mut hud = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while play.elapsed < 3.0 && std::time::Instant::now() < deadline {
+            for msg in bridge.poll() {
+                match msg {
+                    BridgeMsg::Frame(w) => play.apply_frame(&w),
+                    BridgeMsg::Error { msg, traceback, .. } => {
+                        errors.push(format!("{msg}\n{traceback}"));
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(spr) = player(&play).spr {
+                clips.insert(spr.playing.clone());
+            }
+            // Run right, jumping every 0.8 s (holding it 0.3 s).
+            let hop = play.elapsed % 0.8 < 0.3;
+            let keys: &[&str] = if hop { &["d", "space"] } else { &["d"] };
+            let states = play.script_states(|rel| doc.resolve(rel));
+            if bridge.send_frame_with(TIMESTEP, play.elapsed, keys, &states, &play.frame_input()) {
+                play.update(TIMESTEP);
+                hud.clone_from(&play.hud);
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&state);
+        assert!(errors.is_empty(), "{errors:?}");
+        let end = player(&play).position;
+        assert!(end[0] > start[0] + 8.0, "ran right: {start:?} -> {end:?}");
+        assert!(end[1] > 1.5, "still on the level: {end:?}");
+        for clip in ["run", "jump", "fall"] {
+            assert!(clips.contains(clip), "{clip} played: {clips:?}");
+        }
+        let cam = play
+            .doc
+            .entities
+            .iter()
+            .find(|e| e.name() == "Camera")
+            .and_then(|e| e.data.transform)
+            .unwrap()
+            .position;
+        assert!(cam[0] > 8.8, "the camera follows: {cam:?}");
+        let labels: Vec<&str> = hud
+            .iter()
+            .filter_map(|h| match &h.kind {
+                HudKind::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            labels.iter().any(|t| t.ends_with("/ 11")),
+            "the coin count: {labels:?}"
+        );
     }
 
     #[test]

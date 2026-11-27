@@ -70,6 +70,7 @@ fn main() {
             pitch,
             distance,
             target: [tx, ty, tz],
+            two_d: false,
         };
     }
 

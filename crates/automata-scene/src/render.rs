@@ -4,15 +4,14 @@
 //! Games attach [`MeshRenderer`] / [`SpriteRenderer`] components to
 //! entities; [`record_draw_list`] walks the world once per frame and emits
 //! draw commands using each entity's [`GlobalTransform`]. The first entity
-//! carrying a [`Camera3D`] or [`Camera2D`] component becomes the frame's
+//! carrying a [`Camera3D`] or [`Camera2D`](automata_renderer::Camera2D) component becomes the frame's
 //! camera, the first [`DirectionalLight`] becomes the frame's sun, and the
 //! first [`Environment`] sets the frame's look (ambient, fog, tone mapping).
 //! Every [`PointLight`] and [`SpotLight`] lights the frame too (the nearest
 //! and brightest, up to the quality preset's cap).
 
 use automata_renderer::{
-    Camera2D, Camera3D, DrawList, Environment, Material, Mesh, MeshData, Sprite, Sun, Texture,
-    Water,
+    Camera3D, DrawList, Environment, Material, Mesh, MeshData, Sprite, Sun, Texture, Water,
 };
 use std::sync::Arc;
 
@@ -357,8 +356,12 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
     if let Some(camera) = (&mut world.query::<&Camera3D>()).into_iter().next() {
         draw.set_camera_3d(*camera);
     }
-    if let Some(camera) = (&mut world.query::<&Camera2D>()).into_iter().next() {
-        draw.set_camera_2d(*camera);
+    if let Some(camera) = crate::sprite2d::scene_camera_2d(world) {
+        draw.set_camera_2d(camera);
+        // A 2D scene's meshes line up with its sprites.
+        if draw.camera_3d().is_none() {
+            draw.set_camera_3d(crate::sprite2d::ortho_camera_for(&camera));
+        }
     }
     // Lighting: the first entity with a directional light becomes the sun.
     if let Some(light) = (&mut world.query::<&DirectionalLight>()).into_iter().next() {
@@ -431,6 +434,7 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
                 .uv(renderer.uv),
         );
     }
+    crate::sprite2d::record_sprites(world, draw);
 }
 
 /// A plain-data request to render a built-in primitive mesh with a flat
@@ -793,6 +797,7 @@ pub fn materialize_visuals(
 ) -> usize {
     // Terrains keep their own GPU chunks up to date (cheap when unchanged).
     crate::terrain::prepare_terrains(world, renderer);
+    crate::sprite2d::prepare_sprites(world, renderer);
     let mut materialized = 0;
     for entity in pending_visuals(world) {
         // Scope the hecs Ref borrow: it has a Drop impl, so without the
@@ -898,6 +903,7 @@ pub fn materialize_visuals(
 mod tests {
     use super::*;
     use crate::scene::Scene;
+    use automata_renderer::Camera2D;
     use glam::Vec3;
 
     #[test]

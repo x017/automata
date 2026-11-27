@@ -12,8 +12,6 @@ use std::path::{Path, PathBuf};
 
 use automata_core::scene_file::Script;
 
-use automata_core::TransformData;
-
 use crate::doc::{CreateKind, Document};
 use crate::pyenv::ENGINE_VERSION;
 
@@ -157,53 +155,40 @@ pub fn scene(template: Template) -> Document {
         }
         Template::TwoD => {
             let mut doc = Document::new();
-            add_sun(&mut doc);
-            let platforms: [([f32; 3], [f32; 3]); 4] = [
-                ([0.0, -0.5, 0.0], [30.0, 1.0, 2.0]),
-                ([-4.0, 1.5, 0.0], [3.0, 0.4, 2.0]),
-                ([1.0, 3.0, 0.0], [3.0, 0.4, 2.0]),
-                ([6.0, 4.5, 0.0], [3.0, 0.4, 2.0]),
-            ];
-            for (i, (position, scale)) in platforms.into_iter().enumerate() {
-                let id = doc.create(CreateKind::Cube);
-                let Some(idx) = doc.index_of(id) else {
-                    continue;
-                };
+            // A tile grid (cell (0, 0) at its bottom-left corner): a floor
+            // and three ledges to climb, solid for 2D physics. Paint more
+            // with the Inspector's brush.
+            let ground = doc.create(CreateKind::Tilemap);
+            if let Some(idx) = doc.index_of(ground) {
                 let data = &mut doc.entities[idx].data;
-                data.name = Some(if i == 0 {
-                    "Ground".into()
-                } else {
-                    format!("Platform {i}")
-                });
-                data.transform = Some(TransformData {
-                    position,
-                    scale,
-                    ..Default::default()
-                });
-                if let Some(mesh) = &mut data.mesh_visual {
-                    mesh.color = if i == 0 {
-                        [0.30, 0.55, 0.32, 1.0]
-                    } else {
-                        [0.62, 0.45, 0.30, 1.0]
-                    };
+                data.name = Some("Ground".into());
+                if let Some(t) = &mut data.transform {
+                    t.position = [-12.0, -2.0, 0.0];
                 }
-                data.rigid_body = Some(automata_physics::RigidBody::fixed());
-                data.collider_3d = Some(automata_physics::Collider3D::cuboid(
-                    scale[0], scale[1], scale[2],
-                ));
+                let mut map = automata_scene::Tilemap::default();
+                map.resize(32, 12);
+                map.fill((0, 0), (31, 0), 1);
+                map.fill((7, 2), (10, 2), 1);
+                map.fill((13, 4), (16, 4), 1);
+                map.fill((19, 6), (22, 6), 1);
+                map.color = [0.36, 0.62, 0.36, 1.0];
+                data.tilemap = Some(map);
             }
-            let player = doc.create(CreateKind::Player);
+            let player = doc.create(CreateKind::Player2D);
             if let Some(idx) = doc.index_of(player) {
                 let data = &mut doc.entities[idx].data;
                 data.name = Some("Player".into());
                 if let Some(t) = &mut data.transform {
-                    t.position = [-6.0, 1.0, 0.0];
+                    t.position = [-9.5, 0.0, 0.0];
                 }
                 data.script = Some(Script {
                     path: "scripts/player.py".into(),
                 });
             }
-            add_camera(&mut doc, [-6.0, 2.5, 14.0], [-6.0, 2.0, 0.0]);
+            let camera = doc.create(CreateKind::Camera2D);
+            if let Some(idx) = doc.index_of(camera) {
+                doc.entities[idx].data.name = Some("Camera".into());
+            }
             doc.selected = None;
             doc
         }
@@ -329,7 +314,9 @@ fn readme(title: &str, template: Template) -> String {
         }
         Template::TwoD => {
             "Run with **A**/**D** or the arrow keys and jump with **Space**. \
-             The player's code is in `scripts/player.py`.\n"
+             The player's code is in `scripts/player.py`. Select **Ground** in \
+             Oberon to paint more tiles with the Inspector's brush, and give \
+             the player's Sprite a sprite sheet to animate it.\n"
         }
         Template::Empty => {
             "The scene has a sun, a sky and a camera. Add entities in Oberon \
@@ -438,6 +425,10 @@ const PLAYER_2D: &str = r#""""player: runs and jumps side-on (A/D or arrows, Spa
 Oberon calls `start` once and `update` every frame for each entity this
 script is attached to; `oberon run` and exported games do the same. Type
 `ctx.` or `entity.` for everything you can use, with docs.
+
+The Camera follows the entity called "Player" by itself (its Camera Follow
+2D component). To animate the player, give its Sprite a sprite sheet and
+clips in the Inspector, then pick one here: `entity.sprite.play("run")`.
 """
 
 from __future__ import annotations
@@ -447,9 +438,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:  # types for your editor; nothing is imported when it runs
     from automata.script_api import Context, Entity
 
-SPEED = 6.0
-JUMP = 9.0
-GRAVITY = 25.0
+SPEED = 6.0  # cells per second
+JUMP = 11.0
+GRAVITY = 28.0
 
 
 def start(entity: Entity, ctx: Context) -> None:
@@ -467,12 +458,12 @@ def update(entity: Entity, ctx: Context) -> None:
     else:
         vy -= GRAVITY * ctx.time.delta
     entity.state["vy"] = vy
-    # No sideways (Z) movement: the level is a flat strip.
     entity.character_velocity = (x * SPEED, vy, 0.0)
 
-    camera = ctx.camera
-    if camera is not None:
-        camera.follow(entity, offset=(0.0, 1.5, 14.0), look_height=1.0)
+    # Face the way it runs.
+    sprite = entity.sprite
+    if sprite is not None and x != 0.0:
+        sprite.flip_x = x < 0
 "#;
 
 /// The scene `oberon run` / `oberon open` start with in `root`: the
@@ -578,7 +569,12 @@ mod tests {
                 .filter_map(|e| e.data.name.as_deref())
                 .collect();
             assert!(names.contains(&"Camera"), "{template:?}: {names:?}");
-            assert!(names.contains(&"Sun"), "{template:?}: {names:?}");
+            // 2D scenes are unlit: only the 3D ones get a sun.
+            assert_eq!(
+                names.contains(&"Sun"),
+                template != Template::TwoD,
+                "{template:?}: {names:?}"
+            );
             let player = doc
                 .entities
                 .iter()
@@ -590,6 +586,25 @@ mod tests {
                 assert_eq!(script.path, "scripts/player.py");
                 let code = std::fs::read_to_string(dir.join(&script.path)).unwrap();
                 assert!(code.contains("def update(entity: Entity, ctx: Context) -> None:"));
+            }
+            if template == Template::TwoD {
+                // The 2D kit: a solid tile grid, a sprite player with a 2D
+                // collider, and a 2D camera following it.
+                assert!(crate::doc::scene_is_2d(&doc));
+                let has = |f: fn(&automata_core::scene_file::EntityData) -> bool| {
+                    doc.entities.iter().any(|e| f(&e.data))
+                };
+                assert!(has(|d| d.tilemap.as_ref().is_some_and(|m| m.collide)));
+                assert!(has(|d| d.sprite.is_some() && d.collider_2d.is_some()));
+                assert!(has(|d| d.camera_2d.is_some()
+                    && d.camera_follow_2d
+                        .as_ref()
+                        .is_some_and(|f| f.target == "Player")));
+                let code = std::fs::read_to_string(dir.join("scripts/player.py")).unwrap();
+                assert!(
+                    !code.contains("camera.follow"),
+                    "the camera follows by itself"
+                );
             }
             // A second time is refused: the folder isn't empty any more.
             assert!(create(&dir, template).unwrap_err().contains("isn't empty"));

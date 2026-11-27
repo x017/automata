@@ -717,16 +717,41 @@ loop don't get `ctx.save` yet.
   shots, search where they lost you, and only hold back at firing range
   with a clear shot. Manual: [AI](docs/wiki/oberon/ai.md).
 
-### C6. 2D toolkit ⬜ L
-The renderer draws sprites (`SpriteRenderer`), but Python and Oberon can
-only draw them through `ctx.hud`.
-- A sprite component in Python and Oberon, and a 2D scene mode in Oberon
-  (orthographic, XY gizmos).
-- Sprite sheets and frame animation, and a tilemap component with an
-  Oberon tile painter (and auto-tiling).
-- A 2D camera follow, plus 2D physics (already in the engine) in Oberon.
-- **Done when:** a small platformer is built in Oberon without code
-  except the player script.
+### C6. 2D toolkit ✅ L
+- ✅ Sprites: a `Sprite2D` component (image, size, tint, flips, pixel art,
+  layer) drawn in world space under a `Camera2D`, and sprite sheets
+  (columns × rows) with named clips (`first..last`, fps, loop) that
+  `animate()` plays. Python `at.Sprite` / `at.SpriteClip`; scripts use
+  `entity.sprite.play()`, `.stop()`, `.clip`, `.finished`, `.frame` and
+  `.flip_x`.
+- ✅ Tilemaps: a `Tilemap` component (a grid of cells from one tileset,
+  bottom-left origin) with auto-tiles, which pick one of 16 tiles from the
+  neighbours. Solid maps get a box collider per row of cells in 2D physics,
+  rebuilt when the cells change. Python `at.Tilemap` (`from_rows`, `get`,
+  `set`, `fill`, `resize`, `tile_at`, `cell_at`) and `at.AutoTile`.
+- ✅ `CameraFollow2D`: a target, an offset, smoothing, a dead zone and level
+  bounds.
+- ✅ 2D physics in play: colliders without a rigid body are fixed ground,
+  character controllers follow script teleports, and `entity.grounded`
+  works in 2D.
+- ✅ Oberon:
+  - Create entries for **Sprite**, **Tilemap**, **Camera 2D** and
+    **2D Player**.
+  - Inspector sections, including a clips editor and a tile palette. The
+    tile brush paints tiles and auto-tiles, with erase and undo.
+  - The **2D view** (key `2`): flat, with pan and zoom and no Z gizmo
+    axis. It opens by itself for 2D scenes.
+  - Sprites, the follow camera and 2D physics in Play mode.
+  - The `2d` project template now uses all of these.
+- ✅ **Done:** *Pixel Peaks* (`examples/oberon/platformer`) is a 64-cell
+  level with an auto-tiled ground, coins, slimes and a flag. The tutorial
+  builds it in Oberon. Besides the player script it has two short ones: a
+  slime patrol and a parallax sky. Manual: [2D games](docs/wiki/oberon/2d.md).
+  Tutorial: [A 2D platformer](docs/wiki/tutorials/platformer.md).
+  - Not done yet: script ray casts look at the 3D world only.
+    `Camera3D.ortho` isn't used by shadows, water, post effects, SSAO, the
+    editor view or the audio listener (2D sounds play without distance
+    fading). 2D scenes are unlit.
 
 ---
 
@@ -1240,7 +1265,7 @@ per effort. Reorder any time by telling me.
 | 32 | D5 Material assets and editor | M | ✅ |
 | 33 | A13 Terrain | L | ✅ |
 | 34 | B6 Ragdolls | M | ✅ |
-| 35 | C6 2D toolkit | L | ⬜ |
+| 35 | C6 2D toolkit | L | ✅ |
 | 36 | D6 Editor workflow | M | ✅ |
 | 37 | D4 UI editor | L | ✅ |
 | 38 | D7 Localization | S | ✅ |

@@ -119,6 +119,8 @@ pub enum UiAction {
     ShowProfiler,
     /// Turn gizmo snapping on or off.
     ToggleSnap,
+    /// Switch the scene view between 3D and the flat 2D view.
+    Toggle2D,
     /// Open Duplicate Along for an entity.
     DuplicateAlong(u64),
     /// Show the Files panel in the left sidebar.
@@ -458,6 +460,12 @@ impl Ui {
                     ),
                     "",
                     UiAction::ToggleSnap,
+                    true,
+                ),
+                MenuItem::ui(
+                    format!("{}2D View", if self.camera.two_d { "✓ " } else { "   " }),
+                    "2",
+                    UiAction::Toggle2D,
                     true,
                 ),
                 MenuItem::separator(),
@@ -860,6 +868,10 @@ impl Ui {
             UiAction::ToggleSnap => {
                 self.prefs.snap.enabled = !self.prefs.snap.enabled;
                 self.prefs_dirty = true;
+            }
+            UiAction::Toggle2D => {
+                let on = !self.camera.two_d;
+                self.camera.set_two_d(on);
             }
             UiAction::BuildSettings => {
                 self.load_build_settings(doc.path.as_deref());

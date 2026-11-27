@@ -232,6 +232,7 @@ mod tests {
             fov_y_degrees: 60.0,
             near: 0.1,
             far: 1000.0,
+            ortho: 0.0,
         }
     }
 

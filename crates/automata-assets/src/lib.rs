@@ -39,8 +39,8 @@ use glam::Vec3;
 pub use anim::{Clip, ClipEvent, ClipMotion, PartSkin, Pose, Rig};
 pub use anim_graph::{anim_graph_generation, load_anim_graph, AnimGraph, AnimGraphError};
 pub use material::{
-    is_material_path, load_material, set_material_preview, MapSlot, MaterialAsset, MaterialError,
-    MaterialFile,
+    is_material_path, load_image_file, load_material, set_material_preview, sprite_texture,
+    MapSlot, MaterialAsset, MaterialError, MaterialFile,
 };
 
 /// File extensions [`load`] understands (lowercase, without the dot).

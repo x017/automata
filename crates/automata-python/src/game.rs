@@ -460,7 +460,7 @@ fn run_python_frame(
             .map(|r| extras.hud.sprites(r, &frame.items))
             .unwrap_or_default();
         for sprite in sprites {
-            ctx.draw().sprite(sprite);
+            ctx.draw().screen_sprite(sprite);
         }
     }
 

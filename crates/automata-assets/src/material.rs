@@ -521,6 +521,9 @@ static IMAGES: Mutex<BTreeMap<PathBuf, ImageEntry>> = Mutex::new(BTreeMap::new()
 /// they were uploaded.
 type GpuKey = (usize, bool, bool);
 static TEXTURES: Mutex<Vec<(GpuKey, Arc<Image>, Texture)>> = Mutex::new(Vec::new());
+/// Sprite images uploaded without mipmaps, by image and filtering.
+type SpriteKey = (usize, bool);
+static SPRITE_TEXTURES: Mutex<Vec<(SpriteKey, Arc<Image>, Texture)>> = Mutex::new(Vec::new());
 
 fn canonical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
@@ -565,6 +568,41 @@ fn gpu_texture(renderer: &Renderer, img: &Arc<Image>, slot: MapSlot, pixelated: 
     };
     textures.push((key, img.clone(), t.clone()));
     t
+}
+
+/// Reads an image file through the shared cache (re-read once the file
+/// changes); relative paths resolve like model paths.
+///
+/// # Errors
+/// The file is missing or isn't a PNG / JPEG.
+pub fn load_image_file(path: &str) -> Result<Arc<Image>, String> {
+    load_image(&crate::resolve(path)).map_err(|e| format!("{path}: {e}"))
+}
+
+/// A sprite's texture: the image at `path` uploaded once per filtering
+/// (`pixelated` keeps hard pixel edges) and shared by every sprite that
+/// shows it, re-uploaded once the file changes.
+///
+/// # Errors
+/// See [`load_image_file`].
+pub fn sprite_texture(renderer: &Renderer, path: &str, pixelated: bool) -> Result<Texture, String> {
+    let img = load_image_file(path)?;
+    let key = (Arc::as_ptr(&img) as usize, pixelated);
+    let mut textures = SPRITE_TEXTURES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if let Some((_, _, t)) = textures.iter().find(|(k, _, _)| *k == key) {
+        return Ok(t.clone());
+    }
+    // Images the cache dropped (changed on disk) let their uploads go.
+    textures.retain(|(_, img, _)| Arc::strong_count(img) > 1);
+    let t = if pixelated {
+        renderer.create_texture_rgba_nearest(img.width, img.height, &img.rgba)
+    } else {
+        renderer.create_texture_rgba(img.width, img.height, &img.rgba)
+    };
+    textures.push((key, img, t.clone()));
+    Ok(t)
 }
 
 /// Loads a material through the shared cache: relative paths resolve
@@ -741,6 +779,10 @@ pub(crate) fn clear_materials() {
         .unwrap_or_else(PoisonError::into_inner)
         .clear();
     TEXTURES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
+    SPRITE_TEXTURES
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clear();

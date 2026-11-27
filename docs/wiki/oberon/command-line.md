@@ -67,7 +67,8 @@ mygame/
 ```
 
 The templates are `3d` (the default), `2d` (a side-view platformer
-start) and `empty` (only a sun, a sky and a camera). Use `--no-venv` to skip
+start: a painted tilemap, a sprite player and a 2D camera that follows it)
+and `empty` (only a sun, a sky and a camera). Use `--no-venv` to skip
 making `.venv`, then run `oberon setup` later. Use `--python PATH` to make
 `.venv` from a different interpreter.
 

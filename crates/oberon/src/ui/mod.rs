@@ -22,7 +22,7 @@ use glam::Vec3;
 use tiny_skia::Color;
 
 use crate::canvas::Canvas;
-use crate::doc::{ComponentKind, CreateKind, Document, EntityEntry};
+use crate::doc::{BrushTool, ComponentKind, CreateKind, Document, EntityEntry};
 use crate::fields::{self, Choice, Field, Flag, NavBakeField, NavField};
 use crate::theme::{color, layout};
 use crate::view::{self, Gizmo, GizmoMode, Projector};
@@ -47,6 +47,7 @@ pub mod profiler;
 pub mod project_panel;
 pub mod settings;
 pub mod springs;
+pub mod sprite2d;
 pub mod ui_editor;
 
 use dialogs::Dialog;
@@ -449,6 +450,13 @@ pub enum Intent {
         /// The entity at the other end.
         to: String,
     },
+    /// A 2D component edit: its picture, clips, auto-tiles, follow target.
+    Edit2D {
+        /// Entity id.
+        id: u64,
+        /// What changes.
+        edit: crate::fields2d::Edit2D,
+    },
     /// Point an entity's Joint at another entity by name (`None`: the world).
     SetJointTarget {
         /// Entity id.
@@ -661,6 +669,7 @@ impl Intent {
             | Self::SetAnimationClip { id, .. }
             | Self::SetAnimGraph { id, .. }
             | Self::SetJointTarget { id, .. }
+            | Self::Edit2D { id, .. }
             | Self::SetAttach { id, .. }
             | Self::SetNavLink { id, .. }
             | Self::PasteComponent { id, .. }
@@ -697,6 +706,7 @@ impl Intent {
             | Self::SetAnimationClip { id, .. }
             | Self::SetAnimGraph { id, .. }
             | Self::SetJointTarget { id, .. }
+            | Self::Edit2D { id, .. }
             | Self::SetAttach { id, .. }
             | Self::SetNavLink { id, .. }
             | Self::PasteComponent { id, .. }
@@ -844,6 +854,8 @@ enum EditTarget {
     MatProp(material_editor::MatProp),
     /// An animation graph editor field.
     AnimProp(anim_editor::AnimProp),
+    /// A 2D component's text (a sprite clip's name).
+    Text2D(sprite2d::Text2D),
 }
 
 #[derive(Debug, Clone)]
@@ -999,6 +1011,8 @@ pub struct Ui {
     pub show_nav: bool,
     /// The foliage brush (Grass and Scatter painting).
     pub brush: brush::Brush,
+    /// Pictures of sprite frames and tiles for the Inspector.
+    thumbs_2d: sprite2d::Thumbs2D,
     /// The animation preview's time bar is being dragged.
     anim_scrub: bool,
     /// The context menu opened this frame (its opening press picks nothing).
@@ -1128,6 +1142,7 @@ impl Ui {
             nav_missing: None,
             show_nav: true,
             brush: brush::Brush::default(),
+            thumbs_2d: sprite2d::Thumbs2D::default(),
             anim_scrub: false,
             menu_fresh: false,
             recent_colors: Vec::new(),
@@ -1348,12 +1363,14 @@ impl Ui {
         let Some(t) = e.data.transform else {
             return;
         };
-        let radius = if e.data.mesh_visual.is_some() {
+        let radius = if view::has_visual(&e.data) {
             (view::local_half_extents(&e.data) * Vec3::from(t.scale).abs()).length()
         } else {
             1.0
         };
-        self.camera.focus(Vec3::from(t.position), radius.max(0.5));
+        // Around what it shows (a tilemap grows from its corner).
+        let centre = view::model_matrix(&t).transform_point3(view::local_bounds(&e.data).0);
+        self.camera.focus(centre, radius.max(0.5));
     }
 
     fn commit_edit(&mut self) -> Option<Intent> {
@@ -1383,6 +1400,7 @@ impl Ui {
                 })
             }
             EditTarget::DialogName => self.submit_dialog(&edit.buffer),
+            EditTarget::Text2D(which) => Self::commit_text_2d(edit.id, which, &edit.buffer),
             EditTarget::FileRename => self.commit_file_rename(&edit.buffer),
             EditTarget::UiProp(prop) => {
                 self.commit_ui_prop(prop, &edit.buffer);
@@ -2290,6 +2308,43 @@ impl Ui {
             x += bw;
         }
         self.snap_group(canvas, view);
+        self.view_2d_toggle(canvas, view);
+    }
+
+    /// The 2D/3D view switch, right of the snap controls.
+    fn view_2d_rect(canvas: &mut Canvas, view: Rect) -> Rect {
+        let snap = Self::snap_group_rect(canvas, view);
+        let w = canvas.measure_text(layout::FONT_SIZE, "2D") + 28.0;
+        Rect::new(snap.x + snap.w + 6.0, snap.y, w, snap.h)
+    }
+
+    fn view_2d_toggle(&mut self, canvas: &mut Canvas, view: Rect) {
+        let g = Self::view_2d_rect(canvas, view);
+        canvas.fill_rounded(g.x, g.y, g.w, g.h, layout::RADIUS + 1.0, color::surface());
+        let r = Rect::new(g.x + 2.0, g.y + 2.0, g.w - 4.0, g.h - 4.0);
+        let on = self.camera.two_d;
+        if on || self.hot(r) {
+            let bg = if on { color::select() } else { color::hover() };
+            canvas.fill_rounded(r.x, r.y, r.w, r.h, layout::RADIUS, bg);
+        }
+        if self.hot(r) {
+            self.cursor = CursorHint::Pointer;
+        }
+        let tw = canvas.measure_text(layout::FONT_SIZE, "2D");
+        canvas.text(
+            r.x + (r.w - tw) / 2.0,
+            r.y + (r.h - layout::FONT_SIZE) / 2.0 - 1.0,
+            layout::FONT_SIZE,
+            "2D",
+            if on { color::text() } else { color::text_dim() },
+        );
+        self.tip(
+            r,
+            "Flat 2D view: look straight at the XY plane, drag to pan  (2)",
+        );
+        if self.hot(r) && self.p.pressed {
+            self.camera.set_two_d(!on);
+        }
     }
 
     /// The snapping controls, right of the tool group: an on/off toggle
@@ -3053,6 +3108,7 @@ impl Ui {
             }
         }
 
+        y = self.sections_2d(canvas, doc, x, y, w, e);
         y = self.ragdoll_section(canvas, x, y, w, e);
         y = self.nav_sections(canvas, doc, x, y, w, e);
 
@@ -5062,7 +5118,8 @@ impl Ui {
         // The floating tool switch owns its corner of the view.
         let over_tools = editing
             && (Self::tool_group_rect(canvas, rect).contains(p.x, p.y)
-                || Self::snap_group_rect(canvas, rect).contains(p.x, p.y));
+                || Self::snap_group_rect(canvas, rect).contains(p.x, p.y)
+                || Self::view_2d_rect(canvas, rect).contains(p.x, p.y));
         let inside = rect.contains(p.x, p.y) && !over_tools;
         let selected = doc.selected_index().map(|i| &doc.entities[i]);
         // The foliage brush takes the left button while it's on.
@@ -5300,8 +5357,15 @@ impl Ui {
                     draw_nav_mesh(canvas, mesh, &proj);
                 }
             }
+            if proj.flat() {
+                sprite2d::draw_grid_2d(canvas, &proj, rect);
+            }
+            if let Some(id) = brushing.filter(|_| self.brush.tool.is_some_and(BrushTool::is_tile)) {
+                sprite2d::draw_tile_grid(canvas, doc, id, &proj);
+            }
             draw_markers(canvas, doc, &proj, rect);
             draw_camera_frustums(canvas, doc, &proj, selected.map(|e| e.id));
+            sprite2d::draw_camera_2d_frames(canvas, doc, &proj);
             for id in doc.selection() {
                 if let Some(i) = doc.index_of(id) {
                     let lead = Some(id) == doc.selected;
@@ -5911,7 +5975,7 @@ fn entity_icon(canvas: &mut Canvas, cx: f32, cy: f32, d: &EntityData) {
 fn draw_markers(canvas: &mut Canvas, doc: &Document, proj: &Projector, rect: Rect) {
     for e in &doc.entities {
         // Meshes are their own marker; an environment has no position.
-        if e.data.mesh_visual.is_some()
+        if view::has_visual(&e.data)
             || (e.data.environment.is_some()
                 && e.data.camera_3d.is_none()
                 && e.data.directional_light.is_none())

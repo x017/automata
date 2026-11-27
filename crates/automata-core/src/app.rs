@@ -158,10 +158,13 @@ impl WorldState {
     }
 
     /// Advances the scene's animations by `dt` seconds (see
-    /// [`automata_scene::animate`]), feet standing on the physics
+    /// [`automata_scene::animate`]; sprite clips and 2D camera follows
+    /// too), feet standing on the physics
     /// colliders (or, in a world without any, on the meshes).
     pub fn animate(&mut self, dt: f32) {
         let world = self.scene.world_mut();
+        automata_scene::animate_sprites(world, dt);
+        automata_scene::follow_cameras_2d(world, dt);
         if self.physics3d.collider_count() == 0 {
             automata_scene::animate(world, dt);
             return;

@@ -42,6 +42,9 @@ pub fn staged_to_entity_data(entity: &StagedEntity) -> EntityData {
             StagedComponent::Navigation(n) => data.navigation = Some(n.clone()),
             StagedComponent::NavLink(l) => data.nav_link = Some(l.clone()),
             StagedComponent::Ragdoll(r) => data.ragdoll = Some(r.clone()),
+            StagedComponent::Sprite(s) => data.sprite = Some(s.clone()),
+            StagedComponent::Tilemap(t) => data.tilemap = Some(t.clone()),
+            StagedComponent::CameraFollow2D(f) => data.camera_follow_2d = Some(f.clone()),
             StagedComponent::MeshVisual(v) => data.mesh_visual = Some(MeshVisualData::from(v)),
             StagedComponent::RigidBody(b) => data.rigid_body = Some(b.clone()),
             StagedComponent::Collider3D(c) => data.collider_3d = Some(c.clone()),
@@ -110,6 +113,15 @@ pub fn entity_data_to_staged(data: &EntityData) -> StagedEntity {
     }
     if let Some(r) = &data.ragdoll {
         components.push(StagedComponent::Ragdoll(r.clone()));
+    }
+    if let Some(s) = &data.sprite {
+        components.push(StagedComponent::Sprite(s.clone()));
+    }
+    if let Some(t) = &data.tilemap {
+        components.push(StagedComponent::Tilemap(t.clone()));
+    }
+    if let Some(f) = &data.camera_follow_2d {
+        components.push(StagedComponent::CameraFollow2D(f.clone()));
     }
     if let Some(l) = &data.nav_link {
         components.push(StagedComponent::NavLink(l.clone()));

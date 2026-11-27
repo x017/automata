@@ -66,6 +66,9 @@ pub struct EntityData {
     /// Orthographic 2D camera.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera_2d: Option<Camera2D>,
+    /// Moves the entity's 2D camera after another entity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera_follow_2d: Option<automata_scene::CameraFollow2D>,
     /// Directional sun light.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directional_light: Option<DirectionalLight>,
@@ -96,6 +99,12 @@ pub struct EntityData {
     /// A sculpted, painted heightmap ground.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terrain: Option<automata_scene::Terrain>,
+    /// A 2D image (or sprite-sheet frame, animated by clips).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sprite: Option<automata_scene::Sprite2D>,
+    /// A grid of 2D tiles from a tileset image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tilemap: Option<automata_scene::Tilemap>,
     /// Primitive mesh visual.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh_visual: Option<MeshVisualData>,
@@ -353,6 +362,27 @@ impl From<&MeshVisualData> for MeshVisual {
     }
 }
 
+/// The 2D components: sprite, tilemap, 2D camera and follow, 2D collider.
+fn capture_2d(world: &SceneWorld, entity: Entity, data: &mut EntityData) {
+    data.camera_2d = world.get::<&Camera2D>(entity).ok().map(|c| *c);
+    data.sprite = world
+        .get::<&automata_scene::Sprite2D>(entity)
+        .ok()
+        .map(|s| (*s).clone());
+    data.tilemap = world
+        .get::<&automata_scene::Tilemap>(entity)
+        .ok()
+        .map(|t| (*t).clone());
+    data.camera_follow_2d = world
+        .get::<&automata_scene::CameraFollow2D>(entity)
+        .ok()
+        .map(|f| (*f).clone());
+    data.collider_2d = world
+        .get::<&automata_physics::Collider2D>(entity)
+        .ok()
+        .map(|c| (*c).clone());
+}
+
 impl SceneFile {
     /// Captures every entity in a live world.
     #[must_use]
@@ -377,9 +407,6 @@ impl SceneFile {
             if let Some(camera) = eref.get::<&Camera3D>() {
                 data.camera_3d = Some(*camera);
             }
-            if let Some(camera) = eref.get::<&Camera2D>() {
-                data.camera_2d = Some(*camera);
-            }
             if let Some(light) = eref.get::<&DirectionalLight>() {
                 data.directional_light = Some(*light);
             }
@@ -398,6 +425,7 @@ impl SceneFile {
             if let Some(water) = eref.get::<&Water>() {
                 data.water = Some(*water);
             }
+            capture_2d(world, eref.entity(), &mut data);
             data.grass = eref.get::<&automata_scene::Grass>().map(|g| (*g).clone());
             data.terrain = eref.get::<&automata_scene::Terrain>().map(|t| (*t).clone());
             data.scatter = eref.get::<&automata_scene::Scatter>().map(|s| (*s).clone());
@@ -412,9 +440,6 @@ impl SceneFile {
             }
             if let Some(collider) = eref.get::<&automata_physics::Collider3D>() {
                 data.collider_3d = Some((*collider).clone());
-            }
-            if let Some(collider) = eref.get::<&automata_physics::Collider2D>() {
-                data.collider_2d = Some((*collider).clone());
             }
             if let Some(controller) = eref.get::<&automata_physics::CharacterController>() {
                 data.character_controller = Some((*controller).clone());
@@ -510,6 +535,15 @@ impl SceneFile {
             }
             if let Some(terrain) = &data.terrain {
                 let _ = world.insert_one(entity, terrain.clone());
+            }
+            if let Some(sprite) = &data.sprite {
+                let _ = world.insert_one(entity, sprite.clone());
+            }
+            if let Some(map) = &data.tilemap {
+                let _ = world.insert_one(entity, map.clone());
+            }
+            if let Some(follow) = &data.camera_follow_2d {
+                let _ = world.insert_one(entity, follow.clone());
             }
             if let Some(scatter) = &data.scatter {
                 let _ = world.insert_one(entity, scatter.clone());

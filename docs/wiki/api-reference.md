@@ -84,6 +84,35 @@ Read-only properties: `position`, `target`, `fov` / `center`,
 `half_height`. The first camera entity in the scene wins each frame;
 replace per frame via `EntityView.camera_3d`.
 
+### 2D: sprites, tilemaps, follow camera
+
+```text
+at.SpriteClip(name, first=0, last=None, fps=10.0, looping=True)   # last None: = first
+at.Sprite(image="", size=(1, 1), color=(1, 1, 1, 1), flip_x=False, flip_y=False,
+          pixelated=True, layer=0, columns=1, rows=1, frame=0, clips=[], play="")
+
+at.AutoTile(name, first=0)         # 16 tiles from `first`, picked by neighbours
+at.Tilemap(width=16, height=9, tileset="", columns=1, rows=1, tile_size=1.0,
+           autotiles=[], color=(1, 1, 1, 1), pixelated=True, layer=0, collide=True)
+at.Tilemap.from_rows(rows_text, legend, **same options)   # top row first
+tm.get(x, y) -> int                # 0 empty, n tile n-1, -n auto-tile n-1
+tm.tile_at(x, y) -> int | None     # the tile shown, auto-tiles resolved
+tm.set(x, y, value) / tm.fill((x0, y0), (x1, y1), value) / tm.resize(w, h)
+                                   # each returns a changed copy
+tm.cell_at(x, y) -> (cx, cy)       # the cell under a local point
+tm.width, tm.height, tm.filled     # filled: painted cells
+
+at.CameraFollow2D(target="Player", offset=(0, 1), smoothing=0.15,
+                  dead_zone=(0.5, 0.5), bounds=None)   # bounds: (left, bottom, right, top)
+```
+
+Cell (0, 0) is the tilemap's bottom-left, at its entity's position. A
+`collide=True` map is solid in 2D physics. Put `CameraFollow2D` on the
+entity with the `Camera2D`; it moves that entity's Transform. Scripts
+drive sprites through `entity.sprite` (`play(clip, restart=False)`,
+`stop()`, `clip`, `clips`, `finished`, `frame`, `flip_x`, `flip_y`,
+`color`, `layer`). See [2D games](oberon/2d.md).
+
 ### Visuals
 
 ```python

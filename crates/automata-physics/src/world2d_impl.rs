@@ -32,6 +32,25 @@ use crate::world::{
 #[path = "joints2d.rs"]
 mod joints;
 
+/// A transform's place in the 2D world: X/Y and the turn about Z.
+fn pose_2d(t: &Transform) -> Pose {
+    let angle = t.rotation.to_euler(glam::EulerRot::XYZ).2;
+    Pose::new(Vector::new(t.position.x, t.position.y), angle)
+}
+
+/// What a tilemap's colliders depend on: its solid cells, size and
+/// transform.
+fn tilemap_key(map: &automata_scene::Tilemap, t: &Transform) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    map.shape_key().hash(&mut h);
+    for v in [t.position.x, t.position.y, t.scale.x, t.scale.y] {
+        v.to_bits().hash(&mut h);
+    }
+    t.rotation.z.to_bits().hash(&mut h);
+    h.finish()
+}
+
 /// The 2D physics world. Owns the Rapier sets; you own the ECS scene.
 pub struct PhysicsWorld2D {
     gravity: Vec3,
@@ -57,6 +76,12 @@ pub struct PhysicsWorld2D {
     ground: Option<r2::dynamics::RigidBodyHandle>,
     /// Joints already warned about (no body, no such partner).
     joint_warned: std::collections::HashSet<Entity>,
+    /// Colliders without a rigid body (fixed in place) and the transform
+    /// they were placed at.
+    statics: HashMap<Entity, Transform>,
+    /// Solid tilemaps and what their colliders were built from (see
+    /// [`tilemap_key`]).
+    tilemaps: HashMap<Entity, u64>,
 }
 
 impl std::fmt::Debug for PhysicsWorld2D {
@@ -106,6 +131,8 @@ impl PhysicsWorld2D {
             joints: HashMap::new(),
             ground: None,
             joint_warned: std::collections::HashSet::new(),
+            statics: HashMap::new(),
+            tilemaps: HashMap::new(),
         }
     }
 
@@ -141,6 +168,8 @@ impl PhysicsWorld2D {
     /// [`RigidBody`] entities, update kinematic targets, remove despawned
     /// entities. Called each fixed tick before [`step`](Self::step).
     pub fn sync_from_scene(&mut self, scene: &mut SceneWorld) {
+        self.sync_statics(scene);
+        self.sync_tilemaps(scene);
         self.spawn_missing(scene);
         self.update_existing(scene);
         self.despawn_removed(scene);
@@ -256,12 +285,125 @@ impl PhysicsWorld2D {
     fn despawn_removed(&mut self, scene: &mut SceneWorld) {
         let mut to_remove = Vec::new();
         for entity in self.entity_bodies.keys() {
+            if self.statics.contains_key(entity) || self.tilemaps.contains_key(entity) {
+                continue;
+            }
             if scene.get::<&RigidBody>(*entity).is_err() {
                 to_remove.push(*entity);
             }
         }
         for entity in to_remove {
             self.remove_entity(entity);
+        }
+    }
+
+    /// Colliders without a rigid body: fixed bodies that follow their
+    /// transform when it's moved.
+    fn sync_statics(&mut self, scene: &mut SceneWorld) {
+        let mut wanted = Vec::new();
+        for (entity, collider, transform) in &mut scene
+            .query::<hecs::Without<(hecs::Entity, &Collider2D, Option<&Transform>), &RigidBody>>()
+        {
+            wanted.push((
+                entity,
+                collider.clone(),
+                transform.copied().unwrap_or_default(),
+            ));
+        }
+        let gone: Vec<Entity> = self
+            .statics
+            .keys()
+            .filter(|e| !wanted.iter().any(|(w, _, _)| w == *e))
+            .copied()
+            .collect();
+        for entity in gone {
+            self.statics.remove(&entity);
+            self.remove_entity(entity);
+        }
+        for (entity, collider, t) in wanted {
+            match self.statics.get(&entity) {
+                Some(last) if last.position == t.position && last.rotation == t.rotation => {}
+                Some(_) => {
+                    if let Some(rb) = self
+                        .entity_bodies
+                        .get(&entity)
+                        .and_then(|h| self.bodies.get_mut(*h))
+                    {
+                        rb.set_position(pose_2d(&t), true);
+                    }
+                    self.statics.insert(entity, t);
+                }
+                None => {
+                    let handle = self
+                        .bodies
+                        .insert(RigidBodyBuilder::fixed().pose(pose_2d(&t)).build());
+                    self.entity_bodies.insert(entity, handle);
+                    self.body_entities.insert(handle, entity);
+                    self.attach_collider(entity, handle, &collider);
+                    self.statics.insert(entity, t);
+                    trace!(?entity, "physics: spawned static 2D collider");
+                }
+            }
+        }
+    }
+
+    /// Solid tilemaps: one fixed body each, a box collider per run of
+    /// solid cells; rebuilt whenever the cells, size or transform change.
+    fn sync_tilemaps(&mut self, scene: &mut SceneWorld) {
+        let mut wanted = Vec::new();
+        for (entity, map, transform) in
+            &mut scene.query::<(hecs::Entity, &automata_scene::Tilemap, Option<&Transform>)>()
+        {
+            if map.collide {
+                let t = transform.copied().unwrap_or_default();
+                wanted.push((entity, tilemap_key(map, &t), t));
+            }
+        }
+        let stale: Vec<Entity> = self
+            .tilemaps
+            .iter()
+            .filter(|(e, key)| !wanted.iter().any(|(w, k, _)| w == *e && k == *key))
+            .map(|(e, _)| *e)
+            .collect();
+        for entity in stale {
+            self.tilemaps.remove(&entity);
+            self.remove_entity(entity);
+        }
+        for (entity, key, t) in wanted {
+            if self.tilemaps.contains_key(&entity) {
+                continue;
+            }
+            let Ok(map) = scene.get::<&automata_scene::Tilemap>(entity) else {
+                continue;
+            };
+            let boxes = map.solid_boxes();
+            let size = map.tile_size;
+            drop(map);
+            let handle = self
+                .bodies
+                .insert(RigidBodyBuilder::fixed().pose(pose_2d(&t)).build());
+            self.entity_bodies.insert(entity, handle);
+            self.body_entities.insert(handle, entity);
+            let scale = t.scale.truncate().abs() * size;
+            for [x0, y0, x1, y1] in boxes {
+                #[allow(clippy::cast_precision_loss)] // ≤ 1024 cells
+                let (lo, hi) = (
+                    glam::Vec2::new(x0 as f32, y0 as f32) * scale,
+                    glam::Vec2::new(x1 as f32, y1 as f32) * scale,
+                );
+                let (half, centre) = ((hi - lo) * 0.5, (hi + lo) * 0.5);
+                let collider = ColliderBuilder::cuboid(half.x, half.y)
+                    .translation(Vector::new(centre.x, centre.y))
+                    .active_events(ActiveEvents::COLLISION_EVENTS)
+                    .user_data(entity_to_user_data(entity))
+                    .build();
+                let c = self
+                    .colliders
+                    .insert_with_parent(collider, handle, &mut self.bodies);
+                self.entity_colliders.entry(entity).or_insert(c);
+            }
+            self.tilemaps.insert(entity, key);
+            trace!(?entity, "physics: built a 2D tilemap's colliders");
         }
     }
 
@@ -332,7 +474,21 @@ impl PhysicsWorld2D {
             return CharacterMove::default();
         };
         let character_shape = collider.shared_shape().clone();
-        let character_pos = *collider.position();
+        let mut character_pos = *collider.position();
+        // The entity's Transform leads: a script that teleported the
+        // character (respawning it) moves its body there first.
+        let body_at = self
+            .bodies
+            .get(body_handle)
+            .map_or(Vector::ZERO, r2::dynamics::RigidBody::translation);
+        let mut start = body_at;
+        if let Ok(t) = scene.get::<&Transform>(entity) {
+            let at = Vector::new(t.position.x, t.position.y);
+            if (at - body_at).length() > 1e-4 {
+                character_pos.translation += at - body_at;
+                start = at;
+            }
+        }
 
         let query = self.broad_phase.as_query_pipeline(
             self.narrow_phase.query_dispatcher(),
@@ -361,8 +517,7 @@ impl PhysicsWorld2D {
             // KinematicVelocityBased — those must follow the resolved move
             // too, or the collider stays behind while the scene transform
             // walks on.
-            let pos = body.translation();
-            body.set_translation(Vector::new(pos.x + actual.x, pos.y + actual.y), false);
+            body.set_translation(Vector::new(start.x + actual.x, start.y + actual.y), false);
         }
 
         CharacterMove {
