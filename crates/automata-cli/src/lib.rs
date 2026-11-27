@@ -1749,6 +1749,35 @@ pub fn stage_game(
     copy_game(project, cfg, dest)
 }
 
+/// Zips a staged game folder (from [`stage_game`]) to `dest`: its files at
+/// the top of the archive, `game.json` among them. The web player loads
+/// such a `game.zip`. The archive is reproducible: the same files give the
+/// same bytes (every file dated 1980-01-01, none executable). Returns how
+/// many files it holds.
+///
+/// # Errors
+///
+/// When `folder` isn't a staged game or the archive can't be written.
+pub fn zip_staged(folder: &Path, dest: &Path) -> Result<usize, String> {
+    if !folder.join("game.json").is_file() {
+        return Err(format!(
+            "{} isn't a staged game (no game.json)",
+            folder.display()
+        ));
+    }
+    let mut entries = archive::entries(folder, "", &|_| false)
+        .map_err(|e| format!("{}: {e}", folder.display()))?;
+    for e in &mut entries {
+        e.executable = false;
+    }
+    if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    archive::write_zip_dated(dest, &entries, archive::ZIP_EPOCH)
+        .map_err(|e| format!("{}: {e}", dest.display()))?;
+    Ok(entries.len())
+}
+
 /// Replaces `dest` with the project's shipped files and `game.json`.
 pub(crate) fn copy_game(project: &Path, cfg: &BuildConfig, dest: &Path) -> Result<usize, String> {
     if dest.exists() {
@@ -2108,6 +2137,25 @@ mod tests {
         broken.start_scene = Some("missing.ron".into());
         let err = stage_game(&dir, &broken, &out, &mut |_| {}).unwrap_err();
         assert!(err.contains("errors"));
+
+        // Zipped for the web: the same files give the same bytes.
+        stage_game(&dir, &cfg, &out, &mut |_| {}).unwrap();
+        let zip = busy.join("game.zip");
+        assert_eq!(
+            zip_staged(&out, &zip).unwrap(),
+            3,
+            "two files and game.json"
+        );
+        let first = std::fs::read(&zip).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        stage_game(&dir, &cfg, &out, &mut |_| {}).unwrap();
+        zip_staged(&out, &zip).unwrap();
+        assert_eq!(std::fs::read(&zip).unwrap(), first);
+        let text = String::from_utf8_lossy(&first);
+        assert!(text.contains("game.json") && text.contains("scripts/coin.py"));
+        assert!(zip_staged(&dir.join("scripts"), &zip)
+            .unwrap_err()
+            .contains("isn't a staged game"));
 
         for d in [dir, out, busy] {
             let _ = std::fs::remove_dir_all(d);

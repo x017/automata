@@ -1200,7 +1200,7 @@ builds. CI runs the universal *Coin Run* natively, under Rosetta when the
 runner has it, unzipped, and ad-hoc signed.
 
 ### E3. Web export 🔨 L
-[`NEXT_PLANS.md` #7](NEXT_PLANS.md#7-web-export--decided-phases-12-done):
+[`NEXT_PLANS.md` #7](NEXT_PLANS.md#7-web-export--decided-phases-13-done):
 Pyodide 314 (CPython 3.14), with the engine as a Pyodide extension module
 drawing through WebGL2 (wgpu's GLES backend under emscripten). Pyodide is
 bundled in every export, and it targets desktop and phone browsers.
@@ -1212,8 +1212,13 @@ bundled in every export, and it targets desktop and phone browsers.
   resizing, hidden tabs, full screen; audio through an AudioWorklet (kira
   mixes each frame into a `stream` backend the page plays). CI drives the
   test game with fake keys, mouse, touches and a fake gamepad.
-- ⬜ Real games: `game.zip`, and saves and settings in IndexedDB. Coin Run
-  plays in CI.
+- ✅ Real games: the player runs an exported game from `game.zip`
+  (`automata-cli stage --zip`, reproducible), with saves and settings in
+  IndexedDB (IDBFS, synced after each write) and touch controls on touch
+  screens. CI plays Coin Run from the repo's `game.zip`: keys, a coin, the
+  setting and the best run surviving a reload, touch controls. `game.apk`
+  beside it is the same game for Android, committed by the Android
+  workflow after its emulator test.
 - ⬜ The `web` template, `automata-cli build --target web` and Oberon's
   **Build for Web** (folder plus an itch.io zip).
 - ⬜ Size and startup budget.

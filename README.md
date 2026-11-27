@@ -96,6 +96,18 @@ Run the test suite:
 cargo test --workspace
 ```
 
+## Try Coin Run
+
+Two builds of the example game Coin Run (`examples/oberon/coin_run`) sit at
+the top of the repo:
+
+- **`game.apk`**: install it on an Android phone (arm64) or emulator
+  (x86_64). It's signed with CI's debug key, for testing. The Android
+  workflow commits it after the APK passed its emulator test.
+- **`game.zip`**: the exported game folder the web player runs
+  (`automata-cli stage --zip`). Package it with the player using
+  `web/ci/package.sh game.zip` (see [`web/README.md`](web/README.md)).
+
 ## Repository layout
 
 ```text
@@ -113,6 +125,9 @@ automata/
 ├── docs/                   # Architecture, development, and API documentation
 ├── examples/python/        # Runnable example games (headless-capable)
 ├── scripts/                # build.py (one-shot build) and env helpers
+├── web/                    # The engine in the browser (Pyodide, WebGL2)
+├── game.zip                # Coin Run, exported for the web player (scripts/game_zip.sh)
+├── game.apk                # Coin Run for Android, built and emulator-tested by CI
 └── tests/                  # (Cross-crate integration tests, when needed)
 ```
 

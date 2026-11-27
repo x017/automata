@@ -6404,7 +6404,8 @@ def user_data_dir(game: str) -> str:
     """Where an exported game keeps its saves and settings: a folder named
     after ``game`` in the platform's user-data folder (``%APPDATA%`` on
     Windows, ``~/Library/Application Support`` on macOS,
-    ``$XDG_DATA_HOME`` or ``~/.local/share`` elsewhere).
+    ``$XDG_DATA_HOME`` or ``~/.local/share`` elsewhere; in the browser
+    :data:`WEB_DATA_DIR`, which the web player keeps in IndexedDB).
     ``$AUTOMATA_SAVE_DIR`` overrides it."""
     override = os.environ.get("AUTOMATA_SAVE_DIR")
     if override:
@@ -6418,6 +6419,8 @@ def user_data_dir(game: str) -> str:
         base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
     elif os.environ.get("ANDROID_PRIVATE"):
         base = os.environ["ANDROID_PRIVATE"]
+    elif sys.platform == "emscripten":
+        base = WEB_DATA_DIR
     else:
         base = os.environ.get("XDG_DATA_HOME") or ""
         if not os.path.isabs(base):
@@ -6458,6 +6461,23 @@ def _plain(value, where):
                     "strings, True/False/None, and lists and dicts of them")
 
 
+#: Where games keep saves and settings in the browser: the web player
+#: mounts IndexedDB storage here (Emscripten's IDBFS) before the game starts.
+WEB_DATA_DIR = "/data"
+
+#: Called with the path after a save or settings file is written or removed.
+#: The web player adds one that copies the change to IndexedDB.
+store_hooks = []
+
+
+def _stored(path):
+    for hook in list(store_hooks):
+        try:
+            hook(path)
+        except Exception as exc:  # a broken hook mustn't lose the save
+            print(f"automata: store hook failed: {exc}", file=sys.stderr)
+
+
 class _Store:
     """JSON files in one folder, written atomically; or nothing at all
     (``folder=None``: kept in memory, for tests)."""
@@ -6496,11 +6516,13 @@ class _Store:
             json.dump(data, f, indent=1, sort_keys=True, ensure_ascii=False)
             f.write("\n")
         os.replace(tmp, path)
+        _stored(path)
 
     def remove(self, rel):
         path = self.path(rel)
         if path is not None and os.path.isfile(path):
             os.remove(path)
+            _stored(path)
 
     def names(self, sub, suffix):
         path = self.path(sub)

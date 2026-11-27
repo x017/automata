@@ -4,7 +4,10 @@ name: Web
 # wgpu's GL backend under Emscripten), puts the web player together with
 # the spike game, and loads it in headless Chromium (WebGL2 on SwiftShader):
 # frames must advance, the cube must be on screen. Reports the download
-# size and the start-up time. See web/README.md.
+# size and the start-up time. Then Coin Run (game.zip at the top of the
+# repo, which must match examples/oberon/coin_run) must load, play, and
+# keep its settings and saves in IndexedDB across a reload. See
+# web/README.md.
 
 on:
   workflow_dispatch:
@@ -14,6 +17,9 @@ on:
       - "web/**"
       - "crates/**"
       - "Cargo.toml"
+      - "game.zip"
+      - "scripts/game_zip.sh"
+      - "examples/oberon/coin_run/**"
       - ".github/workflows/web.yml"
 
 env:
@@ -62,6 +68,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 android/ci/report.py "web: clippy log" --log clippy.log --lines 300
+      - name: game.zip matches Coin Run
+        run: scripts/game_zip.sh --check
 
   player:
     name: Pyodide wheel and browser smoke test
@@ -135,6 +143,25 @@ jobs:
           python3 android/ci/report.py "web: screenshot" --image web/dist/smoke/screenshot.jpg
           exit $s
 
+      - name: Coin Run from game.zip
+        if: success() || failure()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          s=0
+          SITE=web/dist/coin_run_site web/ci/package.sh game.zip > coin_package.log 2>&1 || { cat coin_package.log; exit 1; }
+          (cd web/dist/coin_run_site && python -m http.server 8001 --bind 127.0.0.1 > ../coin_server.log 2>&1 &)
+          sleep 1
+          NODE_PATH=web/ci/node_modules node web/ci/coin_run.mjs http://127.0.0.1:8001/ || s=1
+          python3 web/ci/check_screenshot.py --any web/dist/coin_run/1-playing.png | tee -a web/dist/coin_run/report.txt || s=1
+          { echo '### Coin Run (web)'; echo '```'; head -20 web/dist/coin_run/report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python3 android/ci/report.py "web: coin run" --log web/dist/coin_run/report.txt --lines 400 \
+            --conclusion $([ $s = 0 ] && echo neutral || echo failure)
+          if [ -f web/dist/coin_run/2-touch.jpg ]; then
+            python3 android/ci/report.py "web: coin run screenshot" --image web/dist/coin_run/2-touch.jpg
+          fi
+          exit $s
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -142,3 +169,5 @@ jobs:
           path: |
             web/dist/site
             web/dist/smoke
+            web/dist/coin_run
+            web/dist/coin_run_site.zip

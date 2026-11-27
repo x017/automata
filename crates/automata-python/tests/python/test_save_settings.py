@@ -341,6 +341,8 @@ def test_user_data_dir_follows_the_platform(monkeypatch, tmp_path):
     monkeypatch.setattr(api.sys, "platform", "darwin")
     assert api.user_data_dir("..") == os.path.join(
         os.path.expanduser("~"), "Library", "Application Support", "AUTOMATA game")
+    monkeypatch.setattr(api.sys, "platform", "emscripten")  # the browser
+    assert api.user_data_dir("Coin Run") == os.path.join(api.WEB_DATA_DIR, "Coin Run")
     monkeypatch.setenv("AUTOMATA_SAVE_DIR", str(tmp_path / "override"))
     assert api.user_data_dir("Coin Run") == str(tmp_path / "override")
     assert api.dev_save_dir("/anything") == str(tmp_path / "override")
@@ -418,3 +420,17 @@ def test_the_player_saves_into_the_user_data_folder(tmp_path, monkeypatch):
     player.main([str(tmp_path), "--headless", "--frames", "2"])
     saved = json.loads((data / "Save Test" / "saves" / "default.json").read_text())
     assert saved["data"] == {"coins": 12}
+
+
+def test_store_hooks_hear_every_write_and_removal(tmp_path, monkeypatch):
+    """The web player copies saves to IndexedDB when it hears of them."""
+    heard = []
+    monkeypatch.setattr(api, "store_hooks", [heard.append, lambda p: 1 / 0])
+    store = api._Store(str(tmp_path), lambda *a: None)
+    store.write("settings.json", {"graphics": "low"})
+    store.write("saves/a.json", {"x": 1})
+    store.remove("saves/a.json")
+    store.remove("saves/missing.json")
+    path = str(tmp_path / "settings.json")
+    assert heard == [path, str(tmp_path / "saves" / "a.json"), str(tmp_path / "saves" / "a.json")]
+    assert json.loads((tmp_path / "settings.json").read_text()) == {"graphics": "low"}

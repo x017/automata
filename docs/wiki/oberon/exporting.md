@@ -143,6 +143,7 @@ automata-cli templates download             # once per engine version
 automata-cli init my_game --scene level.ron # writes build.ron
 automata-cli check my_game                  # validate without building
 automata-cli stage my_game --out staged/    # just the game folder
+automata-cli stage my_game --zip game.zip   # …and zipped, for the web player
 automata-cli build my_game --target all     # or linux / windows / macos / android
 ```
 
@@ -159,7 +160,9 @@ relative to that folder.
 
 `stage` writes only the game folder a build would ship: your files minus
 the ones left out, plus `game.json`. It doesn't need a template. Use it to
-look at what gets shipped, or to package the game yourself.
+look at what gets shipped, or to package the game yourself. `--zip FILE`
+also zips that folder: that `game.zip` is what the web player (in
+progress) loads. The same files always give the same zip, byte for byte.
 
 ## macOS
 

@@ -10,8 +10,10 @@ Phase 1 (the spike) is in: the engine runs *stepped*, the wheel builds in
 CI, and a spinning cube runs in headless Chromium. Phase 2 (input and
 lifecycle) is in: keys, mouse and pointer lock, the wheel, touch, gamepads,
 resizing, hidden tabs, full screen, and sound through an AudioWorklet, all
-driven in CI with fake input. Real games and the exporter come in the next
-phases.
+driven in CI with fake input. Phase 3 (real games) is in: the player runs
+an exported game from `game.zip`, keeps saves and settings in IndexedDB,
+and CI plays Coin Run (`game.zip` at the top of the repo). The exporter
+(`automata-cli build --target web`) comes next.
 
 | Path | What it is |
 | --- | --- |
@@ -21,16 +23,21 @@ phases.
 | `player/audio-worklet.js` | The sound output: plays what the engine mixed each frame |
 | `spike/main.py` | The test game: a cube that answers keys, mouse, touch, gamepads, pointer lock, and beeps |
 | `ci/build_wheel.sh` | Builds the wheel with pyodide-build (cross-build environment, Emscripten, Rust toolchain) |
-| `ci/package.sh` | Puts the site together in `web/dist/site/`: Pyodide's runtime files, the page, the wheel, the game |
+| `ci/package.sh` | Puts the site together in `web/dist/site/` (and a zip of it): Pyodide's runtime files, the page, the wheel, the game (a script, a staged game folder or a `game.zip`) |
 | `ci/smoke.mjs` | Loads the site in headless Chromium (Playwright), waits for frames, measures, takes screenshots |
 | `ci/input_checks.mjs` | Drives the test game with fake keys, mouse, touches and a fake gamepad, and checks what it saw |
-| `ci/check_screenshot.py` | Fails unless the cube is on the screenshot |
+| `ci/coin_run.mjs` | Plays Coin Run from `game.zip`: keys, a coin, the setting and the save after a reload, touch controls |
+| `ci/check_screenshot.py` | Fails unless the cube (or, with `--any`, some scene) is on the screenshot |
 
 ## How it fits together
 
 1. The page (`player.js`) loads Pyodide from `pyodide/` beside it, hands it
    the canvas (`pyodide.canvas.setCanvas3D`), installs the engine wheel
-   (`pyodide.loadPackage`) and runs the game's script as `__main__`.
+   (`pyodide.loadPackage`), mounts the save folder (below) and starts the
+   game that `player.json` names: `"game": "game.zip"`, an exported game
+   folder unpacked to `/game` and run with `automata.player` as the
+   desktop and Android players do, or `"main": "main.py"`, one script run
+   as `__main__` (the test game).
 2. `import automata` loads `engine/`, which installs its step driver with
    `automata_python::install_step_driver` and fills the module just as the
    desktop extension does (`automata._core.platform` is `"web"`).
@@ -80,6 +87,37 @@ while the game wants it.
 
 **Full screen.** Also only from a click: the page has a small button in
 the corner (F11 works too). Games just see the new size.
+
+## Games, saves and settings
+
+A game for the web is the folder every export ships (scenes, scripts,
+assets and `game.json`), zipped: `automata-cli stage PROJECT --zip
+game.zip`. The page fetches it, unpacks it into Pyodide's file system
+(`pyodide.unpackArchive`), sets the page title from `game.json` and calls
+`automata.player.main(["/game"])`, so a scene game starts its
+`start_scene` with its scripts and a code-first game runs its `main`
+script, exactly as exported desktop builds do.
+
+Saves and settings (`ctx.save`, `ctx.settings`) go where
+`automata.script_api.user_data_dir` says, which in the browser is
+`/data/<game name>` (`WEB_DATA_DIR`). The page mounts Emscripten's IDBFS
+there before the game starts, so the files live in the site's IndexedDB:
+it loads them first (`FS.syncfs(true)`), and copies changes back after
+each write. The game's file store tells the page through
+`automata.script_api.store_hooks` (called with the path after every write
+or removal); the page syncs 50 ms later, coalescing writes made
+meanwhile, and again when the page is hidden or closed. Without IndexedDB
+(some private windows) saves last until the page closes and
+`window.automata.storage.error` says why.
+
+Touch controls show by themselves on a touch screen: the page sets
+`AUTOMATA_TOUCH_CONTROLS=1` when the main pointer is coarse (phones and
+tablets), or as `?touch=1` / `?touch=0` in the URL says.
+
+`game.zip` at the top of the repo is Coin Run exported this way
+(`scripts/game_zip.sh` rebuilds it; CI fails when it no longer matches
+`examples/oberon/coin_run`), next to `game.apk`, the same game for
+Android as built and emulator-tested by the Android workflow.
 
 ## Sound
 
@@ -138,7 +176,8 @@ and Node:
 
 ```sh
 web/ci/build_wheel.sh            # web/dist/wheel/automata_engine-…-pyemscripten_…whl
-web/ci/package.sh                # web/dist/site/ (or: package.sh path/to/game.py)
+web/ci/package.sh                # web/dist/site/ with the test game
+web/ci/package.sh game.zip       # …or Coin Run (or any staged folder or script)
 cd web/dist/site && python -m http.server 8000
 ```
 
@@ -156,5 +195,13 @@ Beautiful preset, a resize),
 and checks the screenshot. It posts check runs: `web: smoke` (frames,
 frame rate, timings, every input check, download size per file, the
 console) and `web: screenshot`. `INPUT=0` skips the input checks.
+
+Then it packages Coin Run from `game.zip` and plays it (`coin_run.mjs`,
+the browser twin of the Android emulator test): it must start with
+keyboard controls, F2 must change the graphics preset, the setting must
+reach IndexedDB, walking forward should pick up a coin (soft: SwiftShader
+is slow), and after a reload F2 must go on from the saved preset (and the
+best run be remembered). With `?touch=1` the touch controls must show. It
+posts `web: coin run` and `web: coin run screenshot`.
 
 [Pyodide]: https://pyodide.org

@@ -1,10 +1,16 @@
 // The AUTOMATA web player: loads Pyodide (bundled beside this file), the
 // engine's wheel and the game, then runs one frame per animation frame.
 //
-// `player.json` names the wheel and the game's entry script. The game's
-// `game.run()` only starts it (on the web the browser owns the loop); this
-// file then calls `automata._core.web_frame(width, height)` each frame
-// until it returns false. Between frames it passes the page's input on
+// `player.json` names the wheel and the game: `game` is a zip of an
+// exported game folder (game.json, scenes, scripts, assets; what
+// `automata-cli stage` writes), unpacked to /game and run with
+// `automata.player` as the desktop launchers do; or `main` is a single
+// script. Saves and settings live in /data, kept in the browser's
+// IndexedDB (Emscripten's IDBFS) and synced after every write.
+//
+// The game's `game.run()` only starts it (on the web the browser owns the
+// loop); this file then calls `automata._core.web_frame(width, height)`
+// each frame until it returns false. Between frames it passes the page's input on
 // (keys, mouse, pointer lock, touches, gamepads), tells the engine when
 // the tab is hidden, and plays the sound the engine mixed through an
 // AudioWorklet (audio-worklet.js).
@@ -25,6 +31,8 @@ const stats = (window.automata = {
   input: { keys: 0, unknownKeys: 0, mouse: 0, touches: 0, wheel: 0, focusLost: 0, resumed: 0, pads: 0 },
   pointer: { wanted: false, locked: false, requests: 0, errors: 0 },
   audio: { state: "off", rate: 0, posted: 0, peak: 0, played: 0, queued: 0, dropped: 0, underruns: 0 },
+  storage: { mounted: false, syncs: 0, files: [], error: null },
+  touchScreen: false,
   game: null,
 });
 
@@ -339,6 +347,89 @@ function installFullscreen() {
   });
 }
 
+// --- Saves and settings ----------------------------------------------
+
+// Where games keep saves and settings (automata.script_api.WEB_DATA_DIR).
+const DATA_DIR = "/data";
+
+function listFiles(FS, dir, out = []) {
+  for (const name of FS.readdir(dir)) {
+    if (name === "." || name === "..") continue;
+    const path = `${dir}/${name}`;
+    if (FS.isDir(FS.stat(path).mode)) listFiles(FS, path, out);
+    else out.push(path);
+  }
+  return out;
+}
+
+// Mounts IndexedDB storage at /data and loads what's kept there; returns
+// `sync()`, which copies changes back (one at a time, coalescing calls
+// made meanwhile). Without IndexedDB (some private windows) saves last
+// until the page closes.
+async function mountStorage(pyodide) {
+  const FS = pyodide.FS;
+  const syncfs = (populate) =>
+    new Promise((resolve, reject) => FS.syncfs(populate, (error) => (error ? reject(error) : resolve())));
+  FS.mkdirTree(DATA_DIR);
+  try {
+    FS.mount(FS.filesystems.IDBFS, {}, DATA_DIR);
+    await syncfs(true);
+    stats.storage.mounted = true;
+    stats.storage.files = listFiles(FS, DATA_DIR);
+  } catch (error) {
+    stats.storage.error = String(error);
+    console.warn("automata: saves won't outlast this page:", error);
+    return () => {};
+  }
+  let running = null;
+  let again = false;
+  const sync = () => {
+    if (running) {
+      again = true;
+      return running;
+    }
+    running = syncfs(false)
+      .then(() => {
+        stats.storage.syncs += 1;
+        stats.storage.files = listFiles(FS, DATA_DIR);
+      })
+      .catch((error) => {
+        stats.storage.error = String(error);
+        console.warn("automata: couldn't keep the save:", error);
+      })
+      .finally(() => {
+        running = null;
+        if (again) {
+          again = false;
+          sync();
+        }
+      });
+    return running;
+  };
+  // Saves are written in the frame they change: sync right after it.
+  let timer = 0;
+  window.automataStored = () => {
+    clearTimeout(timer);
+    timer = setTimeout(sync, 50);
+  };
+  pyodide.runPython(
+    "import automata.script_api as _api\nfrom js import automataStored\n" +
+      "_api.store_hooks.append(lambda path: automataStored(path))",
+  );
+  // And before the page goes away or out of sight.
+  window.addEventListener("pagehide", sync);
+  document.addEventListener("visibilitychange", () => document.hidden && sync());
+  return sync;
+}
+
+// Whether the game should show its touch controls: on phones and tablets
+// (a coarse main pointer), or as `?touch=1` / `?touch=0` says.
+function touchScreen() {
+  const param = new URLSearchParams(location.search).get("touch");
+  if (param === "1" || param === "0") return param === "1";
+  return Boolean(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+}
+
 // --- Start ------------------------------------------------------------
 
 async function start() {
@@ -359,12 +450,30 @@ async function start() {
   const core = pyodide.pyimport("automata._core");
   const audioReady = startAudio(core.web_sample_rate());
 
+  await mountStorage(pyodide);
+  stats.touchScreen = touchScreen();
+  if (stats.touchScreen) pyodide.runPython("import os\nos.environ['AUTOMATA_TOUCH_CONTROLS'] = '1'");
+
   stats.phase = "game";
   status.textContent = "Starting the game…";
-  const source = await (await fetch(config.main)).text();
-  pyodide.FS.writeFile(config.main, source);
-  // Scripts run as on desktop; `game.run()` returns at once here.
-  pyodide.runPython(`import runpy\nrunpy.run_path(${JSON.stringify(config.main)}, run_name="__main__")`);
+  // Games run as on desktop; `game.run()` returns at once here.
+  if (config.game) {
+    const response = await fetch(config.game);
+    if (!response.ok) throw new Error(`couldn't load ${config.game}: ${response.status}`);
+    pyodide.unpackArchive(await response.arrayBuffer(), "zip", { extractDir: "/game" });
+    mark("unpacked");
+    try {
+      const manifest = JSON.parse(pyodide.FS.readFile("/game/game.json", { encoding: "utf8" }));
+      if (manifest.name) document.title = manifest.name;
+    } catch {
+      // automata.player says what's wrong with game.json
+    }
+    pyodide.runPython("import automata.player\nautomata.player.main(['/game'])");
+  } else {
+    const source = await (await fetch(config.main)).text();
+    pyodide.FS.writeFile(config.main, source);
+    pyodide.runPython(`import runpy\nrunpy.run_path(${JSON.stringify(config.main)}, run_name="__main__")`);
+  }
   mark("game");
   await audioReady;
 

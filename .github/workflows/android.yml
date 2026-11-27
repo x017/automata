@@ -7,7 +7,9 @@ name: Android
 # draw, take a tap, survive background and foreground, and quit on Back;
 # Coin Run must install, play and keep its settings. The template is then
 # published to the `export-templates` release, where `automata-cli
-# templates download` finds it. See android/README.md.
+# templates download` finds it; and the tested Coin Run APK is committed
+# as game.apk at the top of the repo (when there's none yet, or a commit
+# message asks with "[game.apk]"). See android/README.md.
 
 on:
   workflow_dispatch:
@@ -17,6 +19,8 @@ on:
       - "android/**"
       - "crates/**"
       - "Cargo.toml"
+      - "game.zip"
+      - "examples/oberon/coin_run/**"
       - ".github/workflows/android.yml"
 
 env:
@@ -318,3 +322,55 @@ jobs:
             gh release create export-templates --title "Export templates" --prerelease \
               --notes "Templates for automata-cli / Oberon Build. Installed with: automata-cli templates download"
           gh release upload export-templates dist/automata-template-android.apk --clobber
+
+  game-apk:
+    # The Coin Run APK that just passed the emulator test, as game.apk next
+    # to game.zip (the same game for the web). Committed when the branch
+    # has none yet or the pushed commit's message says "[game.apk]", so the
+    # 35 MB file isn't rewritten on every push. Pushes made with the
+    # workflow's token don't start workflows, so this doesn't loop.
+    name: commit game.apk
+    needs: emulator
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Wanted?
+        id: wanted
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          if [ ! -f game.apk ] || [[ "$MESSAGE" == *"[game.apk]"* ]] || [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "game.apk is there and the commit didn't ask for a new one"
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.wanted.outputs.go == '1'
+        with:
+          name: automata-apks
+          path: dist
+      - name: Commit game.apk
+        if: steps.wanted.outputs.go == '1'
+        run: |
+          cp dist/org.automata.coinrun-x86_64.apk game.apk
+          ls -la game.apk game.zip
+          # The APK was built from the commit under test; game.zip may be
+          # newer, so this only warns.
+          python3 android/ci/same_game.py game.apk game.zip || echo "::warning::game.apk and game.zip differ"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add game.apk
+          if git diff --cached --quiet; then
+            echo "game.apk is unchanged"
+            exit 0
+          fi
+          git commit -q -m "game.apk: Coin Run for Android, built and emulator-tested at ${GITHUB_SHA::7}" \
+            -m "From the automata-apks artifact of run ${GITHUB_RUN_ID} (arm64-v8a and x86_64, debug-signed)."
+          for i in 1 2 3; do
+            git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            git pull -q --rebase origin "${GITHUB_REF_NAME}"
+          done
+          exit 1

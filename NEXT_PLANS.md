@@ -199,7 +199,7 @@ Other Android work:
 
 ### Web, next
 
-Decided and planned in [#7](#7-web-export--decided-phases-12-done).
+Decided and planned in [#7](#7-web-export--decided-phases-13-done).
 
 ---
 
@@ -521,7 +521,7 @@ tracking or failures).
 
 ---
 
-## 7. Web export 🟢 decided (phases 1–2 done)
+## 7. Web export 🟢 decided (phases 1–3 done)
 
 ROADMAP E3. Games run in the browser with the same Python scripts as on
 desktop and Android.
@@ -571,9 +571,14 @@ runs, the page takes it (`web_audio()`) and posts it to an AudioWorklet,
 which plays it after a ~50 ms buffer. The page starts sound on the first
 click, key or tap, as browsers require. See `web/README.md`.
 
+**Games and saves** (phase 3): a web game is the exported game folder,
+zipped (`automata-cli stage --zip`), run with `automata.player` as on
+desktop. Saves and settings live in `/data/<game>`, an IDBFS mount kept in
+IndexedDB; the file store calls `script_api.store_hooks` after each write
+and the page syncs right after. Touch controls show when the main pointer
+is coarse.
+
 Still to do:
-- **Saves and settings:** in IndexedDB (emscripten's IDBFS), synced after
-  writes.
 - **The template:** Pyodide's core files, the engine wheel, `index.html`
   and `player.js`. `automata-cli build --target web` adds `game.zip` and
   writes `build/web/<name>/` plus a zip ready for itch.io.
@@ -589,10 +594,9 @@ Still to do:
    wheel, touch, gamepads, resizing and high-DPI, pausing in a hidden tab,
    fullscreen. Audio through an AudioWorklet. CI drives the test game with
    fake keys, mouse, touches and a fake gamepad (`web/ci/input_checks.mjs`).
-3. **Real games:** the player runs a game from `game.zip`, with saves and
+3. ✅ **Real games:** the player runs a game from `game.zip`, with saves and
    settings in IndexedDB. Coin Run plays in CI: keys reach scripts, the
-   setting survives a reload, and touch controls work under touch
-   emulation.
+   setting survives a reload, and touch controls show on a touch screen.
 4. **Template and build:** the `web` template is published to the
    `export-templates` release. `automata-cli build --target web` and
    Oberon's **Build for Web** produce a folder and an itch.io-ready zip.
@@ -601,8 +605,10 @@ Still to do:
 
 ### Open questions
 
-- WebGL2 limits the renderer may hit (uniform buffer sizes, texture
-  formats, shadow map comparisons). Phase 1 shows which.
+- WebGL2 limits the renderer may hit: answered. Depth textures can't be
+  loaded in GLSL, so those passes compare or bind them as float; the
+  Beautiful preset's soft shadows search blockers with compares, and every
+  preset builds on WebGL2 (`every_shader_translates_for_webgl2`).
 - Download size: Pyodide is about 13 MB (about 6 MB gzipped), plus the
   engine. Phase 1 measures it.
 - Python packages from PyPI in web builds (micropip): later.

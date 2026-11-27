@@ -31,7 +31,7 @@ usage:
                     [--package com.you.game] [--bundle-id com.you.game]
   automata-cli keygen FILE [--name \"Your Name\"]
   automata-cli check [PROJECT]
-  automata-cli stage [PROJECT] [--out DIR]
+  automata-cli stage [PROJECT] [--out DIR] [--zip FILE]
   automata-cli templates path|list
   automata-cli templates download [--target linux|windows|macos|android|all]
   automata-cli templates install ARCHIVE --target linux|windows|macos|android
@@ -50,7 +50,8 @@ arm64-v8a for phones, x86_64 for emulators; default: both).
 `--target macos` writes PROJECT/<output>/macos/NAME.app, one app for Apple
 Silicon and Intel Macs; `--bundle-id` sets its bundle ID (macos.bundle_id).
 `stage` writes only the game folder a build ships (game files and game.json),
-by default to PROJECT/<output>/game.";
+by default to PROJECT/<output>/game; `--zip` also zips it (the game.zip the
+web player loads; the same files always give the same bytes).";
 
 struct Args {
     positional: Vec<String>,
@@ -213,6 +214,11 @@ pub fn run(args: impl IntoIterator<Item = String>, program: &str) -> Result<(), 
             );
             let n = crate::stage_game(&project, &cfg, &out, &mut |m| print(&m))?;
             println!("staged {} ({n} files) in {}", cfg.name, out.display());
+            if let Some(zip) = args.flag("zip") {
+                let zip = std::path::absolute(zip).unwrap_or_else(|_| PathBuf::from(zip));
+                let n = crate::zip_staged(&out, &zip)?;
+                println!("zipped it ({n} files) to {}", zip.display());
+            }
         }
         "keygen" => keygen(&args, program)?,
         "templates" => templates(&args, program)?,

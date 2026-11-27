@@ -319,20 +319,35 @@ fn bad(msg: &str) -> io::Error {
 
 // ----- zip ------------------------------------------------------------------
 
-/// Writes `entries` to a zip archive at `dest` (deflated).
+/// Writes `entries` to a zip archive at `dest` (deflated), dated now.
 ///
 /// # Errors
 ///
 /// When a file can't be read or the archive can't be written, or the
 /// archive would need zip64 (over 4 GiB or 65 535 files).
 pub fn write_zip(dest: &Path, entries: &[Entry]) -> io::Result<()> {
+    write_zip_dated(dest, entries, now_secs())
+}
+
+/// The earliest date a zip can hold (1980-01-01, UTC), for archives that
+/// should come out byte for byte the same each time.
+pub const ZIP_EPOCH: u64 = 315_532_800;
+
+/// Writes `entries` to a zip archive at `dest` (deflated), every file
+/// dated `secs` (a Unix timestamp). The same files, names and date give
+/// the same bytes.
+///
+/// # Errors
+///
+/// As [`write_zip`].
+pub fn write_zip_dated(dest: &Path, entries: &[Entry], secs: u64) -> io::Result<()> {
     if entries.len() > usize::from(u16::MAX) {
         return Err(bad("too many files for a zip archive"));
     }
     let mut out = BufWriter::new(File::create(dest)?);
     let mut central = Vec::new();
     let mut offset: u64 = 0;
-    let (dos_time, dos_date) = dos_datetime(now_secs());
+    let (dos_time, dos_date) = dos_datetime(secs);
     for e in entries {
         let data = std::fs::read(&e.source)?;
         let crc = crc32fast::hash(&data);
