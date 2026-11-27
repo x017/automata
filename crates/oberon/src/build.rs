@@ -15,7 +15,8 @@ pub use automata_cli::android::pem::{
     create_release_key, load_release_key, release_key_path, suggested_release_key_path,
 };
 pub use automata_cli::{
-    check_android_package, parse_android_abis, BuildConfig, Level, Target, ANDROID_ABIS,
+    check_android_package, check_bundle_id, parse_android_abis, BuildConfig, Level, Target,
+    ANDROID_ABIS,
 };
 
 /// The touch controls Build Settings turns on: a stick holding WASD and a

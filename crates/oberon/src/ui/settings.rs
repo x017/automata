@@ -47,7 +47,7 @@ impl SettingsPage {
             Self::Editor => "Typing, display and saving in the built-in script editor.",
             Self::Python => "The interpreter that runs Play mode scripts and the language server behind completions.",
             Self::Files => "Autosave and recently opened scenes.",
-            Self::Build => "Export this project as a game for Windows, Linux and Android. Saved to build.ron in the project folder.",
+            Self::Build => "Export this project as a game for Windows, Linux, macOS and Android. Saved to build.ron in the project folder.",
         }
     }
 }
@@ -75,6 +75,10 @@ pub enum SettingText {
     BuildKey,
     /// Build: the Android processor types.
     BuildAbis,
+    /// Build: the macOS bundle ID.
+    BuildBundleId,
+    /// Build: the macOS app icon.
+    BuildIcon,
 }
 
 const ROW: f32 = 52.0;
@@ -121,7 +125,9 @@ impl Ui {
             | SettingText::BuildPackage
             | SettingText::BuildVersionCode
             | SettingText::BuildKey
-            | SettingText::BuildAbis => {
+            | SettingText::BuildAbis
+            | SettingText::BuildBundleId
+            | SettingText::BuildIcon => {
                 self.commit_build_text(which, value);
                 return None;
             }
@@ -570,6 +576,7 @@ impl Ui {
                 )),
             },
             (SettingText::BuildAbis, Some(v)) => crate::build::parse_android_abis(v).err(),
+            (SettingText::BuildBundleId, Some(v)) => crate::build::check_bundle_id(v).err(),
             (SettingText::BuildKey, Some(v)) => {
                 let root = self.project_root.clone();
                 crate::build::release_key_path(&root, v)
@@ -605,6 +612,10 @@ impl Ui {
                 cfg.android.abis = value
                     .and_then(|v| crate::build::parse_android_abis(&v).ok())
                     .unwrap_or_default();
+            }
+            SettingText::BuildBundleId => cfg.macos.bundle_id = value.unwrap_or_default(),
+            SettingText::BuildIcon => {
+                cfg.macos.icon = value.map(|v| v.replace('\\', "/")).unwrap_or_default();
             }
             SettingText::Python | SettingText::LanguageServer => return,
         }
@@ -643,6 +654,7 @@ impl Ui {
         let half = (body.w - 16.0) / 2.0;
         let right = body.x + half + 16.0;
         let package_hint = cfg.android_package();
+        let bundle_hint = cfg.macos_bundle_id();
         let pairs = [
             (
                 "Game name",
@@ -685,6 +697,16 @@ impl Ui {
                 SettingText::BuildAbis,
                 cfg.android.abis.join(", "),
                 "arm64-v8a, x86_64",
+            ),
+            (
+                "macOS bundle ID",
+                SettingText::BuildBundleId,
+                cfg.macos.bundle_id.clone(),
+                bundle_hint.as_str(),
+                "macOS icon",
+                SettingText::BuildIcon,
+                cfg.macos.icon.clone(),
+                "A square PNG, e.g. icon.png",
             ),
         ];
         for (l1, w1, v1, p1, l2, w2, v2, p2) in pairs {
@@ -736,7 +758,12 @@ impl Ui {
             190.0,
         );
         let mut x = body.x + body.w;
-        for t in [Target::Android, Target::Windows, Target::Linux] {
+        for t in [
+            Target::Android,
+            Target::MacOS,
+            Target::Windows,
+            Target::Linux,
+        ] {
             let on = cfg.targets.contains(&t);
             let label = if on {
                 format!("✓ {}", t.label())
@@ -768,7 +795,7 @@ impl Ui {
             body,
             *y,
             "Archive",
-            "Also write a .zip (Windows) or .tar.gz (Linux), ready to upload. Android builds are an .apk.",
+            "Also write a .zip (Windows, macOS) or .tar.gz (Linux), ready to upload. Android builds are an .apk.",
             cfg.archive,
         ) {
             self.build_settings().archive = !cfg.archive;

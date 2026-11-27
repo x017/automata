@@ -4,7 +4,8 @@ name: Export templates
 # Oberon's Build menu copy games into: the `automata-player` launcher plus a
 # portable CPython with the engine wheel installed. Published to the
 # `export-templates` release, which `automata-cli templates download`
-# fetches.
+# fetches. macOS is built per processor (Apple Silicon, Intel) and merged
+# into one universal template, which makes one .app for both.
 
 on:
   workflow_dispatch:
@@ -17,33 +18,62 @@ on:
       - ".github/workflows/export.yml"
       - "scripts/bundle_oberon.py"
       - "scripts/check_completions.py"
+      - "scripts/sign_macos.sh"
+      - "scripts/macos.entitlements"
+      - "examples/oberon/coin_run/**"
 
 env:
   CARGO_TERM_COLOR: always
   # python-build-standalone release and interpreter version for the runtime.
   PBS_TAG: "20261110"
   PBS_PYTHON: "3.12.16"
+  # The oldest macOS the launcher and engine wheel run on (matches the
+  # bundle's LSMinimumSystemVersion).
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
 
 permissions:
   contents: write
 
 jobs:
   template:
-    name: template (${{ matrix.target }})
+    name: template (${{ matrix.target }} ${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: linux
+            arch: x86_64
             os: ubuntu-22.04
             triple: x86_64-unknown-linux-gnu
             python: runtime/bin/python3
             player: automata-player
+            archive: automata-template-linux-x86_64.tar.gz
+            artifact: automata-template-linux
           - target: windows
+            arch: x86_64
             os: windows-latest
             triple: x86_64-pc-windows-msvc
             python: runtime/python.exe
             player: automata-player.exe
+            archive: automata-template-windows-x86_64.tar.gz
+            artifact: automata-template-windows
+          # The macOS halves; `macos-universal` below merges them.
+          - target: macos
+            arch: arm64
+            os: macos-14
+            triple: aarch64-apple-darwin
+            python: runtime/bin/python3
+            player: automata-player
+            archive: automata-template-macos-arm64.tar.gz
+            artifact: macos-part-arm64
+          - target: macos
+            arch: x86_64
+            os: macos-15-intel
+            triple: x86_64-apple-darwin
+            python: runtime/bin/python3
+            player: automata-player
+            archive: automata-template-macos-x86_64.tar.gz
+            artifact: macos-part-x86_64
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -63,7 +93,7 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          key: export-${{ matrix.target }}
+          key: export-${{ matrix.target }}-${{ matrix.arch }}
 
       - name: Portable Python
         run: |
@@ -96,11 +126,32 @@ jobs:
       - name: Smoke test the runtime
         run: template/${{ matrix.python }} -c "import automata; print('automata', automata.__file__)"
 
+      # In an .app the interpreter lives in Contents/MacOS, so macOS treats
+      # the running game as the app (name, icon, Dock). Point that copy at
+      # its runtime in Contents/Resources, and name the runtime after the
+      # processor so the universal template can hold both.
+      - name: macOS interpreter for the app bundle
+        if: matrix.target == 'macos'
+        run: |
+          arch=${{ matrix.arch }}
+          py="template/python3-$arch"
+          cp -L template/runtime/bin/python3 "$py"
+          chmod u+w "$py"
+          old=$(otool -L "$py" | awk '/libpython/ {print $1}')
+          if [ -n "$old" ]; then
+            install_name_tool -change "$old" \
+              "@executable_path/../Resources/runtime-$arch/lib/$(basename "$old")" "$py"
+          fi
+          codesign --force --sign - "$py"
+          otool -L "$py"
+          lipo -info "$py"
+          mv template/runtime "template/runtime-$arch"
+
       - name: Pack the template
         run: |
           cp target/release/${{ matrix.player }} template/
           ./target/release/automata-cli templates pack template \
-            --target ${{ matrix.target }} --out automata-template-${{ matrix.target }}-x86_64.tar.gz
+            --target ${{ matrix.target }} --out ${{ matrix.archive }}
 
       # Export a real example with the fresh template and run it headless.
       - name: Export and run an example
@@ -108,23 +159,30 @@ jobs:
           trap 'echo "::error title=Export step failed::line $LINENO: $BASH_COMMAND"' ERR
           export AUTOMATA_TEMPLATES="$PWD/templates"
           ./target/release/automata-cli templates install \
-            automata-template-${{ matrix.target }}-x86_64.tar.gz --target ${{ matrix.target }}
+            ${{ matrix.archive }} --target ${{ matrix.target }}
           cp -r examples/oberon/coin_run /tmp/coin_run
           ./target/release/automata-cli init /tmp/coin_run --scene level.ron --name "Coin Run"
           ./target/release/automata-cli build /tmp/coin_run --target ${{ matrix.target }}
           exe="/tmp/coin_run/build/${{ matrix.target }}/Coin Run/Coin Run"
-          if [ "${{ matrix.target }}" = windows ]; then exe="$exe.exe"; fi
+          log="/tmp/coin_run/build/${{ matrix.target }}/Coin Run/logs/last_run.log"
+          case "${{ matrix.target }}" in
+            windows) exe="$exe.exe" ;;
+            macos)
+              exe="/tmp/coin_run/build/macos/Coin Run.app/Contents/MacOS/Coin Run"
+              log="$HOME/Library/Logs/Coin Run/last_run.log" ;;
+          esac
           set +e
           "$exe" --headless --frames 30 > run.txt 2>&1
           code=$?
           set -e
           cat run.txt
+          # (An app run without a terminal writes everything to its log.)
+          if [ "${{ matrix.target }}" = macos ]; then cat "$log"; fi
           if [ $code -ne 0 ]; then
             # Surface the failure as annotations (readable without the logs).
-            log="/tmp/coin_run/build/${{ matrix.target }}/Coin Run/logs/last_run.log"
             for f in run.txt "$log"; do
               [ -f "$f" ] || continue
-              msg=$(tail -c 3000 "$f" | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g' -e 's/\r//g')
+              msg=$(tail -c 3000 "$f" | awk 'BEGIN { ORS = "%0A" } { gsub(/%/, "%25"); gsub(/\r/, ""); print }')
               echo "::error title=Exported game failed ($code) - $(basename "$f")::$msg"
             done
             ls -R "/tmp/coin_run/build/${{ matrix.target }}" | head -60
@@ -133,8 +191,95 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: automata-template-${{ matrix.target }}
-          path: automata-template-${{ matrix.target }}-x86_64.tar.gz
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.archive }}
+
+  # One macOS template for both processors: a universal launcher (lipo),
+  # and each processor's interpreter and runtime side by side. Tested as
+  # shipped: exported, run natively and under Rosetta, unzipped, and signed
+  # with scripts/sign_macos.sh (ad hoc).
+  macos-universal:
+    name: template (macos universal)
+    needs: template
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: export-macos-universal
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: parts
+          pattern: macos-part-*
+          merge-multiple: true
+
+      - name: Build the exporter
+        run: cargo build --release -p automata-cli
+
+      - name: Merge the halves
+        run: |
+          set -euo pipefail
+          mkdir -p universal
+          for arch in arm64 x86_64; do
+            mkdir -p "parts/$arch"
+            tar xzf "parts/automata-template-macos-$arch.tar.gz" -C "parts/$arch"
+            cp -R "parts/$arch/runtime-$arch" "parts/$arch/python3-$arch" universal/
+          done
+          lipo -create parts/arm64/automata-player parts/x86_64/automata-player \
+            -output universal/automata-player
+          lipo -info universal/automata-player
+          ./target/release/automata-cli templates pack universal \
+            --target macos --out automata-template-macos-universal.tar.gz
+          ls -la *.tar.gz
+
+      - name: Export, run, unzip, sign
+        run: |
+          set -euo pipefail
+          trap 'echo "::error title=macOS universal step failed::line $LINENO: $BASH_COMMAND"' ERR
+          export AUTOMATA_TEMPLATES="$PWD/templates"
+          cli=./target/release/automata-cli
+          $cli templates install automata-template-macos-universal.tar.gz --target macos
+          cp -r examples/oberon/coin_run /tmp/coin_run
+          $cli init /tmp/coin_run --scene level.ron --name "Coin Run"
+          $cli build /tmp/coin_run --target macos
+          log="$HOME/Library/Logs/Coin Run/last_run.log"
+          play() {
+            rm -f "$log"
+            if ! "$@" --headless --frames 30 > run.txt 2>&1; then
+              cat run.txt "$log" || true
+              msg=$(tail -c 3000 "$log" | awk 'BEGIN { ORS = "%0A" } { gsub(/%/, "%25"); gsub(/\r/, ""); print }')
+              echo "::error title=Exported app failed ($*)::$msg"
+              exit 1
+            fi
+            cat "$log"
+            grep -q "ran 30 frames" "$log"
+          }
+          app="/tmp/coin_run/build/macos/Coin Run.app"
+          play "$app/Contents/MacOS/Coin Run"
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            play arch -x86_64 "$app/Contents/MacOS/Coin Run"
+          else
+            echo "::notice::No Rosetta on this runner: the Intel half was tested on its own runner only"
+          fi
+          # The zip players download.
+          mkdir -p /tmp/unzipped
+          ditto -x -k "/tmp/coin_run/build/Coin Run-0.1.0-macos-universal.zip" /tmp/unzipped
+          play "/tmp/unzipped/Coin Run.app/Contents/MacOS/Coin Run"
+          # Signed as the docs describe (ad hoc here: no Developer ID in CI).
+          scripts/sign_macos.sh "/tmp/unzipped/Coin Run.app" -
+          play "/tmp/unzipped/Coin Run.app/Contents/MacOS/Coin Run"
+          du -sh "$app" automata-template-macos-universal.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: automata-template-macos
+          path: automata-template-macos-universal.tar.gz
 
   # The Oberon download (editor + standalone CPython + wheels), then the
   # ROADMAP D0 promise checked on a runner with no Python on PATH: `oberon
@@ -236,7 +381,7 @@ jobs:
 
   publish:
     name: publish
-    needs: template
+    needs: [template, macos-universal]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

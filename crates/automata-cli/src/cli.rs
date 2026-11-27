@@ -2,7 +2,7 @@
 //! binary and `oberon export`.
 //!
 //! ```text
-//! automata-cli build [PROJECT] [--target linux|windows|android|all] [--template DIR]
+//! automata-cli build [PROJECT] [--target linux|windows|macos|android|all] [--template DIR]
 //!                    [--key FILE] [--abis arm64-v8a,x86_64]
 //! automata-cli init [PROJECT] [--scene level.ron | --main main.py] [--package ID]
 //! automata-cli keygen FILE [--name NAME]
@@ -21,22 +21,22 @@ use crate::{BuildConfig, Level, Message, Target};
 
 /// The usage text, as printed by `automata-cli help`.
 pub const USAGE: &str = "\
-automata-cli — the AUTOMATA command line: export games to Windows, Linux and
-Android
+automata-cli — the AUTOMATA command line: export games to Windows, Linux,
+macOS and Android
 
 usage:
-  automata-cli build [PROJECT] [--target linux|windows|android|all] [--template DIR]
-                     [--key FILE] [--abis arm64-v8a,x86_64]
+  automata-cli build [PROJECT] [--target linux|windows|macos|android|all]
+                     [--template DIR] [--key FILE] [--abis arm64-v8a,x86_64]
   automata-cli init [PROJECT] [--scene SCENE.ron | --main MAIN.py] [--name NAME]
-                    [--package com.you.game]
+                    [--package com.you.game] [--bundle-id com.you.game]
   automata-cli keygen FILE [--name \"Your Name\"]
   automata-cli check [PROJECT]
   automata-cli stage [PROJECT] [--out DIR]
   automata-cli templates path|list
-  automata-cli templates download [--target linux|windows|android|all]
-  automata-cli templates install ARCHIVE --target linux|windows|android
-  automata-cli templates dev PLAYER [--target linux|windows]
-  automata-cli templates pack DIR --target linux|windows --out ARCHIVE
+  automata-cli templates download [--target linux|windows|macos|android|all]
+  automata-cli templates install ARCHIVE --target linux|windows|macos|android
+  automata-cli templates dev PLAYER [--target linux|windows|macos]
+  automata-cli templates pack DIR --target linux|windows|macos --out ARCHIVE
 
 PROJECT defaults to the current folder; settings come from PROJECT/build.ron.
 `--target android` writes PROJECT/<output>/android/NAME-VERSION.apk. It's
@@ -47,6 +47,8 @@ otherwise with this machine's debug key, for testing: android-debug.key in
 made on first use. `--abis` picks the processors to include (android.abis:
 arm64-v8a for phones, x86_64 for emulators; default: both).
 `--package` sets the Android app ID (build.ron's android.package).
+`--target macos` writes PROJECT/<output>/macos/NAME.app, one app for Apple
+Silicon and Intel Macs; `--bundle-id` sets its bundle ID (macos.bundle_id).
 `stage` writes only the game folder a build ships (game files and game.json),
 by default to PROJECT/<output>/game.";
 
@@ -184,6 +186,10 @@ pub fn run(args: impl IntoIterator<Item = String>, program: &str) -> Result<(), 
             if let Some(package) = args.flag("package") {
                 crate::check_android_package(package)?;
                 cfg.android.package = package.to_string();
+            }
+            if let Some(id) = args.flag("bundle-id") {
+                crate::check_bundle_id(id)?;
+                cfg.macos.bundle_id = id.to_string();
             }
             cfg.save(&project)?;
             println!("wrote {}", project.join(crate::CONFIG_FILE).display());

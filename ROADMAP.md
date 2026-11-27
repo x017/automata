@@ -1175,10 +1175,29 @@ and its own input types. The game-facing API stays the same everywhere.
   builds with `apksigner`. An Android App Bundle (`.aab`) for Google Play
   is out of scope.
 
-### E2. macOS export ⬜ M
+### E2. macOS export ✅ M
 - A macOS template build in CI (Apple Silicon and Intel) and an `.app`
   bundle from the Export dialog.
 - Signing and notarisation are documented.
+
+Done: `--target macos` (**Build ▸ Build for macOS**, the macOS platform
+toggle) writes `build/macos/<name>.app` from any host: one bundle for
+Apple Silicon and Intel, macOS 11+. CI builds a template on an arm64 and
+an Intel runner and merges them. The launcher is made universal with
+`lipo`, and each processor's Python sits next to the other as
+`Contents/MacOS/python3-<arch>` plus `Contents/Resources/runtime-<arch>/`.
+The interpreter's `libpython` link points into the bundle, so the
+interpreter running inside the app makes macOS treat the game as the app
+(name, icon, Dock). Started from Finder, the launcher `exec`s into Python
+and logs to `~/Library/Logs/<name>/`. `build.ron`'s `macos` section and
+Oberon's Build page set the bundle ID and an icon (a PNG is wrapped as
+`.icns`). The `Info.plist` gets the name, version and minimum OS. A
+universal zip keeps the executable flags. `scripts/sign_macos.sh` signs
+every native file innermost first, then the app, using the hardened runtime
+and `macos.entitlements`. The export page documents notarisation
+(`notarytool`, `stapler`) and Gatekeeper's **Open Anyway** for unsigned
+builds. CI runs the universal *Coin Run* natively, under Rosetta when the
+runner has it, unzipped, and ad-hoc signed.
 
 ### E3. Web export 🔨 L
 [`NEXT_PLANS.md` #7](NEXT_PLANS.md#7-web-export--decided-phase-1-done):
@@ -1270,7 +1289,7 @@ per effort. Reorder any time by telling me.
 | 37 | D4 UI editor | L | ✅ |
 | 38 | D7 Localization | S | ✅ |
 | 39 | E1 Android export | L | ✅ |
-| 40 | E2 macOS export | M | ⬜ |
+| 40 | E2 macOS export | M | ✅ |
 | 41 | E3 Web export | L | 🔨 |
 | 42 | E4 Steam integration | M | ⬜ |
 | 43 | F3 Custom shaders | M | ⬜ |

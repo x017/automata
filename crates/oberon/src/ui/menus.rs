@@ -623,6 +623,12 @@ impl Ui {
                         idle,
                     ),
                     MenuItem::intent(
+                        "Build for macOS",
+                        "",
+                        Intent::Build(Some(Target::MacOS)),
+                        idle,
+                    ),
+                    MenuItem::intent(
                         "Build for Android",
                         "",
                         Intent::Build(Some(Target::Android)),

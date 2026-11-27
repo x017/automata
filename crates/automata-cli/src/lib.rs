@@ -1,5 +1,5 @@
-//! Exports AUTOMATA games to standalone builds for Windows, Linux and
-//! Android.
+//! Exports AUTOMATA games to standalone builds for Windows, Linux, macOS
+//! and Android.
 //!
 //! An export copies an **export template** (the `automata-player` launcher
 //! plus a portable Python with the engine installed) and adds the project:
@@ -25,6 +25,7 @@
 pub mod android;
 pub mod archive;
 pub mod cli;
+pub mod macos;
 
 use std::fmt;
 use std::fmt::Write as _;
@@ -53,6 +54,8 @@ pub enum Target {
     Linux,
     /// 64-bit Windows 10+ (`x86_64`).
     Windows,
+    /// macOS 11+ on Apple Silicon and Intel, as one universal `.app`.
+    MacOS,
     /// Android 7+ phones and tablets (`arm64-v8a`, and `x86_64` for
     /// emulators), as a signed APK.
     Android,
@@ -60,17 +63,23 @@ pub enum Target {
 
 impl Target {
     /// Every supported target.
-    pub const ALL: [Target; 3] = [Target::Linux, Target::Windows, Target::Android];
+    pub const ALL: [Target; 4] = [
+        Target::Linux,
+        Target::Windows,
+        Target::MacOS,
+        Target::Android,
+    ];
 
     /// The desktop targets (a template with a launcher and Python).
-    pub const DESKTOP: [Target; 2] = [Target::Linux, Target::Windows];
+    pub const DESKTOP: [Target; 3] = [Target::Linux, Target::Windows, Target::MacOS];
 
-    /// Short name (`linux`, `windows`).
+    /// Short name (`linux`, `windows`, `macos`).
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
             Target::Linux => "linux",
             Target::Windows => "windows",
+            Target::MacOS => "macos",
             Target::Android => "android",
         }
     }
@@ -81,6 +90,7 @@ impl Target {
         match self {
             Target::Linux => "Linux",
             Target::Windows => "Windows",
+            Target::MacOS => "macOS",
             Target::Android => "Android",
         }
     }
@@ -91,6 +101,7 @@ impl Target {
         match self {
             Target::Linux => "linux-x86_64",
             Target::Windows => "windows-x86_64",
+            Target::MacOS => "macos-universal",
             Target::Android => "android",
         }
     }
@@ -100,7 +111,7 @@ impl Target {
     #[must_use]
     pub fn player_file(self) -> &'static str {
         match self {
-            Target::Linux => "automata-player",
+            Target::Linux | Target::MacOS => "automata-player",
             Target::Windows => "automata-player.exe",
             Target::Android => android::TEMPLATE_FILE,
         }
@@ -110,7 +121,7 @@ impl Target {
     #[must_use]
     pub fn exe_suffix(self) -> &'static str {
         match self {
-            Target::Linux => "",
+            Target::Linux | Target::MacOS => "",
             Target::Windows => ".exe",
             Target::Android => ".apk",
         }
@@ -122,7 +133,7 @@ impl Target {
     pub fn archive_ext(self) -> &'static str {
         match self {
             Target::Linux => "tar.gz",
-            Target::Windows => "zip",
+            Target::Windows | Target::MacOS => "zip",
             Target::Android => "apk",
         }
     }
@@ -134,14 +145,23 @@ impl Target {
             Some(Target::Linux)
         } else if cfg!(all(windows, target_arch = "x86_64")) {
             Some(Target::Windows)
+        } else if cfg!(target_os = "macos") {
+            Some(Target::MacOS)
         } else {
             None
         }
     }
 
-    /// Parses `linux` / `windows` / `android`.
+    /// Parses `linux` / `windows` / `macos` / `android` (`mac` and `osx`
+    /// mean macOS too).
     #[must_use]
     pub fn parse(s: &str) -> Option<Target> {
+        if ["mac", "osx"]
+            .iter()
+            .any(|a| a.eq_ignore_ascii_case(s.trim()))
+        {
+            return Some(Target::MacOS);
+        }
         Target::ALL
             .into_iter()
             .find(|t| t.name().eq_ignore_ascii_case(s.trim()))
@@ -194,6 +214,22 @@ pub struct BuildConfig {
     pub touch_controls: Option<TouchControls>,
     /// Android app settings.
     pub android: AndroidConfig,
+    /// macOS app settings.
+    pub macos: MacOsConfig,
+}
+
+/// macOS app settings (`build.ron`'s `macos`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MacOsConfig {
+    /// The bundle identifier (`com.yourname.game`). Empty: the Android app
+    /// ID's default, `com.example.<name>`. macOS keeps a game's settings
+    /// and permissions under it, so choose it before release.
+    pub bundle_id: String,
+    /// The app icon: a square PNG (16 to 1024 pixels, a power of two; 1024
+    /// looks sharpest) or an `.icns` file, relative to the project. Empty:
+    /// the standard app icon.
+    pub icon: String,
 }
 
 /// Android app settings (`build.ron`'s `android`).
@@ -278,6 +314,27 @@ pub fn check_android_package(package: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Checks a macOS bundle identifier: at least two dot-separated parts of
+/// letters, digits, `-` and `.`.
+///
+/// # Errors
+///
+/// What's wrong with it.
+pub fn check_bundle_id(id: &str) -> Result<(), String> {
+    let parts: Vec<&str> = id.split('.').collect();
+    let ok = parts.len() >= 2
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "the macOS bundle ID `{id}` must be at least two dot-separated parts of letters, digits and -, like com.yourname.game"
+        ))
+    }
 }
 
 /// On-screen controls for touch screens (`build.ron`'s `touch_controls`),
@@ -463,6 +520,7 @@ impl Default for BuildConfig {
             exclude: vec!["tests/".into()],
             touch_controls: None,
             android: AndroidConfig::default(),
+            macos: MacOsConfig::default(),
         }
     }
 }
@@ -533,6 +591,20 @@ impl BuildConfig {
             name.insert_str(0, "game");
         }
         format!("com.example.{name}")
+    }
+
+    /// The macOS bundle identifier: `macos.bundle_id`, else
+    /// `com.example.` and the game's name in lowercase letters and digits.
+    #[must_use]
+    pub fn macos_bundle_id(&self) -> String {
+        let set = self.macos.bundle_id.trim();
+        if set.is_empty() {
+            let mut fallback = self.clone();
+            fallback.android.package.clear();
+            fallback.android_package()
+        } else {
+            set.to_string()
+        }
     }
 
     /// The executable / folder name: the game name without characters
@@ -659,6 +731,13 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
     check_strings(project, &base, &Skip::new(project, cfg), &mut out);
     if cfg.targets.is_empty() {
         out.push(Message::error("No target platforms selected."));
+    }
+    if cfg.targets.contains(&Target::MacOS) {
+        out.extend(
+            macos::problems(project, cfg)
+                .into_iter()
+                .map(Message::error),
+        );
     }
     if let Some(touch) = &cfg.touch_controls {
         out.extend(touch.problems().into_iter().map(Message::error));
@@ -1214,7 +1293,8 @@ fn check_sound(project: &Path, base: &Path, who: &str, rel: &str, out: &mut Vec<
 }
 
 /// Where templates are installed: `$AUTOMATA_TEMPLATES`, else
-/// `~/.local/share/automata/templates/<version>` (Linux) or
+/// `~/.local/share/automata/templates/<version>` (Linux),
+/// `~/Library/Application Support/automata/templates/<version>` (macOS) or
 /// `%APPDATA%\automata\templates\<version>` (Windows).
 #[must_use]
 pub fn templates_dir() -> PathBuf {
@@ -1223,6 +1303,9 @@ pub fn templates_dir() -> PathBuf {
     }
     let base = if cfg!(windows) {
         std::env::var_os("APPDATA").map(PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME")
+            .map(|h| PathBuf::from(h).join("Library").join("Application Support"))
     } else {
         std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
@@ -1248,7 +1331,7 @@ pub fn find_template(target: Target) -> Option<PathBuf> {
 /// Android template APK always does.
 #[must_use]
 pub fn template_has_runtime(dir: &Path) -> bool {
-    dir.join("runtime").is_dir() || android::installed_template(dir).is_some()
+    !macos::runtimes(dir).is_empty() || android::installed_template(dir).is_some()
 }
 
 /// Installs a template archive (`automata-template-<target>.tar.gz`, or
@@ -1467,6 +1550,9 @@ pub fn install_dev_template(player: &Path, target: Target) -> Result<PathBuf, St
 }
 
 fn executable_in_build(target: Target, rel: &str, exe: &str) -> bool {
+    if target == Target::MacOS {
+        return macos::executable(rel);
+    }
     target == Target::Linux
         && (rel == exe
             || rel.starts_with("runtime/bin/")
@@ -1512,8 +1598,10 @@ pub fn export(
     if failed {
         return Err("the project has errors; fix them and build again".into());
     }
-    if target == Target::Android {
-        return android::export(project, cfg, template, progress);
+    match target {
+        Target::Android => return android::export(project, cfg, template, progress),
+        Target::MacOS => return macos::export(project, cfg, template, progress),
+        Target::Linux | Target::Windows => {}
     }
     let player = template.join(target.player_file());
     if !player.is_file() {
@@ -2032,7 +2120,7 @@ mod tests {
         let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
         cfg.name = "Coin Run".into();
         assert_eq!(cfg.start_scene.as_deref(), Some("level.ron"));
-        for target in Target::DESKTOP {
+        for target in [Target::Linux, Target::Windows] {
             let tpl = template(target.name(), target, true);
             let mut log = Vec::new();
             let out = export(&dir, &cfg, target, &tpl, &mut |m| log.push(m)).unwrap();
@@ -2057,6 +2145,163 @@ mod tests {
             assert!(archive.to_string_lossy().ends_with(target.archive_ext()));
             assert!(log.iter().all(|m| m.level != Level::Error));
         }
+    }
+
+    /// A macOS template with a runtime and an interpreter for `arches`.
+    fn mac_template(tag: &str, arches: &[&str]) -> PathBuf {
+        let tpl = template(tag, Target::MacOS, false);
+        for arch in arches {
+            let rt = tpl.join(format!("runtime-{arch}"));
+            std::fs::create_dir_all(rt.join("bin")).unwrap();
+            std::fs::create_dir_all(rt.join("lib")).unwrap();
+            std::fs::write(rt.join("bin/python3"), b"py").unwrap();
+            std::fs::write(rt.join("lib/libpython3.12.dylib"), b"lib").unwrap();
+            std::fs::write(tpl.join(format!("python3-{arch}")), b"interpreter").unwrap();
+        }
+        tpl
+    }
+
+    #[test]
+    fn exports_a_universal_mac_app() {
+        let dir = project("mac");
+        let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
+        cfg.name = "Coin Run".into();
+        cfg.version = "1.2.0-beta".into();
+        let tpl = mac_template("macos", &macos::ARCHES);
+        assert!(template_has_runtime(&tpl));
+        let mut log = Vec::new();
+        let out = export(&dir, &cfg, Target::MacOS, &tpl, &mut |m| log.push(m)).unwrap();
+        assert!(log.iter().all(|m| m.level == Level::Info), "{log:?}");
+        assert!(out.standalone);
+        assert!(out.folder.ends_with("build/macos/Coin Run.app"));
+        assert!(out
+            .executable
+            .ends_with("Coin Run.app/Contents/MacOS/Coin Run"));
+        let contents = out.folder.join("Contents");
+        for file in [
+            "MacOS/Coin Run",
+            "MacOS/python3-arm64",
+            "MacOS/python3-x86_64",
+            "Resources/runtime-arm64/bin/python3",
+            "Resources/runtime-x86_64/lib/libpython3.12.dylib",
+            "Resources/game/game.json",
+            "Resources/game/scripts/coin.py",
+            "PkgInfo",
+        ] {
+            assert!(contents.join(file).is_file(), "{file}");
+        }
+        assert!(!contents.join("Resources/game/.oberon").exists());
+        assert!(!contents.join("Resources/AppIcon.icns").exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for file in ["MacOS/Coin Run", "MacOS/python3-arm64"] {
+                let mode = std::fs::metadata(contents.join(file))
+                    .unwrap()
+                    .permissions()
+                    .mode();
+                assert_eq!(mode & 0o111, 0o111, "{file}");
+            }
+        }
+        let plist = std::fs::read_to_string(contents.join("Info.plist")).unwrap();
+        for pair in [
+            ("CFBundleExecutable", "Coin Run"),
+            ("CFBundleIdentifier", "com.example.coinrun"),
+            ("CFBundleShortVersionString", "1.2.0"),
+            ("CFBundlePackageType", "APPL"),
+            ("LSMinimumSystemVersion", "11.0"),
+        ] {
+            let entry = format!("<key>{}</key>\n\t<string>{}</string>", pair.0, pair.1);
+            assert!(plist.contains(&entry), "{entry}\n{plist}");
+        }
+        assert!(!plist.contains("CFBundleIconFile"));
+
+        // One zip holding the app, executables marked as such.
+        let archive = out.archive.unwrap();
+        assert!(archive.ends_with("Coin Run-1.2.0-beta-macos-universal.zip"));
+        let names: Vec<String> = android::zip::read(&std::fs::read(&archive).unwrap())
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert!(names.contains(&"Coin Run.app/Contents/MacOS/Coin Run".to_string()));
+        assert!(names.contains(&"Coin Run.app/Contents/Info.plist".to_string()));
+        assert!(names.contains(&"Coin Run.app/Contents/Resources/game/level.ron".to_string()));
+    }
+
+    #[test]
+    fn mac_apps_take_an_icon_and_bundle_id() {
+        let dir = project("macicon");
+        let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
+        cfg.name = "Coin Run".into();
+        cfg.targets = vec![Target::MacOS];
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend_from_slice(&1024u32.to_be_bytes());
+        png.extend_from_slice(&1024u32.to_be_bytes());
+        png.extend_from_slice(&[8, 6, 0, 0, 0]);
+        std::fs::write(dir.join("icon.png"), &png).unwrap();
+        cfg.macos.icon = "icon.png".into();
+        cfg.macos.bundle_id = "com.yourname.coin-run".into();
+        assert_eq!(validate(&dir, &cfg), Vec::new());
+
+        // One processor in the template: an app for that one.
+        let tpl = mac_template("macicon", &["arm64"]);
+        let out = export(&dir, &cfg, Target::MacOS, &tpl, &mut |_| {}).unwrap();
+        let contents = out.folder.join("Contents");
+        let icns = std::fs::read(contents.join("Resources/AppIcon.icns")).unwrap();
+        assert_eq!(&icns[8..12], b"ic10");
+        let plist = std::fs::read_to_string(contents.join("Info.plist")).unwrap();
+        assert!(plist.contains("<key>CFBundleIconFile</key>\n\t<string>AppIcon</string>"));
+        assert!(plist.contains("<string>com.yourname.coin-run</string>"));
+        assert!(!contents.join("MacOS/python3-x86_64").exists());
+        assert!(out
+            .archive
+            .unwrap()
+            .ends_with("Coin Run-0.1.0-macos-arm64.zip"));
+
+        // Bad settings stop a macOS build (and only matter for one).
+        cfg.macos.icon = "missing.png".into();
+        cfg.macos.bundle_id = "coin run".into();
+        let problems: Vec<String> = validate(&dir, &cfg).into_iter().map(|m| m.text).collect();
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(problems[0].contains("bundle ID"), "{problems:?}");
+        assert!(
+            problems[1].contains("macOS icon missing.png"),
+            "{problems:?}"
+        );
+        assert!(export(&dir, &cfg, Target::MacOS, &tpl, &mut |_| {}).is_err());
+        cfg.targets = vec![Target::Linux];
+        assert_eq!(validate(&dir, &cfg), Vec::new());
+
+        // A development template: just the launcher.
+        cfg.macos = MacOsConfig::default();
+        let dev = template("macdev", Target::MacOS, false);
+        assert!(!template_has_runtime(&dev));
+        let mut log = Vec::new();
+        let out = export(&dir, &cfg, Target::MacOS, &dev, &mut |m| log.push(m)).unwrap();
+        assert!(!out.standalone);
+        assert!(log.iter().any(|m| m.level == Level::Warning));
+        assert!(out.archive.unwrap().ends_with("Coin Run-0.1.0-macos.zip"));
+    }
+
+    #[test]
+    fn mac_targets_parse_and_round_trip() {
+        assert_eq!(Target::parse("macos"), Some(Target::MacOS));
+        assert_eq!(Target::parse(" Mac "), Some(Target::MacOS));
+        assert_eq!(Target::parse("osx"), Some(Target::MacOS));
+        assert_eq!(
+            Target::MacOS.template_archive(),
+            "automata-template-macos-universal.tar.gz"
+        );
+        let cfg: BuildConfig =
+            ron::from_str("(name: \"G\", targets: [Linux, MacOS], macos: (bundle_id: \"a.b\"))")
+                .unwrap();
+        assert_eq!(cfg.targets, vec![Target::Linux, Target::MacOS]);
+        assert_eq!(cfg.macos_bundle_id(), "a.b");
+        assert!(check_bundle_id("com.you.my-game").is_ok());
+        assert!(check_bundle_id("game").is_err());
+        assert!(check_bundle_id("com..game").is_err());
+        assert!(check_bundle_id("com.my_game").is_err());
     }
 
     #[test]

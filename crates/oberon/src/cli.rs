@@ -30,7 +30,7 @@ usage:
   oberon setup [--upgrade]       make or repair the project's .venv
   oberon run [SCENE]             play a scene in a window, without the editor
   oberon test [ARGS…]            run the project's tests/ headless
-  oberon export [--target linux|windows|all]
+  oberon export [--target linux|windows|macos|android|all]
                                  build the game (also: export check|init|templates)
   oberon bench SCENE [--frames N] [--out stats.json]
                                  time a scene in headless Play
@@ -107,7 +107,7 @@ function in tests/test_*.py. Exits non-zero when a test fails."
         }
         "export" => {
             "\
-usage: oberon export [PROJECT] [--target linux|windows|all] [--template DIR]
+usage: oberon export [PROJECT] [--target linux|windows|macos|android|all] [--template DIR]
        oberon export check [PROJECT]
        oberon export init [PROJECT] [--scene SCENE.ron] [--name NAME]
        oberon export templates path|list|download|install|dev|pack …
