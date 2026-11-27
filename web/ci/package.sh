@@ -15,8 +15,8 @@ set -euo pipefail
 PYODIDE_VERSION="${PYODIDE_VERSION:-314.0.8}"
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 dist="$repo/web/dist"
-site="${SITE:-$dist/site}"
-game="${1:-$repo/web/spike/main.py}"
+site="$(realpath -m "${SITE:-$dist/site}")"
+game="$(realpath -m "${1:-$repo/web/spike/main.py}")"
 
 rm -rf "$site" "$site.zip"
 mkdir -p "$site/pyodide"
