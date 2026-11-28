@@ -1199,8 +1199,8 @@ and `macos.entitlements`. The export page documents notarisation
 builds. CI runs the universal *Coin Run* natively, under Rosetta when the
 runner has it, unzipped, and ad-hoc signed.
 
-### E3. Web export 🔨 L
-[`NEXT_PLANS.md` #7](NEXT_PLANS.md#7-web-export--decided-phases-14-done):
+### E3. Web export ✅ L
+[`NEXT_PLANS.md` #7](NEXT_PLANS.md#7-web-export--decided-phases-15-done):
 Pyodide 314 (CPython 3.14), with the engine as a Pyodide extension module
 drawing through WebGL2 (wgpu's GLES backend under emscripten). Pyodide is
 bundled in every export, and it targets desktop and phone browsers.
@@ -1231,7 +1231,14 @@ bundled in every export, and it targets desktop and phone browsers.
   the browser). CI builds Coin Run from the template, checks its
   `game.zip` is the repo's byte for byte, serves it with `automata-cli
   serve` and plays it.
-- ⬜ Size and startup budget.
+- ✅ Size and startup budget: the template's standard library is trimmed
+  (`web/ci/stdlib-drop.txt`) and the modules a game imports at start are
+  precompiled, as is the engine wheel's Python; the package index is empty
+  and the page preloads Pyodide and fetches the game in parallel. Start-up
+  halved (first frame 3.2 s → 1.6 s in the smoke test, Coin Run 4.4 s →
+  2.2–3.0 s under SwiftShader) at the same 17.5 MB (10.4 MB gzipped). CI fails
+  over 18.5 MB, 11 MB gzipped, or a first frame later than 3 s, and posts
+  `web: size and start-up`.
 
 ### E4. Steam integration ⬜ M
 - Achievements, stats, Cloud saves (on top of C3), the overlay, and
@@ -1307,7 +1314,7 @@ per effort. Reorder any time by telling me.
 | 38 | D7 Localization | S | ✅ |
 | 39 | E1 Android export | L | ✅ |
 | 40 | E2 macOS export | M | ✅ |
-| 41 | E3 Web export | L | 🔨 |
+| 41 | E3 Web export | L | ✅ |
 | 42 | E4 Steam integration | M | ⬜ |
 | 43 | F3 Custom shaders | M | ⬜ |
 | 44 | F2 Video playback | M | ⬜ |

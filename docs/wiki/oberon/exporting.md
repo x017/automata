@@ -397,9 +397,19 @@ first click), gamepads and touch all work. Touch controls show by
 themselves on phones and tablets. Sound starts after the player's first
 click, key or tap, as browsers require.
 
-**Size and start-up.** A web build is about 17.5 MB (about 10 MB as sent
-compressed) plus your game, and starts in a few seconds. The game needs
-WebGL2, which current desktop and phone browsers have.
+**Size and start-up.** A web build is about 17.5 MB (about 10.5 MB as sent
+compressed) plus your game, and on a typical connection starts in a couple
+of seconds once downloaded. The game needs WebGL2, which current desktop
+and phone browsers have.
+
+To start quickly, the web build leaves out the parts of Python's standard
+library a browser game can't use: other processes
+(`multiprocessing`), terminals (`curses`, `getpass`), mail
+and web servers, `venv`, debuggers and test runners (`pdb`, `unittest`,
+`doctest`), profilers and `timeit`, and rarely used text encodings
+(UTF-8, UTF-16, Latin-1, Windows-1252 and the other common ones stay).
+Importing one of those fails with `ModuleNotFoundError` in the browser
+console.
 
 **What doesn't work yet.** Python packages beyond the standard library
 and the engine (`pip install`ed ones) aren't included, and native

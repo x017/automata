@@ -317,9 +317,18 @@ browser (IndexedDB), per site: a game on another address starts afresh.</p>
 first click), gamepads and touch all work. Touch controls show by
 themselves on phones and tablets. Sound starts after the player's first
 click, key or tap, as browsers require.</p>
-<p><strong>Size and start-up.</strong> A web build is about 17.5 MB (about 10 MB as sent
-compressed) plus your game, and starts in a few seconds. The game needs
-WebGL2, which current desktop and phone browsers have.</p>
+<p><strong>Size and start-up.</strong> A web build is about 17.5 MB (about 10.5 MB as sent
+compressed) plus your game, and on a typical connection starts in a couple
+of seconds once downloaded. The game needs WebGL2, which current desktop
+and phone browsers have.</p>
+<p>To start quickly, the web build leaves out the parts of Python's standard
+library a browser game can't use: other processes
+(<code>multiprocessing</code>), terminals (<code>curses</code>, <code>getpass</code>), mail
+and web servers, <code>venv</code>, debuggers and test runners (<code>pdb</code>, <code>unittest</code>,
+<code>doctest</code>), profilers and <code>timeit</code>, and rarely used text encodings
+(UTF-8, UTF-16, Latin-1, Windows-1252 and the other common ones stay).
+Importing one of those fails with <code>ModuleNotFoundError</code> in the browser
+console.</p>
 <p><strong>What doesn't work yet.</strong> Python packages beyond the standard library
 and the engine (<code>pip install</code>ed ones) aren't included, and native
 extension modules can't load in a browser.</p>

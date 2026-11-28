@@ -58,18 +58,4 @@ print("engine wheel, largest files (bytes, compressed):")
 for i in sorted(z.infolist(), key=lambda i: -i.compress_size)[:8]:
     print(f"  {i.compress_size:>9} {i.file_size:>10}  {i.filename}")
 ' "$out/$(basename "${wheels[0]}")"
-# How much Binaryen's size optimizer would still take off the engine module
-# (a measurement only; rustc already has emcc optimize it with -Os).
-wasm_opt="$(command -v wasm-opt || find "$HOME" -path '*upstream/bin/wasm-opt' -print -quit 2>/dev/null || true)"
-core="$(find "$dist/wheel-unpacked" -name '_core*.so' | head -1)"
-if [ -n "$wasm_opt" ] && [ -n "$core" ]; then
-  if "$wasm_opt" -Oz --enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int \
-       --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-reference-types \
-       --enable-exception-handling "$core" -o "$dist/core-oz.wasm" 2> "$dist/wasm-opt.log"; then
-    echo "engine module: $(stat -c %s "$core") bytes; wasm-opt -Oz: $(stat -c %s "$dist/core-oz.wasm") bytes" \
-      "(gzipped $(gzip -9c "$core" | wc -c) -> $(gzip -9c "$dist/core-oz.wasm" | wc -c))"
-  else
-    echo "wasm-opt -Oz failed: $(head -3 "$dist/wasm-opt.log")"
-  fi
-fi
 echo "web template in $out ($(du -sb "$out" | cut -f1) bytes)"

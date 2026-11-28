@@ -15,8 +15,9 @@ an exported game from `game.zip`, keeps saves and settings in IndexedDB,
 and CI plays Coin Run (`game.zip` at the top of the repo). Phase 4 (the
 exporter) is in: a published web export template, `automata-cli build
 --target web`, `automata-cli serve`, and Oberon's **Build ▸ Build for Web**
-and **Play in Browser** (below). Phase 5 (the download size and start-up
-time) comes next.
+and **Play in Browser** (below). Phase 5 is in: a trimmed, precompiled
+standard library and engine, with a size and start-up budget CI holds
+(below).
 
 | Path | What it is |
 | --- | --- |
@@ -27,6 +28,9 @@ time) comes next.
 | `spike/main.py` | The test game: a cube that answers keys, mouse, touch, gamepads, pointer lock, and beeps |
 | `ci/build_wheel.sh` | Builds the wheel with pyodide-build (cross-build environment, Emscripten, Rust toolchain) |
 | `ci/template.sh` | Puts the web export template together in `web/dist/template/`: Pyodide's runtime files, the page, the wheel |
+| `ci/stdlib.mjs`, `ci/stdlib-drop.txt`, `ci/stdlib-hot.txt` | The template's `python_stdlib.zip`: without the modules a game can't use in a browser, with the ones it imports at start compiled |
+| `ci/slim_wheel.mjs` | The template's engine wheel: its Python compiled, no type stubs |
+| `ci/web_size.py` | What a build's download is made of, against the published template, and whether it and the start fit the budget |
 | `ci/package.sh` | The template plus a game (a script, a staged game folder or a `game.zip`) in `web/dist/site/` (and a zip of it), for trying things without `automata-cli` |
 | `ci/smoke.mjs` | Loads the site in headless Chromium (Playwright), waits for frames, measures, takes screenshots |
 | `ci/input_checks.mjs` | Drives the test game with fake keys, mouse, touches and a fake gamepad, and checks what it saw |
@@ -172,6 +176,56 @@ Desktop tests can run games stepped too: `automata._core._use_stepped_runs(True)
 installs a windowless step driver, and `automata._core.step_running_game()`
 runs a frame (see `crates/automata-python/tests/python/test_stepped.py`).
 
+## Size and start-up
+
+What a web build downloads, and how soon it plays, from CI (Pyodide
+314.0.8, headless Chromium, WebGL2 on SwiftShader, a 960×540 canvas):
+
+| | Phase 4 | Phase 5 |
+| --- | --- | --- |
+| Download (Coin Run) | 17.49 MB, 10.26 MB gzipped | 17.52 MB, 10.41 MB gzipped |
+| Smoke test: first frame | 3.2 s | 1.6 s |
+| Coin Run (after a reload): Pyodide / engine / first frame | 3.4 / 3.7 / 4.4 s | 1.7–2.5 / 1.9–2.7 / 2.2–3.0 s |
+
+The download stayed the same size; the start-up halved. Where the time went
+was compiling: Pyodide ships its standard library as source, so Python
+compiled the ~190 modules it imports at start on every page load (1.3 s
+under Node), and the engine's `script_api.py` alone took another 0.25 s.
+The template now has:
+
+- **A trimmed standard library** (`ci/stdlib.mjs`). `stdlib-drop.txt`
+  lists what goes: what can't work in a browser (`multiprocessing`, terminals,
+  web and mail servers and clients, `venv`), developer tools (debuggers, test
+  runners, profilers, the REPL, `pydoc`), and rare text codecs. The
+  modules in `stdlib-hot.txt` (what Pyodide and the engine import at
+  start, plus `json`, `random`, `dataclasses` and the like) are compiled to
+  bytecode; the rest stay source. Compiling everything made the zip 3.2 MB
+  and wasn't faster.
+- **A compiled engine wheel** (`ci/slim_wheel.mjs`). Its Python is
+  compiled to unchecked hash-based `.pyc` files (PEP 552: no timestamps to
+  compare, reproducible), next to the source so tracebacks still show
+  lines. The type stubs and `py.typed` go.
+- **An empty package index.** `pyodide-lock.json` keeps only its `info`
+  (119 KB less); the wheel is installed by URL. No source maps, `.d.ts`,
+  `pyodide.js`, `package.json` or console pages.
+- **Parallel downloads.** The page preloads Pyodide's files and
+  `player.json`, and fetches `game.zip` while Python starts.
+
+What's left is mostly CPython (`pyodide.asm.wasm`, 3.5 MB gzipped) and the
+engine (`_core….so` in the wheel, 10.2 MB, 3.8 MB compressed: wgpu, naga,
+physics, audio, built with fat LTO and `opt-level = "s"`). Running
+`wasm-opt -Oz` over the engine as well took off only 30 KB gzipped (0.8%),
+so the build doesn't.
+
+**The budget.** CI's `Size and start-up budget` step runs
+`ci/web_size.py` on Coin Run's build and the smoke test's timings, and
+fails over 18.5 MB, over 11 MB gzipped, or when the first frame comes
+later than 3 s after navigation. It posts `web: size and start-up` (every
+file next to the published template's, the largest parts of the wheel and
+the standard library) and adds it to the job summary. The smoke test also
+reports any file fetched twice (a preload that doesn't match its
+request).
+
 ## First measurements
 
 From the spike in CI (Pyodide 314.0.8, headless Chromium, WebGL2 on
@@ -186,8 +240,7 @@ SwiftShader, a 960×540 canvas):
 | Pyodide ready / engine imported / game started / first frame | 1.6 s / 1.9 s / 2.1 s / 2.7 s after navigation |
 | Frame rate | ~9.5 fps (a CPU rasterizer; real GPUs run far faster) |
 
-Phase 5 sets the budget; trimming the standard library and the wheel are
-the obvious levers.
+(Phase 5's numbers are above.)
 
 ## WebGL2 notes
 

@@ -199,7 +199,7 @@ Other Android work:
 
 ### Web, next
 
-Decided and planned in [#7](#7-web-export--decided-phases-14-done).
+Decided and planned in [#7](#7-web-export--decided-phases-15-done).
 
 ---
 
@@ -521,7 +521,7 @@ tracking or failures).
 
 ---
 
-## 7. Web export 🟢 decided (phases 1–4 done)
+## 7. Web export 🟢 decided (phases 1–5 done)
 
 ROADMAP E3. Games run in the browser with the same Python scripts as on
 desktop and Android.
@@ -605,8 +605,10 @@ top, for itch.io. `automata-cli serve` plays a build locally; Oberon has
 4. ✅ **Template and build:** the `web` template is published to the
    `export-templates` release. `automata-cli build --target web` and
    Oberon's **Build for Web** produce a folder and an itch.io-ready zip.
-5. **Size and startup:** trim what the web doesn't use, measure, set a
-   budget.
+5. ✅ **Size and startup:** the standard library without what a browser
+   game can't use, its start-up modules and the engine's Python
+   precompiled, an empty package index, preloads. Start-up halved; CI
+   holds the budget (18.5 MB, 11 MB gzipped, first frame within 3 s).
 
 ### Open questions
 
