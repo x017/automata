@@ -65,6 +65,7 @@ NAV: list[tuple[str, list[tuple[str, str]]]] = [
         ("wiki/oberon/code-editor.md", "The code editor"),
         ("wiki/oberon/ui-editor.md", "The UI editor"),
         ("wiki/oberon/materials.md", "Materials"),
+        ("wiki/oberon/shaders.md", "Custom shaders"),
         ("wiki/oberon/models.md", "Models"),
         ("wiki/oberon/animation-graphs.md", "Animation graphs"),
         ("wiki/oberon/attachments-and-ik.md", "Attachments & IK"),
