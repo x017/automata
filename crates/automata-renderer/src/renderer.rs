@@ -5038,7 +5038,11 @@ mod tests {
         let size = renderer.size();
         let target = target(renderer.context().device(), size);
         let cube = renderer.create_mesh(&MeshData::cube(1.0));
-        let dark = crate::MaterialParams::with_color([0.02, 0.02, 0.02, 1.0]);
+        // Rough, and lit from the side: no highlight to mistake for glow.
+        let dark = crate::MaterialParams {
+            roughness: 1.0,
+            ..crate::MaterialParams::with_color([0.02, 0.02, 0.02, 1.0])
+        };
         let shaded = renderer.create_shaded_material(
             &dark,
             crate::MaterialTextures::default(),
@@ -5053,7 +5057,7 @@ mod tests {
             glam::Vec3::new(0.0, 0.0, 3.0),
             glam::Vec3::ZERO,
         ));
-        draw.set_sun(crate::Sun::new(glam::Vec3::new(0.0, 0.0, -1.0)));
+        draw.set_sun(crate::Sun::new(glam::Vec3::new(0.6, -0.5, -0.6)));
         draw.mesh(
             &cube,
             glam::Mat4::from_translation(glam::Vec3::new(-0.7, 0.0, 0.0)),
@@ -5124,13 +5128,18 @@ mod tests {
                 left[1] > 150 && left[1] > left[0] + 100,
                 "{quality:?}: the shaded cube glows green: {left:?}"
             );
+            // Not green: whatever the lighting, green doesn't stand out.
+            let greenish = |p: [u8; 4]| i32::from(p[1]) > i32::from(p[0]).max(i32::from(p[2])) + 30;
             assert!(
-                right[1] < 80,
+                !greenish(right),
                 "{quality:?}: the plain one doesn't: {right:?}"
             );
             // Its parameters are its own: none, no glow.
             let (off, _) = shaded_pair(&mut renderer, &glow, [0.0; 8]);
-            assert!(off[1] < 80, "{quality:?}: no glow without params: {off:?}");
+            assert!(
+                !greenish(off),
+                "{quality:?}: no glow without params: {off:?}"
+            );
             // Cut-outs show the background through.
             let (kept, _) = shaded_pair(&mut renderer, &cut, [0.0; 8]);
             let (gone, _) = shaded_pair(
