@@ -63,7 +63,9 @@ for i in sorted(z.infolist(), key=lambda i: -i.compress_size)[:8]:
 wasm_opt="$(command -v wasm-opt || find "$HOME" -path '*upstream/bin/wasm-opt' -print -quit 2>/dev/null || true)"
 core="$(find "$dist/wheel-unpacked" -name '_core*.so' | head -1)"
 if [ -n "$wasm_opt" ] && [ -n "$core" ]; then
-  if "$wasm_opt" -Oz --detect-features "$core" -o "$dist/core-oz.wasm" 2> "$dist/wasm-opt.log"; then
+  if "$wasm_opt" -Oz --enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int \
+       --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-reference-types \
+       --enable-exception-handling "$core" -o "$dist/core-oz.wasm" 2> "$dist/wasm-opt.log"; then
     echo "engine module: $(stat -c %s "$core") bytes; wasm-opt -Oz: $(stat -c %s "$dist/core-oz.wasm") bytes" \
       "(gzipped $(gzip -9c "$core" | wc -c) -> $(gzip -9c "$dist/core-oz.wasm" | wc -c))"
   else

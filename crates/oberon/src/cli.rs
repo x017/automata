@@ -107,9 +107,12 @@ function in tests/test_*.py. Exits non-zero when a test fails."
         }
         "export" => {
             "\
-usage: oberon export [PROJECT] [--target linux|windows|macos|android|all] [--template DIR]
+usage: oberon export [PROJECT] [--target linux|windows|macos|android|web|all] [--template DIR]
        oberon export check [PROJECT]
        oberon export init [PROJECT] [--scene SCENE.ron] [--name NAME]
+       oberon export serve [PROJECT | FOLDER] [--port 8000]
+       oberon export stage [PROJECT] [--out DIR] [--zip FILE]
+       oberon export keygen FILE [--name NAME]
        oberon export templates path|list|download|install|dev|pack …
 
 Builds the game into build/ using the project's build.ron (what
@@ -649,24 +652,44 @@ fn test(args: &[String]) -> CliResult {
 }
 
 fn export(args: &[String]) -> CliResult {
-    let subcommands = ["build", "init", "check", "templates", "help"];
-    let mut full: Vec<String> = args.to_vec();
-    match full.first().map(String::as_str) {
-        Some("--help" | "-h") => {
-            println!("{}", command_help("export").unwrap_or_default());
-            return Ok(ExitCode::SUCCESS);
-        }
-        Some(first) if subcommands.contains(&first) => {}
-        _ => full.insert(0, "build".into()),
+    if matches!(args.first().map(String::as_str), Some("--help" | "-h")) {
+        println!("{}", command_help("export").unwrap_or_default());
+        return Ok(ExitCode::SUCCESS);
     }
-    // Project-taking commands default to the project, not the folder.
-    if matches!(full[0].as_str(), "build" | "init" | "check")
-        && full.get(1).is_none_or(|a| a.starts_with("--"))
-    {
-        full.insert(1, project(None).to_string_lossy().into_owned());
-    }
+    let full = export_args(args, &project(None).to_string_lossy());
     automata_cli::cli::run(full, "oberon export")?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// `oberon export …` as `automata-cli` arguments: `build` unless a
+/// subcommand is named, and the project when a project-taking command
+/// names none.
+fn export_args(args: &[String], project: &str) -> Vec<String> {
+    let subcommands = [
+        "build",
+        "init",
+        "check",
+        "stage",
+        "serve",
+        "keygen",
+        "templates",
+        "help",
+    ];
+    let mut full: Vec<String> = args.to_vec();
+    if !full
+        .first()
+        .is_some_and(|first| subcommands.contains(&first.as_str()))
+    {
+        full.insert(0, "build".into());
+    }
+    if matches!(
+        full[0].as_str(),
+        "build" | "init" | "check" | "stage" | "serve"
+    ) && full.get(1).is_none_or(|a| a.starts_with("--"))
+    {
+        full.insert(1, project.into());
+    }
+    full
 }
 
 /// `oberon bench`: times a scene in headless Play (see `crate::bench`).
@@ -925,6 +948,40 @@ fn doctor(project_dir: Option<&Path>) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_arguments() {
+        let args = |a: &[&str]| {
+            export_args(
+                &a.iter().map(|s| (*s).to_string()).collect::<Vec<_>>(),
+                "proj",
+            )
+        };
+        assert_eq!(args(&[]), ["build", "proj"]);
+        assert_eq!(
+            args(&["--target", "web"]),
+            ["build", "proj", "--target", "web"]
+        );
+        assert_eq!(
+            args(&["game", "--target", "web"]),
+            ["build", "game", "--target", "web"]
+        );
+        assert_eq!(args(&["serve"]), ["serve", "proj"]);
+        assert_eq!(
+            args(&["serve", "--port", "9000"]),
+            ["serve", "proj", "--port", "9000"]
+        );
+        assert_eq!(
+            args(&["serve", "build/web/Game"]),
+            ["serve", "build/web/Game"]
+        );
+        assert_eq!(
+            args(&["stage", "--zip", "g.zip"]),
+            ["stage", "proj", "--zip", "g.zip"]
+        );
+        assert_eq!(args(&["keygen", "k.keystore"]), ["keygen", "k.keystore"]);
+        assert_eq!(args(&["templates", "list"]), ["templates", "list"]);
+    }
 
     fn args(s: &str) -> Vec<String> {
         s.split_whitespace().map(str::to_string).collect()

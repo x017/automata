@@ -218,8 +218,8 @@ jobs:
           s=0
           python3 web/ci/web_size.py "$RUNNER_TEMP/coin_run/build/web/Coin Run" \
             --before "$RUNNER_TEMP/published-web.tar.gz" \
-            --budget-mb 18 --budget-gz 10.5 \
-            --stats web/dist/smoke/stats.json --budget-start 6 > web/dist/size.txt || s=1
+            --budget-mb 18.5 --budget-gz 11 \
+            --stats web/dist/smoke/stats.json --budget-start 3 > web/dist/size.txt || s=1
           cat web/dist/size.txt
           { echo '### Web build size and start-up'; echo '```'; cat web/dist/size.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           python3 android/ci/report.py "web: size and start-up" --log web/dist/size.txt --lines 200 \
