@@ -1,0 +1,199 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "arena/**"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  test:
+    name: fmt / clippy / test / doc
+    runs-on: ubuntu-latest
+    # Explicit bash => `-eo pipefail`, so `cmd | tee log` steps fail when
+    # `cmd` fails (the implicit default shell has no pipefail).
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # Complete CPython (with libpython) for the pyo3 build: automata-python
+      # links it in its test binaries.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Software GPU (llvmpipe/lavapipe) so wgpu render tests actually
+      # execute — without it they graceful-skip and the renderer goes
+      # untested on CI. Retry around the apt lock race on hosted runners.
+      # libudev-dev: gilrs (gamepad input) links libudev on Linux.
+      - name: Install software GPU
+        run: |
+          for i in 1 2 3; do
+            sudo apt-get update && \
+            sudo apt-get install -y --no-install-recommends \
+              libegl1 libgl1 mesa-vulkan-drivers libvulkan1 libudev-dev libasound2-dev && break
+            echo "apt attempt $i failed; retrying in 10s"
+            sleep 10
+          done
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check 2>&1 | tee /tmp/fmt.log
+
+      # Runs even when Format failed, so one CI round reports both.
+      - name: Clippy
+        if: ${{ !cancelled() }}
+        run: cargo clippy --workspace --all-targets --features automata-python/audio-cpal -- -D warnings 2>&1 | tee /tmp/clippy.log
+
+      - name: Tests (CPU + device)
+        if: ${{ !cancelled() }}
+        run: cargo test --workspace --all-targets --features automata-python/audio-cpal -- --skip offscreen 2>&1 | tee /tmp/cpu-test.log
+        env:
+          WGPU_BACKEND: vulkan,gl
+          # automata-python's Rust test binaries link libpython from the
+          # setup-python toolcache; make it resolvable at runtime.
+          LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
+
+      # Run GPU offscreen render tests separately so a software-adapter
+      # quirk doesn't mask the CPU suite, and so its failure is isolated.
+      # GPU tests run single-threaded: concurrent wgpu instance/device
+      # creation on the software Vulkan driver (lavapipe) is flaky.
+      - name: Tests (GPU offscreen)
+        run: cargo test -p automata-renderer --lib offscreen -- --nocapture --test-threads=1 2>&1 | tee /tmp/gpu-test.log
+        env:
+          WGPU_BACKEND: vulkan,gl
+
+      # Surface the logs as check-run annotations too: readable through the
+      # REST API even when log downloads and branch pushes are unavailable.
+      - name: Annotate fmt log
+        if: failure()
+        run: python3 .github/scripts/annotate_log.py fmt
+
+      - name: Annotate clippy log
+        if: failure()
+        run: python3 .github/scripts/annotate_log.py clippy
+
+      - name: Annotate cpu-test log
+        if: failure()
+        run: python3 .github/scripts/annotate_log.py cpu-test
+
+      - name: Annotate gpu-test log
+        if: failure()
+        run: python3 .github/scripts/annotate_log.py gpu-test
+
+      # The log-zip endpoint is unreachable from the dev sandbox; publish the
+      # fmt / clippy / test outputs to a scratch branch on failure so they can
+      # be read via plain git. Only runs when a step failed.
+      - name: Publish test logs on failure
+        if: failure()
+        run: |
+          git config user.email ci@localhost
+          git config user.name "ci"
+          git checkout --orphan ci-logs
+          git rm -rf . > /dev/null 2>&1 || true
+          cp /tmp/fmt.log fmt.log 2>/dev/null || true
+          cp /tmp/clippy.log clippy.log 2>/dev/null || true
+          cp /tmp/cpu-test.log cpu-test.log 2>/dev/null || true
+          cp /tmp/gpu-test.log gpu-test.log 2>/dev/null || true
+          git add -A
+          git commit -m "ci test logs $(date -u +%FT%TZ)"
+          git push -f origin ci-logs
+
+      - name: Documentation
+        run: cargo doc --workspace --no-deps
+
+  site:
+    name: Docs site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs/site/docs is up to date with the Markdown
+        run: python3 scripts/build_site.py --check
+
+  python:
+    name: Python bindings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install system libraries
+        run: |
+          for i in 1 2 3; do
+            sudo apt-get update && \
+            sudo apt-get install -y --no-install-recommends libudev-dev libasound2-dev && break
+            echo "apt attempt $i failed; retrying in 10s"
+            sleep 10
+          done
+
+      - name: Install Python build tools
+        run: pip install maturin pytest
+
+      - name: Build the automata wheel
+        run: maturin build --release --manifest-path crates/automata-python/Cargo.toml --features audio-cpal
+
+      - name: Install the wheel
+        run: pip install target/wheels/automata_engine-*.whl
+
+      - name: Python tests
+        run: pytest crates/automata-python/tests/python
+
+      - name: Tutorials (Oberon track, Zero to Hero, Cookbook)
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            pytest examples/oberon/coin_run/tests examples/oberon/fps/tests examples/oberon/lagoon/tests examples/oberon/night_lights/tests examples/oberon/campfire/tests examples/oberon/robot_plaza/tests examples/oberon/ponytail_park/tests examples/oberon/joint_yard/tests examples/oberon/pause_menu/tests examples/oberon/shape_signal/tests examples/oberon/workshop/tests examples/oberon/shader_lab/tests examples/oberon/lamplight_lane/tests examples/oberon/platformer/tests examples/python/zero_to_hero examples/python/tests
+            python examples/oberon/coin_run/main.py --headless
+            python examples/oberon/fps/main.py --headless
+            python examples/oberon/lagoon/main.py --headless
+            python examples/oberon/platformer/main.py --headless
+            python examples/python/cookbook_platformer.py --headless
+          } 2>&1 | tee /tmp/tutorials.log
+
+      - name: Annotate tutorials log
+        if: failure()
+        run: python3 .github/scripts/annotate_log.py tutorials
+
+      - name: Headless demo
+        run: python examples/python/headless_demo.py
+
+      # Export Coin Run and the FPS with a development template (launcher only; uses
+      # this job's Python) and run the exported executable headless.
+      - name: Export a game (Linux, development template)
+        run: |
+          cargo build --release -p automata-player -p automata-cli
+          export AUTOMATA_TEMPLATES="$RUNNER_TEMP/templates"
+          ./target/release/automata-cli templates dev target/release/automata-player --target linux
+          cp -r examples/oberon/coin_run "$RUNNER_TEMP/coin_run"
+          ./target/release/automata-cli init "$RUNNER_TEMP/coin_run" --scene level.ron --name "Coin Run"
+          ./target/release/automata-cli build "$RUNNER_TEMP/coin_run" --target linux
+          AUTOMATA_PYTHON="$(command -v python)" "$RUNNER_TEMP/coin_run/build/linux/Coin Run/Coin Run" --headless --frames 30
+          tar tzf "$RUNNER_TEMP/coin_run/build/Coin Run-0.1.0-linux-x86_64.tar.gz" | grep -q "Coin Run/game/game.json"
+          # The FPS example ships its own build.ron.
+          cp -r examples/oberon/fps "$RUNNER_TEMP/fps"
+          ./target/release/automata-cli build "$RUNNER_TEMP/fps" --target linux
+          AUTOMATA_PYTHON="$(command -v python)" "$RUNNER_TEMP/fps/build/linux/Blaster Arena/Blaster Arena" --headless --frames 120

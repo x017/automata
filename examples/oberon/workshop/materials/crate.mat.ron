@@ -1,0 +1,9 @@
+// A material. Entities that use it share its colour, surface and
+// textures: material: "materials/crate.mat.ron" on a Mesh Renderer. Texture paths are
+// relative to this file's folder.
+(
+    color: (1.0, 1.0, 1.0, 1.0),
+    roughness: 0.8,
+    base_map: "../textures/planks.png",
+    normal_map: "../textures/planks_normal.png",
+)

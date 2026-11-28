@@ -1,0 +1,681 @@
+//! Integration tests for the 3D physics world.
+
+use automata_physics::prelude::*;
+use automata_scene::{SceneWorld, Transform};
+use glam::Vec3;
+
+const DT: f32 = 1.0 / 60.0;
+
+fn step_n(physics: &mut PhysicsWorld3D, scene: &mut SceneWorld, n: usize) -> PhysicsTick {
+    let mut last = PhysicsTick::default();
+    for _ in 0..n {
+        physics.sync_from_scene(scene);
+        physics.move_characters(scene, DT);
+        last = physics.step(scene, DT);
+    }
+    last
+}
+
+fn position(scene: &SceneWorld, entity: automata_scene::Entity) -> Vec3 {
+    scene.get::<&Transform>(entity).unwrap().position
+}
+
+#[test]
+fn dynamic_body_falls_under_gravity() {
+    let mut scene = SceneWorld::new();
+    let ball = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 10.0, 0.0)),
+        RigidBody::dynamic(),
+        Collider3D::ball(0.5),
+    ));
+
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 30);
+
+    let y = position(&scene, ball).y;
+    assert!(y < 9.0, "ball should have fallen, y = {y}");
+}
+
+#[test]
+fn ball_lands_on_floor_and_stays() {
+    let mut scene = SceneWorld::new();
+    let _floor = scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        RigidBody::fixed(),
+        Collider3D::cuboid(20.0, 1.0, 20.0),
+    ));
+    let ball = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 3.0, 0.0)),
+        RigidBody::dynamic(),
+        Collider3D::ball(0.5),
+    ));
+
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 120);
+
+    let y = position(&scene, ball).y;
+    // Ball radius 0.5 resting on floor top (y = 0.5): centre at ~1.0.
+    assert!(y > 0.8 && y < 1.3, "ball should rest on the floor, y = {y}");
+}
+
+#[test]
+fn collision_events_fire_on_contact() {
+    let mut scene = SceneWorld::new();
+    let floor = scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        RigidBody::fixed(),
+        Collider3D::cuboid(20.0, 1.0, 20.0),
+    ));
+    let ball = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 1.05, 0.0)),
+        RigidBody::dynamic(),
+        Collider3D::ball(0.5),
+    ));
+
+    let mut physics = PhysicsWorld3D::new();
+    let mut saw_start = false;
+    for _ in 0..30 {
+        physics.sync_from_scene(&mut scene);
+        let tick = physics.step(&mut scene, DT);
+        for event in tick.collisions {
+            if let PhysicsEvent::CollisionStarted { entity_a, entity_b } = event {
+                let pair = [entity_a, entity_b];
+                if pair.contains(&ball) && pair.contains(&floor) {
+                    saw_start = true;
+                }
+            }
+        }
+        if saw_start {
+            break;
+        }
+    }
+    assert!(saw_start, "expected a CollisionStarted for ball and floor");
+}
+
+#[test]
+fn sensor_generates_events_without_response() {
+    let mut scene = SceneWorld::new();
+    let trigger = scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        RigidBody::fixed(),
+        Collider3D::cuboid(2.0, 2.0, 2.0).sensor(true),
+    ));
+    let ball = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 0.5, 0.0)),
+        RigidBody::dynamic(),
+        Collider3D::ball(0.5),
+    ));
+
+    let mut physics = PhysicsWorld3D::new();
+    let mut saw_start = false;
+    for _ in 0..30 {
+        physics.sync_from_scene(&mut scene);
+        let tick = physics.step(&mut scene, DT);
+        for event in tick.collisions {
+            if let PhysicsEvent::CollisionStarted { entity_a, entity_b } = event {
+                let pair = [entity_a, entity_b];
+                if pair.contains(&ball) && pair.contains(&trigger) {
+                    saw_start = true;
+                }
+            }
+        }
+    }
+    assert!(saw_start, "sensor should generate CollisionStarted");
+    // Sensor gives no contact response: the ball passes through (y < 0).
+    assert!(position(&scene, ball).y < 0.5);
+}
+
+#[test]
+fn raycast_hits_closest_collider() {
+    let mut scene = SceneWorld::new();
+    let target = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 0.0, -5.0)),
+        RigidBody::fixed(),
+        Collider3D::cuboid(1.0, 1.0, 1.0),
+    ));
+
+    let mut physics = PhysicsWorld3D::new();
+    // One step so the broad phase is ready for queries.
+    physics.sync_from_scene(&mut scene);
+    physics.step(&mut scene, DT);
+
+    let hit = physics
+        .cast_ray(
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, -1.0),
+            100.0,
+            &RayFilter::everything(),
+        )
+        .expect("ray should hit the cube");
+    assert_eq!(hit.entity, target);
+    assert!((hit.distance - 4.5).abs() < 0.01, "hit at {}", hit.distance);
+    assert!((hit.normal.z - 1.0).abs() < 0.01);
+
+    // Excluding the target entity yields no hit.
+    let miss = physics.cast_ray(
+        Vec3::ZERO,
+        Vec3::new(0.0, 0.0, -1.0),
+        100.0,
+        &RayFilter::everything().excluding(target),
+    );
+    assert!(miss.is_none());
+}
+
+#[test]
+fn impulse_changes_velocity() {
+    let mut scene = SceneWorld::new();
+    let ball = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 100.0, 0.0)),
+        RigidBody::dynamic().gravity_scale(0.0),
+        Collider3D::ball(0.5),
+    ));
+
+    let mut physics = PhysicsWorld3D::new();
+    physics.sync_from_scene(&mut scene);
+    physics.apply_impulse(ball, Vec3::new(5.0, 0.0, 0.0));
+    step_n(&mut physics, &mut scene, 10);
+
+    assert!(position(&scene, ball).x > 0.3, "impulse should push +x");
+    assert!(physics.velocity(ball).x > 1.0);
+}
+
+#[test]
+fn kinematic_position_body_pushes_dynamic() {
+    let mut scene = SceneWorld::new();
+    let ball = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 5.0, 0.0)),
+        RigidBody::dynamic().gravity_scale(0.0),
+        Collider3D::ball(0.5),
+    ));
+    // Platform sweeps toward the ball.
+    let platform = scene.spawn((
+        Transform::from_position(Vec3::new(-5.0, 5.0, 0.0)),
+        RigidBody::kinematic_position(),
+        Collider3D::cuboid(1.0, 1.0, 1.0),
+    ));
+
+    let mut physics = PhysicsWorld3D::new();
+    for _ in 0..120 {
+        // Move the platform toward +x before syncing.
+        if let Ok(mut t) = scene.get::<&mut Transform>(platform) {
+            t.position.x += 4.0 * DT;
+        }
+        physics.sync_from_scene(&mut scene);
+        physics.step(&mut scene, DT);
+    }
+
+    assert!(
+        position(&scene, ball).x > 0.5,
+        "kinematic platform should push the ball, x = {}",
+        position(&scene, ball).x
+    );
+}
+
+#[test]
+fn character_controller_walks_and_stays_grounded() {
+    let mut scene = SceneWorld::new();
+    let _floor = scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        RigidBody::fixed(),
+        Collider3D::cuboid(40.0, 1.0, 40.0),
+    ));
+    let character = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 1.5, 0.0)),
+        RigidBody::kinematic_position(),
+        Collider3D::capsule(0.5, 0.4),
+        CharacterController::new().snap_to_ground(0.5),
+        CharacterVelocity::new(Vec3::new(2.0, 0.0, 0.0)),
+    ));
+
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 90);
+
+    let pos = position(&scene, character);
+    assert!(pos.x > 1.5, "character should walk +x, x = {}", pos.x);
+    // Capsule half_height 0.5 + radius 0.4 → feet at y - 0.9; floor top 0.5.
+    assert!(
+        (1.3..=1.6).contains(&pos.y),
+        "character should stand on the floor, y = {}",
+        pos.y
+    );
+}
+
+#[test]
+fn velocity_based_character_collider_follows_the_move() {
+    // KinematicVelocityBased characters: the collider must follow the
+    // resolved controller move, or it stays at spawn while the scene
+    // transform walks on (regression: character fell through the floor).
+    let mut scene = SceneWorld::new();
+    let _floor = scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        RigidBody::fixed(),
+        Collider3D::cuboid(40.0, 1.0, 40.0),
+    ));
+    let character = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 2.0, 0.0)),
+        RigidBody::kinematic_velocity(),
+        Collider3D::capsule(0.5, 0.4),
+        CharacterController::new().snap_to_ground(0.5),
+        CharacterVelocity::new(Vec3::new(1.0, -3.0, 0.0)),
+    ));
+
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 90);
+
+    let pos = position(&scene, character);
+    assert!(pos.x > 0.5, "character should walk +x, x = {}", pos.x);
+    // Capsule feet at y - 0.9; floor top 0.5 → rest at y = 1.4.
+    assert!(
+        (1.3..=1.6).contains(&pos.y),
+        "character should land on the floor, y = {}",
+        pos.y
+    );
+    assert!(
+        physics.grounded(character),
+        "character should be grounded after landing"
+    );
+}
+
+#[test]
+fn despawned_entity_leaves_physics_world() {
+    let mut scene = SceneWorld::new();
+    let ball = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 10.0, 0.0)),
+        RigidBody::dynamic(),
+        Collider3D::ball(0.5),
+    ));
+
+    let mut physics = PhysicsWorld3D::new();
+    physics.sync_from_scene(&mut scene);
+    assert_eq!(physics.body_count(), 1);
+
+    scene.despawn(ball).unwrap();
+    physics.sync_from_scene(&mut scene);
+    assert_eq!(physics.body_count(), 0);
+}
+
+#[test]
+fn collider_offset_moves_the_shape_off_the_entity_origin() {
+    // A model whose geometry sits above its origin gets a collider offset
+    // so the box covers the mesh, not the pivot.
+    let mut scene = SceneWorld::new();
+    let target = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 0.0, -5.0)),
+        RigidBody::fixed(),
+        Collider3D::cuboid(1.0, 1.0, 1.0).offset([0.0, 0.0, 2.0]),
+    ));
+    let mut physics = PhysicsWorld3D::new();
+    physics.sync_from_scene(&mut scene);
+    physics.step(&mut scene, DT);
+    let hit = physics
+        .cast_ray(
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, -1.0),
+            100.0,
+            &RayFilter::everything(),
+        )
+        .expect("ray should hit the offset cube");
+    assert_eq!(hit.entity, target);
+    // The box is centred at z = -3, so its near face is at z = -2.5.
+    assert!((hit.distance - 2.5).abs() < 0.01, "hit at {}", hit.distance);
+}
+
+#[test]
+fn rotated_bodies_spawn_with_their_full_rotation() {
+    // A thin wall turned 90° about Y spans Z, not X. (Bodies used to spawn
+    // with the quaternion's vector part as the angle: about half the turn.)
+    let mut scene = SceneWorld::new();
+    let mut t = Transform::from_position(Vec3::ZERO);
+    t.rotation = glam::Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+    let wall = scene.spawn((t, RigidBody::fixed(), Collider3D::cuboid(10.0, 2.0, 0.2)));
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 1);
+    let filter = RayFilter::everything();
+    // Along X through the wall's thin side: hits at x ≈ -0.1.
+    let hit = physics
+        .cast_ray(Vec3::new(-5.0, 0.0, 0.0), Vec3::X, 20.0, &filter)
+        .expect("hits the wall");
+    assert_eq!(hit.entity, wall);
+    assert!((hit.point.x + 0.1).abs() < 0.02, "{:?}", hit.point);
+    // Along X but 3 m to the side: the wall reaches z = ±5, so it hits.
+    assert!(physics
+        .cast_ray(Vec3::new(-5.0, 0.0, 3.0), Vec3::X, 20.0, &filter)
+        .is_some());
+}
+
+#[test]
+fn collider_snapshots_answer_raycasts_and_list_world_shapes() {
+    let mut scene = SceneWorld::new();
+    let near = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 0.0, -3.0)),
+        RigidBody::fixed(),
+        Collider3D::ball(0.5),
+    ));
+    let far = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 0.0, -8.0)),
+        RigidBody::fixed(),
+        Collider3D::cuboid(2.0, 2.0, 2.0).offset([0.0, 1.0, 0.0]),
+    ));
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 1);
+    let snap = physics.collider_snapshot();
+    assert_eq!(snap.len(), 2);
+
+    let all = RayFilter::everything();
+    let hit = snap
+        .cast_ray(Vec3::ZERO, Vec3::new(0.0, 0.0, -2.0), 100.0, &all)
+        .unwrap();
+    assert_eq!(hit.entity, near);
+    assert!((hit.distance - 2.5).abs() < 1e-3, "{}", hit.distance);
+    assert!((hit.normal.z - 1.0).abs() < 1e-3);
+    let past = snap
+        .cast_ray(Vec3::ZERO, -Vec3::Z, 100.0, &all.clone().excluding(near))
+        .unwrap();
+    assert_eq!(past.entity, far);
+    assert!((past.distance - 7.0).abs() < 1e-3, "{}", past.distance);
+    assert!(snap.cast_ray(Vec3::ZERO, -Vec3::Z, 2.0, &all).is_none());
+    assert!(snap.cast_ray(Vec3::ZERO, Vec3::ZERO, 2.0, &all).is_none());
+
+    let shapes = snap.shapes();
+    let (_, cube, _) = shapes.iter().find(|(e, _, _)| *e == far).unwrap();
+    match cube {
+        WorldShape::Cuboid {
+            center,
+            half_extents,
+            ..
+        } => {
+            // The collider offset is part of the world centre.
+            assert!((*center - Vec3::new(0.0, 1.0, -8.0)).length() < 1e-4);
+            assert!((*half_extents - Vec3::ONE).length() < 1e-4);
+        }
+        other => panic!("expected a cuboid, got {other:?}"),
+    }
+}
+
+/// Big snapshots answer through a bounding-volume tree; the answers must
+/// be the ones testing every collider gives (closest hit, exclusions,
+/// sensors, the distance limit).
+#[test]
+fn big_collider_snapshots_answer_raycasts_like_small_ones() {
+    let mut scene = SceneWorld::new();
+    let mut balls = Vec::new();
+    for i in 0..200_u16 {
+        let x = f32::from(i % 20) * 2.0;
+        let z = f32::from(i / 20) * 2.0;
+        let mut collider = Collider3D::ball(0.5);
+        if i == 3 {
+            collider.sensor = true;
+        }
+        balls.push(scene.spawn((Transform::from_position(Vec3::new(x, 0.0, z)), collider)));
+    }
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 1);
+    let snap = physics.collider_snapshot();
+    assert_eq!(snap.len(), 200);
+    let solid = RayFilter::no_sensors();
+
+    // Along the first row: the nearest ball, then past an excluded one.
+    let hit = snap
+        .cast_ray(Vec3::new(-5.0, 0.0, 0.0), Vec3::X, 100.0, &solid)
+        .unwrap();
+    assert_eq!(hit.entity, balls[0]);
+    assert!((hit.distance - 4.5).abs() < 1e-3, "{}", hit.distance);
+    assert!((hit.normal.x + 1.0).abs() < 1e-3);
+    let next = snap
+        .cast_ray(
+            Vec3::new(-5.0, 0.0, 0.0),
+            Vec3::X,
+            100.0,
+            &solid.clone().excluding(balls[0]),
+        )
+        .unwrap();
+    assert_eq!(next.entity, balls[1]);
+    assert!((next.distance - 6.5).abs() < 1e-3);
+    // Straight down onto every ball; the sensor is skipped unless asked for.
+    for (i, ball) in balls.iter().enumerate() {
+        let position = scene.get::<&Transform>(*ball).unwrap().position;
+        let from = position + Vec3::Y * 3.0;
+        let hit = snap.cast_ray(from, -Vec3::Y, 10.0, &solid);
+        if i == 3 {
+            assert!(hit.is_none());
+            let any = snap
+                .cast_ray(from, -Vec3::Y, 10.0, &RayFilter::everything())
+                .unwrap();
+            assert_eq!(any.entity, *ball);
+        } else {
+            let hit = hit.unwrap();
+            assert_eq!(hit.entity, *ball);
+            assert!((hit.distance - 2.5).abs() < 1e-3);
+        }
+        assert!(snap.cast_ray(from, -Vec3::Y, 2.0, &solid).is_none());
+    }
+    // Between the rows: nothing.
+    assert!(snap
+        .cast_ray(Vec3::new(-5.0, 0.0, 1.0), Vec3::X, 100.0, &solid)
+        .is_none());
+}
+
+#[test]
+fn a_collider_without_a_body_is_static_scenery_that_scripts_can_move() {
+    let mut scene = SceneWorld::new();
+    // A floor and a wall with colliders only (how editors place scenery).
+    let _floor = scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        Collider3D::cuboid(20.0, 1.0, 20.0),
+    ));
+    let wall = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 2.0, -5.0)),
+        Collider3D::cuboid(4.0, 4.0, 1.0),
+    ));
+    let ball = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 3.0, 0.0)),
+        RigidBody::dynamic(),
+        Collider3D::ball(0.5),
+    ));
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 120);
+    let y = position(&scene, ball).y;
+    assert!(y > 0.8 && y < 1.3, "the floor holds the ball, y = {y}");
+    // Static: never moved by physics.
+    assert_eq!(position(&scene, wall), Vec3::new(0.0, 2.0, -5.0));
+
+    let hit = physics
+        .collider_snapshot()
+        .cast_ray(
+            Vec3::new(0.0, 2.0, 0.0),
+            Vec3::NEG_Z,
+            50.0,
+            &RayFilter::everything(),
+        )
+        .expect("the wall blocks the ray");
+    assert_eq!(hit.entity, wall);
+    assert!((hit.distance - 4.5).abs() < 1e-3, "{}", hit.distance);
+
+    // A script moves the wall; the collider follows.
+    scene.get::<&mut Transform>(wall).unwrap().position = Vec3::new(0.0, 2.0, -9.0);
+    step_n(&mut physics, &mut scene, 1);
+    let hit = physics
+        .collider_snapshot()
+        .cast_ray(
+            Vec3::new(0.0, 2.0, 0.0),
+            Vec3::NEG_Z,
+            50.0,
+            &RayFilter::everything(),
+        )
+        .unwrap();
+    assert!((hit.distance - 8.5).abs() < 1e-3, "{}", hit.distance);
+
+    // Removing the collider removes the body.
+    let before = physics.body_count();
+    scene.remove_one::<Collider3D>(wall).unwrap();
+    step_n(&mut physics, &mut scene, 1);
+    assert_eq!(physics.body_count(), before - 1);
+}
+
+/// Writes a closed ramp (a wedge rising along +X: `y = x` over a 1 m
+/// footprint) as an OBJ file and returns its absolute path.
+fn ramp_obj(tag: &str) -> String {
+    let dir = std::env::temp_dir().join(format!("automata-physics-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("ramp.obj");
+    std::fs::write(
+        &file,
+        "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 0 1\nv 1 0 1\nv 1 1 1\n\
+         f 1 3 2\nf 4 5 6\nf 1 2 5\nf 1 5 4\nf 2 3 6\nf 2 6 5\nf 1 4 6\nf 1 6 3\n",
+    )
+    .unwrap();
+    file.to_string_lossy().into_owned()
+}
+
+#[test]
+fn mesh_colliders_hit_the_real_triangles_at_the_entity_scale() {
+    let path = ramp_obj("mesh");
+    let mut scene = SceneWorld::new();
+    let ramp = scene.spawn((
+        Transform::from_position(Vec3::ZERO).with_scale(Vec3::splat(2.0)),
+        Collider3D::mesh(&path),
+    ));
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 1);
+    assert_eq!(physics.collider_count(), 1);
+
+    // Scaled ×2 the slope is y = x over 0..2: straight down at x = 0.5
+    // lands on the slope at y = 0.5, not on the bounding box top (y = 2).
+    let all = RayFilter::everything();
+    let hit = physics
+        .cast_ray(Vec3::new(0.5, 10.0, 1.0), -Vec3::Y, 20.0, &all)
+        .unwrap();
+    assert_eq!(hit.entity, ramp);
+    assert!((hit.point.y - 0.5).abs() < 1e-3, "{:?}", hit.point);
+    // Snapshots (what scripts query) agree, and list the mesh's triangles.
+    let snap = physics.collider_snapshot();
+    let again = snap
+        .cast_ray(Vec3::new(1.5, 10.0, 1.0), -Vec3::Y, 20.0, &all)
+        .unwrap();
+    assert!((again.point.y - 1.5).abs() < 1e-3, "{:?}", again.point);
+    let shapes = snap.shapes();
+    let WorldShape::Mesh { mesh, .. } = shapes[0].1 else {
+        panic!("expected a mesh, got {:?}", shapes[0].1);
+    };
+    let (verts, tris) = snap.mesh_triangles(mesh).unwrap();
+    assert_eq!(tris.len(), 8);
+    assert!(verts.iter().any(|v| (v.x - 2.0).abs() < 1e-5));
+}
+
+#[test]
+fn convex_hulls_give_dynamic_bodies_mass_and_meshes_fall_back_to_them() {
+    let path = ramp_obj("hull");
+    let mut scene = SceneWorld::new();
+    let _floor = scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        Collider3D::cuboid(20.0, 1.0, 20.0),
+    ));
+    let hull = scene.spawn((
+        Transform::from_position(Vec3::new(-3.0, 3.0, 0.0)),
+        RigidBody::dynamic(),
+        Collider3D::convex_hull(&path),
+    ));
+    // A mesh on a dynamic body plays as its hull instead of a massless
+    // triangle soup that would sink through the floor.
+    let mesh = scene.spawn((
+        Transform::from_position(Vec3::new(3.0, 3.0, 0.0)),
+        RigidBody::dynamic(),
+        Collider3D::mesh(&path),
+    ));
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 180);
+    for entity in [hull, mesh] {
+        let y = position(&scene, entity).y;
+        // Floor top at 0.5; the ramp's base sits on it.
+        assert!((0.3..0.8).contains(&y), "should rest on the floor, y = {y}");
+    }
+    let shapes = physics.collider_snapshot().shapes();
+    assert!(shapes
+        .iter()
+        .filter(|(e, _, _)| *e == hull || *e == mesh)
+        .all(|(_, s, _)| matches!(s, WorldShape::Mesh { .. })));
+}
+
+#[test]
+fn a_missing_model_spawns_no_collider() {
+    let mut scene = SceneWorld::new();
+    scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        Collider3D::mesh("/definitely/not/here.glb"),
+    ));
+    let mut physics = PhysicsWorld3D::new();
+    step_n(&mut physics, &mut scene, 1);
+    assert_eq!(physics.collider_count(), 0);
+}
+
+#[test]
+fn root_motion_walks_a_character_into_a_wall_and_stops() {
+    use automata_assets::anim::{Channel, Interpolation, Property, RigNode, Trs};
+    use automata_assets::{Clip, Rig};
+    use automata_scene::{Animator, CharacterMotion};
+
+    // A clip whose root bone walks +X at 2 m/s, looping every second.
+    let rig = Rig {
+        nodes: vec![RigNode {
+            name: "root".into(),
+            parent: None,
+            rest: Trs::IDENTITY,
+        }],
+        joints: vec![(0, glam::Mat4::IDENTITY)],
+        import: glam::Mat4::IDENTITY,
+        clips: vec![Clip {
+            name: "Walk".into(),
+            duration: 1.0,
+            channels: vec![Channel {
+                node: 0,
+                property: Property::Translation,
+                interpolation: Interpolation::Linear,
+                times: vec![0.0, 1.0],
+                values: vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+            }],
+            events: Vec::new(),
+        }],
+        springs: automata_assets::springs::Springs::default(),
+    };
+    let mut animator = Animator::new(std::sync::Arc::new(rig));
+    animator.root_motion = true;
+    animator.play("Walk");
+
+    let mut scene = SceneWorld::new();
+    scene.spawn((
+        Transform::from_position(Vec3::ZERO),
+        RigidBody::fixed(),
+        Collider3D::cuboid(40.0, 1.0, 40.0),
+    ));
+    // A wall whose near face is at x = 3.
+    scene.spawn((
+        Transform::from_position(Vec3::new(3.5, 2.0, 0.0)),
+        RigidBody::fixed(),
+        Collider3D::cuboid(1.0, 4.0, 10.0),
+    ));
+    // No CharacterVelocity: the animation alone moves it.
+    let character = scene.spawn((
+        Transform::from_position(Vec3::new(0.0, 1.4, 0.0)),
+        RigidBody::kinematic_position(),
+        Collider3D::capsule(0.5, 0.4),
+        CharacterController::new().snap_to_ground(0.5),
+        animator,
+    ));
+
+    let mut physics = PhysicsWorld3D::new();
+    let mut xs = Vec::new();
+    for _ in 0..180 {
+        physics.sync_from_scene(&mut scene);
+        physics.move_characters(&mut scene, DT);
+        physics.step(&mut scene, DT);
+        automata_scene::animate(&mut scene, DT);
+        xs.push(position(&scene, character).x);
+    }
+    assert!(scene.get::<&CharacterMotion>(character).is_ok());
+    // About 2 m/s while free (one frame behind the animation)...
+    assert!((xs[59] - 1.97).abs() < 0.1, "x after 1 s = {}", xs[59]);
+    // ...then held at the wall: x = 3 minus the capsule radius and offset.
+    let x = position(&scene, character).x;
+    assert!((2.4..2.65).contains(&x), "stopped at the wall, x = {x}");
+    assert!((xs[179] - xs[150]).abs() < 1e-3, "and stays there");
+}

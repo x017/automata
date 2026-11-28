@@ -1,0 +1,82 @@
+// A UI screen made in Oberon's UI editor. Scripts reach its widgets by
+// name: ctx.ui.screen("results").set("score", 10)
+(
+    design_size: (1280.0, 720.0),
+    hud: false,
+    modal: true,
+    pause: true,
+    escape: false,
+    theme: (
+        panel: Some((0.07, 0.09, 0.14, 0.94)),
+        button: Some((0.16, 0.2, 0.3, 1.0)),
+        hover: Some((0.24, 0.3, 0.44, 1.0)),
+        press: Some((0.11, 0.14, 0.22, 1.0)),
+        accent: Some((1.0, 0.72, 0.25, 1.0)),
+        border: Some((0.3, 0.36, 0.5, 1.0)),
+        text_size: Some(20.0),
+    ),
+    nodes: [
+        (
+            kind: Column,
+            anchor: "center",
+            width: Some(460.0),
+            gap: 14.0,
+            padding: 40.0,
+            panel: true,
+            children: [
+                (
+                    kind: Label,
+                    name: "heading",
+                    text: "TIME!",
+                    size: Some(28.0),
+                    color: Some((1.0, 0.72, 0.25, 1.0)),
+                    align: "center",
+                    font: "fonts/PressStart2P-Regular.ttf",
+                ),
+                (
+                    kind: Label,
+                    name: "final",
+                    text: "SCORE 0",
+                    size: Some(20.0),
+                    align: "center",
+                    font: "fonts/PressStart2P-Regular.ttf",
+                ),
+                (
+                    kind: Label,
+                    name: "detail",
+                    text: "0 right, 0 missed",
+                    color: Some((0.72, 0.76, 0.84, 1.0)),
+                    align: "center",
+                ),
+                (
+                    kind: Label,
+                    name: "best",
+                    text: "Best 0",
+                    align: "center",
+                ),
+                (
+                    kind: Space,
+                    height: Some(6.0),
+                ),
+                (
+                    kind: Row,
+                    height: Some(52.0),
+                    gap: 12.0,
+                    columns: 2,
+                    children: [
+                        (
+                            kind: Button,
+                            name: "again",
+                            text: "results.again",
+                        ),
+                        (
+                            kind: Button,
+                            name: "title",
+                            text: "results.title",
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ],
+)

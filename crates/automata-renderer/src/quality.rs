@@ -1,0 +1,199 @@
+//! Graphics quality presets.
+//!
+//! A preset bundles the quality knobs the renderer supports; games pick one
+//! at startup (`Game(graphics="high")` from Python). Finer-grained controls
+//! build on this type.
+//!
+//! [`GraphicsQuality::Beautiful`] is the top tier: soft shadows, physically
+//! based sun lighting, an HDR pipeline with bloom and FXAA, and refractive
+//! water. The other presets keep the cheaper forward path; High and Ultra
+//! still split their sun shadows into cascades so nearby shadows are crisp.
+
+/// A graphics quality preset.
+///
+/// The preset controls the shadow maps: [`GraphicsQuality::Low`] disables
+/// shadows entirely; higher presets add resolution and cascades, and
+/// [`GraphicsQuality::Beautiful`] switches on everything else too.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum GraphicsQuality {
+    /// No shadows — for weak GPUs and stylized flat looks.
+    Low,
+    /// One 1024px shadow map.
+    Medium,
+    /// Two 2048px shadow cascades (the default).
+    #[default]
+    High,
+    /// Three 2048px shadow cascades.
+    Ultra,
+    /// Four 2048px shadow cascades with soft filtering, physically based
+    /// lighting, HDR bloom, FXAA and refractive water.
+    Beautiful,
+}
+
+impl GraphicsQuality {
+    /// Every preset, lowest first.
+    pub const ALL: [Self; 5] = [
+        Self::Low,
+        Self::Medium,
+        Self::High,
+        Self::Ultra,
+        Self::Beautiful,
+    ];
+
+    /// A short display name.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+            Self::Ultra => "Ultra",
+            Self::Beautiful => "Beautiful",
+        }
+    }
+
+    /// The shadow map side length in texels, per cascade (`1` when shadows
+    /// are off; the texture still exists so bind groups stay valid).
+    #[must_use]
+    pub fn shadow_map_size(self) -> u32 {
+        match self {
+            Self::Low => 1,
+            Self::Medium => 1024,
+            Self::High | Self::Ultra | Self::Beautiful => 2048,
+        }
+    }
+
+    /// How many point lights (glowing meshes included) cast shadows in a
+    /// frame: none on Low and Medium, 2 on High, 4 on Ultra and Beautiful.
+    #[must_use]
+    pub fn point_shadows(self) -> usize {
+        match self {
+            Self::Low | Self::Medium => 0,
+            Self::High => 2,
+            Self::Ultra | Self::Beautiful => crate::MAX_POINT_SHADOWS,
+        }
+    }
+
+    /// Depth compares (each a bilinear 2x2) a pixel takes per shadowed
+    /// point light: one on High, a 2x2 box on Ultra, 8 Poisson taps on
+    /// Beautiful (none without point shadows). Point shadows are lit
+    /// across a lot of the screen, so this is most of their cost.
+    #[must_use]
+    pub fn point_shadow_taps(self) -> u32 {
+        match self {
+            Self::Low | Self::Medium => 0,
+            Self::High => 1,
+            Self::Ultra => 4,
+            Self::Beautiful => 8,
+        }
+    }
+
+    /// Texels per side of each face of a point light's shadow cube.
+    #[must_use]
+    pub fn point_shadow_size(self) -> u32 {
+        match self {
+            Self::Low | Self::Medium => 1,
+            Self::High => 384,
+            Self::Ultra | Self::Beautiful => 512,
+        }
+    }
+
+    /// How many point lights a frame shades (glowing meshes included);
+    /// the ones nearest the camera and brightest win.
+    #[must_use]
+    pub fn max_point_lights(self) -> usize {
+        match self {
+            Self::Low => 4,
+            Self::Medium => 8,
+            Self::High => 16,
+            Self::Ultra | Self::Beautiful => crate::MAX_POINT_LIGHTS,
+        }
+    }
+
+    /// How far each level of detail reaches, relative to the distances a
+    /// mesh's [`crate::MeshLod`] gives: lower presets switch to the simpler
+    /// meshes sooner. Draw distances aren't scaled.
+    #[must_use]
+    pub fn lod_scale(self) -> f32 {
+        match self {
+            Self::Low => 0.5,
+            Self::Medium => 0.75,
+            Self::High => 1.0,
+            Self::Ultra => 1.5,
+            Self::Beautiful => 2.0,
+        }
+    }
+
+    /// Sun shadow cascades: each splits off a slice of the camera's view
+    /// (up to the sun's shadow distance) with its own map, so nearby
+    /// shadows get the most texels. With one, the map covers the whole
+    /// scene or the view, whichever is smaller.
+    #[must_use]
+    pub fn shadow_cascades(self) -> u32 {
+        match self {
+            Self::Low | Self::Medium => 1,
+            Self::High => 2,
+            Self::Ultra => 3,
+            Self::Beautiful => u32::try_from(crate::shadow::MAX_CASCADES).unwrap_or(1),
+        }
+    }
+
+    /// Whether this preset uses the Beautiful path: soft shadows, physically
+    /// based lighting, HDR with bloom and FXAA, and refractive water.
+    #[must_use]
+    pub fn is_beautiful(self) -> bool {
+        matches!(self, Self::Beautiful)
+    }
+
+    /// Whether this preset applies the Environment's post effects (colour
+    /// grading, vignette, grain, chromatic aberration): Medium and up.
+    #[must_use]
+    pub fn post_effects(self) -> bool {
+        !matches!(self, Self::Low)
+    }
+
+    /// Whether this preset draws bloom: a cheap one from the brightest
+    /// pixels on High and Ultra, the full HDR one on Beautiful.
+    #[must_use]
+    pub fn bloom(self) -> bool {
+        matches!(self, Self::High | Self::Ultra | Self::Beautiful)
+    }
+
+    /// Whether this preset renders shadows at all.
+    #[must_use]
+    pub fn shadows_enabled(self) -> bool {
+        !matches!(self, Self::Low)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quality_ladders_shadow_resolution() {
+        assert!(!GraphicsQuality::Low.shadows_enabled());
+        assert!(GraphicsQuality::Medium.shadows_enabled());
+        assert!(
+            GraphicsQuality::Medium.shadow_map_size() < GraphicsQuality::High.shadow_map_size()
+        );
+        let cascades: Vec<u32> = GraphicsQuality::ALL
+            .iter()
+            .map(|q| q.shadow_cascades())
+            .collect();
+        assert_eq!(cascades, [1, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn only_beautiful_goes_hdr() {
+        for q in GraphicsQuality::ALL {
+            assert_eq!(q.is_beautiful(), q == GraphicsQuality::Beautiful);
+        }
+        assert!(GraphicsQuality::Beautiful.shadows_enabled());
+    }
+
+    #[test]
+    fn default_is_high() {
+        assert_eq!(GraphicsQuality::default(), GraphicsQuality::High);
+    }
+}

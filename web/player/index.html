@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>AUTOMATA</title>
+  <!-- Start every download at once rather than one after another (Pyodide
+       fetches these with plain fetch(), which these hints match). -->
+  <link rel="modulepreload" href="pyodide/pyodide.mjs">
+  <link rel="modulepreload" href="pyodide/pyodide.asm.mjs">
+  <link rel="preload" href="pyodide/pyodide.asm.wasm" as="fetch" crossorigin>
+  <link rel="preload" href="pyodide/python_stdlib.zip" as="fetch" crossorigin>
+  <link rel="preload" href="player.json" as="fetch" crossorigin>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b0d14; overflow: hidden; }
+    canvas { display: block; width: 100vw; height: 100vh; touch-action: none; outline: none; }
+    #status {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: #c8cede; font: 16px/1.4 system-ui, sans-serif; pointer-events: none;
+      white-space: pre-wrap; text-align: center; padding: 2em;
+    }
+    #status.error { color: #ff8c8c; align-items: flex-start; text-align: left; font-family: monospace; }
+    #fullscreen {
+      position: fixed; right: 12px; bottom: 12px; width: 36px; height: 36px; padding: 0;
+      border: 0; border-radius: 6px; background: rgba(20, 24, 36, 0.55); color: #c8cede;
+      font: 20px/36px system-ui, sans-serif; cursor: pointer; opacity: 0.6;
+    }
+    #fullscreen:hover { opacity: 1; }
+    #fullscreen[hidden], :fullscreen #fullscreen { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" tabindex="0"></canvas>
+  <div id="status">Loading…</div>
+  <button id="fullscreen" title="Full screen" aria-label="Full screen" hidden>⛶</button>
+  <script type="module" src="player.js"></script>
+</body>
+</html>

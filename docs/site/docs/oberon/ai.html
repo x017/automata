@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI · AUTOMATA docs</title>
+<meta name="description" content="It&#x27;s all plain Python in the shared script API, so it works the same in Play, in exported games, in run_scene and in tests.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../../dither.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../tutorials/fps.html">A first-person shooter</a></li><li><a href="../tutorials/platformer.html">A 2D platformer</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="index.html">Introduction</a></li><li><a href="interface.html">The interface</a></li><li><a href="command-line.html">The oberon command</a></li><li><a href="scripting.html">Scripting</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="graphics.html">Graphics</a></li><li><a href="code-editor.html">The code editor</a></li><li><a href="ui-editor.html">The UI editor</a></li><li><a href="materials.html">Materials</a></li><li><a href="shaders.html">Custom shaders</a></li><li><a href="models.html">Models</a></li><li><a href="animation-graphs.html">Animation graphs</a></li><li><a href="attachments-and-ik.html">Attachments &amp; IK</a></li><li><a href="ragdolls.html">Ragdolls</a></li><li><a href="navigation.html">Navigation</a></li><li><a href="ai.html" aria-current="page">AI</a></li><li><a href="2d.html">2D games</a></li><li><a href="terrain.html">Terrain</a></li><li><a href="foliage.html">Grass &amp; foliage</a></li><li><a href="audio.html">Audio</a></li><li><a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="editor-workflow.html">Editor workflow</a></li><li><a href="exporting.html">Exporting your game</a></li><li><a href="steam.html">Steam</a></li><li><a href="shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/grass-and-foliage.html">Grass &amp; foliage</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/touch-controls.html">Touch controls</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li><li><a href="../guides/performance.html">Performance</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>AI</h1>
+<p><img src="../../../assets/oberon/ai.png" alt="A drone's senses from above: its sight cone stops at a wall, so it can't see the player hiding behind it, but the circle of a blaster shot reaches it" loading="lazy" decoding="async"></p>
+<p><code>ctx.ai</code> gives scripts the building blocks for enemies, guards and
+creatures that make decisions:</p>
+<div class="table"><table><thead><tr><th></th><th>What it does</th><th>Use it for</th></tr></thead><tbody><tr><td><a href="#state-machines"><strong>State machines</strong></a></td><td>One mood at a time (patrol, chase, search), each with its own code, and clear rules for switching</td><td>Most enemies</td></tr><tr><td><a href="#behaviour-trees"><strong>Behaviour trees</strong></a></td><td>Small tasks plugged together: "try this, else that", "do these in order", "wait 2 s"</td><td>Bosses and characters with lots of options</td></tr><tr><td><a href="#sight"><strong>Sight</strong></a></td><td><code>ctx.ai.can_see(viewer, target)</code>: a cone in front of the viewer, blocked by walls</td><td>Noticing the player</td></tr><tr><td><a href="#hearing"><strong>Hearing</strong></a></td><td><code>ctx.ai.noise(...)</code> makes a noise; <code>ctx.ai.hear(listener)</code> returns the ones that reach it</td><td>Gunshots, footsteps, alarms</td></tr></tbody></table></div>
+<p>It's all plain Python in the shared script API, so it works the same in
+Play, in exported games, in <code>run_scene</code> and in tests.</p>
+<p><a href="https://github.com/x017/automata/tree/main/examples/oberon/fps" rel="noopener">The FPS example</a> uses a state machine with
+sight and hearing: its drones look around until they see you or hear a
+shot, chase you, and search where they lost you. See
+<a href="../tutorials/fps.html#4-the-drones">the tutorial</a>.</p>
+<h2 id="state-machines">State machines<a class="anchor" href="#state-machines" aria-label="Link to this section">#</a></h2>
+<p>A state machine is always in exactly one <em>state</em>. Each state is a
+function that runs every frame while it's active. Returning the name of
+another state switches to it:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">patrol</span>(entity, ctx):
+    entity.nav.go(entity.state[<span class="tok-s">&quot;post&quot;</span>])
+    <span class="tok-k">if</span> ctx.ai.can_see(entity, <span class="tok-s">&quot;Player&quot;</span>):
+        <span class="tok-k">return</span> <span class="tok-s">&quot;chase&quot;</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">chase</span>(entity, ctx):
+    entity.nav.go(<span class="tok-s">&quot;Player&quot;</span>)
+    <span class="tok-k">if</span> <span class="tok-k">not</span> ctx.ai.can_see(entity, <span class="tok-s">&quot;Player&quot;</span>):
+        <span class="tok-k">return</span> <span class="tok-s">&quot;patrol&quot;</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;post&quot;</span>] = entity.transform.position
+    entity.state[<span class="tok-s">&quot;brain&quot;</span>] = ctx.ai.state_machine(
+        {<span class="tok-s">&quot;patrol&quot;</span>: patrol, <span class="tok-s">&quot;chase&quot;</span>: chase}, initial=<span class="tok-s">&quot;patrol&quot;</span>)
+
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;brain&quot;</span>].update(entity, ctx)</code></pre></div>
+<p>Make the machine in <code>start</code> and keep it in <code>entity.state</code>, so each entity
+has its own.</p>
+<p>A state can also be a dict (or an object) with <code>enter</code>, <code>update</code> and
+<code>exit</code>, any of which may be missing. <code>enter</code> runs once on the way in,
+<code>exit</code> once on the way out:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>brain = ctx.ai.state_machine({
+    <span class="tok-s">&quot;idle&quot;</span>: {<span class="tok-s">&quot;enter&quot;</span>: stop_moving, <span class="tok-s">&quot;update&quot;</span>: look_around},
+    <span class="tok-s">&quot;alarm&quot;</span>: {<span class="tok-s">&quot;enter&quot;</span>: sound_the_alarm, <span class="tok-s">&quot;update&quot;</span>: run_to_the_button, <span class="tok-s">&quot;exit&quot;</span>: calm_down},
+})</code></pre></div>
+<p>State functions are called with <code>(entity, ctx)</code>, or `(entity, ctx,
+machine)<code>if they take a third argument, which is handy for</code>machine.time`
+(how long it's been in this state).</p>
+<p>Instead of returning names, you can list the rules separately with <code>when</code>.
+They're checked every frame before the state's update; <code>&quot;*&quot;</code> means "from
+any state":</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>brain.when(<span class="tok-s">&quot;patrol&quot;</span>, <span class="tok-s">&quot;chase&quot;</span>, <span class="tok-k">lambda</span> e, c: c.ai.can_see(e, <span class="tok-s">&quot;Player&quot;</span>))
+brain.when(<span class="tok-s">&quot;*&quot;</span>, <span class="tok-s">&quot;flee&quot;</span>, <span class="tok-k">lambda</span> e, c: e.attributes[<span class="tok-s">&quot;health&quot;</span>] &lt; <span class="tok-n">20</span>)</code></pre></div>
+<div class="table"><table><thead><tr><th><code>StateMachine</code></th><th></th></tr></thead><tbody><tr><td><code>update(entity, ctx)</code></td><td>Runs one frame: the rules, then the state's update. Returns the state it's in</td></tr><tr><td><code>state</code></td><td>The current state's name (<code>None</code> before the first update)</td></tr><tr><td><code>previous</code></td><td>The one before</td></tr><tr><td><code>time</code></td><td>Seconds in the current state (from <code>ctx.time.delta</code>)</td></tr><tr><td><code>go(name)</code></td><td>Switch now (<code>exit</code>, then <code>enter</code>)</td></tr><tr><td><code>is_in(*names)</code></td><td>True if it's in any of them</td></tr><tr><td><code>add(name, spec, enter=, update=, exit=)</code></td><td>Add or replace a state</td></tr><tr><td><code>when(source, target, condition)</code></td><td>A switching rule; <code>condition(entity, ctx)</code></td></tr><tr><td><code>history</code></td><td>The last 16 states, oldest first</td></tr><tr><td><code>states</code></td><td>Every state's name</td></tr><tr><td><code>on_change</code></td><td>Set to <code>fn(entity, ctx, old, new)</code> to hear about every switch</td></tr></tbody></table></div>
+<p>A misspelt state name raises <code>KeyError</code> with a suggestion.</p>
+<h2 id="behaviour-trees">Behaviour trees<a class="anchor" href="#behaviour-trees" aria-label="Link to this section">#</a></h2>
+<p>A behaviour tree is built from <em>nodes</em>. Every frame you <code>tick</code> the root,
+and each node answers <code>SUCCESS</code>, <code>FAILURE</code> or <code>RUNNING</code> (not done yet,
+tick me again next frame). Plain functions become actions: returning
+<code>True</code> (or nothing) is success, <code>False</code> is failure, and returning
+<code>ctx.ai.RUNNING</code> keeps it going.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">attack</span>(entity, ctx):
+    ctx.audio.play(<span class="tok-s">&quot;sounds/swing.ogg&quot;</span>)
+
+
+<span class="tok-k">def</span> <span class="tok-f">go_home</span>(entity, ctx):
+    entity.nav.go(entity.state[<span class="tok-s">&quot;home&quot;</span>])
+    <span class="tok-k">return</span> <span class="tok-b">True</span> <span class="tok-k">if</span> entity.nav.arrived <span class="tok-k">else</span> ctx.ai.RUNNING
+
+
+<span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    ai = ctx.ai
+    entity.state[<span class="tok-s">&quot;tree&quot;</span>] = ai.selector(           <span class="tok-c"># the first that doesn&#x27;t fail</span>
+        ai.sequence(                               <span class="tok-c"># all of these, in order</span>
+            ai.condition(<span class="tok-k">lambda</span> e, c: c.ai.can_see(e, <span class="tok-s">&quot;Player&quot;</span>, distance=<span class="tok-n">2</span>)),
+            ai.cooldown(<span class="tok-n">1.5</span>, attack),
+        ),
+        ai.sequence(go_home, ai.wait(<span class="tok-n">3.0</span>)),
+    )
+
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;tree&quot;</span>].tick(entity, ctx)</code></pre></div>
+<div class="table"><table><thead><tr><th>Node</th><th>Answers</th></tr></thead><tbody><tr><td><code>ai.action(fn)</code></td><td>What <code>fn(entity, ctx)</code> returns</td></tr><tr><td><code>ai.condition(fn)</code></td><td><code>SUCCESS</code> if <code>fn</code> is true, else <code>FAILURE</code>; never running</td></tr><tr><td><code>ai.sequence(*children)</code></td><td>Runs the children in order; fails at the first failure, succeeds when all succeed. A running child is carried on next frame</td></tr><tr><td><code>ai.selector(*children)</code></td><td>Tries the children in order; succeeds at the first success. Starts from the top every frame, so a higher-priority branch can take over</td></tr><tr><td><code>ai.parallel(*children, need=&quot;all&quot;)</code></td><td>Ticks every child each frame; succeeds when all (or with <code>need=&quot;one&quot;</code>, one) succeed</td></tr><tr><td><code>ai.invert(child)</code></td><td>Swaps success and failure</td></tr><tr><td><code>ai.succeed(child)</code></td><td>Success whatever the child says (once it's done)</td></tr><tr><td><code>ai.repeat(child, times=None)</code></td><td>Runs the child again and again (forever, or <code>times</code> times), once per frame</td></tr><tr><td><code>ai.wait(seconds)</code></td><td>Running for that long, then success</td></tr><tr><td><code>ai.cooldown(seconds, child)</code></td><td>Runs the child; once it succeeds, fails straight away for <code>seconds</code> (a shot, a shout)</td></tr></tbody></table></div>
+<p>Every node has <code>tick(entity, ctx)</code>, <code>status</code> (its last answer), <code>reset()</code>
+and <code>describe()</code>, which prints the tree with each node's status, handy
+with <code>ctx.log</code>.</p>
+<p>Which to use? A state machine is easiest when a character has a few
+clear moods. A tree is better when it has many options in a priority
+order, such as a boss that heals if it's hurt, else attacks if you're close,
+else walks over.</p>
+<h2 id="sight">Sight<a class="anchor" href="#sight" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">if</span> ctx.ai.can_see(entity, <span class="tok-s">&quot;Player&quot;</span>, fov=<span class="tok-n">110</span>, distance=<span class="tok-n">15</span>):
+    ...</code></pre></div>
+<p>`can_see(viewer, target, fov=120, distance=20, eye=1.6, aim=1.0,
+forward=(0, 0, -1), walls=True)` is true when the target is:</p>
+<ol><li>within <code>distance</code> metres,</li><li>inside a cone <code>fov</code> degrees wide around the way the viewer faces
+(<code>forward</code>, which is −Z unless you say otherwise, turned by the
+viewer's rotation), and</li><li>not behind anything: a ray from the viewer's eye (<code>eye</code> m above its
+origin) to the target's middle (<code>aim</code> m above its origin) must reach it
+first. <code>walls=False</code> skips the ray.</li></ol>
+<p>The target can be an entity, a name or an <code>(x, y, z)</code> point. The viewer
+needs to face where it's looking: turn it with <code>transform.rotation_euler</code>
+or a Nav Agent's Face Movement. Walls are anything with a collider.</p>
+<p><code>ctx.ai.visible(viewer, targets=None, ...)</code> takes the same options and
+returns every entity in <code>targets</code> (default: all of them) that the viewer
+can see, nearest first.</p>
+<h2 id="hearing">Hearing<a class="anchor" href="#hearing" aria-label="Link to this section">#</a></h2>
+<p>A noise is a point with a radius: anything inside the circle can hear
+it. Make one when something loud happens:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.ai.noise(entity, radius=<span class="tok-n">10</span>, kind=<span class="tok-s">&quot;shot&quot;</span>)   <span class="tok-c"># from where this entity is</span>
+ctx.ai.noise((<span class="tok-n">4</span>, <span class="tok-n">0</span>, <span class="tok-n">2</span>), radius=<span class="tok-n">25</span>, kind=<span class="tok-s">&quot;alarm&quot;</span>)</code></pre></div>
+<p>Listeners ask what reached them this frame:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">for</span> noise <span class="tok-k">in</span> ctx.ai.hear(entity, kinds=<span class="tok-s">&quot;shot&quot;</span>):
+    entity.state[<span class="tok-s">&quot;clue&quot;</span>] = noise.position</code></pre></div>
+<div class="table"><table><thead><tr><th><code>ctx.ai</code></th><th></th></tr></thead><tbody><tr><td><code>noise(position_or_entity, radius=10, kind=&quot;noise&quot;, source=None)</code></td><td>Makes a noise. From an entity, that entity is its source and doesn't hear it. Returns the <code>Noise</code></td></tr><tr><td><code>hear(listener, hearing=1.0, kinds=None)</code></td><td>The noises within <code>radius × hearing</code> of the listener that it hasn't heard yet, closest (for their radius) first. <code>hearing=2</code> for sharp ears; <code>kinds</code> a label or a list of them</td></tr><tr><td><code>noises</code></td><td>Every noise still around</td></tr></tbody></table></div>
+<p>A <code>Noise</code> has <code>position</code>, <code>radius</code>, <code>kind</code>, <code>source</code> (a name, or <code>None</code>),
+<code>time</code> (<code>ctx.time.elapsed</code> when it was made) and <code>distance</code> (from the
+listener). A noise lasts this frame and the next, so a listener whose
+script runs before the noisy one still hears it. Each listener hears each
+noise once.</p>
+<p>Noises don't play sounds: call <code>ctx.audio.play</code> as well.</p>
+<h2 id="in-python">In Python<a class="anchor" href="#in-python" aria-label="Link to this section">#</a></h2>
+<p>Python games get the same classes from <code>automata.ai</code>:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">from</span> automata <span class="tok-k">import</span> ai
+
+brain = ai.StateMachine({<span class="tok-s">&quot;idle&quot;</span>: idle, <span class="tok-s">&quot;chase&quot;</span>: chase}, initial=<span class="tok-s">&quot;idle&quot;</span>)
+tree = ai.Selector(ai.Sequence(ai.Condition(close), attack), wander)
+<span class="tok-k">assert</span> tree.tick(entity, ctx) <span class="tok-k">in</span> (ai.SUCCESS, ai.FAILURE, ai.RUNNING)</code></pre></div>
+<p>Sight and hearing need a <code>ctx</code> with <code>physics.raycast</code> and <code>time</code>, as in
+<code>run_scene</code>. To test a script with a fake <code>ctx</code>, give it the real helpers
+with <code>from automata.script_api import AI</code> and <code>ctx.ai = AI(ctx)</code>, as
+<a href="https://github.com/x017/automata/blob/main/examples/oberon/fps/tests/test_fps.py" rel="noopener">the FPS tests</a> do.</p>
+<h2 id="tips">Tips<a class="anchor" href="#tips" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Remember what was seen.</strong> <code>can_see</code> answers for this frame only. Keep
+the last place you saw the player in <code>entity.state</code>, so the enemy can go
+there when it loses them.</li><li><strong>Don't let sight flicker.</strong> Wait a little (<code>s[&quot;unseen&quot;] &gt; 3</code>) before
+giving up, otherwise a pillar passing in front switches states every
+frame.</li><li><strong>Line of sight is a ray.</strong> Only colliders block it, so put a collider
+on every wall and crate that should hide the player. The target's own
+collider (and anything close to it) counts as a hit on the target.</li><li><strong>Raise the eye</strong> for tall enemies and lower <code>aim</code> for crouching
+targets.</li><li><strong>Debug with <code>describe()</code>.</strong> <code>ctx.log(tree.describe())</code> and
+<code>ctx.log(brain.history)</code> show what the AI was thinking.</li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="navigation.html"><small>Previous</small>Navigation</a><a class="next" href="2d.html"><small>Next</small>2D games</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/ai.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#state-machines">State machines</a></li><li class="l2"><a href="#behaviour-trees">Behaviour trees</a></li><li class="l2"><a href="#sight">Sight</a></li><li class="l2"><a href="#hearing">Hearing</a></li><li class="l2"><a href="#in-python">In Python</a></li><li class="l2"><a href="#tips">Tips</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

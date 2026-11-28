@@ -1,0 +1,9 @@
+// A material. Entities that use it share its colour, surface and
+// textures: material: "materials/dissolve.mat.ron" on a Mesh Renderer. Texture paths are
+// relative to this file's folder.
+(
+    color: (0.85, 0.82, 0.78, 1.0),
+    roughness: 0.6,
+    shader: "../shaders/dissolve.wgsl",
+    shader_params: [0.0, 0.6, 3.0, 0.0, 1.0, 0.45, 0.1, 6.0],
+)

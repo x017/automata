@@ -1,0 +1,482 @@
+// Mesh shader. Prepended at build time: tonemap.wgsl and common.wgsl (camera
+// and light bindings, shadows, sky, PBR, fog, tone mapping).
+//
+// Fragment entry points: four for the forward path, one per mix of the
+// shadows a frame samples (`fs_main` sun and point light shadows,
+// `fs_sun_shadows`, `fs_point_shadows`, `fs_unshadowed`), and
+// `fs_beautiful`. Shadow code that never runs still costs (registers, and
+// software rasterizers walk it for every pixel), so each variant compiles
+// only what it samples.
+//
+// Bind groups:
+//   0 — camera (common.wgsl)
+//   1 — skinned draws only: model matrix and joint palette (plain draws
+//       are instanced: model matrices per instance, locations 5–9)
+//   2 — material (base color texture + sampler, parameters, normal /
+//       metallic-roughness / emissive maps + their shared sampler)
+//   3 — light (common.wgsl)
+
+@group(1) @binding(0) var<uniform> model: mat4x4<f32>;
+
+// One copy of an instanced mesh (`batch.rs`): model matrix columns, and
+// how much of it shows (`params.x`, 1 solid, dithered away toward 0).
+struct InstanceInput {
+    @location(5) m0: vec4<f32>,
+    @location(6) m1: vec4<f32>,
+    @location(7) m2: vec4<f32>,
+    @location(8) m3: vec4<f32>,
+    @location(9) params: vec4<f32>,
+};
+
+// Set by the fading pipeline (copies near their draw distance): the
+// dither below is compiled only there, so every other mesh keeps early
+// depth testing.
+override FADING: bool = false;
+
+// Skinned draws only (`vs_skinned`): one matrix per joint, taking a vertex
+// from bind space to model space. Must match `MAX_JOINTS` in Rust.
+@group(1) @binding(1) var<uniform> joints: array<mat4x4<f32>, 128>;
+
+struct MaterialData {
+    color: vec4<f32>,
+    // RGB emitted light.
+    emissive: vec4<f32>,
+    // Roughness, metallic, normal-map scale, map flags (see MAP_*).
+    params: vec4<f32>,
+    // Texture coordinate scale (xy) and offset (zw): tiling.
+    uv: vec4<f32>,
+    // A custom material shader's `shader_params` (`p0`, `p1`).
+    custom0: vec4<f32>,
+    custom1: vec4<f32>,
+};
+@group(2) @binding(0) var material_texture: texture_2d<f32>;
+@group(2) @binding(1) var material_sampler: sampler;
+@group(2) @binding(2) var<uniform> material_data: MaterialData;
+@group(2) @binding(3) var normal_map: texture_2d<f32>;
+@group(2) @binding(4) var metal_rough_map: texture_2d<f32>;
+@group(2) @binding(5) var emissive_map: texture_2d<f32>;
+@group(2) @binding(6) var map_sampler: sampler;
+
+// Which optional maps the material has (bits of `params.w`): unused maps
+// aren't sampled at all, which matters on software rasterizers.
+const MAP_NORMAL: u32 = 1u;
+const MAP_METAL_ROUGH: u32 = 2u;
+const MAP_EMISSIVE: u32 = 4u;
+// A terrain (automata-scene's terrain.rs): `material_texture` is a 2 x 2
+// atlas of ground layers, `emissive_map` the splat map saying how much of
+// each shows, `material_data.emissive` each layer's repeat (metres) and
+// `material_data.uv` the terrain's size (xy) and half a splat texel (zw).
+const MAP_TERRAIN: u32 = 8u;
+
+struct VertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+};
+
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) world_position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(3) @interpolate(flat) fade: f32,
+};
+
+@vertex
+fn vs_main(in: VertexInput, inst: InstanceInput) -> VertexOutput {
+    var out: VertexOutput;
+    let m = mat4x4<f32>(inst.m0, inst.m1, inst.m2, inst.m3);
+    let world = m * vec4<f32>(in.position, 1.0);
+    out.clip_position = camera.view_proj * world;
+    out.world_position = world.xyz;
+    // Upper 3x3 of the model matrix — correct for rotation + uniform scale.
+    out.normal = (m * vec4<f32>(in.normal, 0.0)).xyz;
+    out.uv = in.uv;
+    out.fade = inst.params.x;
+    return out;
+}
+
+// Grass (`grass.rs`): baked chunks, a `GrassVertex` per blade vertex. The
+// rank (0..1) is the order distance thins blades in, the variant (0..1)
+// the palette column, the draw distance the field's (0 = none).
+const MAX_PUSHERS: u32 = 8u;
+
+struct GrassInput {
+    @location(0) offset_h: vec4<f32>,
+    @location(1) root_variant: vec4<f32>,
+    @location(2) up_rank: vec4<f32>,
+    @location(3) normal_reach: vec4<f32>,
+};
+
+// Must match `keep_at` in grass.rs.
+fn grass_keep(distance: f32, draw_distance: f32) -> f32 {
+    if draw_distance <= 0.0 {
+        return 1.0;
+    }
+    return 1.0 - smoothstep(0.2 * draw_distance, draw_distance, distance);
+}
+
+@vertex
+fn vs_grass(in: GrassInput) -> VertexOutput {
+    var out: VertexOutput;
+    let root = in.root_variant.xyz;
+    let up_axis = in.up_rank.xyz;
+    let rank = in.up_rank.w;
+    let height = max(length(up_axis), 1e-4);
+    let up = up_axis / height;
+    let h = clamp(in.offset_h.w, 0.0, 1.0);
+
+    // Distance: thin out by rank (shrinking the blades just past the cut),
+    // and widen what's left so the field stays as full.
+    let draw_distance = in.normal_reach.w;
+    let distance = length(camera.view_pos.xyz - root);
+    let keep = grass_keep(distance, draw_distance);
+    let shrink = clamp((keep - rank) * 12.0, 0.0, 1.0);
+    var widen = 1.0;
+    if draw_distance > 0.0 {
+        widen = 1.0 + 1.6 * smoothstep(0.2 * draw_distance, draw_distance, distance);
+    }
+
+    // The unbent blade, split into its height and its width.
+    let v = in.offset_h.xyz;
+    let along = dot(v, up) * up;
+    let across = (v - along) * widen;
+
+    // Wind: a slow travelling gust over a quicker flutter, plus a little
+    // idle motion even in still air.
+    let dir = camera.wind.xy;
+    let strength = camera.wind.z;
+    let t = camera.wind.w;
+    let travel = dot(root.xz, dir);
+    let phase = fract(rank * 7.31) * 6.2832;
+    let gust = 0.5 + 0.5 * sin(t * 0.9 - travel * 0.12) * sin(t * 0.37 - travel * 0.05 + 1.3);
+    let flutter = sin(t * 2.7 + phase + travel * 0.6);
+    var lean = dir * strength * (0.25 + 0.95 * gust + 0.15 * flutter);
+    let idle = vec2<f32>(sin(t * 1.3 + phase), cos(t * 1.1 + phase * 1.7)) * 0.04;
+    lean = lean + idle;
+
+    // Pushers: blades within reach lean away, more the closer they are.
+    for (var i = 0u; i < MAX_PUSHERS; i = i + 1u) {
+        let p = camera.pushers[i];
+        if p.w <= 0.0 {
+            continue;
+        }
+        let d = root.xz - p.xz;
+        let reach = p.w + 0.5 * height;
+        let dist = length(d);
+        let rise = root.y - p.y;
+        if dist < reach && rise > -0.6 && rise < p.w + 1.0 {
+            let k = 1.0 - dist / reach;
+            lean = lean + d / max(dist, 1e-3) * k * k * 2.2;
+        }
+    }
+    let amount = length(lean);
+    if amount > 1.6 {
+        lean = lean * (1.6 / amount);
+    }
+
+    // Bend: the tip moves most, and the blade keeps its length.
+    let shift = vec3<f32>(lean.x, 0.0, lean.y) * height * h * h;
+    let along_len = length(along);
+    var bent = along + shift;
+    let bent_len = length(bent);
+    if bent_len > 1e-5 {
+        bent = bent * (along_len / bent_len);
+    }
+    let world = root + (bent + across) * shrink;
+
+    out.clip_position = camera.view_proj * vec4<f32>(world, 1.0);
+    out.world_position = world;
+    out.normal = normalize(normalize(in.normal_reach.xyz) + vec3<f32>(lean.x, 0.0, lean.y) * 0.35);
+    // The palette: its column picks the variant, its rows run root to tip
+    // (kept off the wrapped edge rows).
+    out.uv = vec2<f32>(0.0625 + 0.875 * in.root_variant.w, 0.03 + 0.94 * h);
+    out.fade = 1.0;
+    return out;
+}
+
+struct SkinInput {
+    @location(3) joints: vec4<u32>,
+    @location(4) weights: vec4<f32>,
+};
+
+// The vertex's blended joint matrix.
+fn skin_matrix(skin: SkinInput) -> mat4x4<f32> {
+    return joints[skin.joints.x] * skin.weights.x
+        + joints[skin.joints.y] * skin.weights.y
+        + joints[skin.joints.z] * skin.weights.z
+        + joints[skin.joints.w] * skin.weights.w;
+}
+
+@vertex
+fn vs_skinned(in: VertexInput, skin: SkinInput) -> VertexOutput {
+    var out: VertexOutput;
+    let posed = model * skin_matrix(skin);
+    let world = posed * vec4<f32>(in.position, 1.0);
+    out.clip_position = camera.view_proj * world;
+    out.world_position = world.xyz;
+    out.normal = (posed * vec4<f32>(in.normal, 0.0)).xyz;
+    out.uv = in.uv;
+    out.fade = 1.0;
+    return out;
+}
+
+// What both variants know about a fragment.
+struct Surface {
+    p: vec3<f32>,
+    n: vec3<f32>,
+    l: vec3<f32>,
+    v: vec3<f32>,
+    base: vec4<f32>,
+    roughness: f32,
+    metallic: f32,
+    emissive: vec3<f32>,
+};
+
+// Bends `n` by a tangent-space normal map sample. The tangent frame comes
+// from screen-space derivatives of the position and UVs (Schüler's
+// cotangent frame), so meshes need no tangent attribute.
+fn perturb_normal(n: vec3<f32>, p: vec3<f32>, uv: vec2<f32>, ts: vec3<f32>) -> vec3<f32> {
+    let dp1 = dpdx(p);
+    let dp2 = dpdy(p);
+    let duv1 = dpdx(uv);
+    let duv2 = dpdy(uv);
+    let dp2perp = cross(dp2, n);
+    let dp1perp = cross(n, dp1);
+    let t = dp2perp * duv1.x + dp1perp * duv2.x;
+    let b = dp2perp * duv1.y + dp1perp * duv2.y;
+    let len = max(dot(t, t), dot(b, b));
+    if len < 1e-20 {
+        return n; // no UV gradient (untextured geometry)
+    }
+    let inv = inverseSqrt(len);
+    return normalize(t * inv * ts.x + b * inv * ts.y + n * ts.z);
+}
+
+// One terrain layer at tile coordinates `t` (gradients `gx`, `gy`): its
+// atlas cell, sampled inside the cell's wrapped gutter so neither
+// filtering nor mipmaps reach the neighbouring layer.
+fn terrain_layer(k: u32, t: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec3<f32> {
+    let cell = vec2<f32>(f32(k & 1u), f32(k >> 1u));
+    let uv = (cell * 512.0 + vec2<f32>(32.0) + fract(t) * 448.0) / 1024.0;
+    let s = 448.0 / 1024.0;
+    return textureSampleGrad(material_texture, material_sampler, uv, gx * s, gy * s).rgb;
+}
+
+// A terrain's surface: the four layers, each repeating at its own scale,
+// mixed by the splat map.
+fn terrain_surface(in: VertexOutput) -> Surface {
+    var out: Surface;
+    let local = in.uv * material_data.uv.xy;
+    let dx = dpdx(local);
+    let dy = dpdy(local);
+    let st = clamp(in.uv, material_data.uv.zw, vec2<f32>(1.0) - material_data.uv.zw);
+    let w = textureSample(emissive_map, map_sampler, st);
+    let tiles = max(material_data.emissive, vec4<f32>(0.05));
+    var base = vec3<f32>(0.0);
+    if w.x > 0.004 {
+        base += terrain_layer(0u, local / tiles.x, dx / tiles.x, dy / tiles.x) * w.x;
+    }
+    if w.y > 0.004 {
+        base += terrain_layer(1u, local / tiles.y, dx / tiles.y, dy / tiles.y) * w.y;
+    }
+    if w.z > 0.004 {
+        base += terrain_layer(2u, local / tiles.z, dx / tiles.z, dy / tiles.z) * w.z;
+    }
+    if w.w > 0.004 {
+        base += terrain_layer(3u, local / tiles.w, dx / tiles.w, dy / tiles.w) * w.w;
+    }
+    let total = max(w.x + w.y + w.z + w.w, 1e-3);
+    out.p = in.world_position;
+    out.n = normalize(in.normal);
+    out.l = normalize(-light.direction.xyz);
+    out.v = normalize(camera.view_pos.xyz - in.world_position);
+    out.base = vec4<f32>(base / total, 1.0) * material_data.color;
+    out.roughness = material_data.params.x;
+    out.metallic = 0.0;
+    out.emissive = vec3<f32>(0.0);
+    return out;
+}
+
+fn surface(in: VertexOutput) -> Surface {
+    if (u32(material_data.params.w) & MAP_TERRAIN) != 0u {
+        return terrain_surface(in);
+    }
+    if FADING {
+        // Interleaved gradient noise: a fine, even dither that thins the
+        // mesh out as `fade` drops.
+        let p = floor(in.clip_position.xy);
+        let noise = fract(52.9829189 * fract(dot(p, vec2<f32>(0.06711056, 0.00583715))));
+        if in.fade <= noise {
+            discard;
+        }
+    }
+    var out: Surface;
+    let maps = u32(material_data.params.w);
+    // Tiled texture coordinates (the identity unless the material repeats).
+    let uv = in.uv * material_data.uv.xy + material_data.uv.zw;
+    var n = normalize(in.normal);
+    if (maps & MAP_NORMAL) != 0u {
+        var ts = textureSample(normal_map, map_sampler, uv).xyz * 2.0 - 1.0;
+        // glTF normal maps are +Y up in a V-down UV space: flip green.
+        ts = vec3<f32>(ts.xy * vec2<f32>(material_data.params.z, -material_data.params.z), ts.z);
+        n = perturb_normal(n, in.world_position, uv, ts);
+    }
+    out.p = in.world_position;
+    out.n = n;
+    out.l = normalize(-light.direction.xyz);
+    out.v = normalize(camera.view_pos.xyz - in.world_position);
+    out.base = textureSample(material_texture, material_sampler, uv) * material_data.color;
+    out.roughness = material_data.params.x;
+    out.metallic = material_data.params.y;
+    if (maps & MAP_METAL_ROUGH) != 0u {
+        let mr = textureSample(metal_rough_map, map_sampler, uv);
+        out.roughness = clamp(out.roughness * mr.g, 0.04, 1.0);
+        out.metallic = out.metallic * mr.b;
+    }
+    out.emissive = material_data.emissive.rgb;
+    if (maps & MAP_EMISSIVE) != 0u {
+        out.emissive = out.emissive * textureSample(emissive_map, map_sampler, uv).rgb;
+    }
+    // A custom material shader shapes it further (material_api.wgsl).
+    return apply_material(in, uv, out);
+}
+
+// The forward path's surface response: Blinn-Phong whose highlight
+// tightens and brightens as roughness drops (the default roughness gives
+// the engine's original pow-32 highlight), metals tinting it and losing
+// their diffuse, and sky reflections on metals and polished surfaces.
+fn shade_forward(s: Surface, shadow: f32, point_shadows: bool) -> vec3<f32> {
+    let h = normalize(s.l + s.v);
+    let diffuse = max(dot(s.n, s.l), 0.0);
+    let shininess = exp2(11.0 - 10.0 * s.roughness);
+    let f0 = mix(vec3<f32>(0.04), s.base.rgb, s.metallic);
+    // Energy-normalized so a sharp highlight is a bright one; 0.25 for the
+    // default dielectric.
+    let spec_color = f0 * 6.25 * (shininess + 8.0) / 40.0;
+    let sun_in = toon_light(diffuse * shadow);
+    var highlight = pow(max(dot(s.n, h), 1e-5), shininess);
+    if toon_on() {
+        highlight = toon_highlight(highlight);
+    }
+    let specular = highlight * spec_color;
+    let albedo = s.base.rgb * (1.0 - s.metallic);
+    var lit = albedo * hemi(s.n) * light.color_ambient.a * shade_tint(sun_in)
+        + (albedo + specular) * light.color_ambient.rgb * sun_in
+        + rim_light(s.n, s.v, s.l, shadow, albedo);
+    // Point lights (and glowing meshes): the same diffuse + highlight.
+    for (var i = 0u; i < point_count(); i = i + 1u) {
+        let p = point_light(i, s.p);
+        let ndotl = dot(s.n, p.l);
+        if ndotl > 0.0 && any(p.radiance > vec3<f32>(0.0)) {
+            let hp = normalize(p.l + s.v);
+            let spec = pow(max(dot(s.n, hp), 1e-5), shininess) * spec_color;
+            var light_in = (albedo + spec) * p.radiance * toon_light(ndotl);
+            // Shadows only where the light shows: in its faint outer reach
+            // the lookup would cost more than it could change.
+            if point_shadows && max(light_in.r, max(light_in.g, light_in.b)) > POINT_SHADOW_VISIBLE {
+                light_in = light_in * point_shadow(i, s.p, s.n);
+            }
+            lit = lit + light_in;
+        }
+    }
+    // Default (rough, non-metal) surfaces stay matte, as before.
+    let gloss = max(s.metallic, clamp(1.0 - 2.0 * s.roughness, 0.0, 1.0));
+    if gloss > 0.0 {
+        let fr = env_brdf(f0, s.roughness, max(dot(s.n, s.v), 1e-4));
+        let env = sky_radiance(reflect(-s.v, s.n));
+        lit += env * fr * gloss * light.color_ambient.a * mix(0.6, 1.0, min(shadow, 1.0));
+    }
+    return lit + s.emissive;
+}
+
+// Forward path: Blinn-Phong sun and point lights, filtered shadows,
+// hemispheric ambient, fog, tone mapping. The flags are constants in each
+// entry point, so the compiler drops the shadow lookups a variant skips.
+fn forward(in: VertexOutput, sun_shadows: bool, point_shadows: bool) -> vec4<f32> {
+    let s = surface(in);
+    var shadow = 1.0;
+    if sun_shadows {
+        shadow = shadow_forward(in.world_position, s.n, s.l);
+    }
+    // Under water the light is tinted and the sun comes through in caustics.
+    let wl = water_light(in.world_position);
+    let lit = shade_forward(s, shadow * wl.a, point_shadows) * wl.rgb;
+    return vec4<f32>(finish_forward(apply_fog(lit, in.world_position, in.clip_position.xy)), s.base.a);
+}
+
+// Sun and point light shadows (High and up, when both cast).
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return forward(in, true, true);
+}
+
+// Sun shadows only (Medium; higher presets without shadowed point lights).
+@fragment
+fn fs_sun_shadows(in: VertexOutput) -> @location(0) vec4<f32> {
+    return forward(in, true, false);
+}
+
+// Point light shadows only (a sun without shadows, or none).
+@fragment
+fn fs_point_shadows(in: VertexOutput) -> @location(0) vec4<f32> {
+    return forward(in, false, true);
+}
+
+// No shadows (Low, or nothing casts any).
+@fragment
+fn fs_unshadowed(in: VertexOutput) -> @location(0) vec4<f32> {
+    return forward(in, false, false);
+}
+
+// Beautiful's screen-space occlusion (ssao.wgsl), half resolution: r
+// ambient occlusion, g contact shadow, b view depth.
+@group(3) @binding(5) var occlusion_map: texture_2d<f32>;
+
+// The occlusion at full-resolution pixel `frag`: the four nearest
+// half-resolution texels, bilinearly weighted but leaving out those on
+// another surface (by view depth), so it doesn't bleed across edges.
+fn screen_occlusion(frag: vec2<f32>, world: vec3<f32>) -> vec2<f32> {
+    let dims = vec2<i32>(textureDimensions(occlusion_map));
+    let depth = dot(world - camera.view_pos.xyz, light.camera_forward.xyz);
+    // Texel i was computed at full-resolution pixel 2i.
+    let t = (frag - vec2<f32>(0.5)) * 0.5;
+    let base = vec2<i32>(floor(t));
+    let f = t - floor(t);
+    let tolerance = 0.03 * depth + 0.05;
+    var sum = vec2<f32>(0.0);
+    var total = 0.0;
+    for (var k = 0; k < 4; k = k + 1) {
+        let o = vec2<i32>(k & 1, k >> 1u);
+        let s = textureLoad(occlusion_map, clamp(base + o, vec2<i32>(0), dims - 1), 0);
+        let bilinear = select(1.0 - f.x, f.x, o.x == 1) * select(1.0 - f.y, f.y, o.y == 1);
+        let gap = abs(s.b - depth);
+        let w = (bilinear + 1e-3) * f32(gap < tolerance);
+        sum += s.rg * w;
+        total += w;
+    }
+    if total <= 0.0 {
+        // No texel on this surface: see-through meshes (not in the depth
+        // prepass) and slivers too thin for half resolution stay open.
+        return vec2<f32>(1.0);
+    }
+    return sum / total;
+}
+
+// Beautiful: GGX sun with contact-hardening cascaded shadows, ambient
+// occlusion, sky reflections and sun-scattering fog, written as HDR for
+// the post chain.
+@fragment
+fn fs_beautiful(in: VertexOutput) -> @location(0) vec4<f32> {
+    let s = surface(in);
+    let occ = screen_occlusion(in.clip_position.xy, in.world_position);
+    let wl = water_light(in.world_position);
+    let shadow = shadow_soft(in.world_position, s.n, s.l, in.clip_position.xy) * occ.y * wl.a;
+    let albedo = s.base.rgb * (1.0 - s.metallic);
+    let f0 = mix(vec3<f32>(0.04), s.base.rgb, s.metallic);
+    let ao = pow(max(occ.x, 1e-3), light.point_shadow.w);
+    let lit = (shade_pbr(albedo, s.n, s.v, s.l, shadow, s.roughness, f0, ao)
+        + points_pbr(s.p, albedo, s.n, s.v, s.roughness, f0)
+        + s.emissive) * wl.rgb;
+    return vec4<f32>(apply_fog_scatter(lit, in.world_position, in.clip_position.xy), s.base.a);
+}

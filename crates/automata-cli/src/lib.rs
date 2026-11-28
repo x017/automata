@@ -1,0 +1,3489 @@
+//! Exports AUTOMATA games to standalone builds for Windows, Linux, macOS
+//! and Android.
+//!
+//! An export copies an **export template** (the `automata-player` launcher
+//! plus a portable Python with the engine installed) and adds the project:
+//!
+//! ```text
+//! build/linux/Coin Run/
+//!     Coin Run            the launcher, renamed
+//!     game/               scenes, scripts, assets, game.json
+//!     runtime/            Python + the engine
+//! build/Coin Run-0.1.0-linux-x86_64.tar.gz
+//! ```
+//!
+//! Templates are built per platform by CI (`.github/workflows/export.yml`)
+//! and installed into [`templates_dir`]. Because a template already holds
+//! the compiled engine, exporting needs no compiler: any machine can export
+//! for any supported platform.
+//!
+//! Android builds work the same way with a template APK: see [`android`].
+//!
+//! Project settings live in `build.ron` next to the project's scenes
+//! ([`BuildConfig`]).
+
+pub mod android;
+pub mod archive;
+pub mod cli;
+pub mod macos;
+pub mod serve;
+pub mod steam;
+pub mod web;
+
+use std::fmt;
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+/// The engine version templates must match.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The repository that publishes the templates (`owner/name`).
+pub const TEMPLATE_REPO: &str = "x017/automata";
+/// The release tag holding the templates.
+pub const TEMPLATE_TAG: &str = "export-templates";
+/// Where CI publishes templates (`<base>/automata-template-<target>.tar.gz`).
+pub const TEMPLATE_URL: &str =
+    "https://github.com/x017/automata/releases/download/export-templates";
+
+/// The settings file inside a project.
+pub const CONFIG_FILE: &str = "build.ron";
+
+/// A platform a game can be exported to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Target {
+    /// 64-bit Linux (`x86_64`, glibc).
+    Linux,
+    /// 64-bit Windows 10+ (`x86_64`).
+    Windows,
+    /// macOS 11+ on Apple Silicon and Intel, as one universal `.app`.
+    MacOS,
+    /// Android 7+ phones and tablets (`arm64-v8a`, and `x86_64` for
+    /// emulators), as a signed APK.
+    Android,
+    /// Desktop and phone browsers (WebGL2), as a folder for any static web
+    /// host plus a zip for itch.io.
+    Web,
+}
+
+impl Target {
+    /// Every supported target.
+    pub const ALL: [Target; 5] = [
+        Target::Linux,
+        Target::Windows,
+        Target::MacOS,
+        Target::Android,
+        Target::Web,
+    ];
+
+    /// The desktop targets (a template with a launcher and Python).
+    pub const DESKTOP: [Target; 3] = [Target::Linux, Target::Windows, Target::MacOS];
+
+    /// Short name (`linux`, `windows`, `macos`).
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Target::Linux => "linux",
+            Target::Windows => "windows",
+            Target::MacOS => "macos",
+            Target::Android => "android",
+            Target::Web => "web",
+        }
+    }
+
+    /// Display name.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Target::Linux => "Linux",
+            Target::Windows => "Windows",
+            Target::MacOS => "macOS",
+            Target::Android => "Android",
+            Target::Web => "Web",
+        }
+    }
+
+    /// Platform with architecture (`linux-x86_64`).
+    #[must_use]
+    pub fn triple(self) -> &'static str {
+        match self {
+            Target::Linux => "linux-x86_64",
+            Target::Windows => "windows-x86_64",
+            Target::MacOS => "macos-universal",
+            Target::Android => "android",
+            Target::Web => "web",
+        }
+    }
+
+    /// The launcher's file name inside a template (the template APK for
+    /// Android, the page for the web).
+    #[must_use]
+    pub fn player_file(self) -> &'static str {
+        match self {
+            Target::Linux | Target::MacOS => "automata-player",
+            Target::Windows => "automata-player.exe",
+            Target::Android => android::TEMPLATE_FILE,
+            Target::Web => web::PAGE,
+        }
+    }
+
+    /// The executable suffix.
+    #[must_use]
+    pub fn exe_suffix(self) -> &'static str {
+        match self {
+            Target::Linux | Target::MacOS => "",
+            Target::Windows => ".exe",
+            Target::Android => ".apk",
+            Target::Web => ".html",
+        }
+    }
+
+    /// The archive extension for exported builds (Android builds are an
+    /// APK already).
+    #[must_use]
+    pub fn archive_ext(self) -> &'static str {
+        match self {
+            Target::Linux => "tar.gz",
+            Target::Windows | Target::MacOS | Target::Web => "zip",
+            Target::Android => "apk",
+        }
+    }
+
+    /// The target this program runs on, if supported.
+    #[must_use]
+    pub fn host() -> Option<Target> {
+        if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            Some(Target::Linux)
+        } else if cfg!(all(windows, target_arch = "x86_64")) {
+            Some(Target::Windows)
+        } else if cfg!(target_os = "macos") {
+            Some(Target::MacOS)
+        } else {
+            None
+        }
+    }
+
+    /// Parses `linux` / `windows` / `macos` / `android` / `web` (`mac` and
+    /// `osx` mean macOS too; `browser` and `html5` the web).
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Target> {
+        let is = |names: &[&str]| names.iter().any(|a| a.eq_ignore_ascii_case(s.trim()));
+        if is(&["mac", "osx"]) {
+            return Some(Target::MacOS);
+        }
+        if is(&["browser", "html5", "html"]) {
+            return Some(Target::Web);
+        }
+        Target::ALL
+            .into_iter()
+            .find(|t| t.name().eq_ignore_ascii_case(s.trim()))
+    }
+
+    /// The template archive name (`automata-template-linux-x86_64.tar.gz`,
+    /// `automata-template-android.apk`).
+    #[must_use]
+    pub fn template_archive(self) -> String {
+        match self {
+            Target::Android => "automata-template-android.apk".into(),
+            _ => format!("automata-template-{}.tar.gz", self.triple()),
+        }
+    }
+}
+
+impl fmt::Display for Target {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+/// A project's export settings (`build.ron`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BuildConfig {
+    /// The game's name: the window title, executable, and folder name.
+    pub name: String,
+    /// Version, used in archive names.
+    pub version: String,
+    /// The scene the game starts in (relative to the project), for Oberon
+    /// projects.
+    pub start_scene: Option<String>,
+    /// A Python script to run instead of a scene (code-first games).
+    pub main_script: Option<String>,
+    /// Window size in pixels.
+    pub resolution: (u32, u32),
+    /// Platforms to export.
+    pub targets: Vec<Target>,
+    /// Output folder (relative to the project).
+    pub output: String,
+    /// Also write a `.tar.gz` / `.zip` of each build.
+    pub archive: bool,
+    /// Extra paths to leave out (relative to the project; a trailing `/`
+    /// means a folder). Build output, `.oberon/`, caches and VCS folders are
+    /// always left out.
+    pub exclude: Vec<String>,
+    /// On-screen thumbsticks and buttons for touch screens (Android), which
+    /// hold the game's keys. `None`: no touch controls.
+    pub touch_controls: Option<TouchControls>,
+    /// Android app settings.
+    pub android: AndroidConfig,
+    /// macOS app settings.
+    pub macos: MacOsConfig,
+    /// Steam: the app id and the Steamworks SDK (desktop builds).
+    pub steam: steam::SteamConfig,
+}
+
+/// macOS app settings (`build.ron`'s `macos`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MacOsConfig {
+    /// The bundle identifier (`com.yourname.game`). Empty: the Android app
+    /// ID's default, `com.example.<name>`. macOS keeps a game's settings
+    /// and permissions under it, so choose it before release.
+    pub bundle_id: String,
+    /// The app icon: a square PNG (16 to 1024 pixels, a power of two; 1024
+    /// looks sharpest) or an `.icns` file, relative to the project. Empty:
+    /// the standard app icon.
+    pub icon: String,
+}
+
+/// Android app settings (`build.ron`'s `android`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AndroidConfig {
+    /// The app ID (`com.yourname.game`). Empty: `com.example.<name>`,
+    /// fine for testing; set your own before publishing, since it can't
+    /// change once people install the game.
+    pub package: String,
+    /// The version Android compares for updates: raise it with each
+    /// release.
+    pub version_code: u32,
+    /// Your release signing key: a PEM file (`automata-cli keygen` makes
+    /// one), relative to the project folder, absolute, or under `~/`. Keep
+    /// it outside the project. Empty: this machine's debug key, for
+    /// testing. `$AUTOMATA_ANDROID_RELEASE_KEY` takes precedence.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub key: String,
+    /// The processors to include: `arm64-v8a` (phones and tablets) and
+    /// `x86_64` (emulators on PCs). Empty: every one in the template.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub abis: Vec<String>,
+}
+
+impl Default for AndroidConfig {
+    fn default() -> Self {
+        Self {
+            package: String::new(),
+            version_code: 1,
+            key: String::new(),
+            abis: Vec::new(),
+        }
+    }
+}
+
+/// The Android processor types (ABIs) builds can include.
+pub const ANDROID_ABIS: [&str; 4] = ["arm64-v8a", "x86_64", "armeabi-v7a", "x86"];
+
+/// Parses a comma-separated list of Android ABIs (empty: all in the
+/// template).
+///
+/// # Errors
+///
+/// When a name isn't an Android ABI.
+pub fn parse_android_abis(list: &str) -> Result<Vec<String>, String> {
+    let mut abis = Vec::new();
+    for abi in list.split(',').map(str::trim).filter(|a| !a.is_empty()) {
+        if !ANDROID_ABIS.contains(&abi) {
+            return Err(format!(
+                "`{abi}` is not an Android processor type (use {})",
+                ANDROID_ABIS.join(", ")
+            ));
+        }
+        if !abis.iter().any(|a| a == abi) {
+            abis.push(abi.to_string());
+        }
+    }
+    Ok(abis)
+}
+
+/// Checks an Android app ID: at least two dot-separated parts, each a
+/// letter followed by letters, digits or `_`.
+///
+/// # Errors
+///
+/// What's wrong with it.
+pub fn check_android_package(package: &str) -> Result<(), String> {
+    let parts: Vec<&str> = package.split('.').collect();
+    if parts.len() < 2 {
+        return Err(format!(
+            "the Android app ID `{package}` needs at least two parts, like com.yourname.game"
+        ));
+    }
+    for part in parts {
+        let ok = part.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !ok {
+            return Err(format!(
+                "the Android app ID `{package}`: each part must start with a letter and hold only letters, digits and _ (like com.yourname.game)"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Checks a macOS bundle identifier: at least two dot-separated parts of
+/// letters, digits, `-` and `.`.
+///
+/// # Errors
+///
+/// What's wrong with it.
+pub fn check_bundle_id(id: &str) -> Result<(), String> {
+    let parts: Vec<&str> = id.split('.').collect();
+    let ok = parts.len() >= 2
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "the macOS bundle ID `{id}` must be at least two dot-separated parts of letters, digits and -, like com.yourname.game"
+        ))
+    }
+}
+
+/// On-screen controls for touch screens (`build.ron`'s `touch_controls`),
+/// read by `ctx.input.touch_controls` in the game.
+///
+/// ```ron
+/// touch_controls: Some((
+///     sticks: [(side: Left, keys: ["forward", "left", "back", "right"])],
+///     buttons: [(key: "jump", label: "Jump")],
+/// )),
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TouchControls {
+    /// Thumbsticks, one per side at most. Each appears where the thumb
+    /// lands on its half of the screen and holds its keys as it's pushed.
+    pub sticks: Vec<TouchStick>,
+    /// Buttons around the bottom-right corner (the first in the corner),
+    /// up to six. Each holds its key while a finger is on it.
+    pub buttons: Vec<TouchButton>,
+    /// Dragging on the free part of this side moves `ctx.input.mouse_delta`
+    /// (mouse look). Not a side with a stick.
+    pub look: Option<TouchSide>,
+    /// When they're on the screen.
+    pub show: TouchShow,
+}
+
+/// A touch thumbstick.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TouchStick {
+    /// Which half of the screen it lives on.
+    pub side: TouchSide,
+    /// The keys or actions it holds: four (up, left, down, right) or two
+    /// (left, right).
+    pub keys: Vec<String>,
+}
+
+/// A touch button.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TouchButton {
+    /// The key or action it holds.
+    pub key: String,
+    /// The text on it (empty: the key).
+    #[serde(default)]
+    pub label: String,
+}
+
+/// A half of the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TouchSide {
+    /// The left half.
+    Left,
+    /// The right half.
+    Right,
+}
+
+impl TouchSide {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+}
+
+/// When touch controls are shown.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TouchShow {
+    /// On touch screens (Android).
+    #[default]
+    Auto,
+    /// Everywhere; on a computer the mouse works them.
+    Always,
+    /// Only when a script turns them on (`touch_controls.visible`).
+    Never,
+}
+
+impl TouchControls {
+    /// What's wrong with these settings, as `build.ron` problems.
+    #[must_use]
+    pub fn problems(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (i, stick) in self.sticks.iter().enumerate() {
+            let n = stick.keys.len();
+            if n != 2 && n != 4 {
+                out.push(format!(
+                    "touch_controls: the {} stick has {n} keys; it needs four (up, left, down, right) or two (left, right)",
+                    stick.side.name()
+                ));
+            }
+            if stick.keys.iter().any(|k| k.trim().is_empty()) {
+                out.push(format!(
+                    "touch_controls: the {} stick has an empty key",
+                    stick.side.name()
+                ));
+            }
+            if self.sticks[..i].iter().any(|s| s.side == stick.side) {
+                out.push(format!(
+                    "touch_controls: two sticks on the {} side",
+                    stick.side.name()
+                ));
+            }
+        }
+        if self.buttons.len() > 6 {
+            out.push(format!(
+                "touch_controls: {} buttons; up to 6 fit",
+                self.buttons.len()
+            ));
+        }
+        if self.buttons.iter().any(|b| b.key.trim().is_empty()) {
+            out.push("touch_controls: a button has no key".into());
+        }
+        if let Some(side) = self.look {
+            if self.sticks.iter().any(|s| s.side == side) {
+                out.push(format!(
+                    "touch_controls: look and a stick can't share the {} side",
+                    side.name()
+                ));
+            }
+        }
+        out
+    }
+
+    /// The settings as `game.json` holds them (what
+    /// `ctx.input.touch_controls.set` takes).
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        let keys = |keys: &[String]| {
+            keys.iter()
+                .map(|k| json_string(k))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let sticks = self
+            .sticks
+            .iter()
+            .map(|s| {
+                format!(
+                    "{{\"side\": \"{}\", \"keys\": [{}]}}",
+                    s.side.name(),
+                    keys(&s.keys)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let buttons = self
+            .buttons
+            .iter()
+            .map(|b| {
+                format!(
+                    "{{\"key\": {}, \"label\": {}}}",
+                    json_string(&b.key),
+                    json_string(&b.label)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let look = self
+            .look
+            .map_or_else(|| "null".to_string(), |s| format!("\"{}\"", s.name()));
+        let show = match self.show {
+            TouchShow::Auto => "auto",
+            TouchShow::Always => "always",
+            TouchShow::Never => "never",
+        };
+        format!(
+            "{{\"sticks\": [{sticks}], \"buttons\": [{buttons}], \"look\": {look}, \"show\": \"{show}\"}}"
+        )
+    }
+}
+
+impl Default for BuildConfig {
+    fn default() -> Self {
+        Self {
+            name: "My Game".into(),
+            version: "0.1.0".into(),
+            start_scene: None,
+            main_script: None,
+            resolution: (1280, 720),
+            targets: vec![Target::Linux, Target::Windows],
+            output: "build".into(),
+            archive: true,
+            exclude: vec!["tests/".into()],
+            touch_controls: None,
+            android: AndroidConfig::default(),
+            macos: MacOsConfig::default(),
+            steam: steam::SteamConfig::default(),
+        }
+    }
+}
+
+impl BuildConfig {
+    /// Settings for a project: `build.ron` if present, otherwise defaults
+    /// named after the folder, starting in `scene` (when given).
+    #[must_use]
+    pub fn for_project(project: &Path, scene: Option<&Path>) -> Self {
+        if let Ok(cfg) = Self::load(project) {
+            return cfg;
+        }
+        let mut cfg = Self::default();
+        if let Some(name) = project.file_name().and_then(|n| n.to_str()) {
+            cfg.name = title_case(name);
+        }
+        cfg.start_scene = scene
+            .and_then(|s| {
+                s.strip_prefix(project)
+                    .ok()
+                    .map(Path::to_path_buf)
+                    .or(Some(s.to_path_buf()))
+            })
+            .map(|p| archive::slash_path(&p));
+        cfg
+    }
+
+    /// Reads `build.ron` from `project`.
+    ///
+    /// # Errors
+    ///
+    /// When the file is missing or invalid.
+    pub fn load(project: &Path) -> Result<Self, String> {
+        let path = project.join(CONFIG_FILE);
+        let text =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        ron::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+    }
+
+    /// Writes `build.ron` into `project`.
+    ///
+    /// # Errors
+    ///
+    /// When the file can't be written.
+    pub fn save(&self, project: &Path) -> Result<(), String> {
+        let pretty = ron::ser::PrettyConfig::new().struct_names(true);
+        let text = ron::ser::to_string_pretty(self, pretty).map_err(|e| e.to_string())?;
+        let path = project.join(CONFIG_FILE);
+        std::fs::write(&path, format!("// Export settings for automata-cli and Oberon (Build → Build Settings).\n{text}\n"))
+            .map_err(|e| format!("{}: {e}", path.display()))
+    }
+
+    /// The Android app ID: `android.package`, else `com.example.` and the
+    /// game's name in lowercase letters and digits.
+    #[must_use]
+    pub fn android_package(&self) -> String {
+        let set = self.android.package.trim();
+        if !set.is_empty() {
+            return set.to_string();
+        }
+        let mut name: String = self
+            .name
+            .chars()
+            .filter(char::is_ascii_alphanumeric)
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        if !name.starts_with(|c: char| c.is_ascii_alphabetic()) {
+            name.insert_str(0, "game");
+        }
+        format!("com.example.{name}")
+    }
+
+    /// The macOS bundle identifier: `macos.bundle_id`, else
+    /// `com.example.` and the game's name in lowercase letters and digits.
+    #[must_use]
+    pub fn macos_bundle_id(&self) -> String {
+        let set = self.macos.bundle_id.trim();
+        if set.is_empty() {
+            let mut fallback = self.clone();
+            fallback.android.package.clear();
+            fallback.android_package()
+        } else {
+            set.to_string()
+        }
+    }
+
+    /// The executable / folder name: the game name without characters
+    /// file systems reject.
+    #[must_use]
+    pub fn file_name(&self) -> String {
+        let clean: String = self
+            .name
+            .chars()
+            .filter(|c| {
+                !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+                    && !c.is_control()
+            })
+            .collect();
+        let clean = clean.trim().trim_end_matches('.').to_string();
+        if clean.is_empty() {
+            "Game".into()
+        } else {
+            clean
+        }
+    }
+}
+
+fn title_case(s: &str) -> String {
+    s.split(['_', '-', ' '])
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            c.next().map_or_else(String::new, |f| {
+                f.to_uppercase().collect::<String>() + c.as_str()
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// How serious a check result is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Level {
+    /// Progress.
+    Info,
+    /// Suspicious but exportable.
+    Warning,
+    /// The export can't continue.
+    Error,
+}
+
+/// A progress or problem message from an export.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Message {
+    /// How serious.
+    pub level: Level,
+    /// The text.
+    pub text: String,
+}
+
+impl Message {
+    fn info(text: impl Into<String>) -> Self {
+        Self {
+            level: Level::Info,
+            text: text.into(),
+        }
+    }
+    fn warn(text: impl Into<String>) -> Self {
+        Self {
+            level: Level::Warning,
+            text: text.into(),
+        }
+    }
+    fn error(text: impl Into<String>) -> Self {
+        Self {
+            level: Level::Error,
+            text: text.into(),
+        }
+    }
+}
+
+/// Checks a project before exporting: the start scene loads, every script,
+/// model, material, sound and font it names exists inside the project
+/// (only the project folder ships), and a start point is set.
+#[must_use]
+pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
+    let mut out = Vec::new();
+    if cfg.name.trim().is_empty() {
+        out.push(Message::error("The game has no name (build.ron: name)."));
+    }
+    match (&cfg.main_script, &cfg.start_scene) {
+        (Some(main), _) => {
+            let path = project.join(main);
+            if !path.is_file() {
+                out.push(Message::error(format!("Main script not found: {main}")));
+            }
+        }
+        (None, Some(scene)) => {
+            let path = project.join(scene);
+            match std::fs::read_to_string(&path) {
+                Err(e) => out.push(Message::error(format!("Start scene {scene}: {e}"))),
+                Ok(text) => match automata_core::scene_file::SceneFile::from_ron(&text) {
+                    Err(e) => out.push(Message::error(format!(
+                        "Start scene {scene} doesn't load: {e}"
+                    ))),
+                    Ok(file) => {
+                        let base = path.parent().unwrap_or(project);
+                        for entity in &file.entities {
+                            check_entity(project, base, &file, entity, &mut out);
+                        }
+                    }
+                },
+            }
+        }
+        (None, None) => out.push(Message::error(
+            "Nothing to start: set a start scene or a main script (Build Settings).",
+        )),
+    }
+    // Scripts name fonts relative to the scene's folder.
+    let base = match (&cfg.main_script, &cfg.start_scene) {
+        (None, Some(scene)) => project
+            .join(scene)
+            .parent()
+            .map_or_else(|| project.to_path_buf(), Path::to_path_buf),
+        _ => project.to_path_buf(),
+    };
+    check_fonts(project, &base, &Skip::new(project, cfg), &mut out);
+    check_strings(project, &base, &Skip::new(project, cfg), &mut out);
+    if cfg.targets.is_empty() {
+        out.push(Message::error("No target platforms selected."));
+    }
+    if cfg.targets.contains(&Target::MacOS) {
+        out.extend(
+            macos::problems(project, cfg)
+                .into_iter()
+                .map(Message::error),
+        );
+    }
+    cfg.steam.check(project, &cfg.targets, &mut out);
+    if let Some(touch) = &cfg.touch_controls {
+        out.extend(touch.problems().into_iter().map(Message::error));
+        if cfg.main_script.is_some() {
+            out.push(Message::warn(
+                "touch_controls work in scene games; a main script sets up its own (ctx.input.touch_controls).",
+            ));
+        }
+    }
+    out
+}
+
+/// Checks what one entity of the start scene names: its script, model,
+/// material, sound, animation graph, collider and joint.
+fn check_entity(
+    project: &Path,
+    base: &Path,
+    file: &automata_core::scene_file::SceneFile,
+    entity: &automata_core::scene_file::EntityData,
+    out: &mut Vec<Message>,
+) {
+    if let Some(script) = &entity.script {
+        if !base.join(&script.path).is_file() {
+            out.push(Message::error(format!(
+                "{}: script {} not found",
+                entity.name.as_deref().unwrap_or("an entity"),
+                script.path
+            )));
+        }
+    }
+    if let Some(automata_core::scene_file::PrimitiveData::Model { path }) =
+        entity.mesh_visual.as_ref().map(|m| &m.primitive)
+    {
+        let who = entity.name.as_deref().unwrap_or("an entity");
+        check_model(project, base, who, path, out);
+    }
+    if let Some(material) = entity
+        .mesh_visual
+        .as_ref()
+        .map(|m| m.material.trim())
+        .filter(|m| !m.is_empty())
+    {
+        let who = entity.name.as_deref().unwrap_or("an entity");
+        check_material(project, base, who, material, out);
+    }
+    if let Some(post) = entity
+        .post_shader
+        .as_ref()
+        .map(|p| p.shader.trim())
+        .filter(|p| !p.is_empty())
+    {
+        let who = entity.name.as_deref().unwrap_or("an entity");
+        check_post_shader(project, base, who, post, out);
+    }
+    if let Some(source) = &entity.audio_source {
+        let who = entity.name.as_deref().unwrap_or("an entity");
+        check_sound(project, base, who, &source.clip, out);
+    }
+    if let Some(graph) = entity
+        .animation
+        .as_ref()
+        .map(|a| a.graph.trim())
+        .filter(|g| !g.is_empty())
+    {
+        let who = entity.name.as_deref().unwrap_or("an entity");
+        let model = match entity.mesh_visual.as_ref().map(|m| &m.primitive) {
+            Some(automata_core::scene_file::PrimitiveData::Model { path }) => Some(path.as_str()),
+            _ => None,
+        };
+        check_anim_graph(project, base, who, graph, model, out);
+    }
+    if let Some(collider) = &entity.collider_3d {
+        let who = entity.name.as_deref().unwrap_or("an entity");
+        let body = entity.rigid_body.as_ref().map(|b| b.body_type);
+        if let Some(problem) = automata_physics::collider_problem(&collider.shape, body) {
+            out.push(Message::error(format!("{who}: {problem}")));
+        } else if let Some(model) = collider.shape.model() {
+            check_model(project, base, who, model, out);
+        }
+    }
+    if let Some(joint) = &entity.joint {
+        check_joint(file, entity, joint, out);
+    }
+}
+
+/// Checks the fonts scripts name: every string literal ending in `.ttf` or
+/// `.otf` in a shipped `.py` file must be a font file inside the project
+/// that ships. (A game with a missing font still runs, drawing with the
+/// built-in one, which is easy to miss.)
+fn check_fonts(project: &Path, base: &Path, skip: &Skip, out: &mut Vec<Message>) {
+    let mut seen = std::collections::HashSet::new();
+    for (script, line, font) in font_literals(project, skip) {
+        // A script may belong to a scene in a subfolder (another level, or
+        // a demo kept inside the project): its fonts can be named relative
+        // to any folder it sits in, as well as the start scene's.
+        let mut bases = vec![base.to_path_buf()];
+        let script_path = automata_assets::join_relative(project, &script);
+        for dir in script_path.ancestors().skip(1) {
+            if !dir.starts_with(project) {
+                break;
+            }
+            bases.push(dir.to_path_buf());
+        }
+        if seen.insert((font.clone(), bases.clone())) {
+            check_font(
+                project,
+                &bases,
+                skip,
+                &format!("{script}:{line}"),
+                &font,
+                out,
+            );
+        }
+    }
+}
+
+/// Checks one font a game names (`who` says where): it should be a font
+/// file inside the project that ships, found relative to one of `bases`
+/// (the first is where the message says it looked).
+///
+/// Problems are warnings, not errors: a font that doesn't load draws its
+/// text in the built-in font, so the game still runs.
+fn check_font(
+    project: &Path,
+    bases: &[PathBuf],
+    skip: &Skip,
+    who: &str,
+    font: &str,
+    out: &mut Vec<Message>,
+) {
+    const FALLBACK: &str = "its text will use the built-in font";
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let candidates: Vec<PathBuf> = if Path::new(font).is_absolute() {
+        vec![PathBuf::from(font)]
+    } else {
+        bases
+            .iter()
+            .map(|b| automata_assets::join_relative(b, font))
+            .collect()
+    };
+    let Some(file) = candidates.iter().find(|f| f.is_file()).cloned() else {
+        let looked = candidates
+            .first()
+            .map_or_else(|| font.to_string(), |p| p.display().to_string());
+        out.push(Message::warn(format!(
+            "{who}: font {font} not found (looked for {looked}); {FALLBACK}. Copy the \
+             font file there, or drop it onto the editor to import it into fonts/"
+        )));
+        return;
+    };
+    let shipped = canon(&file)
+        .strip_prefix(canon(project))
+        .ok()
+        .map(archive::slash_path);
+    match shipped {
+        None => out.push(Message::warn(format!(
+            "{who}: font {font} is outside the project folder and won't ship, so \
+             {FALLBACK} (drop it into the editor to import it into fonts/)"
+        ))),
+        Some(rel) if skip.excluded(&rel) => out.push(Message::warn(format!(
+            "{who}: font {font} is excluded from the build (build.ron: exclude), so \
+             {FALLBACK}"
+        ))),
+        Some(_) if !is_font_file(&file) => out.push(Message::warn(format!(
+            "{who}: {font} isn't a TrueType or OpenType font, so {FALLBACK}"
+        ))),
+        Some(_) => {}
+    }
+}
+
+/// Checks the string tables (`lang/*.csv`): they ship, their language
+/// fonts are fonts that ship, and mistakes in them are warned about, with
+/// the keys a language lacks (those show in the first language).
+fn check_strings(project: &Path, base: &Path, skip: &Skip, out: &mut Vec<Message>) {
+    let table = automata_core::StringTable::load(base);
+    if table.files.is_empty() {
+        return;
+    }
+    for file in &table.files {
+        let rel = std::fs::canonicalize(base.join(file))
+            .ok()
+            .and_then(|p| {
+                let root = std::fs::canonicalize(project).ok()?;
+                p.strip_prefix(root).ok().map(archive::slash_path)
+            })
+            .unwrap_or_else(|| file.clone());
+        if skip.excluded(&rel) {
+            out.push(Message::error(format!(
+                "{file} is excluded from the build (build.ron: exclude), so ctx.tr would \
+                 show keys instead of text"
+            )));
+        }
+    }
+    for problem in &table.problems {
+        out.push(Message::warn(problem.clone()));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for (i, font) in table.fonts.iter().enumerate() {
+        if !font.is_empty() && seen.insert(font.clone()) {
+            let who = format!("lang/*.csv @font ({})", table.languages[i]);
+            check_font(project, &[base.to_path_buf()], skip, &who, font, out);
+        }
+    }
+    for (language, keys) in table.untranslated() {
+        let shown: Vec<&str> = keys.iter().take(4).map(String::as_str).collect();
+        let more = if keys.len() > shown.len() {
+            ", …"
+        } else {
+            ""
+        };
+        out.push(Message::warn(format!(
+            "lang/*.csv: {} key{} without {language} text ({}{more}); they show in {}",
+            keys.len(),
+            if keys.len() == 1 { "" } else { "s" },
+            shown.join(", "),
+            table.languages[0]
+        )));
+    }
+}
+
+/// Whether `path` starts like a TrueType / OpenType font (or collection).
+fn is_font_file(path: &Path) -> bool {
+    let mut head = [0u8; 4];
+    std::fs::File::open(path)
+        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut head))
+        .is_ok()
+        && matches!(&head, [0, 1, 0, 0] | b"OTTO" | b"true" | b"ttcf")
+}
+
+/// Every `.ttf` / `.otf` string literal in the project's shipped `.py`
+/// files: (script, line, literal), in a stable order.
+fn font_literals(project: &Path, skip: &Skip) -> Vec<(String, usize, String)> {
+    let mut scripts = Vec::new();
+    let mut stack = vec![project.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(items) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for item in items.flatten() {
+            let path = item.path();
+            let rel = archive::slash_path(path.strip_prefix(project).unwrap_or(&path));
+            if skip.excluded(&rel) || scripts.len() > 5000 {
+                continue;
+            }
+            match item.file_type() {
+                Ok(t) if t.is_dir() => stack.push(path),
+                Ok(_)
+                    if path
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("py"))
+                        && !is_test_script(&rel) =>
+                {
+                    scripts.push((rel, path));
+                }
+                _ => {}
+            }
+        }
+    }
+    scripts.sort();
+    let mut found = Vec::new();
+    for (rel, path) in scripts {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let mut docstring = None;
+        for (i, line) in text.lines().enumerate() {
+            for literal in string_literals(line, &mut docstring) {
+                let font = Path::new(&literal).extension().is_some_and(|e| {
+                    e.eq_ignore_ascii_case("ttf") || e.eq_ignore_ascii_case("otf")
+                });
+                // f-strings and format templates can't be checked.
+                if font && !literal.contains('{') {
+                    found.push((rel.clone(), i + 1, literal.replace('\\', "/")));
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Whether a script (`/`-separated, relative to the project) is a test:
+/// in a `tests/` folder or named like pytest's (`test_*.py`, `*_test.py`,
+/// `conftest.py`). Tests don't run in the game, and they name fonts that
+/// don't exist on purpose.
+fn is_test_script(rel: &str) -> bool {
+    let mut parts: Vec<&str> = rel.split('/').collect();
+    let name = parts.pop().unwrap_or_default().to_ascii_lowercase();
+    parts.iter().any(|p| p.eq_ignore_ascii_case("tests"))
+        || name.starts_with("test_")
+        || name.ends_with("_test.py")
+        || name == "conftest.py"
+}
+
+/// The single-line string literals of one line of Python (comments
+/// skipped; escapes kept as written, which is fine for paths).
+///
+/// Triple-quoted strings (docstrings, long text) are skipped: they
+/// describe fonts rather than name them. `triple` carries an unclosed one
+/// (its quote character) from line to line.
+fn string_literals(line: &str, triple: &mut Option<char>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut chars = line.chars();
+    if let Some(q) = *triple {
+        if !skip_triple(&mut chars, q) {
+            return out;
+        }
+        *triple = None;
+    }
+    while let Some(c) = chars.next() {
+        match c {
+            '#' => break,
+            '"' | '\'' if twice(&chars, c) => {
+                chars.nth(1);
+                if !skip_triple(&mut chars, c) {
+                    *triple = Some(c);
+                    break;
+                }
+            }
+            '"' | '\'' => {
+                let mut text = String::new();
+                let mut closed = false;
+                while let Some(d) = chars.next() {
+                    if d == '\\' {
+                        text.push(d);
+                        if let Some(e) = chars.next() {
+                            text.push(e);
+                        }
+                    } else if d == c {
+                        closed = true;
+                        break;
+                    } else {
+                        text.push(d);
+                    }
+                }
+                if closed {
+                    out.push(text);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Whether the next two characters are both `q`.
+fn twice(chars: &std::str::Chars<'_>, q: char) -> bool {
+    let mut ahead = chars.clone();
+    ahead.next() == Some(q) && ahead.next() == Some(q)
+}
+
+/// Moves `chars` past the closing `q` `q` `q` of a triple-quoted string;
+/// false when the line ends first.
+fn skip_triple(chars: &mut std::str::Chars<'_>, q: char) -> bool {
+    while let Some(d) = chars.next() {
+        if d == '\\' {
+            chars.next();
+        } else if d == q && twice(chars, q) {
+            chars.nth(1);
+            return true;
+        }
+    }
+    false
+}
+
+/// Warns about a joint that can't hold anything: no body of its own, or a
+/// partner name no entity has (a script might spawn it, so not an error).
+fn check_joint(
+    file: &automata_core::scene_file::SceneFile,
+    entity: &automata_core::scene_file::EntityData,
+    joint: &automata_physics::Joint,
+    out: &mut Vec<Message>,
+) {
+    let who = entity.name.as_deref().unwrap_or("an entity");
+    if entity.rigid_body.is_none() {
+        out.push(Message::warn(format!(
+            "{who}: its Joint needs a Rigidbody on the same entity"
+        )));
+    }
+    if let Some(partner) = &joint.connected {
+        let found = file
+            .entities
+            .iter()
+            .any(|e| e.name.as_deref() == Some(partner.as_str()) && !std::ptr::eq(e, entity));
+        if !found {
+            out.push(Message::warn(format!(
+                "{who}: its Joint is connected to {partner:?}, but no entity has that name"
+            )));
+        }
+    }
+}
+
+/// Checks one model reference: the file and the files it uses (buffers,
+/// textures, `.mtl`) exist and sit inside the project, so they ship.
+fn check_model(project: &Path, base: &Path, who: &str, rel: &str, out: &mut Vec<Message>) {
+    let file = if Path::new(rel).is_absolute() {
+        PathBuf::from(rel)
+    } else {
+        automata_assets::join_relative(base, rel)
+    };
+    if !file.is_file() {
+        out.push(Message::error(format!("{who}: model {rel} not found")));
+        return;
+    }
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let root = canon(project);
+    if !canon(&file).starts_with(&root) {
+        out.push(Message::error(format!(
+            "{who}: model {rel} is outside the project folder and won't ship \
+             (drop it into the editor to import it into models/)"
+        )));
+        return;
+    }
+    for dep in automata_assets::dependencies(&file) {
+        let shown = dep
+            .strip_prefix(&root)
+            .unwrap_or(&dep)
+            .display()
+            .to_string();
+        if !dep.is_file() {
+            out.push(Message::warn(format!(
+                "{who}: model {rel} uses {shown}, which is missing"
+            )));
+        } else if !canon(&dep).starts_with(&root) {
+            out.push(Message::warn(format!(
+                "{who}: model {rel} uses {shown}, outside the project; it won't ship"
+            )));
+        }
+    }
+}
+
+/// Checks a material reference: the file exists inside the project and
+/// reads, and the textures it names exist inside the project too.
+fn check_material(project: &Path, base: &Path, who: &str, rel: &str, out: &mut Vec<Message>) {
+    let file = if Path::new(rel).is_absolute() {
+        PathBuf::from(rel)
+    } else {
+        automata_assets::join_relative(base, rel)
+    };
+    let Ok(text) = std::fs::read_to_string(&file) else {
+        out.push(Message::error(format!("{who}: material {rel} not found")));
+        return;
+    };
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let root = canon(project);
+    if !canon(&file).starts_with(&root) {
+        out.push(Message::error(format!(
+            "{who}: material {rel} is outside the project folder and won't ship"
+        )));
+        return;
+    }
+    if let Err(e) = automata_assets::MaterialFile::parse(&text) {
+        out.push(Message::error(format!(
+            "{who}: material {rel} doesn't read: {e}"
+        )));
+        return;
+    }
+    for dep in automata_assets::material::material_dependencies(&file) {
+        let shown = canon(&dep);
+        let shown = shown
+            .strip_prefix(&root)
+            .unwrap_or(&dep)
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        if !dep.is_file() {
+            out.push(Message::warn(format!(
+                "{who}: material {rel} uses {shown}, which is missing"
+            )));
+        } else if !canon(&dep).starts_with(&root) {
+            out.push(Message::warn(format!(
+                "{who}: material {rel} uses {shown}, outside the project; it won't ship"
+            )));
+        } else if automata_assets::shader::is_shader_path(&dep) {
+            if let Some(e) =
+                shader_problem(&dep, &shown, automata_assets::shader::ShaderKind::Material)
+            {
+                out.push(Message::error(format!(
+                    "{who}: material {rel}: shader {e} (it draws with the standard surface)"
+                )));
+            }
+        }
+    }
+}
+
+/// What's wrong with a shader file by the engine's rules, if anything.
+fn shader_problem(
+    file: &Path,
+    name: &str,
+    kind: automata_assets::shader::ShaderKind,
+) -> Option<String> {
+    match automata_assets::shader::load_shader_file(file, name, kind) {
+        Ok(asset) => asset.error.as_ref().map(ToString::to_string),
+        Err(e) => Some(e),
+    }
+}
+
+/// Checks a Post Shader: the `.wgsl` exists inside the project and passes
+/// the engine's checks.
+fn check_post_shader(project: &Path, base: &Path, who: &str, rel: &str, out: &mut Vec<Message>) {
+    let file = if Path::new(rel).is_absolute() {
+        PathBuf::from(rel)
+    } else {
+        automata_assets::join_relative(base, rel)
+    };
+    if !file.is_file() {
+        out.push(Message::error(format!(
+            "{who}: post shader {rel} not found"
+        )));
+        return;
+    }
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if !canon(&file).starts_with(canon(project)) {
+        out.push(Message::error(format!(
+            "{who}: post shader {rel} is outside the project folder and won't ship"
+        )));
+        return;
+    }
+    if let Some(e) = shader_problem(&file, rel, automata_assets::shader::ShaderKind::Post) {
+        out.push(Message::error(format!(
+            "{who}: post shader {e} (the frame keeps its standard look)"
+        )));
+    }
+}
+
+/// Checks an Animation's graph: the file exists inside the project, reads,
+/// and makes sense for the entity's model (its clips and bones).
+fn check_anim_graph(
+    project: &Path,
+    base: &Path,
+    who: &str,
+    rel: &str,
+    model: Option<&str>,
+    out: &mut Vec<Message>,
+) {
+    let join = |rel: &str| {
+        if Path::new(rel).is_absolute() {
+            PathBuf::from(rel)
+        } else {
+            automata_assets::join_relative(base, rel)
+        }
+    };
+    let file = join(rel);
+    let Ok(text) = std::fs::read_to_string(&file) else {
+        out.push(Message::error(format!(
+            "{who}: animation graph {rel} not found"
+        )));
+        return;
+    };
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if !canon(&file).starts_with(canon(project)) {
+        out.push(Message::error(format!(
+            "{who}: animation graph {rel} is outside the project folder and won't ship"
+        )));
+        return;
+    }
+    let graph = match automata_assets::AnimGraph::parse(&text) {
+        Ok(graph) => graph,
+        Err(e) => {
+            out.push(Message::error(format!(
+                "{who}: animation graph {rel} doesn't read: {e}"
+            )));
+            return;
+        }
+    };
+    let rig = model
+        .map(join)
+        .and_then(|m| automata_assets::load(m.to_str()?).ok())
+        .and_then(|m| m.rig.clone());
+    let clips = rig.as_ref().map(|r| r.clip_names());
+    let bones: Option<Vec<&str>> = rig
+        .as_ref()
+        .map(|r| r.nodes.iter().map(|n| n.name.as_str()).collect());
+    for problem in graph.problems(clips.as_deref(), bones.as_deref()) {
+        out.push(Message::warn(format!(
+            "{who}: animation graph {rel}: {problem}"
+        )));
+    }
+}
+
+/// Checks an Audio Source's clip: set, present, a sound file, and inside
+/// the project so it ships.
+fn check_sound(project: &Path, base: &Path, who: &str, rel: &str, out: &mut Vec<Message>) {
+    if rel.trim().is_empty() {
+        out.push(Message::warn(format!(
+            "{who}: the Audio Source has no clip and will stay silent"
+        )));
+        return;
+    }
+    let file = if Path::new(rel).is_absolute() {
+        PathBuf::from(rel)
+    } else {
+        automata_assets::join_relative(base, rel)
+    };
+    if !file.is_file() {
+        out.push(Message::error(format!("{who}: sound {rel} not found")));
+        return;
+    }
+    if !automata_core::audio_source::is_audio_path(&file) {
+        out.push(Message::warn(format!(
+            "{who}: {rel} isn't a sound file the engine plays (.ogg, .wav, .mp3, .flac)"
+        )));
+    }
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if !canon(&file).starts_with(canon(project)) {
+        out.push(Message::error(format!(
+            "{who}: sound {rel} is outside the project folder and won't ship \
+             (drop it into the editor to import it into sounds/)"
+        )));
+    }
+}
+
+/// Where templates are installed: `$AUTOMATA_TEMPLATES`, else
+/// `~/.local/share/automata/templates/<version>` (Linux),
+/// `~/Library/Application Support/automata/templates/<version>` (macOS) or
+/// `%APPDATA%\automata\templates\<version>` (Windows).
+#[must_use]
+pub fn templates_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("AUTOMATA_TEMPLATES") {
+        return PathBuf::from(dir);
+    }
+    let base = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME")
+            .map(|h| PathBuf::from(h).join("Library").join("Application Support"))
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| {
+                std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share"))
+            })
+    }
+    .unwrap_or_else(std::env::temp_dir);
+    base.join("automata").join("templates").join(VERSION)
+}
+
+/// The installed template folder for `target`, if there is one.
+#[must_use]
+pub fn find_template(target: Target) -> Option<PathBuf> {
+    // (The Android template's "player" is the template APK.)
+    let dir = templates_dir().join(target.triple());
+    dir.join(target.player_file()).is_file().then_some(dir)
+}
+
+/// Whether a template folder bundles its own Python (a development
+/// template doesn't, and needs Python with `automata` installed). The
+/// Android template APK always does.
+#[must_use]
+pub fn template_has_runtime(dir: &Path) -> bool {
+    !macos::runtimes(dir).is_empty()
+        || android::installed_template(dir).is_some()
+        || web::is_template(dir)
+}
+
+/// Installs a template archive (`automata-template-<target>.tar.gz`, or
+/// the APK for Android) for `target`, replacing any installed one.
+///
+/// # Errors
+///
+/// When the archive can't be extracted or holds no player.
+pub fn install_template(archive_path: &Path, target: Target) -> Result<PathBuf, String> {
+    let dest = templates_dir().join(target.triple());
+    let staging = dest.with_extension("installing");
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+    if target == Target::Android {
+        // The template is the APK itself.
+        let bytes =
+            std::fs::read(archive_path).map_err(|e| format!("{}: {e}", archive_path.display()))?;
+        if android::zip::read(&bytes).is_err() {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(format!("{} is not an APK", archive_path.display()));
+        }
+        std::fs::write(staging.join(android::TEMPLATE_FILE), bytes).map_err(|e| e.to_string())?;
+    } else {
+        archive::extract_tar_gz(archive_path, &staging)
+            .map_err(|e| format!("{}: {e}", archive_path.display()))?;
+    }
+    if !staging.join(target.player_file()).is_file() {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(format!(
+            "{} is not a {} template (no {})",
+            archive_path.display(),
+            target.label(),
+            target.player_file()
+        ));
+    }
+    if target == Target::Web {
+        if let Err(e) = web::template_wheel(&staging) {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(format!("{}: {e}", archive_path.display()));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dest);
+    std::fs::rename(&staging, &dest).map_err(|e| e.to_string())?;
+    Ok(dest)
+}
+
+/// Downloads the published template for `target` (with `curl`, which ships
+/// with Linux distributions and Windows 10+) and installs it.
+///
+/// # Errors
+///
+/// When the download or install fails.
+pub fn download_template(target: Target) -> Result<PathBuf, String> {
+    let name = target.template_archive();
+    let tmp = std::env::temp_dir().join(&name);
+    let _ = std::fs::remove_file(&tmp);
+    let mut tried = Vec::new();
+    // 1. The public release URL.
+    let url = format!("{TEMPLATE_URL}/{name}");
+    if curl(&["-fsSL", "--retry", "2", "-o"], &tmp, &url) {
+        return install_downloaded(&tmp, target);
+    }
+    tried.push(format!(
+        "{url} (not reachable without signing in: the repository may be private)"
+    ));
+    // 2. The GitHub CLI, signed in (`gh auth login`): works for private repos.
+    let gh = std::process::Command::new("gh")
+        .args([
+            "release",
+            "download",
+            TEMPLATE_TAG,
+            "--repo",
+            TEMPLATE_REPO,
+            "--clobber",
+        ])
+        .args(["--pattern", &name, "--output"])
+        .arg(&tmp)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output();
+    match gh {
+        Ok(out) if out.status.success() && tmp.is_file() => {
+            return install_downloaded(&tmp, target);
+        }
+        Ok(out) => {
+            let err = String::from_utf8_lossy(&out.stderr);
+            let first = err.lines().next().unwrap_or("failed").trim();
+            let short: String = first.chars().take(160).collect();
+            tried.push(format!("gh release download: {short}"));
+        }
+        Err(_) => tried.push("gh (GitHub CLI) is not installed".into()),
+    }
+    // 3. A token in GH_TOKEN / GITHUB_TOKEN, through the GitHub API.
+    let token = std::env::var("GH_TOKEN")
+        .or_else(|_| std::env::var("GITHUB_TOKEN"))
+        .ok()
+        .filter(|t| !t.trim().is_empty());
+    if let Some(token) = token {
+        match download_with_token(&token, &name, &tmp) {
+            Ok(()) => return install_downloaded(&tmp, target),
+            Err(e) => tried.push(format!("GitHub API with GH_TOKEN: {e}")),
+        }
+    } else {
+        tried.push("no GH_TOKEN / GITHUB_TOKEN set".into());
+    }
+    Err(format!(
+        "could not download {name}. Tried:\n  - {}\nSign in with `gh auth login` (or set GH_TOKEN), or install a template file with `automata-cli templates install <file>`.",
+        tried.join("\n  - ")
+    ))
+}
+
+fn install_downloaded(tmp: &Path, target: Target) -> Result<PathBuf, String> {
+    let dir = install_template(tmp, target);
+    let _ = std::fs::remove_file(tmp);
+    dir
+}
+
+/// Runs curl with `args`, `-o <out>` style output and `url`; true on success.
+fn curl(args: &[&str], out: &Path, url: &str) -> bool {
+    std::process::Command::new("curl")
+        .args(args)
+        .arg(out)
+        .arg(url)
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Fetches a release asset through the API (private repositories).
+fn download_with_token(token: &str, name: &str, out: &Path) -> Result<(), String> {
+    let api = format!("https://api.github.com/repos/{TEMPLATE_REPO}/releases/tags/{TEMPLATE_TAG}");
+    let auth = format!("Authorization: Bearer {token}");
+    let json = std::process::Command::new("curl")
+        .args([
+            "-fsSL",
+            "-H",
+            &auth,
+            "-H",
+            "Accept: application/vnd.github+json",
+            &api,
+        ])
+        .output()
+        .map_err(|e| format!("could not run curl: {e}"))?;
+    if !json.status.success() {
+        return Err("the release isn't visible with this token".into());
+    }
+    let asset = asset_api_url(&String::from_utf8_lossy(&json.stdout), name)
+        .ok_or_else(|| format!("the release has no {name}"))?;
+    let ok = std::process::Command::new("curl")
+        .args([
+            "-fsSL",
+            "--retry",
+            "2",
+            "-H",
+            &auth,
+            "-H",
+            "Accept: application/octet-stream",
+            "-o",
+        ])
+        .arg(out)
+        .arg(&asset)
+        .status()
+        .is_ok_and(|s| s.success());
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("downloading {asset} failed"))
+    }
+}
+
+/// The API URL of the asset called `name` in a release's JSON. Each asset
+/// object starts with its `"url"`; the uploader's own `"url"` comes after
+/// the asset's `"name"`, so splitting on `"url"` keeps them apart.
+fn asset_api_url(json: &str, name: &str) -> Option<String> {
+    let quoted = format!("\"{name}\"");
+    json.split("\"url\"").find_map(|chunk| {
+        let rest = chunk.trim_start().strip_prefix(':')?.trim_start();
+        let rest = rest.strip_prefix('"')?;
+        let url = &rest[..rest.find('"')?];
+        (url.contains("/releases/assets/") && chunk.contains(&quoted)).then(|| url.to_string())
+    })
+}
+
+/// Packs a template folder (player + optional `runtime/`) into an archive.
+/// CI uses this to publish templates.
+///
+/// # Errors
+///
+/// When the folder holds no player or the archive can't be written.
+pub fn pack_template(dir: &Path, target: Target, dest: &Path) -> Result<(), String> {
+    if target == Target::Android {
+        return Err("the Android template is an APK already: install it as it is".into());
+    }
+    if !dir.join(target.player_file()).is_file() {
+        return Err(format!("{} has no {}", dir.display(), target.player_file()));
+    }
+    let entries = archive::entries(dir, "", &|rel| {
+        executable_in_build(target, rel, target.player_file())
+    })
+    .map_err(|e| e.to_string())?;
+    archive::write_tar_gz(dest, &entries).map_err(|e| e.to_string())
+}
+
+/// Makes a development template from a built `automata-player`: no
+/// bundled Python, so the exported game uses the Python on `PATH` (with
+/// `automata` installed). Handy for testing exports without downloads.
+///
+/// # Errors
+///
+/// When the player can't be copied.
+pub fn install_dev_template(player: &Path, target: Target) -> Result<PathBuf, String> {
+    match target {
+        Target::Android => {
+            return Err("Android has no development template: install the template APK".into())
+        }
+        Target::Web => {
+            return Err("the web has no development template: install the web template".into())
+        }
+        Target::Linux | Target::Windows | Target::MacOS => {}
+    }
+    let dest = templates_dir().join(target.triple());
+    let _ = std::fs::remove_dir_all(&dest);
+    std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+    let to = dest.join(target.player_file());
+    std::fs::copy(player, &to).map_err(|e| format!("{}: {e}", player.display()))?;
+    make_executable(&to);
+    Ok(dest)
+}
+
+fn executable_in_build(target: Target, rel: &str, exe: &str) -> bool {
+    if target == Target::MacOS {
+        return macos::executable(rel);
+    }
+    target == Target::Linux
+        && (rel == exe
+            || rel.starts_with("runtime/bin/")
+            || std::path::Path::new(rel)
+                .extension()
+                .is_some_and(|e| e == "so"))
+}
+
+/// The result of exporting one target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Exported {
+    /// The platform.
+    pub target: Target,
+    /// The game folder (run the executable inside it).
+    pub folder: PathBuf,
+    /// The executable.
+    pub executable: PathBuf,
+    /// The archive, when one was written.
+    pub archive: Option<PathBuf>,
+    /// Whether the build bundles Python (false for development templates).
+    pub standalone: bool,
+}
+
+/// Exports `project` for `target` using the template in `template`.
+/// `progress` receives messages as the export runs.
+///
+/// # Errors
+///
+/// When validation fails or a file can't be copied / written.
+pub fn export(
+    project: &Path,
+    cfg: &BuildConfig,
+    target: Target,
+    template: &Path,
+    progress: &mut dyn FnMut(Message),
+) -> Result<Exported, String> {
+    let problems = validate(project, cfg);
+    let mut failed = false;
+    for p in problems {
+        failed |= p.level == Level::Error;
+        progress(p);
+    }
+    if failed {
+        return Err("the project has errors; fix them and build again".into());
+    }
+    match target {
+        Target::Android => return android::export(project, cfg, template, progress),
+        Target::MacOS => return macos::export(project, cfg, template, progress),
+        Target::Web => return web::export(project, cfg, template, progress),
+        Target::Linux | Target::Windows => {}
+    }
+    let player = template.join(target.player_file());
+    if !player.is_file() {
+        return Err(format!(
+            "no {} template at {} (Build Settings → Download templates)",
+            target.label(),
+            template.display()
+        ));
+    }
+    let standalone = template_has_runtime(template);
+    if !standalone {
+        progress(Message::warn(format!(
+            "{} template has no bundled Python: the build runs with the Python on PATH (development template).",
+            target.label()
+        )));
+    }
+
+    let name = cfg.file_name();
+    let out_root = project.join(&cfg.output);
+    let folder = out_root.join(target.name()).join(&name);
+    progress(Message::info(format!(
+        "{}: exporting to {}",
+        target.label(),
+        folder.display()
+    )));
+    if folder.exists() {
+        std::fs::remove_dir_all(&folder)
+            .map_err(|e| format!("could not clear {}: {e}", folder.display()))?;
+    }
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+
+    // The launcher, renamed after the game.
+    let exe = folder.join(format!("{name}{}", target.exe_suffix()));
+    std::fs::copy(&player, &exe).map_err(|e| format!("{}: {e}", player.display()))?;
+    make_executable(&exe);
+
+    // The runtime.
+    if standalone {
+        let n = copy_tree(&template.join("runtime"), &folder.join("runtime"), &|_| {
+            true
+        })?;
+        progress(Message::info(format!(
+            "{}: runtime ({n} files)",
+            target.label()
+        )));
+    }
+
+    // The game files.
+    let n = copy_game(project, cfg, &folder.join("game"))?;
+    progress(Message::info(format!(
+        "{}: game ({n} files)",
+        target.label()
+    )));
+    steam::ship(&cfg.steam, project, target, &folder.join("game"), progress)?;
+
+    let archive_path = if cfg.archive {
+        let file = format!(
+            "{name}-{}-{}.{}",
+            cfg.version.trim(),
+            target.triple(),
+            target.archive_ext()
+        );
+        let path = out_root.join(file);
+        let entries = archive::entries(&folder, &name, &|rel| {
+            executable_in_build(target, rel, &format!("{name}{}", target.exe_suffix()))
+        })
+        .map_err(|e| e.to_string())?;
+        match target {
+            Target::Windows => archive::write_zip(&path, &entries),
+            _ => archive::write_tar_gz(&path, &entries),
+        }
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+        progress(Message::info(format!(
+            "{}: archive {}",
+            target.label(),
+            path.display()
+        )));
+        Some(path)
+    } else {
+        None
+    };
+    progress(Message::info(format!(
+        "{}: done → {}",
+        target.label(),
+        exe.display()
+    )));
+    Ok(Exported {
+        target,
+        folder,
+        executable: exe,
+        archive: archive_path,
+        standalone,
+    })
+}
+
+/// Writes the game folder an export ships (`game/` in a build) to `dest`:
+/// the project's files minus the left-out ones, plus `game.json`. Builds
+/// that don't come from a desktop template use this; the Android build
+/// packs the folder into its APK. Returns how many project files were
+/// copied. A previous staged folder at `dest` is replaced.
+///
+/// # Errors
+///
+/// When the project has errors (each reported through `progress`), when
+/// `dest` is the project, holds it, or sits inside it without being left
+/// out (the copy would include itself), when `dest` is a folder with other
+/// things in it, or when files can't be copied.
+pub fn stage_game(
+    project: &Path,
+    cfg: &BuildConfig,
+    dest: &Path,
+    progress: &mut dyn FnMut(Message),
+) -> Result<usize, String> {
+    let mut failed = false;
+    for p in validate(project, cfg) {
+        failed |= p.level == Level::Error;
+        progress(p);
+    }
+    if failed {
+        return Err("the project has errors; fix them and build again".into());
+    }
+    let skip = Skip::new(project, cfg);
+    if project.starts_with(dest) {
+        return Err(format!(
+            "{} holds the project; stage the game somewhere else",
+            dest.display()
+        ));
+    }
+    if let Ok(rel) = dest.strip_prefix(project) {
+        if !skip.excluded(&archive::slash_path(rel)) {
+            return Err(format!(
+                "{} is inside the project and would be copied into itself; use the output folder ({}) or somewhere outside",
+                dest.display(),
+                cfg.output
+            ));
+        }
+    }
+    let foreign = std::fs::read_dir(dest).is_ok_and(|mut entries| entries.next().is_some())
+        && !dest.join("game.json").is_file();
+    if foreign {
+        return Err(format!(
+            "{} isn't empty and isn't a staged game; choose an empty or new folder",
+            dest.display()
+        ));
+    }
+    copy_game(project, cfg, dest)
+}
+
+/// Zips a staged game folder (from [`stage_game`]) to `dest`: its files at
+/// the top of the archive, `game.json` among them. The web player loads
+/// such a `game.zip`. The archive is reproducible: the same files give the
+/// same bytes (every file dated 1980-01-01, none executable). Returns how
+/// many files it holds.
+///
+/// # Errors
+///
+/// When `folder` isn't a staged game or the archive can't be written.
+pub fn zip_staged(folder: &Path, dest: &Path) -> Result<usize, String> {
+    if !folder.join("game.json").is_file() {
+        return Err(format!(
+            "{} isn't a staged game (no game.json)",
+            folder.display()
+        ));
+    }
+    let mut entries = archive::entries(folder, "", &|_| false)
+        .map_err(|e| format!("{}: {e}", folder.display()))?;
+    for e in &mut entries {
+        e.executable = false;
+    }
+    if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    archive::write_zip_dated(dest, &entries, archive::ZIP_EPOCH)
+        .map_err(|e| format!("{}: {e}", dest.display()))?;
+    Ok(entries.len())
+}
+
+/// Replaces `dest` with the project's shipped files and `game.json`.
+pub(crate) fn copy_game(project: &Path, cfg: &BuildConfig, dest: &Path) -> Result<usize, String> {
+    if dest.exists() {
+        std::fs::remove_dir_all(dest)
+            .map_err(|e| format!("could not clear {}: {e}", dest.display()))?;
+    }
+    std::fs::create_dir_all(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    let skip = Skip::new(project, cfg);
+    let n = copy_tree(project, dest, &|rel| !skip.excluded(rel))?;
+    write_manifest(&dest.join("game.json"), cfg).map_err(|e| e.to_string())?;
+    Ok(n)
+}
+
+/// Paths an export leaves out.
+struct Skip {
+    project: PathBuf,
+    output: String,
+    extra: Vec<String>,
+}
+
+impl Skip {
+    fn new(project: &Path, cfg: &BuildConfig) -> Self {
+        let output = archive::slash_path(Path::new(&cfg.output));
+        let mut extra: Vec<String> = cfg
+            .exclude
+            .iter()
+            .map(|e| e.trim().trim_start_matches("./").to_string())
+            .collect();
+        // A Steamworks SDK kept in the project isn't part of the game.
+        if let Some(sdk) = steam::sdk_in_project(&cfg.steam) {
+            extra.push(format!("{sdk}/"));
+        }
+        Self {
+            project: project.to_path_buf(),
+            output,
+            extra,
+        }
+    }
+
+    fn excluded(&self, rel: &str) -> bool {
+        let parts: Vec<&str> = rel.split('/').collect();
+        let always = parts.iter().any(|p| {
+            matches!(
+                *p,
+                ".oberon"
+                    | "__pycache__"
+                    | ".git"
+                    | ".hg"
+                    | ".svn"
+                    | ".venv"
+                    | "venv"
+                    | ".pytest_cache"
+                    | ".mypy_cache"
+                    | ".ruff_cache"
+                    | "node_modules"
+                    // Installed packages (automata's own source among
+                    // them), wherever a Python environment lives.
+                    | "site-packages"
+                    | "dist-packages"
+            )
+        }) || Path::new(rel)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("pyc"))
+            || rel == CONFIG_FILE
+            || rel == ".DS_Store"
+            // A virtual environment under any name (`env/`, `.env-3.12/`…).
+            || self.project.join(rel).join("pyvenv.cfg").is_file();
+        let output = !self.output.is_empty()
+            && (rel == self.output || rel.starts_with(&format!("{}/", self.output)));
+        let extra = self.extra.iter().any(|e| {
+            if let Some(dir) = e.strip_suffix('/') {
+                rel == dir || rel.starts_with(&format!("{dir}/"))
+            } else {
+                rel == e
+            }
+        });
+        always || output || extra
+    }
+}
+
+/// Drops Windows' verbatim prefix (`\\?\C:\…` → `C:\…`,
+/// `\\?\UNC\host\…` → `\\host\…`) that `canonicalize` adds. In verbatim
+/// form `/` is not a separator, so Python opening `game\scripts/x.py` fails.
+/// Other paths are returned unchanged.
+#[must_use]
+pub fn plain_path(p: PathBuf) -> PathBuf {
+    let plain = p.to_str().and_then(|s| {
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            Some(format!(r"\\{rest}"))
+        } else {
+            s.strip_prefix(r"\\?\")
+                .filter(|rest| rest.as_bytes().get(1) == Some(&b':'))
+                .map(str::to_string)
+        }
+    });
+    plain.map_or(p, PathBuf::from)
+}
+
+pub(crate) fn copy_tree(
+    from: &Path,
+    to: &Path,
+    keep: &dyn Fn(&str) -> bool,
+) -> Result<usize, String> {
+    let mut count = 0;
+    let mut stack = vec![from.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let items = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        for item in items {
+            let item = item.map_err(|e| e.to_string())?;
+            let path = item.path();
+            let rel = archive::slash_path(path.strip_prefix(from).unwrap_or(&path));
+            if !keep(&rel) {
+                continue;
+            }
+            let kind = item.file_type().map_err(|e| e.to_string())?;
+            let dest = to.join(&rel);
+            if kind.is_dir() {
+                stack.push(path);
+            } else if kind.is_file() || archive::is_file_link(&path) {
+                // Links are copied as the file they point at.
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                std::fs::copy(&path, &dest).map_err(|e| format!("{}: {e}", path.display()))?;
+                count += 1;
+            }
+        }
+    }
+    Ok(count)
+}
+
+pub(crate) fn json_string(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            c if (c as u32) < 0x20 => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn write_manifest(path: &Path, cfg: &BuildConfig) -> std::io::Result<()> {
+    let opt = |v: &Option<String>| v.as_deref().map_or_else(|| "null".to_string(), json_string);
+    let touch = cfg
+        .touch_controls
+        .as_ref()
+        .map_or_else(|| "null".to_string(), TouchControls::to_json);
+    // Only games with Steam say so (the same game.json bytes otherwise).
+    let steam = cfg
+        .steam
+        .to_json()
+        .map_or_else(String::new, |s| format!("  \"steam\": {s},\n"));
+    let text = format!(
+        "{{\n  \"name\": {},\n  \"version\": {},\n  \"start_scene\": {},\n  \"main\": {},\n  \"resolution\": [{}, {}],\n  \"touch_controls\": {},\n{steam}  \"engine\": {}\n}}\n",
+        json_string(&cfg.name),
+        json_string(&cfg.version),
+        opt(&cfg.start_scene),
+        opt(&cfg.main_script),
+        cfg.resolution.0,
+        cfg.resolution.1,
+        touch,
+        json_string(VERSION),
+    );
+    std::fs::write(path, text)
+}
+
+#[cfg(unix)]
+fn make_executable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755));
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &Path) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_the_asset_api_url_in_release_json() {
+        let json = r#"{"url":"https://api.github.com/repos/x/y/releases/1","assets":[
+          {"url": "https://api.github.com/repos/x/y/releases/assets/11", "id":11,
+           "name": "automata-template-windows-x86_64.tar.gz",
+           "uploader": {"url": "https://api.github.com/users/bot"}},
+          {"url":"https://api.github.com/repos/x/y/releases/assets/22","id":22,
+           "name":"automata-template-linux-x86_64.tar.gz",
+           "uploader":{"url":"https://api.github.com/users/bot"}}]}"#;
+        assert_eq!(
+            asset_api_url(json, "automata-template-linux-x86_64.tar.gz").as_deref(),
+            Some("https://api.github.com/repos/x/y/releases/assets/22")
+        );
+        assert_eq!(
+            asset_api_url(json, "automata-template-windows-x86_64.tar.gz").as_deref(),
+            Some("https://api.github.com/repos/x/y/releases/assets/11")
+        );
+        assert_eq!(asset_api_url(json, "missing.tar.gz"), None);
+    }
+
+    #[test]
+    fn verbatim_windows_paths_are_made_plain() {
+        let plain = |s: &str| plain_path(PathBuf::from(s)).to_string_lossy().into_owned();
+        assert_eq!(plain(r"\\?\C:\Games\Coin Run"), r"C:\Games\Coin Run");
+        assert_eq!(plain(r"\\?\UNC\server\share\game"), r"\\server\share\game");
+        // Device paths and ordinary paths are left alone.
+        assert_eq!(plain(r"\\?\Volume{1234}\game"), r"\\?\Volume{1234}\game");
+        assert_eq!(plain("/home/me/game"), "/home/me/game");
+    }
+
+    fn project(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("automata-cli-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("scripts")).unwrap();
+        std::fs::create_dir_all(dir.join(".oberon")).unwrap();
+        std::fs::create_dir_all(dir.join("scripts/__pycache__")).unwrap();
+        std::fs::write(
+            dir.join("scripts/coin.py"),
+            "def update(entity, ctx):\n    pass\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("scripts/__pycache__/coin.pyc"), "x").unwrap();
+        std::fs::write(dir.join(".oberon/autosave.ron"), "x").unwrap();
+        let scene = automata_core::scene_file::SceneFile {
+            version: 1,
+            entities: Vec::new(),
+        };
+        std::fs::write(dir.join("level.ron"), scene.to_ron().unwrap()).unwrap();
+        dir
+    }
+
+    fn template(tag: &str, target: Target, runtime: bool) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("automata-template-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(target.player_file()), b"player").unwrap();
+        if runtime {
+            std::fs::create_dir_all(dir.join("runtime/bin")).unwrap();
+            std::fs::write(dir.join("runtime/bin/python3"), b"py").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn touch_controls_come_from_build_ron_and_go_to_game_json() {
+        let cfg: BuildConfig = ron::from_str(
+            r#"(name: "Pad", start_scene: Some("level.ron"), touch_controls: Some((
+                sticks: [(side: Left, keys: ["forward", "left", "back", "right"])],
+                buttons: [(key: "jump", label: "Jump \"high\""), (key: "e")],
+                look: Some(Right),
+            )))"#,
+        )
+        .unwrap();
+        let touch = cfg.touch_controls.as_ref().unwrap();
+        assert_eq!(touch.show, TouchShow::Auto);
+        assert_eq!(touch.buttons[1].label, "");
+        assert_eq!(touch.problems(), Vec::<String>::new());
+        assert_eq!(
+            touch.to_json(),
+            r#"{"sticks": [{"side": "left", "keys": ["forward", "left", "back", "right"]}], "buttons": [{"key": "jump", "label": "Jump \"high\""}, {"key": "e", "label": ""}], "look": "right", "show": "auto"}"#
+        );
+        // It survives a save and load, and plain configs leave it out.
+        let text = ron::ser::to_string(&cfg).unwrap();
+        assert_eq!(ron::from_str::<BuildConfig>(&text).unwrap(), cfg);
+        assert_eq!(BuildConfig::default().touch_controls, None);
+
+        let dir = project("touch");
+        let out = std::env::temp_dir().join(format!("automata-touch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        let mut cfg = cfg;
+        cfg.start_scene = Some("level.ron".into());
+        stage_game(&dir, &cfg, &out, &mut |_| {}).unwrap();
+        let manifest = std::fs::read_to_string(out.join("game.json")).unwrap();
+        assert!(manifest.contains(r#""touch_controls": {"sticks": [{"side": "left""#));
+        cfg.touch_controls = None;
+        stage_game(&dir, &cfg, &out, &mut |_| {}).unwrap();
+        let manifest = std::fs::read_to_string(out.join("game.json")).unwrap();
+        assert!(manifest.contains(r#""touch_controls": null"#));
+        let _ = std::fs::remove_dir_all(&out);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bad_touch_controls_are_export_errors() {
+        let stick = |side, keys: &[&str]| TouchStick {
+            side,
+            keys: keys.iter().map(|k| (*k).to_string()).collect(),
+        };
+        let touch = TouchControls {
+            sticks: vec![
+                stick(TouchSide::Left, &["w", "a", "s"]),
+                stick(TouchSide::Left, &["a", ""]),
+                stick(TouchSide::Right, &["q", "e"]),
+            ],
+            buttons: (0..7)
+                .map(|i| TouchButton {
+                    key: if i == 0 { " ".into() } else { i.to_string() },
+                    label: String::new(),
+                })
+                .collect(),
+            look: Some(TouchSide::Right),
+            show: TouchShow::Always,
+        };
+        let problems = touch.problems().join("\n");
+        for expected in [
+            "the left stick has 3 keys",
+            "the left stick has an empty key",
+            "two sticks on the left side",
+            "7 buttons; up to 6 fit",
+            "a button has no key",
+            "look and a stick can't share the right side",
+        ] {
+            assert!(problems.contains(expected), "{expected}\n{problems}");
+        }
+        let dir = project("touch-bad");
+        let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
+        cfg.touch_controls = Some(touch);
+        let errors = validate(&dir, &cfg);
+        assert!(errors
+            .iter()
+            .any(|m| m.level == Level::Error && m.text.contains("up to 6 fit")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stages_the_game_folder_without_a_template() {
+        let dir = project("stage");
+        let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
+        cfg.name = "Coin Run".into();
+        let cfg = cfg;
+        let out = std::env::temp_dir().join(format!("automata-stage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        let n = stage_game(&dir, &cfg, &out, &mut |_| {}).unwrap();
+        assert_eq!(n, 2, "the scene and the script");
+        assert!(out.join("scripts/coin.py").is_file());
+        assert!(out.join("level.ron").is_file());
+        assert!(!out.join(".oberon").exists());
+        assert!(!out.join("scripts/__pycache__").exists());
+        let manifest = std::fs::read_to_string(out.join("game.json")).unwrap();
+        assert!(manifest.contains("\"name\": \"Coin Run\""));
+        assert!(manifest.contains("\"start_scene\": \"level.ron\""));
+
+        // Staging again replaces the previous folder.
+        std::fs::write(out.join("stale.txt"), "x").unwrap();
+        stage_game(&dir, &cfg, &out, &mut |_| {}).unwrap();
+        assert!(!out.join("stale.txt").exists());
+
+        // The output folder inside the project is fine; other places inside
+        // it, the project itself, and folders with other things in them aren't.
+        let inside = dir.join(&cfg.output).join("game");
+        stage_game(&dir, &cfg, &inside, &mut |_| {}).unwrap();
+        assert!(inside.join("game.json").is_file());
+        let no = |dest: &Path| stage_game(&dir, &cfg, dest, &mut |_| {}).unwrap_err();
+        assert!(no(&dir.join("scripts/game")).contains("copied into itself"));
+        assert!(no(&dir).contains("holds the project"));
+        let busy = std::env::temp_dir().join(format!("automata-busy-{}", std::process::id()));
+        std::fs::create_dir_all(&busy).unwrap();
+        std::fs::write(busy.join("notes.txt"), "mine").unwrap();
+        assert!(no(&busy).contains("isn't a staged game"));
+        assert!(busy.join("notes.txt").is_file(), "left alone");
+
+        // A project with errors isn't staged.
+        let mut broken = cfg.clone();
+        broken.start_scene = Some("missing.ron".into());
+        let err = stage_game(&dir, &broken, &out, &mut |_| {}).unwrap_err();
+        assert!(err.contains("errors"));
+
+        // Zipped for the web: the same files give the same bytes.
+        stage_game(&dir, &cfg, &out, &mut |_| {}).unwrap();
+        let zip = busy.join("game.zip");
+        assert_eq!(
+            zip_staged(&out, &zip).unwrap(),
+            3,
+            "two files and game.json"
+        );
+        let first = std::fs::read(&zip).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        stage_game(&dir, &cfg, &out, &mut |_| {}).unwrap();
+        zip_staged(&out, &zip).unwrap();
+        assert_eq!(std::fs::read(&zip).unwrap(), first);
+        let text = String::from_utf8_lossy(&first);
+        assert!(text.contains("game.json") && text.contains("scripts/coin.py"));
+        assert!(zip_staged(&dir.join("scripts"), &zip)
+            .unwrap_err()
+            .contains("isn't a staged game"));
+
+        for d in [dir, out, busy] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[test]
+    fn exports_a_scene_project_for_both_platforms() {
+        let dir = project("both");
+        let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
+        cfg.name = "Coin Run".into();
+        assert_eq!(cfg.start_scene.as_deref(), Some("level.ron"));
+        for target in [Target::Linux, Target::Windows] {
+            let tpl = template(target.name(), target, true);
+            let mut log = Vec::new();
+            let out = export(&dir, &cfg, target, &tpl, &mut |m| log.push(m)).unwrap();
+            assert!(out
+                .executable
+                .ends_with(format!("Coin Run{}", target.exe_suffix())));
+            assert!(out.folder.join("runtime/bin/python3").is_file());
+            assert!(out.folder.join("game/scripts/coin.py").is_file());
+            assert!(
+                !out.folder.join("game/.oberon").exists(),
+                "editor state stays out"
+            );
+            assert!(!out.folder.join("game/scripts/__pycache__").exists());
+            assert!(
+                !out.folder.join("game/build").exists(),
+                "no build inside the build"
+            );
+            let manifest = std::fs::read_to_string(out.folder.join("game/game.json")).unwrap();
+            assert!(manifest.contains("\"start_scene\": \"level.ron\""));
+            assert!(manifest.contains("\"main\": null"));
+            let archive = out.archive.unwrap();
+            assert!(archive.to_string_lossy().ends_with(target.archive_ext()));
+            assert!(log.iter().all(|m| m.level != Level::Error));
+        }
+    }
+
+    /// A macOS template with a runtime and an interpreter for `arches`.
+    fn mac_template(tag: &str, arches: &[&str]) -> PathBuf {
+        let tpl = template(tag, Target::MacOS, false);
+        for arch in arches {
+            let rt = tpl.join(format!("runtime-{arch}"));
+            std::fs::create_dir_all(rt.join("bin")).unwrap();
+            std::fs::create_dir_all(rt.join("lib")).unwrap();
+            std::fs::write(rt.join("bin/python3"), b"py").unwrap();
+            std::fs::write(rt.join("lib/libpython3.12.dylib"), b"lib").unwrap();
+            std::fs::write(tpl.join(format!("python3-{arch}")), b"interpreter").unwrap();
+        }
+        tpl
+    }
+
+    fn web_template(tag: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("automata-template-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("pyodide")).unwrap();
+        std::fs::write(
+            dir.join("index.html"),
+            "<html><head><title>AUTOMATA</title></head></html>",
+        )
+        .unwrap();
+        for file in ["player.js", "audio-worklet.js", "pyodide/pyodide.mjs"] {
+            std::fs::write(dir.join(file), b"js").unwrap();
+        }
+        std::fs::write(
+            dir.join("automata-0.1.0-cp314-cp314-pyodide_2025_0_wasm32.whl"),
+            b"whl",
+        )
+        .unwrap();
+        // Left over from a hand-made site: a build writes its own.
+        std::fs::write(dir.join("player.json"), b"{}").unwrap();
+        std::fs::write(dir.join("game.zip"), b"old").unwrap();
+        dir
+    }
+
+    #[test]
+    fn exports_a_web_build_and_an_itch_zip() {
+        let dir = project("web");
+        let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
+        cfg.name = "Coin <Run>".into();
+        cfg.version = "1.0".into();
+        cfg.targets = vec![Target::Web];
+        let tpl = web_template("web");
+        assert!(template_has_runtime(&tpl));
+        let mut log = Vec::new();
+        let out = export(&dir, &cfg, Target::Web, &tpl, &mut |m| log.push(m)).unwrap();
+        assert!(log.iter().all(|m| m.level == Level::Info), "{log:?}");
+        assert!(out.standalone);
+        assert!(
+            out.folder.ends_with("build/web/Coin Run"),
+            "{:?}",
+            out.folder
+        );
+        assert_eq!(out.executable, out.folder.join("index.html"));
+        let html = std::fs::read_to_string(&out.executable).unwrap();
+        assert!(html.contains("<title>Coin &lt;Run&gt;</title>"), "{html}");
+        let config = std::fs::read_to_string(out.folder.join("player.json")).unwrap();
+        assert_eq!(
+            config.trim(),
+            r#"{"wheel": "automata-0.1.0-cp314-cp314-pyodide_2025_0_wasm32.whl", "game": "game.zip", "name": "Coin <Run>"}"#
+        );
+        // The game, as `stage --zip` zips it: no editor state or bytecode.
+        let game =
+            android::zip::read(&std::fs::read(out.folder.join("game.zip")).unwrap()).unwrap();
+        let names: Vec<&str> = game.iter().map(|e| e.name.as_str()).collect();
+        assert!(
+            names.contains(&"game.json") && names.contains(&"scripts/coin.py"),
+            "{names:?}"
+        );
+        assert!(names
+            .iter()
+            .all(|n| !n.contains(".oberon") && !n.contains("__pycache__")));
+        assert!(!out.folder.parent().unwrap().join(".game").exists());
+        // itch.io: index.html at the top of the zip.
+        let zip = out.archive.clone().unwrap();
+        assert!(zip.ends_with("build/web/Coin Run-1.0-web.zip"), "{zip:?}");
+        let entries = android::zip::read(&std::fs::read(&zip).unwrap()).unwrap();
+        let mut names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            [
+                "audio-worklet.js",
+                "automata-0.1.0-cp314-cp314-pyodide_2025_0_wasm32.whl",
+                "game.zip",
+                "index.html",
+                "player.js",
+                "player.json",
+                "pyodide/pyodide.mjs"
+            ]
+        );
+        // Building again replaces the folder.
+        std::fs::write(out.folder.join("stale.txt"), b"x").unwrap();
+        export(&dir, &cfg, Target::Web, &tpl, &mut |_| {}).unwrap();
+        assert!(!out.folder.join("stale.txt").exists());
+        // An incomplete template says what's missing.
+        std::fs::remove_file(tpl.join("player.js")).unwrap();
+        let err = export(&dir, &cfg, Target::Web, &tpl, &mut |_| {}).unwrap_err();
+        assert!(err.contains("no player.js"), "{err}");
+        assert!(!template_has_runtime(&tpl));
+    }
+
+    #[test]
+    fn exports_a_universal_mac_app() {
+        let dir = project("mac");
+        let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
+        cfg.name = "Coin Run".into();
+        cfg.version = "1.2.0-beta".into();
+        let tpl = mac_template("macos", &macos::ARCHES);
+        assert!(template_has_runtime(&tpl));
+        let mut log = Vec::new();
+        let out = export(&dir, &cfg, Target::MacOS, &tpl, &mut |m| log.push(m)).unwrap();
+        assert!(log.iter().all(|m| m.level == Level::Info), "{log:?}");
+        assert!(out.standalone);
+        assert!(out.folder.ends_with("build/macos/Coin Run.app"));
+        assert!(out
+            .executable
+            .ends_with("Coin Run.app/Contents/MacOS/Coin Run"));
+        let contents = out.folder.join("Contents");
+        for file in [
+            "MacOS/Coin Run",
+            "MacOS/python3-arm64",
+            "MacOS/python3-x86_64",
+            "Resources/runtime-arm64/bin/python3",
+            "Resources/runtime-x86_64/lib/libpython3.12.dylib",
+            "Resources/game/game.json",
+            "Resources/game/scripts/coin.py",
+            "PkgInfo",
+        ] {
+            assert!(contents.join(file).is_file(), "{file}");
+        }
+        assert!(!contents.join("Resources/game/.oberon").exists());
+        assert!(!contents.join("Resources/AppIcon.icns").exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for file in ["MacOS/Coin Run", "MacOS/python3-arm64"] {
+                let mode = std::fs::metadata(contents.join(file))
+                    .unwrap()
+                    .permissions()
+                    .mode();
+                assert_eq!(mode & 0o111, 0o111, "{file}");
+            }
+        }
+        let plist = std::fs::read_to_string(contents.join("Info.plist")).unwrap();
+        for pair in [
+            ("CFBundleExecutable", "Coin Run"),
+            ("CFBundleIdentifier", "com.example.coinrun"),
+            ("CFBundleShortVersionString", "1.2.0"),
+            ("CFBundlePackageType", "APPL"),
+            ("LSMinimumSystemVersion", "11.0"),
+        ] {
+            let entry = format!("<key>{}</key>\n\t<string>{}</string>", pair.0, pair.1);
+            assert!(plist.contains(&entry), "{entry}\n{plist}");
+        }
+        assert!(!plist.contains("CFBundleIconFile"));
+
+        // One zip holding the app, executables marked as such.
+        let archive = out.archive.unwrap();
+        assert!(archive.ends_with("Coin Run-1.2.0-beta-macos-universal.zip"));
+        let names: Vec<String> = android::zip::read(&std::fs::read(&archive).unwrap())
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert!(names.contains(&"Coin Run.app/Contents/MacOS/Coin Run".to_string()));
+        assert!(names.contains(&"Coin Run.app/Contents/Info.plist".to_string()));
+        assert!(names.contains(&"Coin Run.app/Contents/Resources/game/level.ron".to_string()));
+    }
+
+    #[test]
+    fn mac_apps_take_an_icon_and_bundle_id() {
+        let dir = project("macicon");
+        let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
+        cfg.name = "Coin Run".into();
+        cfg.targets = vec![Target::MacOS];
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend_from_slice(&1024u32.to_be_bytes());
+        png.extend_from_slice(&1024u32.to_be_bytes());
+        png.extend_from_slice(&[8, 6, 0, 0, 0]);
+        std::fs::write(dir.join("icon.png"), &png).unwrap();
+        cfg.macos.icon = "icon.png".into();
+        cfg.macos.bundle_id = "com.yourname.coin-run".into();
+        assert_eq!(validate(&dir, &cfg), Vec::new());
+
+        // One processor in the template: an app for that one.
+        let tpl = mac_template("macicon", &["arm64"]);
+        let out = export(&dir, &cfg, Target::MacOS, &tpl, &mut |_| {}).unwrap();
+        let contents = out.folder.join("Contents");
+        let icns = std::fs::read(contents.join("Resources/AppIcon.icns")).unwrap();
+        assert_eq!(&icns[8..12], b"ic10");
+        let plist = std::fs::read_to_string(contents.join("Info.plist")).unwrap();
+        assert!(plist.contains("<key>CFBundleIconFile</key>\n\t<string>AppIcon</string>"));
+        assert!(plist.contains("<string>com.yourname.coin-run</string>"));
+        assert!(!contents.join("MacOS/python3-x86_64").exists());
+        assert!(out
+            .archive
+            .unwrap()
+            .ends_with("Coin Run-0.1.0-macos-arm64.zip"));
+
+        // Bad settings stop a macOS build (and only matter for one).
+        cfg.macos.icon = "missing.png".into();
+        cfg.macos.bundle_id = "coin run".into();
+        let problems: Vec<String> = validate(&dir, &cfg).into_iter().map(|m| m.text).collect();
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(problems[0].contains("bundle ID"), "{problems:?}");
+        assert!(
+            problems[1].contains("macOS icon missing.png"),
+            "{problems:?}"
+        );
+        assert!(export(&dir, &cfg, Target::MacOS, &tpl, &mut |_| {}).is_err());
+        cfg.targets = vec![Target::Linux];
+        assert_eq!(validate(&dir, &cfg), Vec::new());
+
+        // A development template: just the launcher.
+        cfg.macos = MacOsConfig::default();
+        let dev = template("macdev", Target::MacOS, false);
+        assert!(!template_has_runtime(&dev));
+        let mut log = Vec::new();
+        let out = export(&dir, &cfg, Target::MacOS, &dev, &mut |m| log.push(m)).unwrap();
+        assert!(!out.standalone);
+        assert!(log.iter().any(|m| m.level == Level::Warning));
+        assert!(out.archive.unwrap().ends_with("Coin Run-0.1.0-macos.zip"));
+    }
+
+    #[test]
+    fn mac_targets_parse_and_round_trip() {
+        assert_eq!(Target::parse("macos"), Some(Target::MacOS));
+        assert_eq!(Target::parse(" Mac "), Some(Target::MacOS));
+        assert_eq!(Target::parse("osx"), Some(Target::MacOS));
+        assert_eq!(
+            Target::MacOS.template_archive(),
+            "automata-template-macos-universal.tar.gz"
+        );
+        let cfg: BuildConfig =
+            ron::from_str("(name: \"G\", targets: [Linux, MacOS], macos: (bundle_id: \"a.b\"))")
+                .unwrap();
+        assert_eq!(cfg.targets, vec![Target::Linux, Target::MacOS]);
+        assert_eq!(cfg.macos_bundle_id(), "a.b");
+        assert!(check_bundle_id("com.you.my-game").is_ok());
+        assert!(check_bundle_id("game").is_err());
+        assert!(check_bundle_id("com..game").is_err());
+        assert!(check_bundle_id("com.my_game").is_err());
+    }
+
+    #[test]
+    fn exports_an_android_apk_from_the_template() {
+        let dir = project("apk");
+        let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
+        cfg.name = "Coin Run".into();
+        let tpl = std::env::temp_dir().join(format!("automata-apk-tpl-{}", std::process::id()));
+        std::fs::create_dir_all(&tpl).unwrap();
+        let apk_bytes = android::tests::template();
+        let installed_from = tpl.join("downloaded.apk");
+        std::fs::write(&installed_from, &apk_bytes).unwrap();
+        std::fs::write(tpl.join(android::TEMPLATE_FILE), &apk_bytes).unwrap();
+        assert!(template_has_runtime(&tpl));
+        let key_file = tpl.join("debug.key");
+        let mut log = Vec::new();
+        let out =
+            android::export_with_key(&dir, &cfg, &tpl, &key_file, &mut |m| log.push(m)).unwrap();
+        assert!(out.executable.ends_with("android/Coin Run-0.1.0.apk"));
+        // The staged copy is gone: only the APK is left.
+        assert!(!out.folder.join("game").exists());
+        let text: Vec<&str> = log.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            text.iter().any(|t| t.contains("com.example.coinrun")),
+            "{text:?}"
+        );
+        assert!(
+            text.iter().any(|t| t.contains("debug signing key")),
+            "{text:?}"
+        );
+        let (key, new) = android::key::load_or_create(&key_file).unwrap();
+        assert!(!new);
+        let apk = std::fs::read(&out.executable).unwrap();
+        android::sign::verify(&apk, &key).unwrap();
+        let names: Vec<String> = android::zip::read(&apk)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert!(names.contains(&"assets/automata/game/scripts/coin.py".to_string()));
+        assert!(!names.iter().any(|n| n.contains(".oberon")));
+
+        // A bad app ID stops the build.
+        cfg.android.package = "Coin Run".into();
+        let err = android::export_with_key(&dir, &cfg, &tpl, &key_file, &mut |_| {}).unwrap_err();
+        assert!(err.contains("app ID"), "{err}");
+        // A broken template is reported.
+        std::fs::write(tpl.join(android::TEMPLATE_FILE), b"nope").unwrap();
+        cfg.android.package = "com.example.run".into();
+        assert!(android::export_with_key(&dir, &cfg, &tpl, &key_file, &mut |_| {}).is_err());
+        for d in [dir, tpl] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[test]
+    fn android_app_ids() {
+        let mut cfg = BuildConfig {
+            name: "3D Coin Run!".into(),
+            ..BuildConfig::default()
+        };
+        assert_eq!(cfg.android_package(), "com.example.game3dcoinrun");
+        cfg.android.package = " org.me.run ".into();
+        assert_eq!(cfg.android_package(), "org.me.run");
+        assert!(check_android_package("org.me.run_2").is_ok());
+        for bad in ["run", "org..run", "org.2run", "org.me-run", "org.mé"] {
+            assert!(check_android_package(bad).is_err(), "{bad}");
+        }
+        let old: BuildConfig = ron::from_str("(name: \"Old\")").unwrap();
+        assert_eq!(old.android, AndroidConfig::default());
+        assert_eq!(
+            parse_android_abis(" x86_64, arm64-v8a,,x86_64").unwrap(),
+            ["x86_64", "arm64-v8a"]
+        );
+        assert!(parse_android_abis("arm64")
+            .unwrap_err()
+            .contains("arm64-v8a"));
+        assert_eq!(parse_android_abis("").unwrap(), Vec::<String>::new());
+        // The key and ABIs round-trip, and stay out of build.ron when unset.
+        let text = ron::ser::to_string(&old.android).unwrap();
+        assert!(!text.contains("key") && !text.contains("abis"), "{text}");
+        let mut set = old.android.clone();
+        set.key = "~/keys/game.pem".into();
+        set.abis = vec!["arm64-v8a".into()];
+        let back: AndroidConfig = ron::from_str(&ron::ser::to_string(&set).unwrap()).unwrap();
+        assert_eq!(back, set);
+        assert_eq!(old.android.version_code, 1);
+        assert_eq!(Target::parse("Android"), Some(Target::Android));
+        assert_eq!(
+            Target::Android.template_archive(),
+            "automata-template-android.apk"
+        );
+    }
+
+    #[test]
+    fn a_linux_archive_extracts_to_a_runnable_folder() {
+        let dir = project("tgz");
+        let cfg = BuildConfig {
+            name: "Run".into(),
+            start_scene: Some("level.ron".into()),
+            ..BuildConfig::default()
+        };
+        let tpl = template("tgz", Target::Linux, true);
+        let out = export(&dir, &cfg, Target::Linux, &tpl, &mut |_| {}).unwrap();
+        let unpacked = dir.join("unpacked");
+        archive::extract_tar_gz(out.archive.as_ref().unwrap(), &unpacked).unwrap();
+        assert!(unpacked.join("Run/Run").is_file());
+        assert!(unpacked.join("Run/game/game.json").is_file());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(unpacked.join("Run/Run"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o111, 0o111, "the launcher stays executable");
+        }
+    }
+
+    #[test]
+    fn steam_builds_ship_the_library_and_the_app_id() {
+        let dir = project("steam");
+        let bin = dir.join("third_party/steamworks/redistributable_bin/linux64");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("libsteam_api.so"), b"steam").unwrap();
+        let cfg: BuildConfig = ron::from_str(
+            r#"(name: "Run", start_scene: Some("level.ron"),
+                steam: (app_id: 480, sdk: "third_party/steamworks"))"#,
+        )
+        .unwrap();
+        assert!(!cfg.steam.restart);
+        let text = ron::ser::to_string(&cfg).unwrap();
+        assert_eq!(ron::from_str::<BuildConfig>(&text).unwrap(), cfg);
+        let tpl = template("steam", Target::Linux, true);
+        let mut log = Vec::new();
+        let out = export(&dir, &cfg, Target::Linux, &tpl, &mut |m| log.push(m.text)).unwrap();
+        let game = out.folder.join("game");
+        assert_eq!(
+            std::fs::read(game.join("libsteam_api.so")).unwrap(),
+            b"steam"
+        );
+        let manifest = std::fs::read_to_string(game.join("game.json")).unwrap();
+        assert!(
+            manifest.contains(r#""steam": {"app_id": 480, "restart": false},"#),
+            "{manifest}"
+        );
+        // The SDK itself stays behind.
+        assert!(!game.join("third_party").exists());
+        assert!(
+            log.iter()
+                .any(|l| l == "Linux: Steam (app 480, libsteam_api.so)"),
+            "{log:?}"
+        );
+
+        // Without Steam: no library, no "steam" in game.json.
+        let plain = BuildConfig {
+            steam: steam::SteamConfig::default(),
+            ..cfg.clone()
+        };
+        let out = export(&dir, &plain, Target::Linux, &tpl, &mut |_| {}).unwrap();
+        let game = out.folder.join("game");
+        assert!(!game.join("libsteam_api.so").exists());
+        let manifest = std::fs::read_to_string(game.join("game.json")).unwrap();
+        assert!(!manifest.contains("steam"), "{manifest}");
+
+        // A missing SDK stops the build (unless the environment names one).
+        if std::env::var_os(steam::SDK_ENV).is_none() {
+            let mut gone = cfg;
+            gone.steam.sdk = "nowhere".into();
+            let mut log = Vec::new();
+            assert!(export(&dir, &gone, Target::Linux, &tpl, &mut |m| log.push(m.text)).is_err());
+            assert!(
+                log.iter().any(|l| l.contains("isn't the Steamworks SDK")),
+                "{log:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&tpl);
+    }
+
+    #[test]
+    fn validation_catches_missing_scenes_and_scripts() {
+        let dir = project("bad");
+        let none = BuildConfig::default();
+        assert!(validate(&dir, &none)
+            .iter()
+            .any(|m| m.level == Level::Error));
+        let missing = BuildConfig {
+            start_scene: Some("nope.ron".into()),
+            ..BuildConfig::default()
+        };
+        assert!(validate(&dir, &missing)[0].text.contains("nope.ron"));
+        // A scene whose entity points at a script that isn't there.
+        let mut scene = automata_core::scene_file::SceneFile {
+            version: 1,
+            entities: Vec::new(),
+        };
+        scene.entities.push(automata_core::scene_file::EntityData {
+            name: Some("Coin".into()),
+            script: Some(automata_core::scene_file::Script {
+                path: "scripts/gone.py".into(),
+            }),
+            ..Default::default()
+        });
+        std::fs::write(dir.join("broken.ron"), scene.to_ron().unwrap()).unwrap();
+        let broken = BuildConfig {
+            start_scene: Some("broken.ron".into()),
+            ..BuildConfig::default()
+        };
+        let problems = validate(&dir, &broken);
+        assert!(problems
+            .iter()
+            .any(|m| m.text.contains("Coin: script scripts/gone.py not found")));
+    }
+
+    #[test]
+    fn validation_checks_materials_and_their_textures() {
+        use automata_core::scene_file::{EntityData, MeshVisualData, PrimitiveData, SceneFile};
+        let dir = project("materials");
+        std::fs::create_dir_all(dir.join("materials")).unwrap();
+        std::fs::create_dir_all(dir.join("textures")).unwrap();
+        std::fs::write(dir.join("textures/brick.png"), b"not checked here").unwrap();
+        std::fs::write(
+            dir.join("materials/brick.mat.ron"),
+            "(base_map: \"../textures/brick.png\", normal_map: \"../textures/gone.png\")",
+        )
+        .unwrap();
+        std::fs::write(dir.join("materials/typo.mat.ron"), "(colour: (1, 1, 1, 1))").unwrap();
+        let cube = |name: &str, material: &str| EntityData {
+            name: Some(name.into()),
+            mesh_visual: Some(MeshVisualData {
+                primitive: PrimitiveData::Cube { size: 1.0 },
+                color: [1.0; 4],
+                surface: automata_core::scene_file::Surface::default(),
+                draw_distance: 0.0,
+                material: material.into(),
+            }),
+            ..Default::default()
+        };
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                cube("Wall", "materials/brick.mat.ron"),
+                cube("Odd", "materials/typo.mat.ron"),
+                cube("Ghost", "materials/ghost.mat.ron"),
+                cube("Plain", ""),
+            ],
+        };
+        std::fs::write(dir.join("mats.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            name: "Mats".into(),
+            start_scene: Some("mats.ron".into()),
+            ..BuildConfig::default()
+        };
+        let log = validate(&dir, &cfg);
+        let texts: Vec<String> = log
+            .iter()
+            .map(|m| format!("{:?} {}", m.level, m.text))
+            .collect();
+        let has = |s: &str| texts.iter().any(|t| t.contains(s));
+        assert!(has("Warning Wall: material materials/brick.mat.ron uses textures/gone.png, which is missing"), "{texts:#?}");
+        assert!(!has("brick.png"), "a present texture is fine: {texts:#?}");
+        assert!(
+            has("Error Odd: material materials/typo.mat.ron doesn't read"),
+            "{texts:#?}"
+        );
+        assert!(
+            has("Error Ghost: material materials/ghost.mat.ron not found"),
+            "{texts:#?}"
+        );
+    }
+
+    #[test]
+    fn validation_checks_material_and_post_shaders() {
+        use automata_core::scene_file::{EntityData, MeshVisualData, PrimitiveData, SceneFile};
+        let dir = project("shaders");
+        std::fs::create_dir_all(dir.join("materials")).unwrap();
+        std::fs::create_dir_all(dir.join("shaders")).unwrap();
+        std::fs::write(
+            dir.join("shaders/glow.wgsl"),
+            "fn material(in: MaterialInput) -> MaterialOutput {\n    return nope;\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("shaders/tint.wgsl"),
+            "fn post(in: PostInput) -> vec3<f32> { return in.color; }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("materials/glow.mat.ron"),
+            "(shader: \"../shaders/glow.wgsl\")",
+        )
+        .unwrap();
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                EntityData {
+                    name: Some("Lamp".into()),
+                    mesh_visual: Some(MeshVisualData {
+                        primitive: PrimitiveData::Cube { size: 1.0 },
+                        color: [1.0; 4],
+                        surface: automata_core::scene_file::Surface::default(),
+                        draw_distance: 0.0,
+                        material: "materials/glow.mat.ron".into(),
+                    }),
+                    ..Default::default()
+                },
+                EntityData {
+                    name: Some("Look".into()),
+                    post_shader: Some(automata_core::scene_file::PostShader::new(
+                        "shaders/tint.wgsl",
+                    )),
+                    ..Default::default()
+                },
+                EntityData {
+                    name: Some("Gone".into()),
+                    post_shader: Some(automata_core::scene_file::PostShader::new(
+                        "shaders/gone.wgsl",
+                    )),
+                    ..Default::default()
+                },
+            ],
+        };
+        std::fs::write(dir.join("fx.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            name: "Fx".into(),
+            start_scene: Some("fx.ron".into()),
+            ..BuildConfig::default()
+        };
+        let texts: Vec<String> = validate(&dir, &cfg)
+            .iter()
+            .map(|m| format!("{:?} {}", m.level, m.text))
+            .collect();
+        let has = |s: &str| texts.iter().any(|t| t.contains(s));
+        assert!(
+            has("Error Lamp: material materials/glow.mat.ron: shader shaders/glow.wgsl:2:"),
+            "{texts:#?}"
+        );
+        assert!(!has("Look"), "a working post shader is fine: {texts:#?}");
+        assert!(
+            has("Error Gone: post shader shaders/gone.wgsl not found"),
+            "{texts:#?}"
+        );
+        assert!(!has("Plain"), "{texts:#?}");
+    }
+
+    #[test]
+    fn validation_checks_animation_graphs_against_the_model() {
+        use automata_core::scene_file::{EntityData, MeshVisualData, PrimitiveData, SceneFile};
+        let dir = project("anim_graphs");
+        std::fs::create_dir_all(dir.join("anims")).unwrap();
+        std::fs::create_dir_all(dir.join("models")).unwrap();
+        let robot = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/oberon/robot_plaza/models/robot.glb");
+        std::fs::copy(robot, dir.join("models/robot.glb")).unwrap();
+        let good = automata_assets::AnimGraph::starter(&["Idle", "Walking"]);
+        good.save(&dir.join("anims/good.anim.ron"), "good.anim.ron")
+            .unwrap();
+        let typo = automata_assets::AnimGraph::starter(&["Idle", "Moonwalk"]);
+        typo.save(&dir.join("anims/typo.anim.ron"), "typo.anim.ron")
+            .unwrap();
+        std::fs::write(dir.join("anims/bad.anim.ron"), "(layers: oops)").unwrap();
+        let bot = |name: &str, graph: &str| EntityData {
+            name: Some(name.into()),
+            mesh_visual: Some(MeshVisualData {
+                primitive: PrimitiveData::Model {
+                    path: "models/robot.glb".into(),
+                },
+                color: [1.0; 4],
+                surface: automata_core::scene_file::Surface::default(),
+                draw_distance: 0.0,
+                material: String::new(),
+            }),
+            animation: Some(automata_core::scene_file::Animation {
+                graph: graph.into(),
+                ..automata_core::scene_file::Animation::default()
+            }),
+            ..Default::default()
+        };
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                bot("Good", "anims/good.anim.ron"),
+                bot("Typo", "anims/typo.anim.ron"),
+                bot("Bad", "anims/bad.anim.ron"),
+                bot("Ghost", "anims/ghost.anim.ron"),
+                bot("Plain", ""),
+            ],
+        };
+        std::fs::write(dir.join("bots.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            name: "Bots".into(),
+            start_scene: Some("bots.ron".into()),
+            ..BuildConfig::default()
+        };
+        let texts: Vec<String> = validate(&dir, &cfg)
+            .iter()
+            .map(|m| format!("{:?} {}", m.level, m.text))
+            .collect();
+        let has = |s: &str| texts.iter().any(|t| t.contains(s));
+        assert!(!has("Good") && !has("Plain"), "{texts:#?}");
+        assert!(
+            has("Warning Typo: animation graph anims/typo.anim.ron:") && has("Moonwalk"),
+            "{texts:#?}"
+        );
+        assert!(
+            has("Error Bad: animation graph anims/bad.anim.ron doesn't read"),
+            "{texts:#?}"
+        );
+        assert!(
+            has("Error Ghost: animation graph anims/ghost.anim.ron not found"),
+            "{texts:#?}"
+        );
+    }
+
+    #[test]
+    fn validation_checks_models_ship_with_the_game() {
+        use automata_core::scene_file::{EntityData, MeshVisualData, PrimitiveData, SceneFile};
+        let dir = project("models");
+        let outside = std::env::temp_dir().join(format!("export-outside-{}", std::process::id()));
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::create_dir_all(dir.join("models")).unwrap();
+        let tri = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        std::fs::write(dir.join("models/rock.obj"), tri).unwrap();
+        std::fs::write(
+            dir.join("models/crate.obj"),
+            format!("mtllib crate.mtl\n{tri}"),
+        )
+        .unwrap();
+        std::fs::write(outside.join("far.obj"), tri).unwrap();
+        let model = |name: &str, path: String| EntityData {
+            name: Some(name.into()),
+            mesh_visual: Some(MeshVisualData {
+                primitive: PrimitiveData::Model { path },
+                color: [1.0; 4],
+                surface: automata_core::scene_file::Surface::default(),
+                draw_distance: 0.0,
+                material: String::new(),
+            }),
+            ..Default::default()
+        };
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                model("Rock", "models/rock.obj".into()),
+                model("Crate", "models/crate.obj".into()),
+                model("Ghost", "models/ghost.glb".into()),
+                model("Far", outside.join("far.obj").display().to_string()),
+            ],
+        };
+        std::fs::write(dir.join("models.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("models.ron".into()),
+            ..BuildConfig::default()
+        };
+        let problems = validate(&dir, &cfg);
+        let has = |level: Level, text: &str| {
+            problems
+                .iter()
+                .any(|m| m.level == level && m.text.contains(text))
+        };
+        assert!(
+            !problems.iter().any(|m| m.text.starts_with("Rock")),
+            "{problems:?}"
+        );
+        assert!(
+            has(Level::Warning, "Crate: model models/crate.obj uses"),
+            "{problems:?}"
+        );
+        assert!(has(Level::Error, "Ghost: model models/ghost.glb not found"));
+        assert!(has(Level::Error, "is outside the project folder"));
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn validation_warns_about_joints_that_cant_hold() {
+        use automata_core::scene_file::{EntityData, SceneFile};
+        use automata_physics::{Joint, RigidBody};
+        let dir = project("joints");
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                EntityData {
+                    name: Some("Frame".into()),
+                    rigid_body: Some(RigidBody::fixed()),
+                    ..Default::default()
+                },
+                EntityData {
+                    name: Some("Door".into()),
+                    rigid_body: Some(RigidBody::dynamic()),
+                    joint: Some(Joint::default().connected_to("Frame")),
+                    ..Default::default()
+                },
+                EntityData {
+                    name: Some("Ghost".into()),
+                    joint: Some(Joint::ball().connected_to("Nobody")),
+                    ..Default::default()
+                },
+            ],
+        };
+        std::fs::write(dir.join("j.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("j.ron".into()),
+            ..BuildConfig::default()
+        };
+        let texts: Vec<String> = validate(&dir, &cfg)
+            .into_iter()
+            .filter(|m| m.level == Level::Warning)
+            .map(|m| m.text)
+            .collect();
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        assert!(texts.iter().all(|t| t.starts_with("Ghost:")), "{texts:?}");
+        assert!(texts.iter().any(|t| t.contains("Rigidbody")), "{texts:?}");
+        assert!(texts.iter().any(|t| t.contains("\"Nobody\"")), "{texts:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn validation_checks_collider_models_and_body_types() {
+        use automata_core::scene_file::{EntityData, SceneFile};
+        use automata_physics::{Collider3D, RigidBody};
+        let dir = project("colliders");
+        std::fs::create_dir_all(dir.join("models")).unwrap();
+        std::fs::write(
+            dir.join("models/rock.obj"),
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        )
+        .unwrap();
+        let entity = |name: &str, collider: Collider3D, body: Option<RigidBody>| EntityData {
+            name: Some(name.into()),
+            collider_3d: Some(collider),
+            rigid_body: body,
+            ..Default::default()
+        };
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                entity("Ground", Collider3D::mesh("models/rock.obj"), None),
+                entity(
+                    "Boulder",
+                    Collider3D::convex_hull("models/rock.obj"),
+                    Some(RigidBody::dynamic()),
+                ),
+                entity(
+                    "Heavy",
+                    Collider3D::mesh("models/rock.obj"),
+                    Some(RigidBody::dynamic()),
+                ),
+                entity("Lost", Collider3D::mesh("models/lost.glb"), None),
+            ],
+        };
+        std::fs::write(dir.join("c.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("c.ron".into()),
+            ..BuildConfig::default()
+        };
+        let problems = validate(&dir, &cfg);
+        let named = |who: &str| problems.iter().filter(|m| m.text.starts_with(who)).count();
+        assert_eq!(named("Ground"), 0, "{problems:?}");
+        assert_eq!(named("Boulder"), 0, "{problems:?}");
+        assert!(problems
+            .iter()
+            .any(|m| m.level == Level::Error && m.text.starts_with("Heavy: A Mesh collider")));
+        assert!(problems
+            .iter()
+            .any(|m| m.level == Level::Error && m.text == "Lost: model models/lost.glb not found"));
+    }
+
+    /// The FPS example exports cleanly: its scripts, models (with import
+    /// settings) and sounds are all where they belong.
+    #[test]
+    fn the_fps_example_validates() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/oberon/fps");
+        let cfg = BuildConfig::load(&dir).unwrap();
+        assert_eq!(cfg.start_scene.as_deref(), Some("level.ron"));
+        let problems: Vec<_> = validate(&dir, &cfg)
+            .into_iter()
+            .filter(|m| m.level != Level::Info)
+            .collect();
+        assert!(problems.is_empty(), "{problems:?}");
+    }
+
+    #[test]
+    fn validation_checks_audio_clips() {
+        use automata_core::scene_file::{EntityData, SceneFile};
+        use automata_core::AudioSource;
+        let dir = project("sounds");
+        std::fs::create_dir_all(dir.join("sounds")).unwrap();
+        std::fs::write(dir.join("sounds/bell.ogg"), b"ogg").unwrap();
+        let source = |name: &str, clip: &str| EntityData {
+            name: Some(name.into()),
+            audio_source: Some(AudioSource::new(clip)),
+            ..Default::default()
+        };
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                source("Bell", "sounds/bell.ogg"),
+                source("Gone", "sounds/gone.wav"),
+                source("Mute", ""),
+            ],
+        };
+        std::fs::write(dir.join("s.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("s.ron".into()),
+            ..BuildConfig::default()
+        };
+        let problems = validate(&dir, &cfg);
+        let has = |level: Level, text: &str| {
+            problems
+                .iter()
+                .any(|m| m.level == level && m.text.contains(text))
+        };
+        assert!(
+            !problems.iter().any(|m| m.text.starts_with("Bell")),
+            "{problems:?}"
+        );
+        assert!(
+            has(Level::Error, "Gone: sound sounds/gone.wav not found"),
+            "{problems:?}"
+        );
+        assert!(
+            has(Level::Warning, "Mute: the Audio Source has no clip"),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn python_string_literals_are_found_and_comments_skipped() {
+        let one = |line: &str| string_literals(line, &mut None);
+        assert_eq!(
+            one(r#"ctx.hud.text("Hi", 1, 2, font='fonts/A.ttf')  # "b.otf""#),
+            vec!["Hi".to_string(), "fonts/A.ttf".to_string()]
+        );
+        assert_eq!(
+            one(r#"x = "it's" + 'say "hi"'"#),
+            vec!["it's".to_string(), "say \"hi\"".to_string()]
+        );
+        assert_eq!(one("x = 'open"), Vec::<String>::new());
+        assert_eq!(one(r#"x = "" + ''"#), vec![String::new(), String::new()]);
+    }
+
+    #[test]
+    fn test_scripts_are_known() {
+        for rel in [
+            "tests/test_x.py",
+            "game/tests/helpers.py",
+            "test_hud.py",
+            "a/hud_test.py",
+            "conftest.py",
+        ] {
+            assert!(is_test_script(rel), "{rel}");
+        }
+        for rel in [
+            "scripts/hud.py",
+            "scripts/latest.py",
+            "contest.py",
+            "testing/x.py",
+        ] {
+            assert!(!is_test_script(rel), "{rel}");
+        }
+    }
+
+    #[test]
+    fn docstrings_are_skipped_when_looking_for_fonts() {
+        let text = r#"def f():
+    """Draws text, like "fonts/Pixel.ttf" or
+    'fonts/Round.otf'."""
+    a = '''one line: "fonts/X.ttf"''' + "fonts/A.ttf"
+    b = """ \""" fonts/Y.ttf """
+    return "fonts/B.ttf"
+"#;
+        let mut triple = None;
+        let found: Vec<String> = text
+            .lines()
+            .flat_map(|line| string_literals(line, &mut triple))
+            .collect();
+        assert_eq!(
+            found,
+            vec!["fonts/A.ttf".to_string(), "fonts/B.ttf".to_string()]
+        );
+        assert_eq!(triple, None);
+    }
+
+    #[test]
+    fn python_environments_neither_ship_nor_are_checked() {
+        let dir = project("pyenv");
+        // automata's own source names fonts in its docstrings and messages:
+        // a venv under any name, or installed packages anywhere, must not
+        // make the project look broken, nor ship with the game.
+        for (folder, venv) in [("env", true), ("python/Lib", false)] {
+            let pkg = dir.join(folder).join("site-packages/automata");
+            std::fs::create_dir_all(&pkg).unwrap();
+            std::fs::write(pkg.join("api.py"), "F = 'fonts/Pixel.ttf'\n").unwrap();
+            if venv {
+                std::fs::write(dir.join(folder).join("pyvenv.cfg"), "home = /usr\n").unwrap();
+                std::fs::write(dir.join(folder).join("tool.py"), "F = 'fonts/T.ttf'\n").unwrap();
+            }
+        }
+        std::fs::create_dir_all(dir.join("scripts/tests")).unwrap();
+        std::fs::write(
+            dir.join("scripts/tests/helpers.py"),
+            "F = 'fonts/Fake.ttf'\n",
+        )
+        .unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("level.ron".into()),
+            ..BuildConfig::default()
+        };
+        let errors: Vec<Message> = validate(&dir, &cfg)
+            .into_iter()
+            .filter(|m| m.level == Level::Error)
+            .collect();
+        assert_eq!(errors, Vec::<Message>::new());
+        let dest = dir.join(&cfg.output).join("game");
+        stage_game(&dir, &cfg, &dest, &mut |_| {}).unwrap();
+        assert!(dest.join("scripts/coin.py").is_file());
+        assert!(!dest.join("env").exists());
+        assert!(!dest.join("python/Lib/site-packages").exists());
+    }
+
+    #[test]
+    fn validation_checks_fonts_scripts_name() {
+        let dir = project("fonts");
+        let ttf = |p: &Path, head: &[u8]| {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, [head, &[0u8; 60]].concat()).unwrap();
+        };
+        ttf(&dir.join("fonts/Pixel.ttf"), &[0, 1, 0, 0]);
+        ttf(&dir.join("fonts/Round.OTF"), b"OTTO");
+        ttf(&dir.join("fonts/fake.ttf"), b"PK\x03\x04");
+        ttf(&dir.join("tests/Only.ttf"), &[0, 1, 0, 0]);
+        let outside =
+            std::env::temp_dir().join(format!("automata-cli-font-{}", std::process::id()));
+        ttf(&outside.join("Far.ttf"), &[0, 1, 0, 0]);
+        let far = outside
+            .join("Far.ttf")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        let scene = automata_core::scene_file::SceneFile {
+            version: 1,
+            entities: vec![],
+        };
+        std::fs::write(dir.join("s.ron"), scene.to_ron().unwrap()).unwrap();
+        std::fs::write(
+            dir.join("scripts/hud.py"),
+            format!(
+                "def update(ctx, dt):\n\
+                 \x20   ctx.hud.text('Hi', 0, 0, font=\"fonts/Pixel.ttf\")\n\
+                 \x20   ctx.ui.theme.font = 'fonts/Round.OTF'\n\
+                 \x20   ctx.hud.text('x', 0, 0, font='fonts\\\\Pixel.ttf')  # 'fonts/Gone.ttf'\n\
+                 \x20   ctx.hud.text('x', 0, 0, font='fonts/Gone.ttf')\n\
+                 \x20   ctx.hud.text('x', 0, 0, font='fonts/fake.ttf')\n\
+                 \x20   ctx.hud.text('x', 0, 0, font='tests/Only.ttf')\n\
+                 \x20   ctx.hud.text('x', 0, 0, font='{far}')\n\
+                 \x20   ctx.hud.text('x', 0, 0, font=f'fonts/{{name}}.ttf')\n"
+            ),
+        )
+        .unwrap();
+        // Test scripts don't ship, so their fonts aren't checked.
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        std::fs::write(dir.join("tests/test_x.py"), "F = 'fonts/Nope.ttf'\n").unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("s.ron".into()),
+            ..BuildConfig::default()
+        };
+        let problems = validate(&dir, &cfg);
+        let fonts: Vec<&str> = problems
+            .iter()
+            .filter(|m| m.text.contains("font") || m.text.contains("TrueType"))
+            .map(|m| {
+                // A font that doesn't load falls back to the built-in one,
+                // so these never stop a build.
+                assert_eq!(m.level, Level::Warning, "{m:?}");
+                m.text.as_str()
+            })
+            .collect();
+        assert_eq!(fonts.len(), 4, "{fonts:#?}");
+        assert!(fonts[0].contains("built-in font"), "{}", fonts[0]);
+        assert!(fonts[0].starts_with("scripts/hud.py:5: font fonts/Gone.ttf not found"));
+        assert!(fonts[1].starts_with("scripts/hud.py:6: fonts/fake.ttf isn't a TrueType"));
+        assert!(fonts[2].contains("tests/Only.ttf is excluded from the build"));
+        assert!(
+            fonts[3].contains("is outside the project folder"),
+            "{}",
+            fonts[3]
+        );
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn fonts_resolve_from_the_scripts_own_scene_folder() {
+        // A demo (or second level) kept in a subfolder names its fonts
+        // relative to its own scene, like examples/oberon/pause_menu.
+        let dir = project("font-nested");
+        let ttf = |path: &Path| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, [&[0u8, 1, 0, 0][..], &[0u8; 60]].concat()).unwrap();
+        };
+        ttf(&dir.join("pause_menu/fonts/PressStart2P-Regular.ttf"));
+        let scene = automata_core::scene_file::SceneFile {
+            version: 1,
+            entities: vec![],
+        };
+        std::fs::write(dir.join("s.ron"), scene.to_ron().unwrap()).unwrap();
+        std::fs::create_dir_all(dir.join("pause_menu/scripts")).unwrap();
+        std::fs::write(
+            dir.join("pause_menu/scripts/menu.py"),
+            "PIXEL = \"fonts/PressStart2P-Regular.ttf\"\nOTHER = 'fonts/Missing.ttf'\n",
+        )
+        .unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("s.ron".into()),
+            ..BuildConfig::default()
+        };
+        let problems = validate(&dir, &cfg);
+        let fonts: Vec<&Message> = problems
+            .iter()
+            .filter(|m| m.text.contains("font"))
+            .collect();
+        assert_eq!(fonts.len(), 1, "{fonts:#?}");
+        assert!(fonts[0].text.contains("fonts/Missing.ttf not found"));
+        assert_eq!(fonts[0].level, Level::Warning);
+        assert!(
+            !problems
+                .iter()
+                .any(|m| m.level == Level::Error && m.text.contains("font")),
+            "{problems:#?}"
+        );
+    }
+
+    #[test]
+    fn validation_checks_string_tables() {
+        let dir = project("strings");
+        std::fs::create_dir_all(dir.join("fonts")).unwrap();
+        std::fs::write(
+            dir.join("fonts/JP.otf"),
+            [&b"OTTO"[..], &[0u8; 60]].concat(),
+        )
+        .unwrap();
+        let scene = automata_core::scene_file::SceneFile {
+            version: 1,
+            entities: vec![],
+        };
+        std::fs::write(dir.join("s.ron"), scene.to_ron().unwrap()).unwrap();
+        std::fs::create_dir_all(dir.join("lang")).unwrap();
+        std::fs::write(
+            dir.join("lang/strings.csv"),
+            "key,en,ja,ko\n@font,,fonts/JP.otf,fonts/KO.otf\n\
+             menu.play,Play,プレイ,\nmenu.quit,Quit,,\nmenu.play,Again,,\n",
+        )
+        .unwrap();
+        let cfg = BuildConfig {
+            start_scene: Some("s.ron".into()),
+            ..BuildConfig::default()
+        };
+        let texts = |cfg: &BuildConfig| -> Vec<(Level, String)> {
+            validate(&dir, cfg)
+                .into_iter()
+                .filter(|m| m.text.contains("lang/"))
+                .map(|m| (m.level, m.text))
+                .collect()
+        };
+        let found = texts(&cfg);
+        assert_eq!(found.len(), 4, "{found:#?}");
+        assert_eq!(
+            found[0],
+            (
+                Level::Warning,
+                "lang/strings.csv:5: menu.play is already in lang/strings.csv:3; keeping that one"
+                    .into()
+            )
+        );
+        assert_eq!(found[1].0, Level::Warning);
+        assert!(
+            found[1]
+                .1
+                .starts_with("lang/*.csv @font (ko): font fonts/KO.otf not found"),
+            "{}",
+            found[1].1
+        );
+        assert_eq!(
+            found[2],
+            (
+                Level::Warning,
+                "lang/*.csv: 1 key without ja text (menu.quit); they show in en".into()
+            )
+        );
+        assert!(found[3].1.starts_with("lang/*.csv: 2 keys without ko text"));
+        // Excluding the tables is an error: the game would show keys.
+        let excluded = BuildConfig {
+            exclude: vec!["lang/".into()],
+            ..cfg
+        };
+        assert!(texts(&excluded)
+            .iter()
+            .any(|(l, t)| *l == Level::Error && t.contains("lang/strings.csv is excluded")));
+    }
+
+    #[test]
+    fn config_round_trips_and_names_are_file_safe() {
+        let dir = project("cfg");
+        let cfg = BuildConfig {
+            name: "Coin: Run?".into(),
+            main_script: Some("main.py".into()),
+            targets: vec![Target::Windows],
+            ..BuildConfig::default()
+        };
+        cfg.save(&dir).unwrap();
+        assert_eq!(BuildConfig::load(&dir).unwrap(), cfg);
+        assert_eq!(cfg.file_name(), "Coin Run");
+        assert_eq!(BuildConfig::for_project(&dir, None), cfg, "build.ron wins");
+        assert_eq!(title_case("coin_run"), "Coin Run");
+        assert_eq!(Target::parse("Windows"), Some(Target::Windows));
+        assert_eq!(Target::parse("web"), Some(Target::Web));
+        assert_eq!(Target::parse("HTML5"), Some(Target::Web));
+        assert_eq!(
+            Target::Web.template_archive(),
+            "automata-template-web.tar.gz"
+        );
+        assert_ne!(Target::host(), Some(Target::Web));
+    }
+
+    #[test]
+    fn templates_pack_and_install() {
+        let tpl = template("pack", Target::Linux, true);
+        let archive = tpl.with_extension("tar.gz");
+        pack_template(&tpl, Target::Linux, &archive).unwrap();
+        let home = std::env::temp_dir().join(format!("automata-tpl-home-{}", std::process::id()));
+        // This is the only test that touches AUTOMATA_TEMPLATES.
+        std::env::set_var("AUTOMATA_TEMPLATES", &home);
+        let dir = install_template(&archive, Target::Linux).unwrap();
+        assert_eq!(find_template(Target::Linux), Some(dir.clone()));
+        assert!(template_has_runtime(&dir));
+        assert!(
+            install_template(&archive, Target::Windows).is_err(),
+            "wrong platform"
+        );
+        std::env::remove_var("AUTOMATA_TEMPLATES");
+    }
+}

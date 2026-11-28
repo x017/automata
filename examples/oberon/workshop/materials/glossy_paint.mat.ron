@@ -1,0 +1,7 @@
+// A material. Entities that use it share its colour, surface and
+// textures: material: "materials/glossy_paint.mat.ron" on a Mesh Renderer. Texture paths are
+// relative to this file's folder.
+(
+    color: (0.8, 0.08, 0.06, 1.0),
+    roughness: 0.15,
+)

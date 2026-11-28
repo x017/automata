@@ -1,0 +1,76 @@
+# AUTOMATA workspace.
+#
+# Subsystem crates are introduced incrementally as their boundaries become
+# meaningful (see build.md section 9). Phase 1 establishes `automata-core`.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.86"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/x017/automata"
+
+# Dependencies shared by workspace crates. Versions are pinned here so that
+# all subsystem crates resolve the same releases.
+[workspace.dependencies]
+# Engine crates
+automata-assets = { path = "crates/automata-assets" }
+automata-core = { path = "crates/automata-core" }
+automata-input = { path = "crates/automata-input" }
+automata-nav = { path = "crates/automata-nav" }
+automata-physics = { path = "crates/automata-physics" }
+automata-renderer = { path = "crates/automata-renderer" }
+automata-scene = { path = "crates/automata-scene" }
+
+# Third-party
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+winit = "0.30"
+# `std` explicitly: on Linux winit's sctk-adwaita turns it on, elsewhere
+# nothing does and tiny-skia-path has no float maths without it.
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
+ab_glyph = "0.2"
+# wgpu's defaults without `webgpu`: that backend is for wasm32-unknown-unknown
+# only; the Pyodide build (emscripten) draws with WebGL2 through `gles`.
+wgpu = { version = "30", default-features = false, features = [
+    "std",
+    "parking_lot",
+    "dx12",
+    "metal",
+    "gles",
+    "vulkan",
+    "wgsl",
+] }
+pollster = "1.0"
+glam = { version = "0.33", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+ron = "0.8"
+bytemuck = { version = "1", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+naga = { version = "30", default-features = false }
+hecs = "0.11"
+pyo3 = "0.30"
+kira = { version = "0.12", default-features = false, features = ["wav", "ogg", "vorbis", "mp3", "flac", "pcm"] }
+rapier2d = "0.36"
+rapier3d = "0.36"
+gilrs = "0.11"
+
+[workspace.lints.rust]
+# The engine forbids unsafe code in its own crates; dependencies that need
+# unsafe internals (wgpu, rapier, ...) remain responsible for it themselves.
+unsafe_code = "forbid"
+# Every public API must be documented (build.md, engineering principle 8).
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 } # lint group: explicit priority required
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Documented exceptions to the pedantic set.
+cast_precision_loss = "allow"   # f32 is the engine's standard scalar; conversions are deliberate
+module_name_repetitions = "allow" # names like `config::EngineConfig` are acceptable
+similar_names = "allow"         # too noisy around math-heavy code

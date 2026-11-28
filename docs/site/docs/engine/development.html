@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Development Guide · AUTOMATA docs</title>
+<meta name="description" content="Run the bootstrap-toolchain workflow (.github/workflows/bootstrap-toolchain.yml). It packages the stable toolchain (with rustfmt and clippy) and the cargo vendor output as workflow artifacts.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../../dither.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../tutorials/fps.html">A first-person shooter</a></li><li><a href="../tutorials/platformer.html">A 2D platformer</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/command-line.html">The oberon command</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/ui-editor.html">The UI editor</a></li><li><a href="../oberon/materials.html">Materials</a></li><li><a href="../oberon/shaders.html">Custom shaders</a></li><li><a href="../oberon/models.html">Models</a></li><li><a href="../oberon/animation-graphs.html">Animation graphs</a></li><li><a href="../oberon/attachments-and-ik.html">Attachments &amp; IK</a></li><li><a href="../oberon/ragdolls.html">Ragdolls</a></li><li><a href="../oberon/navigation.html">Navigation</a></li><li><a href="../oberon/ai.html">AI</a></li><li><a href="../oberon/2d.html">2D games</a></li><li><a href="../oberon/terrain.html">Terrain</a></li><li><a href="../oberon/foliage.html">Grass &amp; foliage</a></li><li><a href="../oberon/audio.html">Audio</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/editor-workflow.html">Editor workflow</a></li><li><a href="../oberon/exporting.html">Exporting your game</a></li><li><a href="../oberon/steam.html">Steam</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/grass-and-foliage.html">Grass &amp; foliage</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/touch-controls.html">Touch controls</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li><li><a href="../guides/performance.html">Performance</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="architecture.html">Architecture</a></li><li><a href="development.html" aria-current="page">Development</a></li><li><a href="api.html">API design</a></li><li><a href="oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Development Guide</h1>
+<h2 id="prerequisites">Prerequisites<a class="anchor" href="#prerequisites" aria-label="Link to this section">#</a></h2>
+<ul><li>Rust stable (MSRV: <strong>1.86</strong>), with <code>rustfmt</code> and <code>clippy</code></li><li>Python 3 (from Phase 5 onward)</li></ul>
+<p>Standard setup via <a href="https://rustup.rs" rel="noopener">rustup</a>:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>rustup component add rustfmt clippy</code></pre></div>
+<h3 id="offline--sandboxed-environments">Offline / sandboxed environments<a class="anchor" href="#offline--sandboxed-environments" aria-label="Link to this section">#</a></h3>
+<p>Some development sandboxes cannot reach <code>static.rust-lang.org</code> or
+<code>crates.io</code>. For those, the repository provides a bootstrap path that
+ferries a toolchain and vendored dependencies through GitHub Actions
+artifacts:</p>
+<ol><li><p>Run the <strong>bootstrap-toolchain</strong> workflow
+(<code>.github/workflows/bootstrap-toolchain.yml</code>). It packages the stable
+toolchain (with <code>rustfmt</code> and <code>clippy</code>) and the <code>cargo vendor</code> output as
+workflow artifacts.</p></li><li><p>From the sandbox, fetch and install them:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>./scripts/setup-offline-env.sh
+export PATH=&quot;$HOME/.local/automata-rust/stable-x86_64-unknown-linux-gnu/bin:$PATH&quot;</code></pre></div>
+<p>The script also writes <code>.cargo/config.toml</code> (git-ignored) pointing Cargo
+at <code>vendor/</code>, so builds work fully offline.</p>
+<p><strong>Note for sandboxed sessions:</strong> only git-tracked file contents persist
+across sandbox sessions — the toolchain (<code>~/.local/automata-rust</code>),
+<code>vendor/</code>, and <code>.cargo/config.toml</code> are wiped between sessions. Re-run
+<code>scripts/setup-offline-env.sh</code> at the start of every session.</p></li></ol>
+<ol start="3"><li>Re-run the bootstrap workflow whenever dependencies change (it triggers
+automatically on changes to any <code>Cargo.toml</code>).</li></ol>
+<h2 id="everyday-commands">Everyday commands<a class="anchor" href="#everyday-commands" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>cargo run -p automata-core        # run the engine entry point
+cargo test --workspace            # unit + integration + doc tests
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+cargo doc --workspace --no-deps --open</code></pre></div>
+<p>All of the above run in CI and must stay green.</p>
+<h3 id="python-bindings">Python bindings<a class="anchor" href="#python-bindings" aria-label="Link to this section">#</a></h3>
+<p>The <code>automata-python</code> crate builds the <code>automata</code> Python package with
+<a href="https://www.maturin.rs" rel="noopener">maturin</a>:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>python3 -m venv .venv
+.venv/bin/pip install maturin pytest
+.venv/bin/maturin build --manifest-path crates/automata-python/Cargo.toml
+.venv/bin/pip install target/wheels/automata_engine-*.whl
+.venv/bin/python -m pytest crates/automata-python/tests/python
+.venv/bin/python examples/python/headless_demo.py</code></pre></div>
+<p><strong>Sandbox note:</strong> the sandbox has no <code>libpython</code>, so linking any target that
+embeds Python fails locally. Workarounds baked into the workflow:</p>
+<ul><li>Build/clippy the bindings with <code>PYO3_BUILD_EXTENSION_MODULE=1</code> (this is
+what maturin sets; it skips the libpython link).</li><li>Run <code>cargo test --workspace --exclude automata-python</code> locally; the
+crate's Rust unit tests link libpython and therefore run on CI only.</li><li>Python-side behavior is covered locally by the pytest suite against the
+maturin-built wheel, which links without libpython by design.</li></ul>
+<h3 id="documentation-site">Documentation site<a class="anchor" href="#documentation-site" aria-label="Link to this section">#</a></h3>
+<p>The wiki and engine docs are also published as static HTML under
+<code>docs/site/docs/</code>, generated from the Markdown by <code>scripts/build_site.py</code>
+(standard library only). The Markdown is the source of truth: after editing
+any page under <code>docs/wiki/</code> or <code>docs/*.md</code>, rebuild and commit the output.</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>python3 scripts/build_site.py           # regenerate docs/site/docs/
+python3 scripts/build_site.py --check   # what CI runs: fails if stale
+python3 -m http.server -d docs 8000     # preview at http://localhost:8000/site/</code></pre></div>
+<p>New pages must be added to <code>NAV</code> in the script to get a sidebar entry. The
+page styles and scripts live in <code>scripts/site/</code> and are copied into
+<code>docs/site/docs/_static/</code>.</p>
+<p><strong>Landing page</strong> (<code>docs/site/index.html</code> + <code>docs/site/landing.js</code>). It is
+set in Michroma for the wordmark and headlines, Bricolage Grotesque for body
+text, and JetBrains Mono for code. All three are OFL and vendored in
+<code>docs/site/fonts/</code>. <code>landing.js</code> is a tiny hidden-line 3D
+renderer on a 2D canvas, styled after Oberon's scene view. It draws the hero
+scene and the <code>coin.py</code> playground, whose yellow numbers are draggable
+sliders running the same logic as the tutorial script. It also drives the
+Oberon tour, which highlights regions of the screenshots in
+<code>docs/assets/oberon/</code>. If you regenerate those screenshots with a different
+layout, update the <code>data-rect</code> values (in 1600×950 pixels) in <code>index.html</code>.</p>
+<p><strong>Docs pages</strong> use editorial type (Geist with Instrument Serif for display)
+and one-bit dithered art. <code>docs/site/dither.js</code> provides the dither-to-colour
+"develop" effect on screenshots. The section banners in <code>docs/site/img/</code>
+are exported from the same shader with <code>scripts/site/export-art.html</code>; its
+header lists the parameters for each.</p>
+<p>Everything honours <code>prefers-reduced-motion</code>, and the pages work without
+JavaScript (the canvases simply stay empty).</p>
+<h2 id="coding-conventions">Coding conventions<a class="anchor" href="#coding-conventions" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Edition 2021</strong>, MSRV 1.86 (bumped deliberately, not casually).</li><li><strong>No <code>unsafe</code></strong> in engine crates — enforced workspace-wide.</li><li><strong>Document every public item.</strong> <code>missing_docs</code> is a workspace lint and CI
+denies warnings. Document why, not just what.</li><li><strong>Errors</strong>: libraries define a crate-local <code>Error</code> enum with <code>thiserror</code>
+plus a <code>Result&lt;T&gt;</code> alias. Recoverable conditions are <code>Result</code>s, never
+panics. Panics signal programmer error only.</li><li><strong>Logging</strong>: use <code>tracing</code> macros (<code>info!</code>, <code>debug!</code>, …). Library code
+never prints to stdout/stderr directly.</li><li><strong>Dependencies</strong>: prefer mature, maintained crates (build.md section 2).
+Declare shared dependencies in the workspace root <code>[workspace.dependencies]</code>
+and inherit with <code>dep.workspace = true</code>. New dependencies require a stated
+reason in their commit message.</li><li><strong>Formatting</strong>: <code>rustfmt.toml</code> holds the canonical style. Lint policy lives
+in the workspace <code>[workspace.lints]</code> tables — exceptions are documented
+there, not scattered across the code.</li><li><strong>Tests</strong>: unit tests next to the code, integration tests in <code>tests/</code>,
+doc tests for public API examples. New functionality ships with tests
+(build.md section 10).</li></ul>
+<h2 id="working-agreements-ai-assisted-development">Working agreements (AI-assisted development)<a class="anchor" href="#working-agreements-ai-assisted-development" aria-label="Link to this section">#</a></h2>
+<p>Per build.md section 10:</p>
+<ul><li>Implement one subsystem at a time; keep the build green after each step.</li><li>Inspect existing code before modifying it; no large uncontrolled rewrites.</li><li>Verify dependency APIs against official documentation.</li><li>Every completed subsystem has a defined public interface and tests.</li></ul>
+<h2 id="commits-and-branches">Commits and branches<a class="anchor" href="#commits-and-branches" aria-label="Link to this section">#</a></h2>
+<ul><li>Imperative commit messages (<code>Add …</code>, <code>Fix …</code>), referencing the phase or
+subsystem where relevant (<code>phase 1: …</code>).</li><li><code>main</code> must always build. Feature work happens on branches and lands via
+pull request with green CI.</li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="architecture.html"><small>Previous</small>Architecture</a><a class="next" href="api.html"><small>Next</small>API design</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/development.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#prerequisites">Prerequisites</a></li><li class="l3"><a href="#offline--sandboxed-environments">Offline / sandboxed environments</a></li><li class="l2"><a href="#everyday-commands">Everyday commands</a></li><li class="l3"><a href="#python-bindings">Python bindings</a></li><li class="l3"><a href="#documentation-site">Documentation site</a></li><li class="l2"><a href="#coding-conventions">Coding conventions</a></li><li class="l2"><a href="#working-agreements-ai-assisted-development">Working agreements (AI-assisted development)</a></li><li class="l2"><a href="#commits-and-branches">Commits and branches</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

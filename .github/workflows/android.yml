@@ -1,0 +1,379 @@
+name: Android
+
+# Builds the SDL3 spike APK (android/app) and the export template (the
+# player with no game, for phones and emulators) with python-for-android.
+# Coin Run is then built from the template with `automata-cli build
+# --target android`, as users build games. On an emulator the spike must
+# draw, take a tap, survive background and foreground, and quit on Back;
+# Coin Run must install, play and keep its settings. The template is then
+# published to the `export-templates` release, where `automata-cli
+# templates download` finds it; and the tested Coin Run APK is committed
+# as game.apk at the top of the repo (when there's none yet, or a commit
+# message asks with "[game.apk]"). See android/README.md.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, "arena/**"]
+    paths:
+      - "android/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "game.zip"
+      - "examples/oberon/coin_run/**"
+      - ".github/workflows/android.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  # python-for-android `develop`, pinned: the SDL3 bootstrap is new there.
+  P4A_REF: 9562d1b4f306d0af1e76991c711114010dea4152
+  NDK_VERSION: "28.2.13676358" # r28c, as python-for-android recommends
+  ANDROID_API: "35"
+
+defaults:
+  run:
+    shell: bash
+
+# Reports (logs, screenshots) are published as check runs, so they can be
+# read through the API (android/ci/report.py).
+permissions:
+  contents: write
+  checks: write
+
+jobs:
+  check:
+    # Fast feedback before the long APK build: the Android crate compiles
+    # for Android and is clippy-clean.
+    name: check (aarch64-linux-android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+          components: clippy, rustfmt
+      - name: fmt
+        run: cargo fmt --manifest-path android/engine/Cargo.toml --check
+      - name: clippy
+        env:
+          PYO3_CROSS_PYTHON_VERSION: "3.14"
+          VCPKGRS_DISABLE: "1"
+        run: |
+          cargo clippy --manifest-path android/engine/Cargo.toml \
+            --target aarch64-linux-android --all-targets -- -D warnings 2>&1 | tee clippy.log
+      - name: Report clippy
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 android/ci/report.py "android: clippy log" --log clippy.log --lines 300
+
+  apk:
+    name: APKs (spike, template)
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift
+          df -h /
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build tools
+        run: |
+          sudo apt-get update
+          # python-for-android's own list (its Dockerfile), plus patchelf,
+          # and libudev for building automata-cli (gamepads).
+          sudo apt-get install -y --no-install-recommends \
+            ant autoconf automake autopoint ccache cmake g++ gcc git lbzip2 \
+            libffi-dev libltdl-dev libtool libssl-dev make patch pkg-config \
+            unzip wget zip zlib1g-dev libncurses-dev patchelf libudev-dev
+          python -m pip install --upgrade pip
+          python -m pip install "cython<3.2" \
+            "python-for-android @ git+https://github.com/kivy/python-for-android@${P4A_REF}"
+          # Gradle: Maven Central through Google's mirror first (429s).
+          mkdir -p ~/.gradle/init.d
+          cp android/ci/maven-mirror.gradle ~/.gradle/init.d/
+
+      - name: Android NDK
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          echo "installed NDKs: $(ls "$ANDROID_HOME/ndk" 2>/dev/null | tr '\n' ' ')"
+          echo "installed platforms: $(ls "$ANDROID_HOME/platforms" 2>/dev/null | tr '\n' ' ')"
+          wanted=()
+          [ -d "$ANDROID_HOME/ndk/${NDK_VERSION}" ] || wanted+=("ndk;${NDK_VERSION}")
+          [ -d "$ANDROID_HOME/platforms/android-${ANDROID_API}" ] || wanted+=("platforms;android-${ANDROID_API}")
+          if [ ${#wanted[@]} -gt 0 ]; then
+            # `yes` dies of SIGPIPE when sdkmanager is done: not a failure.
+            set +o pipefail
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "${wanted[@]}" > sdk.log 2>&1
+            status=${PIPESTATUS[1]}
+            tail -20 sdk.log
+            if [ "$status" != 0 ]; then
+              python3 android/ci/report.py "android: sdkmanager log" --log sdk.log --lines 200
+              exit 1
+            fi
+          fi
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build the APK
+        # Progress lines only; the full log is printed when the build fails.
+        run: android/build_apk.sh android/app x86_64 2>&1 | tee build.log | sed -n '/INFO\|WARNING\|ERROR/p'
+
+      - name: Build the template APK
+        # Phones (arm64-v8a) and emulators (x86_64) in one APK.
+        run: android/build_apk.sh template arm64-v8a,x86_64 2>&1 | tee build.log | sed -n '/INFO\|WARNING\|ERROR/p'
+
+      - name: Build Coin Run from the template
+        # As users build: build.ron from `init` (the example has none, like
+        # the export CI's copy), then `build --target android`, which signs
+        # with a debug key it makes on first use.
+        run: |
+          cargo build -q -p automata-cli
+          cli=target/debug/automata-cli
+          export AUTOMATA_TEMPLATES="$RUNNER_TEMP/templates"
+          export AUTOMATA_ANDROID_KEY="$RUNNER_TEMP/android-debug.key"
+          $cli templates install dist/automata-template-android.apk --target android
+          cp -r examples/oberon/coin_run "$RUNNER_TEMP/coin_run"
+          $cli init "$RUNNER_TEMP/coin_run" --scene level.ron --name "Coin Run" --package org.automata.coinrun
+          $cli build "$RUNNER_TEMP/coin_run" --target android
+          cp "$RUNNER_TEMP/coin_run/build/android/Coin Run-0.1.0.apk" dist/org.automata.coinrun-x86_64.apk
+
+      - name: Release signing
+        # Your own key: one made by `keygen`, and one from openssl (as a key
+        # exported from an existing keystore would be), each checked by
+        # Android's apksigner against openssl's certificate fingerprint.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          cli=target/debug/automata-cli
+          export AUTOMATA_TEMPLATES="$RUNNER_TEMP/templates"
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          keys="$RUNNER_TEMP/keys"; mkdir -p "$keys"; s=0
+          $cli keygen "$keys/release.pem" --name "Coin Run Studio" 2>&1 | tee signing.txt
+          openssl req -x509 -newkey rsa:3072 -nodes -days 9000 -subj "/CN=Imported/O=Example" \
+            -keyout "$keys/imported.key" -out "$keys/imported.crt" 2>/dev/null
+          openssl rsa -traditional -in "$keys/imported.key" > "$keys/imported.pem"
+          cat "$keys/imported.crt" >> "$keys/imported.pem"
+          for k in release imported; do
+            echo "== $k" | tee -a signing.txt
+            $cli build "$RUNNER_TEMP/coin_run" --target android --key "$keys/$k.pem" --abis x86_64 2>&1 | tee -a signing.txt || s=1
+            apk="$RUNNER_TEMP/coin_run/build/android/Coin Run-0.1.0.apk"
+            "$apksigner" verify --verbose --print-certs "$apk" 2>&1 | grep -v WARNING | tee -a signing.txt || s=1
+            want=$(openssl x509 -in "$keys/$k.pem" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d : | tr A-F a-f)
+            "$apksigner" verify --print-certs "$apk" | grep -q "SHA-256 digest: $want" \
+              && echo "certificate matches openssl: $want" | tee -a signing.txt \
+              || { echo "certificate mismatch (want $want)" | tee -a signing.txt; s=1; }
+            n=$(unzip -l "$apk" | grep -c 'lib/arm64-v8a/' || true)
+            echo "arm64-v8a libs left (want 0): $n" | tee -a signing.txt
+            [ "$n" = 0 ] || s=1
+          done
+          python3 android/ci/report.py "android: release signing" --log signing.txt --lines 120 \
+            --conclusion $([ $s = 0 ] && echo success || echo failure)
+          exit $s
+
+      - name: Build log (on failure)
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f build.log ]; then
+            tail -300 build.log
+            python3 android/ci/report.py "android: APK build log" --log build.log --lines 500
+          fi
+
+      - name: APK size
+        # What the template is made of, next to the published one.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist/*.apk
+          gh release download export-templates --repo "$GITHUB_REPOSITORY" \
+            --pattern automata-template-android.apk --output "$RUNNER_TEMP/published.apk" || true
+          # The budget: what one processor type may add to a game. The goal was
+          # "well under +20 MB"; it's about 16.5 MB, so 18 MB catches regressions.
+          s=0
+          python3 android/ci/apk_size.py dist/automata-template-android.apk --budget 18 \
+            --before "$RUNNER_TEMP/published.apk" > size.txt || s=1
+          cat size.txt
+          { echo '### Android template size'; echo '```'; cat size.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python3 android/ci/report.py "android: template size" --log size.txt --lines 200 \
+            --conclusion $([ $s = 0 ] && echo neutral || echo failure)
+          exit $s
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: automata-apks
+          path: dist/*.apk
+          if-no-files-found: error
+
+  emulator:
+    name: emulator smoke test
+    needs: apk
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: automata-apks
+          path: apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: ImageMagick
+        # The tests measure screenshots, and the report shrinks them.
+        run: |
+          command -v convert > /dev/null || {
+            sudo apt-get update -q && sudo apt-get install -y -q imagemagick > /dev/null
+          }
+
+      - name: Run on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          # One line: the action runs each line on its own, and both tests
+          # should run even when the first fails.
+          script: s=0; android/ci/smoke_test.sh apk/org.automata.spike-x86_64.apk android-smoke || s=1; android/ci/coin_run_test.sh apk/org.automata.coinrun-x86_64.apk android-smoke/coin_run || s=1; exit $s
+
+      - name: Report the smoke test
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -e android-smoke/logcat.txt ]; then
+            mkdir -p android-smoke
+            echo "The smoke test never started: the emulator didn't boot or adb failed." \
+              > android-smoke/logcat.txt
+          fi
+          python3 android/ci/report.py "android: logcat" --log android-smoke/logcat.txt \
+            --lines 700 --grep "python|SDL|automata|wgpu|AndroidRuntime|DEBUG|ActivityTaskManager|WindowManager|Fatal" \
+            --exclude "extracting|pythonutil|AppsFilter|SemanticLocation|nativeloader|CarrierSvc|ImsResolver"
+          if [ -e android-smoke/coin_run/logcat.txt ]; then
+            python3 android/ci/report.py "android: coin run logcat" --log android-smoke/coin_run/logcat.txt \
+              --lines 500 --grep "python|SDL|automata|wgpu|AndroidRuntime|DEBUG|Fatal" \
+              --exclude "extracting|pythonutil|AppsFilter|SemanticLocation|nativeloader|CarrierSvc|ImsResolver"
+          fi
+          if [ -e android-smoke/coin_run/startup.txt ]; then
+            { echo '### Coin Run startup (emulator)'; echo '```'; cat android-smoke/coin_run/startup.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            python3 android/ci/report.py "android: startup" --log android-smoke/coin_run/startup.txt
+          fi
+          for stacks in android-smoke/stacks.txt android-smoke/coin_run/stacks.txt; do
+            [ -e "$stacks" ] || continue
+            python3 android/ci/report.py "android: stacks ($(dirname "$stacks"))" --log "$stacks" \
+              --lines 900 --grep "^==|^\"|#[0-9]+ pc|  at |native: |state=|Activity|debuggerd|denied|rror|ailed" \
+              --exclude "libart\.so|libbase\.so|libc\.so \(__epoll|/system/framework/"
+          done
+          command -v convert > /dev/null || {
+            sudo apt-get update -q && sudo apt-get install -y -q imagemagick > /dev/null
+          }
+          for shot in android-smoke/*.png android-smoke/coin_run/*.png; do
+            [ -e "$shot" ] || continue
+            name="$(basename "$shot" .png)"
+            convert "$shot" -resize 640x640 -quality 70 "android-smoke/$name-small.jpg"
+            python3 android/ci/report.py "android: screenshot $name" --image "android-smoke/$name-small.jpg"
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-smoke
+          path: android-smoke/
+
+  publish:
+    # The template every Android build starts from, once it passed.
+    name: publish the template
+    needs: emulator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: automata-apks
+          path: dist
+      - name: Update the export-templates release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -la dist
+          gh release view export-templates >/dev/null 2>&1 || \
+            gh release create export-templates --title "Export templates" --prerelease \
+              --notes "Templates for automata-cli / Oberon Build. Installed with: automata-cli templates download"
+          gh release upload export-templates dist/automata-template-android.apk --clobber
+
+  game-apk:
+    # The Coin Run APK that just passed the emulator test, as game.apk next
+    # to game.zip (the same game for the web). Committed when the branch
+    # has none yet or the pushed commit's message says "[game.apk]", so the
+    # 35 MB file isn't rewritten on every push. Pushes made with the
+    # workflow's token don't start workflows, so this doesn't loop.
+    name: commit game.apk
+    needs: emulator
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Wanted?
+        id: wanted
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          if [ ! -f game.apk ] || [[ "$MESSAGE" == *"[game.apk]"* ]] || [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "game.apk is there and the commit didn't ask for a new one"
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.wanted.outputs.go == '1'
+        with:
+          name: automata-apks
+          path: dist
+      - name: Commit game.apk
+        if: steps.wanted.outputs.go == '1'
+        run: |
+          cp dist/org.automata.coinrun-x86_64.apk game.apk
+          ls -la game.apk game.zip
+          # The APK was built from the commit under test; game.zip may be
+          # newer, so this only warns.
+          python3 android/ci/same_game.py game.apk game.zip || echo "::warning::game.apk and game.zip differ"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add game.apk
+          if git diff --cached --quiet; then
+            echo "game.apk is unchanged"
+            exit 0
+          fi
+          git commit -q -m "game.apk: Coin Run for Android, built and emulator-tested at ${GITHUB_SHA::7}" \
+            -m "From the automata-apks artifact of run ${GITHUB_RUN_ID} (arm64-v8a and x86_64, debug-signed)."
+          for i in 1 2 3; do
+            git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            git pull -q --rebase origin "${GITHUB_REF_NAME}"
+          done
+          exit 1

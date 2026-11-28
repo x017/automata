@@ -1,0 +1,8 @@
+// A material. Entities that use it share its colour, surface and
+// textures: material: "materials/lava.mat.ron" on a Mesh Renderer. Texture paths are
+// relative to this file's folder.
+(
+    color: (1.0, 1.0, 1.0, 1.0),
+    shader: "../shaders/lava.wgsl",
+    shader_params: [1.0, 4.0, 3.0],
+)

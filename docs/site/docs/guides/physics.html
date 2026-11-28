@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide: Physics · AUTOMATA docs</title>
+<meta name="description" content="Rapier-powered rigid bodies in 3D and 2D, a character controller, and raycasts — stepped at a fixed 60 Hz so gameplay is identical at any frame rate.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../../dither.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../tutorials/fps.html">A first-person shooter</a></li><li><a href="../tutorials/platformer.html">A 2D platformer</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/command-line.html">The oberon command</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/ui-editor.html">The UI editor</a></li><li><a href="../oberon/materials.html">Materials</a></li><li><a href="../oberon/shaders.html">Custom shaders</a></li><li><a href="../oberon/models.html">Models</a></li><li><a href="../oberon/animation-graphs.html">Animation graphs</a></li><li><a href="../oberon/attachments-and-ik.html">Attachments &amp; IK</a></li><li><a href="../oberon/ragdolls.html">Ragdolls</a></li><li><a href="../oberon/navigation.html">Navigation</a></li><li><a href="../oberon/ai.html">AI</a></li><li><a href="../oberon/2d.html">2D games</a></li><li><a href="../oberon/terrain.html">Terrain</a></li><li><a href="../oberon/foliage.html">Grass &amp; foliage</a></li><li><a href="../oberon/audio.html">Audio</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/editor-workflow.html">Editor workflow</a></li><li><a href="../oberon/exporting.html">Exporting your game</a></li><li><a href="../oberon/steam.html">Steam</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="game-loop.html">The game loop</a></li><li><a href="scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="grass-and-foliage.html">Grass &amp; foliage</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="input.html">Input</a></li><li><a href="touch-controls.html">Touch controls</a></li><li><a href="physics.html" aria-current="page">Physics</a></li><li><a href="events-and-resources.html">Events &amp; resources</a></li><li><a href="oop-style.html">OOP style</a></li><li><a href="scene-files.html">Scene files</a></li><li><a href="project-structure.html">Project structure</a></li><li><a href="testing.html">Testing</a></li><li><a href="performance.html">Performance</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Guide: Physics</h1>
+<p>Rapier-powered rigid bodies in 3D and 2D, a character controller, and
+raycasts — stepped at a fixed 60 Hz so gameplay is identical at any frame
+rate.</p>
+<h2 id="bodies">Bodies<a class="anchor" href="#bodies" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.RigidBody.dynamic()              <span class="tok-c"># gravity, forces, collisions — crates, balls</span>
+at.RigidBody.fixed()                <span class="tok-c"># never moves — floors, walls, platforms</span>
+at.RigidBody.kinematic_velocity()   <span class="tok-c"># you set velocity; physics resolves collisions</span>
+at.RigidBody.kinematic_position()   <span class="tok-c"># you set position; it pushes dynamic bodies</span></code></pre></div>
+<p>Fine-tuning: `at.RigidBody(body_type="dynamic", gravity_scale=1.0,
+linear_damping=0.0, angular_damping=0.0, enabled=True)`.</p>
+<h2 id="colliders">Colliders<a class="anchor" href="#colliders" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Collider3D.cuboid(x, y, z)   <span class="tok-c"># FULL sizes — match Transform.scale exactly</span>
+at.Collider3D.ball(radius)
+at.Collider3D.capsule(half_height, radius)
+at.Collider3D.mesh(<span class="tok-s">&quot;models/platform.glb&quot;</span>)         <span class="tok-c"># the model&#x27;s own triangles</span>
+at.Collider3D.convex_hull(<span class="tok-s">&quot;models/crate.glb&quot;</span>)     <span class="tok-c"># shrink-wrapped around it</span>
+
+at.Collider2D.cuboid(x, y)
+at.Collider2D.ball(radius)
+at.Collider2D.capsule(half_height, radius)</code></pre></div>
+<p>Chainable material modifiers: <code>.friction(0.8)</code>, <code>.restitution(0.3)</code>
+(bounciness), <code>.density(2.0)</code>, <code>.sensor(True)</code> (detect overlap without
+blocking movement — pickups, triggers).</p>
+<aside class="note"><p><strong>Collider sizes are full sizes.</strong> <code>Transform(scale=(40, 1, 40))</code> pairs
+with <code>Collider3D.cuboid(40, 1, 40)</code>. Get this wrong and things float or
+sink by exactly half.</p></aside>
+<h3 id="colliders-from-models">Colliders from models<a class="anchor" href="#colliders-from-models" aria-label="Link to this section">#</a></h3>
+<p><code>mesh</code> and <code>convex_hull</code> take a model file (relative to the scene, like
+<code>MeshRenderer.model</code>) and build the shape from it when the scene starts,
+after the model's import settings and at the entity's scale. The scene
+stores only the path.</p>
+<ul><li><strong>Mesh</strong> is exact: rays and characters hit the real triangles, so
+ramps, arches and bevelled platforms behave as they look. Use it for
+static scenery (no rigid body, or a static or kinematic one). A triangle
+mesh has no inside, so it can't give a dynamic body mass: on a dynamic
+body it plays as its convex hull, and Oberon and <strong>Build Game</strong> flag it.</li><li><strong>Convex hull</strong> wraps the model like shrink-film: no dents or holes. Use
+it for dynamic bodies a box or capsule fits badly.</li><li>Boxes, balls and capsules are still the cheapest. Prefer them when they
+fit.</li></ul>
+<aside class="note"><p><strong>2D and 3D are separate worlds.</strong> A <code>Collider2D</code> never touches a
+<code>Collider3D</code>. Pick one per game; per entity, use the matching family.</p></aside>
+<h2 id="the-per-frame-toolbox">The per-frame toolbox<a class="anchor" href="#the-per-frame-toolbox" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.physics.grounded(player)                       <span class="tok-c"># standing on something?</span>
+ctx.physics.velocity(entity)                       <span class="tok-c"># current (vx, vy, vz)</span>
+ctx.physics.set_velocity(entity, (<span class="tok-n">0</span>, <span class="tok-n">5</span>, <span class="tok-n">0</span>))
+ctx.physics.apply_impulse(entity, (<span class="tok-n">0</span>, <span class="tok-n">300</span>, <span class="tok-n">0</span>))     <span class="tok-c"># one-shot kick</span>
+ctx.physics.apply_force(entity, (<span class="tok-n">10</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>))        <span class="tok-c"># continuous push</span>
+ctx.physics.gravity() / ctx.physics.set_gravity((<span class="tok-n">0</span>, -<span class="tok-n">9.81</span>, <span class="tok-n">0</span>))
+ctx.physics.body_count()
+
+key = ctx.physics.cast_ray(origin, direction, max_distance=<span class="tok-n">100.0</span>, exclude=player)
+hit = ctx.physics.ray_result(key)   <span class="tok-c"># (entity_id, point, normal, distance) or None</span>
+ctx.physics.water_height(x, z)      <span class="tok-c"># water surface height there, or None</span>
+ctx.water.splash(entity, <span class="tok-n">2.0</span>)       <span class="tok-c"># rings and foam (scene scripts; see Water)</span></code></pre></div>
+<p><code>ctx.physics2d</code> mirrors the essentials for the 2D world (<code>apply_impulse</code>,
+<code>grounded</code>, <code>body_count</code>).</p>
+<h2 id="water">Water<a class="anchor" href="#water" aria-label="Link to this section">#</a></h2>
+<p>Every entity with a <a href="rendering-and-lights.html#water"><code>Water</code></a> component is
+also a volume of water. Dynamic bodies in it get two things each step:</p>
+<ul><li><strong>Buoyancy</strong>: an upward push of `water density × gravity × submerged
+volume`, applied where the body is under, so a body settles at the depth
+its density gives and tilts with the waves. A body floats when its
+collider <code>density</code> is below the water's, with that fraction under.</li><li><strong>Drag</strong>: it loses speed and spin in proportion to how much of it is
+under (<code>drag</code>, default 1.0; 0 turns it off).</li></ul>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>scene.add(at.Entity(<span class="tok-s">&quot;sea&quot;</span>).add(at.Transform()).add(
+    at.Water(size=(<span class="tok-n">80</span>, <span class="tok-n">80</span>), wave_height=<span class="tok-n">0.4</span>, wave_length=<span class="tok-n">20.0</span>)))  <span class="tok-c"># density=2.0</span>
+scene.add(at.Entity(<span class="tok-s">&quot;crate&quot;</span>)
+    .add(at.Transform(position=(<span class="tok-n">0</span>, <span class="tok-n">2</span>, <span class="tok-n">0</span>)))
+    .add(at.MeshRenderer.cube(size=<span class="tok-n">1.0</span>))
+    .add(at.RigidBody.dynamic())
+    .add(at.Collider3D.cuboid(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>)))              <span class="tok-c"># density 1.0: half under</span>
+scene.add(at.Entity(<span class="tok-s">&quot;anchor&quot;</span>)
+    .add(at.Transform(position=(<span class="tok-n">3</span>, <span class="tok-n">2</span>, <span class="tok-n">0</span>)))
+    .add(at.MeshRenderer.cube(size=<span class="tok-n">0.5</span>))
+    .add(at.RigidBody.dynamic())
+    .add(at.Collider3D.cuboid(<span class="tok-n">0.5</span>, <span class="tok-n">0.5</span>, <span class="tok-n">0.5</span>).density(<span class="tok-n">6.0</span>)))  <span class="tok-c"># sinks, slowly</span></code></pre></div>
+<p>Bodies ride exactly the waves that are drawn: physics samples the same
+Gerstner waves on the CPU, on the same clock. A long wave over a large
+surface moves the geometry. Waves shorter than about four of the surface's
+128 grid cells only ripple the shading, so they don't move bodies either.
+In Oberon, set <strong>Density</strong> and <strong>Drag</strong> in the Water section of the
+Inspector.</p>
+<p>It's built to be cheap:</p>
+<ul><li>Without water it costs nothing.</li><li>Sleeping bodies are skipped, and bodies that settle on calm water fall
+asleep.</li><li>Awake bodies away from the water cost a couple of comparisons.</li><li>A body in the water is sampled at 1 point if small, or 8 if not (so long
+hulls pitch and roll). About 0.25 µs per floating body per step on waves,
+measured on one core.</li></ul>
+<p>The surface isn't solid: give the water a floor if sinking things should
+stop. The <a href="https://github.com/x017/automata/blob/main/examples/oberon/lagoon/README.md" rel="noopener">Lagoon example</a>
+floats crates and buoys, and runs a boat round the island.</p>
+<h3 id="ripples-and-wakes">Ripples and wakes<a class="anchor" href="#ripples-and-wakes" aria-label="Link to this section">#</a></h3>
+<p>On top of the waves, a small wave simulation runs around the camera: a
+256 × 256 grid, a quarter metre per cell (64 m across), that follows the
+view. Anything crossing the surface pushes it about, dynamic and kinematic
+bodies alike:</p>
+<ul><li>A body that <strong>drops in</strong> splashes: rings spread out from it, and foam.
+The harder and bigger, the bigger the splash.</li><li>A body that <strong>bobs</strong> sends out small rings as it bobs.</li><li>A body that <strong>moves</strong> pushes ripples ahead and leaves a V-shaped
+<strong>wake</strong> behind it, with a trail of foam. Ripples spread at 1.6 m/s, so
+anything faster than that (a boat) gets a proper V.</li><li>Scripts make their own: <code>ctx.water.splash(position, strength)</code> (scene
+scripts, Oberon included) or <code>ctx.physics.splash((x, y, z), strength)</code>
+(engine scripts). <code>position</code> can be an entity; <code>strength</code> runs from 0 to
+10, and 1 is about a crate dropped from a couple of metres.</li></ul>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    <span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;space&quot;</span>):
+        ctx.water.splash(entity, <span class="tok-n">3.0</span>)   <span class="tok-c"># a cannonball lands here</span></code></pre></div>
+<p>Ripples are only drawn; they don't move bodies (those ride the waves).
+They fade over about ten seconds. Beyond the 64 m around the view there are
+none, and the field fades out toward its edges so it never ends in a seam.</p>
+<h3 id="splashes-and-spray">Splashes and spray<a class="anchor" href="#splashes-and-spray" aria-label="Link to this section">#</a></h3>
+<p>A body that hits the water faster than 1.5 m/s also throws up a <strong>splash</strong>:
+a burst of droplets (the <code>&quot;splash&quot;</code> particle preset) where it went in.
+Its size follows the entry speed. A crate dropped from a metre makes a
+few droplets; a dive off a pier sends up a white crown. Characters splash
+too, although they're moved by teleporting rather than by velocity.</p>
+<p>On a <code>Water</code> with <code>wind</code> above 0.5, <strong>spray</strong> blows off the wave crests
+within 25 m of the camera, carried downwind (<code>wave_direction</code>). It gets
+more frequent and denser as <code>wind</code> goes up to 1. Calm water never sprays.</p>
+<p>Both are ordinary particle entities that remove themselves once they're
+done. In Rust, <code>PhysicsTick::splashes</code> lists each step's splashes (where,
+how fast and how big), and <code>set_water_particles(false)</code> stops the
+particles but keeps the rings.</p>
+<p>It costs nothing until something disturbs the water and nothing again once
+it calms down. While it runs, about 0.25 ms per physics step in a release
+build. The engine and Oberon point it at the camera that draws the frame;
+with your own <code>PhysicsWorld3D</code> in Rust, call `set_ripple_view(eye,
+target)<code>each frame and hand</code>ripples()<code>to</code>DrawList::set_ripples`.</p>
+<h2 id="joints">Joints<a class="anchor" href="#joints" aria-label="Link to this section">#</a></h2>
+<p><img src="../../../assets/physics/joint_yard.jpg" alt="A door on a hinge, a rope bridge of hinged planks, and a chain of ball joints swinging a wrecking ball through a sign" loading="lazy" decoding="async"></p>
+<p>A <strong>Joint</strong> holds an entity's body to another entity's (<code>connected</code>, by
+name) or to the world (<code>connected=None</code>). Both need a rigid body. An entity
+has at most one joint, so a chain is each link joined to the one before it.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>door.add(at.Joint.hinge(axis=(<span class="tok-n">0</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>), connected=<span class="tok-s">&quot;Door Frame&quot;</span>,
+                        anchor=(-<span class="tok-n">0.54</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>),            <span class="tok-c"># the hinge edge, in the door&#x27;s space</span>
+                        limits=(-<span class="tok-n">1.7</span>, <span class="tok-n">1.7</span>),              <span class="tok-c"># radians</span>
+                        motor=at.JointMotor(target=<span class="tok-n">0.0</span>)))  <span class="tok-c"># pulls shut</span>
+link.add(at.Joint.ball(connected=<span class="tok-s">&quot;Link 3&quot;</span>, anchor=(<span class="tok-n">0.2</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>)))
+sign.add(at.Joint.fixed(connected=<span class="tok-s">&quot;Post&quot;</span>, break_force=<span class="tok-n">120.0</span>))  <span class="tok-c"># snaps past 120 N</span>
+lamp.add(at.Joint.spring(<span class="tok-n">1.2</span>, stiffness=<span class="tok-n">30.0</span>, damping=<span class="tok-n">1.0</span>, connected=<span class="tok-s">&quot;Beam&quot;</span>))
+crate.add(at.Joint.rope(<span class="tok-n">3.0</span>))                             <span class="tok-c"># hangs from the world</span></code></pre></div>
+<div class="table"><table><thead><tr><th>Kind</th><th>Moves</th><th>Limits</th><th>Motor</th><th>Use</th></tr></thead><tbody><tr><td><code>hinge</code></td><td>turns around <code>axis</code></td><td>angle (rad)</td><td>✓</td><td>doors, wheels, bridge planks</td></tr><tr><td><code>ball</code></td><td>swivels freely</td><td>cone (rad)</td><td></td><td>chain links, ragdoll shoulders</td></tr><tr><td><code>slider</code></td><td>slides along <code>axis</code></td><td>position (m)</td><td>✓</td><td>drawers, lifts, pistons</td></tr><tr><td><code>fixed</code></td><td>nothing</td><td></td><td></td><td>welds — give it a <code>break_force</code></td></tr><tr><td><code>rope</code></td><td>up to <code>length</code> apart, slack closer</td><td></td><td></td><td>ropes, leashes</td></tr><tr><td><code>spring</code></td><td>pulled towards <code>length</code> apart</td><td></td><td></td><td>bouncy lamps, suspension</td></tr></tbody></table></div>
+<ul><li><strong><code>anchor</code></strong> is where the joint sits, in this entity's local space;
+<code>connected_anchor</code> is the same point in the other's. Leave that out and
+the joint holds the bodies as they were placed; a rope or spring is then
+tied to the other's centre (joined to the world: to a point above it).</li><li><strong><code>length=0</code></strong> (ropes and springs) means "the distance they start at".</li><li><strong><code>JointMotor(speed)</code></strong> turns (or slides) at <code>speed</code> rad/s (m/s);
+<strong><code>JointMotor(target=1.2)</code></strong> pulls to an angle and holds it.
+<code>stiffness=400, damping=80</code> settle in about half a second with no
+overshoot; <code>max_force=0</code> means as strong as needed.</li><li><strong><code>break_force</code></strong> (newtons, 0 = never) snaps the joint when it's pulled
+harder. <strong><code>collide_connected</code></strong> lets the two bodies bump each other
+(off by default, so a hinge's door and frame can overlap).</li><li>2D works the same with <code>Collider2D</code> bodies: hinges and balls turn around Z.</li></ul>
+<h3 id="joints-in-scripts">Joints in scripts<a class="anchor" href="#joints-in-scripts" aria-label="Link to this section">#</a></h3>
+<p>A running joint is <code>entity.joint</code> (or <code>view.joint</code>), and <code>None</code> without one:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    j = entity.joint
+    j.angle          <span class="tok-c"># hinge angle from where it started (radians); .value for any kind</span>
+    j.force          <span class="tok-c"># newtons pulling on it at the last step</span>
+    j.attached, j.broken
+    j.motor_target = <span class="tok-n">1.4</span> <span class="tok-k">if</span> ctx.input.pressed(<span class="tok-s">&quot;e&quot;</span>) <span class="tok-k">else</span> <span class="tok-n">0.0</span>   <span class="tok-c"># or motor_speed</span>
+    j.limits = (-<span class="tok-n">0.5</span>, <span class="tok-n">0.5</span>)      <span class="tok-c"># None to free it</span>
+    j.enabled = <span class="tok-b">False</span>           <span class="tok-c"># let go; True joins again</span>
+    j.connected = <span class="tok-s">&quot;Hook&quot;</span>        <span class="tok-c"># join something else</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_joint_broken</span>(entity, ctx):          <span class="tok-c"># once, when break_force snaps it</span>
+    <span class="tok-b">print</span>(<span class="tok-s">&quot;snapped at&quot;</span>, entity.joint.force, <span class="tok-s">&quot;N&quot;</span>)</code></pre></div>
+<p>The key store reaches other entities' joints — <code>ctx.get(&quot;Door:joint:angle&quot;)</code>
+— and a break also publishes <code>&quot;&lt;name&gt;:joint:broken&quot;</code> with the force.</p>
+<h3 id="joints-in-oberon">Joints in Oberon<a class="anchor" href="#joints-in-oberon" aria-label="Link to this section">#</a></h3>
+<p><strong>Add Component → Joint</strong> adds a hinge, and a Rigidbody and Collider if the
+entity has none. The Inspector's Joint section picks the <strong>Type</strong>, what it's
+<strong>Connected To</strong> (World or any named entity), the <strong>Anchor</strong>, and only the
+settings that type uses: hinge and ball angles in degrees, slider distances
+in metres. Renaming an entity keeps joints pointed at it. The
+<code>examples/oberon/joint_yard</code> example has a door, a rope bridge and a chain
+to take apart.</p>
+<h2 id="the-character-controller">The character controller<a class="anchor" href="#the-character-controller" aria-label="Link to this section">#</a></h2>
+<p>The platformer recipe — tight movement that still collides and climbs
+slopes:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>player = (
+    at.Entity(<span class="tok-s">&quot;player&quot;</span>)
+    .add(at.Transform(position=(<span class="tok-n">0</span>, <span class="tok-n">1.4</span>, <span class="tok-n">0</span>)))
+    .add(at.MeshRenderer.cube(size=<span class="tok-n">0.9</span>, color=ORANGE))
+    .add(at.RigidBody.kinematic_velocity())       <span class="tok-c"># 1. we own the velocity</span>
+    .add(at.Collider3D.capsule(<span class="tok-n">0.5</span>, <span class="tok-n">0.4</span>))         <span class="tok-c"># 2. capsule slides over edges</span>
+    .add(at.CharacterController(snap_to_ground=<span class="tok-n">0.5</span>))  <span class="tok-c"># 3. kinematic solver</span>
+    .add(at.CharacterVelocity())                  <span class="tok-c"># 4. per-frame drive input</span>
+)</code></pre></div>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    player = ctx.scene[<span class="tok-s">&quot;player&quot;</span>]
+    dx = <span class="tok-b">self</span>.controls.axis(<span class="tok-s">&quot;move_x&quot;</span>, ctx.input)
+    <span class="tok-k">if</span> ctx.physics.grounded(player):
+        <span class="tok-b">self</span>.vy = -<span class="tok-n">1.0</span>                             <span class="tok-c"># stay snapped to ground</span>
+        <span class="tok-k">if</span> <span class="tok-b">self</span>.controls.just_pressed(<span class="tok-s">&quot;jump&quot;</span>, ctx.input):
+            <span class="tok-b">self</span>.vy = JUMP_SPEED
+    <span class="tok-k">else</span>:
+        <span class="tok-b">self</span>.vy -= GRAVITY * ctx.time.delta
+    player.character_velocity = (dx * WALK_SPEED, <span class="tok-b">self</span>.vy, <span class="tok-n">0.0</span>)</code></pre></div>
+<p><code>CharacterController</code> options (keyword-only): <code>snap_to_ground</code>,
+<code>autostep</code>, <code>max_slope_climb_angle</code>, <code>min_slope_slide_angle</code>,
+<code>offset</code>, <code>slide</code>, and <code>mode=&quot;normal&quot;</code> (or <code>&quot;autostep&quot;</code>-friendly setups).</p>
+<h2 id="common-pitfalls">Common pitfalls<a class="anchor" href="#common-pitfalls" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Player falls through the floor:</strong> collider sizes don't match the
+visual scale (use full sizes), or the floor lacks <code>RigidBody.fixed()</code>.</li><li><strong>Kinematic character never moves:</strong> you set <code>Transform.position</code> instead
+of <code>character_velocity</code> — the solver only sees the velocity component.</li><li><strong>A joint drifts apart or explodes:</strong> the bodies are very different in
+mass (a 1 kg link holding a 1000 kg ball). Raise the light ones' collider
+<code>density</code>, or lower the heavy one's.</li><li><strong>A joined pair pushes itself apart:</strong> they overlap and you turned on
+<code>collide_connected</code>; leave it off.</li><li><strong>Dynamic body jitters against a wall:</strong> that's restitution/friction;
+try <code>friction(0.2)</code> on the wall or clamp velocity yourself.</li></ul>
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="scenes-and-entities.html">Scenes &amp; Entities</a> — component basics</li><li><a href="../cookbook.html#movement">Cookbook</a> — coyote time, jump buffering</li><li><a href="../api-reference.html#physics-ctxphysics">API Reference</a></li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="touch-controls.html"><small>Previous</small>Touch controls</a><a class="next" href="events-and-resources.html"><small>Next</small>Events &amp; resources</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/physics.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#bodies">Bodies</a></li><li class="l2"><a href="#colliders">Colliders</a></li><li class="l3"><a href="#colliders-from-models">Colliders from models</a></li><li class="l2"><a href="#the-per-frame-toolbox">The per-frame toolbox</a></li><li class="l2"><a href="#water">Water</a></li><li class="l3"><a href="#ripples-and-wakes">Ripples and wakes</a></li><li class="l3"><a href="#splashes-and-spray">Splashes and spray</a></li><li class="l2"><a href="#joints">Joints</a></li><li class="l3"><a href="#joints-in-scripts">Joints in scripts</a></li><li class="l3"><a href="#joints-in-oberon">Joints in Oberon</a></li><li class="l2"><a href="#the-character-controller">The character controller</a></li><li class="l2"><a href="#common-pitfalls">Common pitfalls</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

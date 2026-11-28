@@ -609,7 +609,8 @@ AUTOMATA is not intended to become:
 
 - A replacement for Unreal Engine.
 - A replacement for Unity.
-- A complete visual game editor in its initial stages.
+- A complete visual game editor in its initial stages (Oberon, the desktop
+  editor, is a separate later tool — not engine core).
 - A custom operating system or graphics driver.
 - A custom physics implementation.
 - A full 3D modeling application.

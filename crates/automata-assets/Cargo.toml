@@ -1,0 +1,21 @@
+[package]
+name = "automata-assets"
+description = "AUTOMATA assets: 3D models (glTF 2.0, OBJ) and material files, with a hot-reloading cache."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+automata-renderer.workspace = true
+glam.workspace = true
+image.workspace = true
+ron.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

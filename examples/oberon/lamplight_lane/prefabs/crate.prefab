@@ -1,0 +1,25 @@
+(
+    version: 1,
+    entities: [
+        (
+            name: Some("Crate"),
+            transform: Some((
+                position: (0.0, 0.4, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.8, 0.8, 0.8),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.62, 0.45, 0.25, 1.0),
+                surface: (
+                    roughness: Some(0.8),
+                ),
+            )),
+            attributes: {
+                "hp": Int(3),
+            },
+        ),
+    ],
+)

@@ -1,0 +1,404 @@
+name: Export templates
+
+# Builds the per-platform export templates that `automata-cli build` and
+# Oberon's Build menu copy games into: the `automata-player` launcher plus a
+# portable CPython with the engine wheel installed. Published to the
+# `export-templates` release, which `automata-cli templates download`
+# fetches. macOS is built per processor (Apple Silicon, Intel) and merged
+# into one universal template, which makes one .app for both.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, "arena/**"]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/export.yml"
+      - "scripts/bundle_oberon.py"
+      - "scripts/check_completions.py"
+      - "scripts/sign_macos.sh"
+      - "scripts/macos.entitlements"
+      - "examples/oberon/coin_run/**"
+
+env:
+  CARGO_TERM_COLOR: always
+  # python-build-standalone release and interpreter version for the runtime.
+  PBS_TAG: "20261110"
+  PBS_PYTHON: "3.12.16"
+  # The oldest macOS the launcher and engine wheel run on (matches the
+  # bundle's LSMinimumSystemVersion).
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
+
+permissions:
+  contents: write
+
+jobs:
+  template:
+    name: template (${{ matrix.target }} ${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux
+            arch: x86_64
+            os: ubuntu-22.04
+            triple: x86_64-unknown-linux-gnu
+            python: runtime/bin/python3
+            player: automata-player
+            archive: automata-template-linux-x86_64.tar.gz
+            artifact: automata-template-linux
+          - target: windows
+            arch: x86_64
+            os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            python: runtime/python.exe
+            player: automata-player.exe
+            archive: automata-template-windows-x86_64.tar.gz
+            artifact: automata-template-windows
+          # The macOS halves; `macos-universal` below merges them.
+          - target: macos
+            arch: arm64
+            os: macos-15
+            triple: aarch64-apple-darwin
+            python: runtime/bin/python3
+            player: automata-player
+            archive: automata-template-macos-arm64.tar.gz
+            artifact: macos-part-arm64
+          - target: macos
+            arch: x86_64
+            os: macos-15-intel
+            triple: x86_64-apple-darwin
+            python: runtime/bin/python3
+            player: automata-player
+            archive: automata-template-macos-x86_64.tar.gz
+            artifact: macos-part-x86_64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux build dependencies
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libudev-dev libasound2-dev
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: export-${{ matrix.target }}-${{ matrix.arch }}
+
+      - name: Portable Python
+        run: |
+          asset="cpython-${PBS_PYTHON}+${PBS_TAG}-${{ matrix.triple }}-install_only_stripped.tar.gz"
+          curl -fsSL --retry 3 -o python.tar.gz \
+            "https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_TAG}/${asset}"
+          mkdir -p template
+          tar xzf python.tar.gz -C template
+          mv template/python template/runtime
+          template/${{ matrix.python }} --version
+
+      - name: Build the player and exporter
+        run: cargo build --release -p automata-player -p automata-cli
+
+      - name: Build and install the engine wheel
+        run: |
+          PY="$PWD/template/${{ matrix.python }}"
+          "$PY" -m pip install --no-cache-dir "maturin>=1.7,<2.0"
+          # audio-cpal: shipped games play sound on the real device (ALSA on
+          # Linux, WASAPI on Windows); without it the mixer is silent.
+          "$PY" -m maturin build --release --manifest-path crates/automata-python/Cargo.toml \
+            -i "$PY" --out wheels --auditwheel skip --features audio-cpal
+          "$PY" -m pip install --no-cache-dir wheels/*.whl
+          "$PY" -m pip uninstall -y maturin
+          # Trim what a shipped game never needs.
+          rm -rf template/runtime/include template/runtime/share
+          find template/runtime -name __pycache__ -type d -prune -exec rm -rf {} +
+          find template/runtime -type d \( -name test -o -name tests -o -name idlelib -o -name tkinter -o -name turtledemo -o -name ensurepip \) -path '*/lib*/*' -prune -exec rm -rf {} + || true
+
+      - name: Smoke test the runtime
+        run: template/${{ matrix.python }} -c "import automata; print('automata', automata.__file__)"
+
+      # In an .app the interpreter lives in Contents/MacOS, so macOS treats
+      # the running game as the app (name, icon, Dock). Point that copy at
+      # its runtime in Contents/Resources, and name the runtime after the
+      # processor so the universal template can hold both.
+      - name: macOS interpreter for the app bundle
+        if: matrix.target == 'macos'
+        run: |
+          arch=${{ matrix.arch }}
+          py="template/python3-$arch"
+          cp -L template/runtime/bin/python3 "$py"
+          chmod u+w "$py"
+          old=$(otool -L "$py" | awk '/libpython/ {print $1}')
+          if [ -n "$old" ]; then
+            install_name_tool -change "$old" \
+              "@executable_path/../Resources/runtime-$arch/lib/$(basename "$old")" "$py"
+          fi
+          codesign --force --sign - "$py"
+          otool -L "$py"
+          lipo -info "$py"
+          mv template/runtime "template/runtime-$arch"
+
+      - name: Pack the template
+        run: |
+          cp target/release/${{ matrix.player }} template/
+          ./target/release/automata-cli templates pack template \
+            --target ${{ matrix.target }} --out ${{ matrix.archive }}
+
+      # Export a real example with the fresh template and run it headless.
+      - name: Export and run an example
+        run: |
+          trap 'echo "::error title=Export step failed::line $LINENO: $BASH_COMMAND"' ERR
+          export AUTOMATA_TEMPLATES="$PWD/templates"
+          ./target/release/automata-cli templates install \
+            ${{ matrix.archive }} --target ${{ matrix.target }}
+          cp -r examples/oberon/coin_run /tmp/coin_run
+          ./target/release/automata-cli init /tmp/coin_run --scene level.ron --name "Coin Run"
+          ./target/release/automata-cli build /tmp/coin_run --target ${{ matrix.target }}
+          exe="/tmp/coin_run/build/${{ matrix.target }}/Coin Run/Coin Run"
+          log="/tmp/coin_run/build/${{ matrix.target }}/Coin Run/logs/last_run.log"
+          case "${{ matrix.target }}" in
+            windows) exe="$exe.exe" ;;
+            macos)
+              exe="/tmp/coin_run/build/macos/Coin Run.app/Contents/MacOS/Coin Run"
+              log="$HOME/Library/Logs/Coin Run/last_run.log" ;;
+          esac
+          set +e
+          "$exe" --headless --frames 30 > run.txt 2>&1
+          code=$?
+          set -e
+          cat run.txt
+          # (An app run without a terminal writes everything to its log.)
+          if [ "${{ matrix.target }}" = macos ]; then
+            cat "$log"
+            [ $code -ne 0 ] || grep -q "ran 30 frames" "$log" || code=1
+          fi
+          if [ $code -ne 0 ]; then
+            # Surface the failure as annotations (readable without the logs).
+            for f in run.txt "$log"; do
+              [ -f "$f" ] || continue
+              msg=$(tail -c 3000 "$f" | awk 'BEGIN { ORS = "%0A" } { gsub(/%/, "%25"); gsub(/\r/, ""); print }')
+              echo "::error title=Exported game failed ($code) - $(basename "$f")::$msg"
+            done
+            ls -R "/tmp/coin_run/build/${{ matrix.target }}" | head -60
+            exit $code
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.archive }}
+
+  # One macOS template for both processors: a universal launcher (lipo),
+  # and each processor's interpreter and runtime side by side. Tested as
+  # shipped: exported, run natively and under Rosetta, unzipped, and signed
+  # with scripts/sign_macos.sh (ad hoc).
+  macos-universal:
+    name: template (macos universal)
+    needs: template
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: export-macos-universal
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: parts
+          pattern: macos-part-*
+          merge-multiple: true
+
+      - name: Build the exporter
+        run: cargo build --release -p automata-cli
+
+      - name: Merge the halves
+        run: |
+          set -euo pipefail
+          mkdir -p universal
+          for arch in arm64 x86_64; do
+            mkdir -p "parts/$arch"
+            tar xzf "parts/automata-template-macos-$arch.tar.gz" -C "parts/$arch"
+            cp -R "parts/$arch/runtime-$arch" "parts/$arch/python3-$arch" universal/
+          done
+          lipo -create parts/arm64/automata-player parts/x86_64/automata-player \
+            -output universal/automata-player
+          lipo -info universal/automata-player
+          ./target/release/automata-cli templates pack universal \
+            --target macos --out automata-template-macos-universal.tar.gz
+          ls -la *.tar.gz
+
+      - name: Export, run, unzip, sign
+        run: |
+          set -euo pipefail
+          trap 'echo "::error title=macOS universal step failed::line $LINENO: $BASH_COMMAND"' ERR
+          export AUTOMATA_TEMPLATES="$PWD/templates"
+          cli=./target/release/automata-cli
+          $cli templates install automata-template-macos-universal.tar.gz --target macos
+          cp -r examples/oberon/coin_run /tmp/coin_run
+          $cli init /tmp/coin_run --scene level.ron --name "Coin Run"
+          $cli build /tmp/coin_run --target macos
+          log="$HOME/Library/Logs/Coin Run/last_run.log"
+          play() {
+            rm -f "$log"
+            if ! "$@" --headless --frames 30 > run.txt 2>&1; then
+              cat run.txt "$log" || true
+              msg=$(tail -c 3000 "$log" | awk 'BEGIN { ORS = "%0A" } { gsub(/%/, "%25"); gsub(/\r/, ""); print }')
+              echo "::error title=Exported app failed ($*)::$msg"
+              exit 1
+            fi
+            cat "$log"
+            grep -q "ran 30 frames" "$log"
+          }
+          app="/tmp/coin_run/build/macos/Coin Run.app"
+          play "$app/Contents/MacOS/Coin Run"
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            play arch -x86_64 "$app/Contents/MacOS/Coin Run"
+          else
+            echo "::notice::No Rosetta on this runner: the Intel half was tested on its own runner only"
+          fi
+          # The zip players download.
+          mkdir -p /tmp/unzipped
+          ditto -x -k "/tmp/coin_run/build/Coin Run-0.1.0-macos-universal.zip" /tmp/unzipped
+          play "/tmp/unzipped/Coin Run.app/Contents/MacOS/Coin Run"
+          # Signed as the docs describe (ad hoc here: no Developer ID in CI).
+          scripts/sign_macos.sh "/tmp/unzipped/Coin Run.app" -
+          play "/tmp/unzipped/Coin Run.app/Contents/MacOS/Coin Run"
+          du -sh "$app" automata-template-macos-universal.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: automata-template-macos
+          path: automata-template-macos-universal.tar.gz
+
+  # The Oberon download (editor + standalone CPython + wheels), then the
+  # ROADMAP D0 promise checked on a runner with no Python on PATH: `oberon
+  # new` makes an offline .venv, and open-less commands, the tests and the
+  # language server's completions all work in it.
+  oberon-sdk:
+    name: oberon sdk (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux
+            os: ubuntu-22.04
+            exe: oberon
+          - target: windows
+            os: windows-latest
+            exe: oberon.exe
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux build dependencies
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libudev-dev libasound2-dev
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: oberon-sdk-${{ matrix.target }}
+
+      # Only runs the helper scripts; the oberon steps hide it.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build oberon
+        run: |
+          set +e
+          cargo build --release -p oberon 2>&1 | tee build.log
+          code=${PIPESTATUS[0]}
+          if [ $code -ne 0 ]; then
+            # Compiler errors as annotations: readable without the raw logs.
+            grep -n -A12 -E "^error|panicked|failed to run custom build" build.log | head -c 6000 > errors.txt || true
+            [ -s errors.txt ] || tail -c 4000 build.log > errors.txt
+            msg=$(sed -e 's/%/%25/g' -e 's/\r//g' errors.txt | sed -e ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=oberon build failed ($code)::$msg"
+          fi
+          exit $code
+
+      - name: Bundle oberon + Python + wheels
+        run: python scripts/bundle_oberon.py --oberon "target/release/${{ matrix.exe }}" --out dist/oberon --archive
+
+      - name: oberon new, doctor, test, run (offline, Python hidden)
+        timeout-minutes: 15
+        run: |
+          trap 'echo "::error title=oberon sdk step failed::line $LINENO: $BASH_COMMAND"' ERR
+          set -eo pipefail
+          OBERON="$PWD/dist/oberon/${{ matrix.exe }}"
+          BUNDLE="$PWD/dist/oberon/python"
+          # No index and no set-up Python: the bundle has to be enough.
+          export PIP_NO_INDEX=1
+          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -vi python | paste -sd: -)"
+          cd "$RUNNER_TEMP"
+          "$OBERON" --version
+          "$OBERON" new mygame
+          cd mygame
+          "$OBERON" doctor
+          # The project's .venv was made from the bundled interpreter.
+          base=$("$OBERON" python -c "import sys; print(sys.base_prefix)")
+          echo "venv base: $base"
+          "$OBERON" python -c "import os, sys; sys.exit(not os.path.samefile(sys.argv[1], sys.argv[2]))" "$base" "$BUNDLE"
+          "$OBERON" test
+          "$OBERON" run --headless --frames 30 | tee run.txt
+          grep -q "ran 30 frames" run.txt
+          "$OBERON" export check
+          "$OBERON" new ../flat --template 2d
+          (cd ../flat && "$OBERON" test && "$OBERON" run --headless --frames 5)
+          "$OBERON" new ../bare --template empty
+          (cd ../bare && "$OBERON" test)
+
+      - name: Completions and typo diagnostics in the new project
+        timeout-minutes: 15
+        run: python scripts/check_completions.py "$RUNNER_TEMP/mygame"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oberon-${{ matrix.target }}
+          path: dist/oberon.*
+          retention-days: 14
+
+  publish:
+    name: publish
+    needs: [template, macos-universal]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: automata-template-*
+          merge-multiple: true
+      - name: Update the export-templates release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -la dist
+          gh release view export-templates >/dev/null 2>&1 || \
+            gh release create export-templates --title "Export templates" --prerelease \
+              --notes "Templates for automata-cli / Oberon Build. Installed with: automata-cli templates download"
+          gh release upload export-templates dist/*.tar.gz --clobber

@@ -1,0 +1,97 @@
+(
+    version: 1,
+    entities: [
+        (
+            name: Some("Warm Lamp Post"),
+            transform: Some((
+                position: (0.0, 1.6, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.12, 3.2, 0.12),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.08, 0.085, 0.09, 1.0),
+                surface: (
+                    roughness: Some(0.45),
+                    metallic: Some(0.8),
+                ),
+            )),
+            prefab: Some((
+                path: "prefabs/lamp_post.prefab",
+            )),
+        ),
+        (
+            name: Some("Lamp Arm"),
+            transform: Some((
+                position: (0.0, 3.14, 0.32),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.07, 0.07, 0.7),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.08, 0.085, 0.09, 1.0),
+                surface: (
+                    roughness: Some(0.45),
+                    metallic: Some(0.8),
+                ),
+            )),
+            prefab: Some((
+                path: "prefabs/lamp_post.prefab",
+                index: 1,
+            )),
+        ),
+        (
+            name: Some("Lamp Globe"),
+            transform: Some((
+                position: (0.0, 2.9, 0.62),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.4,
+                ),
+                color: (1.0, 0.5, 0.15, 1.0),
+                surface: (
+                    emissive: (1.0, 0.62, 0.28),
+                    glow_light: 0.0,
+                ),
+            )),
+            prefab: Some((
+                path: "prefabs/lamp_post.prefab",
+                index: 2,
+                overrides: [
+                    "mesh_visual.color",
+                    "mesh_visual.surface.emissive",
+                    "mesh_visual.surface.emissive_strength",
+                ],
+            )),
+        ),
+        (
+            name: Some("Lamp Light"),
+            transform: Some((
+                position: (0.0, 2.9, 0.62),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            point_light: Some((
+                color: (1.0, 0.62, 0.28),
+                intensity: 5.5,
+                range: 10.0,
+                radius: 0.12,
+            )),
+            prefab: Some((
+                path: "prefabs/lamp_post.prefab",
+                index: 3,
+                overrides: [
+                    "point_light.color",
+                    "point_light.intensity",
+                ],
+            )),
+        ),
+    ],
+)

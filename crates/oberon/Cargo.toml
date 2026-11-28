@@ -1,0 +1,51 @@
+[package]
+name = "oberon"
+description = "Oberon: the AUTOMATA scene editor — a native Rust app (winit + tiny-skia + the engine's wgpu renderer)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Oberon is a native windowed app, but it never needs `unsafe`: the UI is
+# drawn with tiny-skia, and presentation goes through the engine's own safe
+# wgpu surface (`Renderer::blit_rgba_to_surface`). So the whole crate can
+# inherit the workspace's `unsafe_code = "forbid"`. The coordinate-heavy UI
+# code relaxes a few pedantic clippy lints in-source (`#![allow]` per module).
+[lints]
+workspace = true
+
+[features]
+# Real sound output for Play mode and clip previews (ALSA on Linux needs
+# `libasound2-dev`; WASAPI / CoreAudio need nothing). Without it Oberon
+# still runs Audio Sources, silently: `--no-default-features`.
+default = ["audio-device"]
+audio-device = ["automata-audio/cpal"]
+
+[dependencies]
+automata-assets = { path = "../automata-assets" }
+automata-audio = { path = "../automata-audio" }
+automata-core = { path = "../automata-core" }
+automata-cli = { path = "../automata-cli" }
+automata-input = { path = "../automata-input" }
+automata-nav = { path = "../automata-nav" }
+automata-physics = { path = "../automata-physics" }
+automata-renderer = { path = "../automata-renderer" }
+automata-scene = { path = "../automata-scene" }
+ab_glyph.workspace = true
+glam.workspace = true
+image.workspace = true
+tiny-skia.workspace = true
+winit.workspace = true
+pollster.workspace = true
+tracing.workspace = true
+serde.workspace = true
+ron.workspace = true
+
+# The code editor's system clipboard (pure-Rust X11 connection; winit
+# already depends on it).
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+x11rb = { version = "0.13", default-features = false }
+
+[dev-dependencies]

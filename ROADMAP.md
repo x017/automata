@@ -1,0 +1,1380 @@
+# Roadmap
+
+Every remaining feature, cut into phases that each ship on their own. Say
+**"proceed"** and the next ⬜ phase in the [run order](#run-order) gets
+built, tested, documented, pushed and reported. Then it's ticked ✅ here.
+
+Each phase names the code it touches today, what "done" looks like, and a
+size: **S** = about a day, **M** = a few days, **L** = a week or more.
+Big multi-part designs that were already agreed live in
+[`NEXT_PLANS.md`](NEXT_PLANS.md) (Android, game UI, skeletal animation);
+the phases below link to them rather than repeat them.
+
+Status: ✅ done · 🔨 in progress · ⬜ not started
+
+## Every phase is done when
+
+1. **Engine, Python and Oberon all have it** where it applies: the Rust
+   crate, the scene file (`automata-core/src/scene_file.rs`, saved only
+   when set, so old scenes stay byte-identical), Python
+   (`automata-python/src/*.rs` + `_core.pyi`, or the shared
+   `script_api.py` for script helpers, so Oberon Play and `run_scene`
+   behave the same), and the Oberon Inspector / menus.
+2. **Tests:** CPU unit tests; an offscreen GPU test for anything visible
+   (`automata-renderer` `offscreen_*`, run on CI's software GPU); Python
+   tests; Oberon UI tests for new rows and menus; the script conformance
+   suite for new script API.
+3. **Performance checked:** High and Beautiful frame times on the Lagoon
+   and FPS views, before and after. Heavy effects stay off below their
+   preset, following the agreed split: the sky, sun and nicer shadows also
+   go on High; SSAO, refraction, lens flare, DoF and god rays are
+   Beautiful only.
+4. **Docs:** the wiki pages (`docs/wiki/...`), the API reference, and
+   `scripts/build_site.py`.
+5. **An example uses it** (Coin Run, FPS, Lagoon, or a new one) and its
+   `build_level.py` regenerates the RON files.
+6. **Gates:** `cargo fmt`, clippy `-D warnings` per crate, all test
+   suites, CI green, then a report with before/after renders.
+
+---
+
+## Track A: Graphics
+
+The "make it look like an indie game, not a toy" request. A1–A10 finish it;
+A11–A13 are the big-world features after.
+
+### A0. Sky, sun, lens flare, endless water ✅
+### A0b. Materials: roughness, metal, normal maps, glow; Sphere primitive ✅
+### A0c. Glowing objects light their surroundings ✅
+### A4. Shadows from point lights (glowing objects) ✅
+Done ahead of A1, at the user's request. High shadows the 2 nearest glow
+lights, Ultra and Beautiful the 4 nearest (six-face shadow cubes, 384 /
+512 px; soft taps on Beautiful). A "Glow Shadows" toggle is on meshes
+(`glow_shadows=`, scene `Surface`, Oberon). Spotlight shadows move to A3,
+together with spotlights.
+
+**Performance fix (after A3).** A4–A3 had made every preset slower, Low
+and Medium included, because they all ran one forward shader carrying all
+the shadow code. The forward path now has one entry point per mix of
+shadows a frame samples (none, sun, point lights, both), picked per frame:
+Low and Medium never compile point shadow code, and High skips it when no
+shadowed light is in view. Point shadow cube faces are cached and redrawn
+only when their light or the casters they see change (still scenes redraw
+none). The lookup is branch-free and matrix-free, skipped where a light is
+too faint to show, and takes one bilinear compare on High (2x2 on Ultra,
+8 taps on Beautiful). Software-GPU timings (1280×720, best run, ms):
+Low back to its pre-A4 cost (Coin Run 315 before A4, 765 at A3, 340 now;
+Lagoon 876 → 1350 → 876), Night Lights High 851 → 777, Ultra 1117 → 854,
+Beautiful 1808 → 1432.
+
+### A1. Shadows I: crisp sun shadows on High and Ultra ✅
+Sun shadows are split into cascades: 2 on High and 3 on Ultra (2048 px each), plus
+Beautiful's 4. Cascades cross-fade at their edges and fade out at the
+shadow distance, and pull in to the level's size in small levels. The forward path uses
+bilinear 4-tap filtering with a normal offset. Shaded sides lean toward
+the sky colour when the sky dome is on. The sun has Shadow Distance and
+Shadow Softness (scene, Python, Oberon Graphics tab and Inspector).
+Measured cost: High +0–7%, Ultra within noise. (The 8-tap rotated Poisson
+was too slow on High, at +15–24%.)
+
+### A2. Shadows II: Beautiful's contact-hardening shadows and ambient occlusion ✅ M
+Done. PCSS in `sample_cascade`: an 8-read blocker search (sunlit pixels
+stop there), then 12 bilinear taps over a penumbra of tan(sun radius) ×
+softness × caster distance, 1–16 texels. A depth prepass of the opaque
+meshes into its own target (`ssao.rs`; the scene keeps its own depth, so
+see-through meshes draw as before) feeds one half-resolution pass:
+12-sample hemisphere AO over 1.5 m (normals from depth, squared) plus a
+12-step, 0.45 m contact ray toward the sun, and the view depth. Two
+depth-aware 7-tap blurs, then a depth-aware upsample in `fs_beautiful`.
+AO dims ambient only; contact shadows multiply the sun shadow.
+`Environment.ambient_occlusion` (0–2, default 1) in scene files, Python
+and Oberon (Graphics tab and Inspector, "Occlusion"). Beautiful meshes
+bind a separate light layout (binding 5), so High's pipelines are
+untouched; a GPU test checks the crease darkens on Beautiful and High is
+byte-identical at any strength. Measured cost: Coin Run about 2× faster
+(the blocker search skips filtering in sun), FPS about +12%.
+
+### A3. Placeable point lights and spotlights ✅ S
+Done. `PointLight` and `SpotLight` scene components (colour, intensity,
+range with 0 = auto, source radius, Cast Shadows; spots add cone and inner
+angles). A spot shines along its entity's −Z. They work in scene files
+(`point_light` / `spot_light`), Python (`at.PointLight`, `at.SpotLight`)
+and Oberon: Create menu, Add Component, Inspector rows, light-coloured
+viewport icons, and range rings or the cone out to its range on
+selection. The renderer's `PointLight` gained `spot: Option<SpotCone>`.
+`PointLightData` grew to 16 floats, carrying the axis and a cos-space
+falloff scale/offset (a point light is scale 0, offset 1, so it is
+unchanged). Shadow slots became a budget of six layers per shadowed point
+light: a point light takes six cube faces, a spot one perspective view
+over its cone plus 4°. So High's two slots shadow up to twelve spots.
+Casters are culled by a cone test. A light inside a small mesh (bounding
+radius up to 0.3 m plus the light's radius: a bulb, flame or lens) leaves
+it out of its shadow. GPU test: a spot lights inside its cone, not
+outside, and a blocker shades it on presets with point shadows. Demo:
+`examples/oberon/night_lights` (a torch on a wall and two headlights, all
+shadowed, with no light from a glowing mesh).
+
+### A5. Water interaction I: ripples and wakes ✅ M
+Done. `automata_physics::ripples::RippleField`: a 256² damped wave
+equation, 0.25 m per cell (64 m across), with an edge sponge, scrolled in
+whole cells to follow the view (centred 0.3 of its width ahead of the eye).
+`apply_water` gives every dynamic **and kinematic** body crossing the
+surface a dent (a cosine bump of its waterplane radius, as deep as its
+draft); each step the field loses the new dent and gets the old one back,
+so dropping in, bobbing and moving all make waves. Faster than the ripple
+speed (1.6 m/s), moving makes a Mach-cone V (close to Kelvin's 19.5° at
+boat speeds). Hitting the water faster than 1.5 m/s adds a splash. Foam
+comes from how fast a dent moves the water and fades over a few seconds.
+Calm water costs nothing; running, ~0.25 ms per step in release.
+`PhysicsWorld3D::{splash, set_ripple_view, ripples, ripple_height}`; the
+engine drivers and Oberon Play aim it at the drawn camera and hand a
+`RippleMap` snapshot (RGBA half floats: height, slopes, foam) to
+`DrawList::set_ripples`. The renderer uploads it to a new water binding
+only when it changes. `water.wgsl` adds its height to the vertices and its
+slopes (×3) to the normal, fading it at the field's edges, plus foam from
+the field and on ripple crests, on every preset. Script API:
+`ctx.water.splash(position_or_entity, strength)` and `ctx.water.height`
+(shared API, so Oberon too, over the bridge as `splashes`), and
+`ctx.physics.splash` for engine scripts. The Lagoon's crate now drops in
+at Play start and its boat is kinematic, steered round the island by
+`scripts/motor_boat.py`, riding the waves. `render_still` gained
+`PLAY=seconds` to render a moment of Play. Tests: the ring speed and
+symmetry, calming down, still dents making no waves, a V wake and calm
+water ahead, the field following the view, a dropped crate's rings, a
+moving body's wake, splashes (Rust, Python, the Oberon bridge), half-float
+packing, and a GPU test that rings and foam change the water on Low and
+Beautiful.
+- Spec was: a ripple heightfield simulated around the camera, stamped by
+  bodies crossing the surface; ripple normals and height in `water.wgsl`;
+  V-shaped wakes and foam on crests; `ctx.water.splash(position,
+  strength)`.
+- **Done when:** dropping a crate in the Lagoon sends rings outward, and
+  the boat leaves a wake. ✅
+
+### A6. Particles ✅ L
+Done. `automata_scene::ParticleEmitter` (28 fields: rate, burst,
+duration, one-shot, lifetime, shape point/sphere/box/cone, cone angle,
+speed, gravity, drag, size/colour over life with HDR colours, fades, spin,
+stretch, blend, lit, soft, sprite or texture + sprite sheet, world or
+local space) with six presets (Fire, Smoke, Sparks, Dust, Splash, Magic)
+and `set_field` by name, shared by Python and the Oberon bridge.
+`simulate_particles` runs every emitter on the CPU (a `ParticleState` per
+entity; one-shot emitters despawn when done) in both engine drivers and
+Oberon Play; `preview_particles` replays finished effects instead, for the
+editor's live preview. `spawn_burst` / `burst` make one-off effects and
+extra particles. Renderer (`particles.rs`, `particles.wgsl`): instanced
+camera-facing quads, one draw per emitter, in their own pass after the
+scene and water with the depth attached read-only, so they fade softly
+where they meet it; alpha and additive pipelines; a procedural 5-sprite
+sheet (dot, spark, star, flame, puff) or a loaded texture with frame
+animation; lit particles take the sun, ambient and placed lights (per
+particle, no shadows); stretched sparks along their velocity; HDR colours bloom on
+Beautiful. Every preset draws them. Python: `at.ParticleEmitter(**fields)`,
+`.preset(name, **fields)`, `.replace`, scene files, `ctx.scene.burst` /
+`burst_emitter`; the shared script API has `ctx.particles.burst(effect,
+position, direction, count, **fields)` and `ctx.particles.emit(entity,
+n)`, over the bridge as `bursts` / `emits`. Oberon: Create → Particles,
+Add Component → Particle Emitter, an Inspector section (preset, shape,
+sprite and blend menus; glow fields keep HDR colours editable with the
+colour picker), a flame icon, live preview while editing (particles carry
+over edits). The FPS player's shots burst sparks along the hit normal
+(hotter ones on drones); `examples/oberon/campfire` has fire, lit smoke,
+embers and a crackle script. `render_still` gained `SHOOT` and `AIM`.
+Tests: emission, bursts, one-shot cleanup, preview replay, shapes,
+over-life curves, sprite sheets, fields by name, scene-file round trips,
+GPU drawing (blend, soft edges, lit), Python, the bridge, the Inspector,
+and the FPS example played in Oberon throwing sparks.
+- Spec was: an instanced billboard pipeline with soft edges, additive or
+  alpha blending, sprite-sheet animation and lit or unlit particles; a
+  `ParticleEmitter` (rate, bursts, lifetime, shapes, velocity, gravity,
+  drag, size/colour/alpha over life, world or local space) simulated on
+  the CPU; Fire, Smoke, Sparks, Dust, Splash, Magic presets; Python
+  `at.ParticleEmitter.preset("fire")` and `ctx` bursts; Oberon Inspector,
+  live preview and Create → Particles.
+- **Done when:** the FPS blaster throws sparks on hit, and a campfire
+  example burns and smokes. ✅
+
+### A7. Water interaction II: splashes, underwater, caustics ✅ M
+Done: bodies and characters that hit the water faster than 1.5 m/s throw a
+splash burst sized by their entry speed, and `Water.wind` above 0.5 blows
+spray off the crests near the camera. With the camera under the surface,
+every preset fogs and absorbs colour toward blue-green, shows the surface
+from below (with total internal reflection) and a wobbling waterline, and
+the main audio track goes through a 650 Hz low-pass (engine and Oberon
+Play; `ctx.audio.set_low_pass` for scripts). Medium and up draw animated
+caustics (`Water.caustics`) on whatever is under the nearest four waters.
+The Lagoon has a swimmer on the pier (Tab, run, jump, C to dive) and the
+orbit camera follows it under.
+- Spec was: splash bursts (A6) sized by the entry speed, plus droplets and
+  spray on wave crests in strong wind; an underwater view with fog and
+  colour absorption, a wobbling waterline and muffled audio (a low-pass
+  filter in `automata-audio`); animated caustics projected onto geometry
+  under the water.
+- **Done when:** jumping into the Lagoon splashes, and diving shows a
+  blue-green world with moving caustics. ✅
+
+### A8. A post chain for every preset, and colour grading ✅ M
+Today only Beautiful has HDR, bloom and FXAA (`post.rs`). The styles
+need post effects on High too.
+- A lighter LDR post chain on Medium and up: colour grading (exposure,
+  contrast, saturation, temperature/tint, lift/gamma/gain), vignette,
+  film grain and chromatic aberration; cheap bloom on High.
+- `Environment` fields for each, plus a "Post" section in the Graphics
+  tab.
+- **Done when:** a desaturated, overexposed NieR grade and a warm,
+  saturated BotW grade can be dialled in on High. ✅
+
+Done: `Environment` grades the frame after tone mapping on Medium and up
+(white balance, lift/gamma/gain, contrast, saturation, vignette, grain,
+chromatic aberration) and High/Ultra get a cheap quarter-resolution bloom;
+Beautiful folds the same grade into its HDR resolve. Five looks
+(`PostEffects::PRESETS`: Neutral, Bleached, Vivid, Film, Noir) in Python
+(`post="bleached"`, `with_post`) and in Oberon's new Post group. A neutral
+grade with no bloom skips the pass entirely.
+
+### A9. Atmosphere: height fog, god rays, depth of field, dust ✅ M
+- Height fog: thick in valleys, thin up high, lit by the sun.
+- God rays on Beautiful: screen-space light shafts from the sun, blocked
+  by geometry.
+- Depth of field on Beautiful: the focus distance auto-follows the
+  camera's target (or is set manually), with bokeh-like blur.
+- Dust motes floating in sunbeams, a camera-attached particle preset
+  (A6).
+- **Done when:** the NieR checklist from planning (desaturated and
+  overexposed grade, height fog, strong soft bloom, god rays, DoF, grain,
+  chromatic aberration, vignette, dust) is all there. ✅
+
+Done: `Environment` gained `fog_height`/`fog_falloff` (fog integrated
+along each view ray through an exponential height layer, every preset)
+and `fog_sun`; on Beautiful, `god_rays` (a quarter-resolution radial blur
+of the sky around the sun, masked by depth so geometry casts shafts) and
+`depth_of_field` (a half-resolution disc blur whose circle of confusion
+follows `focus_distance`, or the camera's target, with a depth-aware
+gather and upsample so in-focus edges don't halo). The `"motes"` particle
+preset fills a box around the camera (`follow_camera`, particles wrap),
+and lit particles take the sun's shadow. Daylight and dusk turn on height
+fog and god rays; the lagoon example wears the full list (Film look plus
+all four). Python keywords, the stub, and Oberon rows for all of it.
+
+### A10. Style presets: Realistic, Semi-realistic, BotW, A Short Hike, NieR ✅ L
+- Shading modes: **toon** (banded diffuse with a tint ramp and tinted
+  shadows), rim light, and a painted-sky mode.
+- **Outlines** (a depth/normal edge pass) and **pixelation** (render at
+  low resolution, nearest-neighbour upscale, optional palette).
+- A **Style** dropdown in the Graphics tab, stored on `Environment`. Each
+  style sets environment, post and shading values. Styles mix: pick one,
+  then override any knob, and the label shows "Custom".
+- Python: `at.Environment.style("nier")`.
+- **Done when:** the same Lagoon scene renders in all five styles, side
+  by side in the docs.
+
+Done: `Environment` gained toon bands (with softness, flat highlights),
+a shade tint, rim light and a painted sky, shared by the forward and
+physically based shaders so they work on every preset. Outlines come from
+a second difference of 1/depth (silhouettes and creases, drawn before
+water so it covers them). Pixels and a dithered palette run in the grade
+pass (Medium to Ultra) or FXAA's (Beautiful), sized for a 720 px screen.
+`Environment::STYLES` and `with_style` set five looks while keeping the
+scene's colours and sky, and `style_name` reads "Custom" once a knob
+changes. Python has `Environment.style("nier")`, `with_style`, `styles()`
+and `style_name`. Oberon has a Style group (dropdown plus every knob) in
+the Graphics tab and the Inspector. `docs/assets/rendering/styles.jpg`
+shows the Lagoon in all five.
+
+### A11. Big worlds: culling, instancing, LOD ✅ M
+The main pass draws every mesh. Only shadows are culled today
+(`mesh_spheres` in `renderer.rs`).
+- Frustum culling in the main and shadow passes.
+- Automatic instancing: same mesh and material → one draw call.
+- Distance LOD: models can ship `_LOD1`/`_LOD2` meshes, or fade out past
+  a distance.
+- `examples/bench` gains a 10,000-tree forest.
+- **Done when:** the forest runs at least 3× faster than today on High.
+
+Done: `examples/bench/forest.py` renders 10,000 trees, with a sun casting
+shadows, fog, and the camera among the trees. On lavapipe at 1280×720
+High it went from 9,493 to 1,098 ms per frame (8.6×, pixel-identical),
+and to 723 ms (13×) with `draw_distance=80`. Every frame, the renderer
+picks each mesh's level and fade, culls against the camera frustum (sun
+cascades and point-light faces cull their own way), and groups what's
+left into instanced batches. Batches are keyed by content: a mesh's
+geometry hash and a material's uniform plus textures. Per-instance
+transforms go in one growing vertex buffer, which avoids per-mesh uniform
+buffers and bind groups, and binding at an offset keeps it working on
+GLES and WebGL. Skinned meshes still draw one by one. glTF nodes named
+`…_LODn` become per-part levels, with distances from the import settings
+(`lod_distances`) or from the model's size, scaled by the graphics preset.
+`draw_distance` (scene files, Python constructors) culls past a distance,
+shadow included, and dithers out over the last tenth through a pipeline
+override constant. Not done yet: an Inspector field for the draw distance.
+
+### A12. Grass and foliage (BotW-style fields) ✅ L
+Builds on A11's instancing.
+- A `Grass` component: blades painted onto surfaces in Oberon with a
+  brush (density, height, colour variation), drawn as instanced blades
+  with distance fade.
+- Wind (shared with water and trees), and blades that bend away from the
+  player and objects.
+- Foliage scatter: paint models (rocks, flowers, bushes) onto ground.
+- **Done when:** a field of grass sways around the walking player with
+  no frame drop on High.
+
+Done: `Grass` grows blades over an area plus brush strokes (soft discs
+that paint or erase, stored in the entity's space and saved in scene
+files). Fields are grown once, cached, and split into 8 m chunks. Each
+chunk is baked into a GPU vertex buffer the first time it's seen, so a
+frame uploads nothing for grass and draws each visible chunk in one
+call, nearest first. Distance thins blades toward `draw_distance` (in
+rank order, with a smooth shrink at the cut), and past 12 m a blade is
+one triangle instead of five. The vertex shader sways blades in the
+`Environment`'s new `wind` and `wind_direction`, which spring bones and
+water spray share. Blades bend away from the bottom of every character
+and moving body's collider (the 8 nearest the camera). `Scatter` draws
+the entity's model at many painted spots, instanced. In Oberon, Grass
+and Scatter get Inspector sections with a brush: Paint or Erase, four
+sizes and three strengths, on whatever surface is under the cursor, one
+undo step a stroke. The Environment gets Wind rows. `examples/oberon/meadow`
+has a 30 × 30 m field (52,000 blades, a path erased through it), painted
+wildflowers, scattered low-poly rocks, flowers and trees, a runner with a
+Character Controller and a ball to kick.
+
+Performance could only be measured on lavapipe, a software rasterizer.
+At 1280×720 on High the meadow takes 1,686 ms a frame against 687 ms
+with no foliage. At 320×180 it's 264 against 61, so most of what's left
+is fill rate. Baking chunks and the far-blade LOD brought it down from
+2,761 ms with instanced blades. On lavapipe the extra cost is a frame
+drop. On a real GPU a frame's grass is one draw per visible chunk with no
+uploads, but "no frame drop on High" still needs checking on real
+hardware. Not done yet: a brush stroke regrows and rebakes the whole
+field (fine at this size, a hitch on huge fields), and painting doesn't
+follow terrain until A13 (now it does).
+
+### A13. Terrain ✅ L
+- ✅ A `Terrain` component: a square heightmap (33 to 1025 heights a side,
+  resampled when changed) centred on its entity, drawn in 32-cell chunks
+  (a stroke rebuilds only the chunks it touched) with a 4-layer splat
+  material (grass, rock, sand, dirt: colour, optional
+  texture, tile size). Oberon's Inspector has sculpt brushes (Raise,
+  Lower, Smooth, Flatten to where the stroke began, Noise) and layer
+  paint brushes in four sizes and three strengths, one undo step a
+  stroke, in the entity's space. Plus Auto Paint (by height and slope)
+  and Import Heightmap (greyscale PNG/JPEG). Create → Terrain makes one.
+  Saved as two base64 PNGs (a 129² terrain is about 35 KB).
+- ✅ A Rapier heightfield collider, rebuilt when sculpted and moved with
+  its entity. Ray casts hit it, in games, in scripts during Oberon's Play,
+  and under the editor's brush.
+  Water: Auto Paint reads the first Water's height for the beach line,
+  and the Water's shoreline foam and depth colour meet the ground.
+- ✅ Grass and Scatter over a terrain stand on its surface and follow it
+  when it's re-sculpted (`follow_terrain`, on by default).
+- ✅ Python: `at.Terrain` (`sculpt`, `paint`, `auto_paint`, `shape`,
+  `load_heightmap`, `height_at`, `normal_at`, `weights_at`) and
+  `at.TerrainLayer`.
+- ✅ **Done:** `examples/oberon/island`, a 128 m island with a beach and a
+  cove, two grassy hills, a dirt path and a cliff headland. Every height
+  and colour comes from Oberon's brushes and Auto Paint:
+  `crates/oberon/tests/island.rs` replays the strokes through the
+  editor's own calls and checks the level still matches. Manual:
+  [Terrain](docs/wiki/oberon/terrain.md). Not done yet: no terrain LOD
+  (every chunk at full detail, so 1025² is heavy), and Grass/Scatter have no
+  Follow Terrain toggle in the Inspector (Python and scene files only).
+
+---
+
+## Track B: Animation and characters
+
+The plan is [`NEXT_PLANS.md` #4](NEXT_PLANS.md#4-skeletal-animation--in-progress-phase-1-).
+Import and GPU skinning are ✅.
+
+### B1. Animation playback ✅ L
+NEXT_PLANS #4 phase 2:
+- An `Animation` component (default clip, speed, play on start).
+- `entity.animation.play("run", loop=True, fade=0.2)`, `.stop()`,
+  `.playing`, `.time` in `script_api.py`.
+- Crossfades.
+- An Inspector clip list with a preview scrubber that plays in the
+  editor.
+- A CC0 animated character example.
+
+Done: `automata_scene::Animation { clip, speed, looping, play_on_start }`
+is saved in scene files, and an `Animator` plays it with smoothstep
+crossfades (a fade interrupted mid-way blends on from the pose shown).
+Scripts get `entity.animation.play(clip, loop, fade, speed, restart)`,
+`.stop(fade)`, `.clip`, `.time` (settable), `.duration`, `.playing`,
+`.speed`, `.clips` and `.length(clip)`. An unknown clip raises `KeyError`,
+and asking for the playing clip again keeps it going, so scripts can pick
+a clip every frame. Python games get the same as `view.animation`, plus
+`at.Animation`. Oberon gives a dropped-in animated model an Animation set
+to its idle clip, holds each model on its clip's first frame while
+editing, and the Inspector's Animation section has a clip menu, Speed,
+Loop, Play On Start and a Preview row (play/pause and a scrubbing time
+bar) that animates in the scene view without pressing Play. Newly
+materialized models keep their animator's pose instead of flashing the
+rest pose. `examples/oberon/robot_plaza` uses Quaternius' CC0
+RobotExpressive: a player script that blends Idle, Walking, Running, Jump
+and Wave, a greeter that waves when you come near, and robots that dance,
+sit (a one-shot holding its last frame) and walk in slow motion. Docs:
+[Models → Animation](docs/wiki/oberon/models.md#animation).
+
+### B2. Spring bones: hair, cloth, tails ✅ M
+- Verlet chains on chosen bones (stiffness, drag, gravity, wind), with
+  sphere and capsule colliders on the body so hair doesn't pass through
+  shoulders.
+- Configured in the model's import settings (`.import.ron`), with an
+  Oberon editor that picks the chain roots.
+- **Done when:** a character's ponytail and skirt swing and settle as it
+  runs and stops.
+
+Done: `ImportSettings.springs` holds chains (root bone, stiffness, drag,
+gravity, wind, thickness) and sphere/capsule colliders (bone, offset,
+radius, length), saved in `<model>.import.ron` and copied into the rig.
+`automata_scene::SpringSim` simulates each swinging bone's tip with Verlet
+in world space (substepped, the entity's move spread across substeps),
+springs it towards its animated place, keeps the bone's length, projects it
+out of colliders onto the reachable circle, and turns the bone to follow.
+Forks (a skirt's waistband) stay put while their branches swing; teleports
+reset. Springs damp in proportion to their rate so long chains settle
+instead of whipping. The `Animator` runs it after the clip with the
+entity's `GlobalTransform`, and models with springs but no clips get one.
+Scripts get `entity.animation.springs` and `.reset_springs()`. Oberon's
+Import block has a Springs section (+ Chain, + Collider, per-chain and
+per-collider numbers, × to remove), with bones picked from a searchable
+palette that lists likely roots first. `examples/oberon/ponytail_park` has
+a generated CC0 runner with a ponytail and an eight-panel skirt; a Rust
+test runs it, stops it and checks the hair trails, swings forward, stays
+out of the head and settles. Docs:
+[Models → Spring bones](docs/wiki/oberon/models.md#spring-bones).
+
+### B2b. Clips from other files ✅ S
+- A model borrows the animations of other glTF files made for the same
+  skeleton (one file per move, as animation packs and Mixamo ship them).
+- **Done when:** a clip from another file plays on the model like its own.
+
+Done: `ImportSettings.clips` lists the files (relative to the model, saved
+in `<model>.import.ron`). Loading the model loads each file's clips and
+retargets them onto the model's rig by bone name (`Clip::retarget`), so the
+node order may differ and keys for missing bones are dropped. A file with
+one clip names it after the file (`run.glb` gives `run`); a file with
+several gives `file:Clip` (`sword:Slash`). Names stay exact, and a name the
+model already has keeps the model's clip, with a warning. Missing or broken
+files are skipped with a warning but still watched, so hot reload and
+`automata_assets::dependencies` (Oberon's reload, the export check) cover
+them. Oberon's Import block has a Clip files section (+ Clips from file…,
+a palette of the project's other glTF files; each file with the clips it
+gave, red when it gave none; × to remove). Ponytail Park's emotes (1 waves,
+2 cheers) come from `models/anims/emotes.glb`, a skeleton-only file from
+`make_runner.py`. Docs:
+[Models → Clips from other files](docs/wiki/oberon/models.md#clips-from-other-files).
+
+### B3. Animation events and root motion ✅ M
+NEXT_PLANS #4 phase 3. Events are named moments in clips, marked under
+`events` in `<model>.import.ron` (`(clip: "Run", time: 0.18, name:
+"footstep")`, borrowed clips included). They're stored on the `Clip`
+(sorted, clamped). The `Animator` collects the events its playhead passes
+each step: forwards, backwards, across loop wraps, and at exactly the
+start of a fresh play. A one-shot clip fires `end`, and a clip fading out
+fires nothing. They go into a ring of the latest 32 with a per-entity
+`seq`, carried to scripts in `AnimationState.events` (bridge `ev`), so
+skipped bridge frames lose nothing. `script_api` delivers each once,
+at the start of the next frame, to `on_animation_event(entity, ctx, name)`
+and to the channel `<entity>:animation:<event>`. The new channels API is
+`ctx.subscribe(pattern, fn)` with `*`/`?` wildcards, plus `unsubscribe`,
+`publish` and `Subscription.cancel()`. Re-subscribing is a no-op,
+subscribers follow hot reloads, errors report against the subscriber's
+script, and subscriptions end with their entity.
+
+Root motion (`Animation.root_motion`, the Inspector's Root Motion row,
+`entity.animation.root_motion`) uses `ClipMotion`: the shallowest bone
+with a translation channel, measured in model space. Its ground (XZ)
+travel is pinned out of the pose and moves the entity instead, so a jump's
+height stays in the animation. Characters get a `CharacterMotion` that
+`PhysicsWorld3D::move_characters` consumes on top of their velocity, so
+walls stop them. Other entities have their transform moved directly. The
+Preview bar shows event ticks. Ponytail Park: footstep dust from one
+`*:animation:footstep` subscription, and a 3-key Leap (2.4 m, borrowed
+from `emotes.glb`) by root motion. Play sessions now pin model paths to the
+document's folder. Docs:
+[Models → Animation events](docs/wiki/oberon/models.md#animation-events),
+[Models → Root motion](docs/wiki/oberon/models.md#root-motion).
+
+### B3b. Key store for scripts ✅ M
+Engine state by key, Redis style, in `script_api.KeyStore` (Oberon's Play
+and `run_scene` alike): `ctx.get` / `ctx.set` / `ctx.scan` / `ctx.keys` /
+`ctx.ref`. Keys are `entity:component:field`. The components are
+`animation` (clip, time, speed and root_motion settable; setting `clip`
+plays it), `transform` (position, rotation, scale) and `attr`. Shorter keys
+give the component handle or the entity. `get`/`set`/`ref` take one exact
+key: a shared name is an error that points to `scan`, and wildcards are
+refused. `scan`/`keys` take `*`/`?`, keep scene order and skip entities
+without the component or field. Wrong entity, component, field or attribute
+names raise `KeyError` with a difflib "did you mean". Read-only fields raise
+`AttributeError`, and `set` won't create attributes. `ctx.ref` returns a
+`ComponentRef` / `FieldRef` that re-resolves on each use and raises once
+its entity is gone. Colons are refused in entity names (`at.Entity`,
+`Entity.name`, Oberon's rename). Oberon's Inspector notes shared names
+and names with `:` under the entity name. Ponytail Park: C makes the
+Spectator cheer through `ctx.ref("Spectator:animation")`. Docs:
+[Scripting → Keys](docs/wiki/oberon/scripting.md#keys),
+[Channels](docs/wiki/oberon/scripting.md#channels).
+### B4. Animation state machine and graph editor ✅ L
+NEXT_PLANS #4 phase 4. Scope: everything (1D and 2D blend spaces, and
+layers with bone masks).
+- ✅ Graph files and the runtime: `.anim.ron` with parameters (float, int,
+  bool, trigger), layers (weight, bone mask), states (a clip, a 1D or a 2D
+  blend space, speed, loop), and transitions (conditions, triggers, exit
+  time, fade, Any State). The `Animator` runs it; `Animation.graph` names
+  the file. Manual: [`animation-graphs.md`](docs/wiki/oberon/animation-graphs.md).
+- ✅ Scripts and Play: `entity.animation.set` / `get` / `trigger` /
+  `state` / `layer_state` / `layer_weight` / `play_state` (the same on
+  `view.animation`), `at.Animation(graph=…)`, graph state and requests
+  over Oberon's bridge, the Inspector's Graph row (pick, make from the
+  model's clips, or drop a `.anim.ron`), `automata-cli check` validating
+  graphs against the model, and Robot Plaza's player driven by
+  `anims/robot.anim.ron` (waving on a `["Torso"]` layer while it walks).
+- ✅ The Oberon graph editor: `.anim.ron` files open in a tab with a node
+  canvas (drag states, pan, zoom, right-click to add states and draw
+  transitions, Any State and the entry marked), panels for parameters,
+  layers and masks (bones picked from the model), states and transitions
+  with their conditions, and 1D and 2D blend space editors with draggable
+  points. During Play the selected entity's live state glows with its
+  progress, a firing transition lights up, parameters show their values,
+  and unsaved edits run at once, picking up where the graph was.
+- ✅ Docs and an example: the manual's
+  [Animation graphs](docs/wiki/oberon/animation-graphs.md) page (format,
+  scripts, the editor) and Robot Plaza's graph-driven player.
+
+### B5. Attachments and IK ✅ M
+- ✅ Attach any entity to a bone: the `Attachment` component
+  (`automata_scene::attach`) places it by an offset in the bone's space,
+  keeping its own size, chaining (a gem on a sword in a hand) and
+  surviving loops. Scene files' `attach: (to, bone)`, `at.Attach`,
+  `entity.attach` / `detach` / `attached_to` in scripts (and on
+  `view`), and Oberon's **Attach To Bone** component (Follow and Bone
+  menus, the gizmo moving it in the world and storing the offset, shown
+  on the edit-time pose and the animation preview).
+- ✅ Two-bone IK (`automata_scene::ik`): legs and heads found by bone
+  names (Blender, Mixamo, Quaternius, Unreal styles, IK-control rigs with
+  feet off the shins and helper bones). **Feet On Ground** plants each
+  foot on colliders while running (meshes in the editor and games without
+  physics), drops the hips and tilts the foot to the slope.
+  `animation.reach(bone, target)` bends an arm or leg to a point or an
+  entity, and `animation.look_at(target)` turns the head and neck within
+  limits, all easing in and out over the playing clip or graph.
+- ✅ Docs and an example: the manual's
+  [Attachments & IK](docs/wiki/oberon/attachments-and-ik.md) page, and
+  Robot Plaza's top hat, steps and ramp, a Stepper standing on a step and
+  a Greeter that watches you.
+
+### B6. Ragdolls ✅ M
+Needs C1 (joints).
+- ✅ Capsule bodies and joints generated from the skeleton
+  (`RagdollLayout::of`, cached per model): a capsule per main bone sized
+  from the skinned mesh around it, mass shared by volume, hinges for knees
+  and elbows, cone-limited ball joints elsewhere, small bones and spring
+  bones (hair, skirts) left to their parents. Works from the usual bone
+  names (camelCase, `_L`/`.R`, `mixamorig:`); checked on the runner and the
+  robot.
+- ✅ Switching between animated and ragdoll: a `Ragdoll` component
+  (`active`, `mass`, `stiffness`, `blend_time`). Limp bodies start at the
+  posed bones with the character's velocity; the entity's own capsule and
+  Character Controller sleep; ray casts report the entity. Stiffness holds
+  the pose it went limp in. Pushes go on a named bone or spread by mass.
+  Switched off, the entity is placed on the ground under the hips, as high
+  as it stood, and the animation blends back in over `blend_time`.
+  Ragdolls settle (extra solver passes, damping once calm) so they come to
+  rest however they land.
+- ✅ Scripts: `entity.ragdoll.on(push=..., bone=...)`, `.off()`, `.push()`,
+  `.limp`, `.resting`, `.blending`, `.weight`, `.hips`; Python
+  `at.Ragdoll`; Oberon's Inspector section (Start Limp, Mass, Stiffness,
+  Blend Time) and bridge.
+- ✅ **Done:** Robot Plaza's **Wobbly** falls over when you walk into it and
+  gets back up. Manual: [Ragdolls](docs/wiki/oberon/ragdolls.md). Not done
+  yet: no get-up animation (it blends from how it lay into its clip).
+
+---
+
+## Track C: Gameplay systems
+
+### C1. Physics joints ✅ M
+Rapier's joint sets are already created and stepped in
+`world2d_impl.rs` / `world3d_impl.rs`, but nothing exposes them.
+- Fixed, hinge, ball, slider, rope and spring joints, with limits and
+  motors.
+- Scene components, Python and an Oberon target-entity picker.
+- **Done when:** a swinging door, a rope bridge and a chain demo work.
+
+Done. `Joint` is a scene component holding an entity's body to another
+entity's (by name) or to the world:
+- **Kinds:** hinge, ball, slider, fixed, rope and spring, with an anchor,
+  an axis, limits (radians or metres), and a motor. A motor either turns
+  at a speed or pulls to a target; its 400/80 default settles in about
+  0.6 s with no overshoot.
+- **Breaking:** `break_force` snaps a joint, and `JointState` reports its
+  value, force and whether it's attached.
+- **3D and 2D:** the 2D world takes only entities with a `Collider2D`.
+- **Scripts:** `entity.joint` / `view.joint` read the angle and force, and
+  set the motor, limits, `enabled` and `connected`. `ctx.get("Door:joint:angle")`
+  works too. A snap calls `on_joint_broken` and publishes
+  `<name>:joint:broken`.
+- **Oberon:** an Inspector section with a Connected To menu, showing only
+  the rows each kind uses (degrees or metres). Renames carry over to
+  joints, and export validation warns about joints with no body or no
+  partner.
+- **Demo:** `examples/oberon/joint_yard` has a motor-driven door, a
+  ten-plank rope bridge holding a crate, and an eight-link chain whose
+  wrecking ball snaps a welded sign.
+
+### C2. Tweens and timers ✅ S
+- In `script_api.py`, so both runners get them:
+  `ctx.tween(entity, "position", to, 0.5, ease="out_cubic")`,
+  `ctx.after(2.0, fn)`, `ctx.every(1.0, fn)`, with cancel handles.
+- 20 easing curves.
+
+Done: `ctx.tween(entity, field, to, seconds, ease=...)` moves position,
+rotation, scale, an attribute or any writable key field (`"animation:speed"`),
+with `start`, `delay`, `loop` (forever or n plays), `yoyo`, `on_update` and
+`on_done`. Whole numbers stay whole, and a new tween on the same field
+replaces the old one. `ctx.tween_value` tweens a value of your own (HUD
+fades). `ctx.after` / `ctx.every(..., times=)` call `fn(*args)`. Tweens
+and timers return handles with `cancel()`, `pause()` and `resume()`, plus
+`finish()` and `value` / `progress` on tweens. All 31 Penner curves (`linear`
+plus `in_`/`out_`/`in_out_` of 10 families) are in `EASINGS` and
+`ctx.ease(name, t)`, and they take forgiving spellings (`"easeOutCubic"`).
+They move once a frame by `ctx.time.delta`, before `update`. They end
+with the entity whose script made them (or the one they move), pause
+with a script paused by an error, follow hot reloads, and report errors
+like subscribers. A new `tests/script_conformance/tweens` scenario holds
+Oberon's Play mode and `run_scene` to the same frames. The engine-side
+conformance runner now uses `fixed_delta=1/60`, so both count the same
+time. The campfire's crackle now books its pops with `ctx.after`.
+`at.Game`'s object-oriented loop doesn't have them yet.
+
+### C3. Save games and settings ✅ S
+- `ctx.save["coins"] = 12`, plus slots, stored as JSON in the platform's
+  user-data folder, so it works in exports.
+- Player settings (volume, graphics quality, key bindings) persisted
+  automatically.
+
+Done. `ctx.save` is a dict of JSON values. It's written atomically at the
+end of any frame that changed it, nested edits included. A broken file is
+set aside with a warning. Slots are `saves/<slot>.json`, with `use`,
+`slots()`, `exists`, `delete` and `clear`. `ctx.settings` is a separate
+`settings.json` shared by every slot:
+- `volume` sets the master volume, both in Oberon and under `run_scene`.
+- `graphics` sets the preset. In Play it overrides the editor's preset
+  until Stop.
+- `bind` and `rebind` make actions that `ctx.input.pressed("jump")`
+  understands (mouse buttons too). `any_just_pressed()` drives "press a
+  key" screens.
+
+Saved settings apply on the first frame. Saves go to:
+- Oberon: `.oberon/save`, which is never exported.
+- `run_scene`: `.oberon/save` next to the scene. Headless runs keep
+  nothing.
+- Exported games: `automata.player` uses the user-data folder named after
+  the game (`%APPDATA%`, `~/Library/Application Support`, or XDG).
+
+`$AUTOMATA_SAVE_DIR` overrides all of them. Coin Run remembers its best
+run and lifetime coins, binds its controls as actions, and cycles the
+graphics preset on F2. The coin-collector tutorial gained a step 7 for
+this. Games run from a `main` script on the object-oriented `at.Game`
+loop don't get `ctx.save` yet.
+
+### C4. Navigation ✅ L
+- ✅ A navmesh baked from static colliders (the new `automata-nav` crate:
+  voxelise → walkable cells eroded by the agent radius → regions →
+  rectangular polygons, with automatic jump and drop links across gaps
+  and hand-placed `NavLink`s). The `Navigation` component holds the bake
+  settings and the saved `<scene>.nav.ron`, which is reused while it
+  matches the level and re-baked (with a warning) when it doesn't.
+  Oberon's **Bake** button saves it, and the scene view overlays the
+  walkable area and the jump arcs.
+- ✅ `ctx.nav.path(a, b)` (plus `nearest`, `reachable`, `path_length`,
+  `ready`; funnel-pulled corner paths) and a `NavAgent` component: speed,
+  acceleration, steering round corners, avoidance between agents, jump
+  links on an arc, characters moved through their controller and others
+  hovering. `entity.nav.go(point | entity | name)`, `stop`, `arrived`,
+  `path` and friends in scripts, in Python games and Oberon's Play mode
+  alike.
+- ✅ **Done:** the FPS drones are Nav Agents. Come close or shoot one and
+  it chases you round the walls and down the platforms, stopping at
+  firing range. Manual: [Navigation](docs/wiki/oberon/navigation.md).
+
+### C5. AI helpers ✅ S
+- ✅ Pure-Python state-machine and behaviour-tree helpers in the script
+  API (`ctx.ai.state_machine`: states as functions or enter/update/exit,
+  switching by returned name or `when` rules, `time` in state, history;
+  `sequence`, `selector`, `parallel`, `action`, `condition`, `wait`,
+  `invert`, `succeed`, `repeat`, `cooldown` nodes with
+  `SUCCESS`/`FAILURE`/`RUNNING`). The same classes are `automata.ai` for
+  Python games.
+- ✅ Perception: `ctx.ai.can_see` (a sight cone turned by the viewer's
+  rotation, with a line-of-sight ray cast that walls block) and
+  `visible`; hearing with `ctx.ai.noise(position, radius, kind)` and
+  `ctx.ai.hear(listener)`, each noise heard once per listener.
+- ✅ **Done:** the FPS drones are a three-state machine (idle → chase →
+  search): they look around, notice you when they see you, hear your
+  shots, search where they lost you, and only hold back at firing range
+  with a clear shot. Manual: [AI](docs/wiki/oberon/ai.md).
+
+### C6. 2D toolkit ✅ L
+- ✅ Sprites: a `Sprite2D` component (image, size, tint, flips, pixel art,
+  layer) drawn in world space under a `Camera2D`, and sprite sheets
+  (columns × rows) with named clips (`first..last`, fps, loop) that
+  `animate()` plays. Python `at.Sprite` / `at.SpriteClip`; scripts use
+  `entity.sprite.play()`, `.stop()`, `.clip`, `.finished`, `.frame` and
+  `.flip_x`.
+- ✅ Tilemaps: a `Tilemap` component (a grid of cells from one tileset,
+  bottom-left origin) with auto-tiles, which pick one of 16 tiles from the
+  neighbours. Solid maps get a box collider per row of cells in 2D physics,
+  rebuilt when the cells change. Python `at.Tilemap` (`from_rows`, `get`,
+  `set`, `fill`, `resize`, `tile_at`, `cell_at`) and `at.AutoTile`.
+- ✅ `CameraFollow2D`: a target, an offset, smoothing, a dead zone and level
+  bounds.
+- ✅ 2D physics in play: colliders without a rigid body are fixed ground,
+  character controllers follow script teleports, and `entity.grounded`
+  works in 2D.
+- ✅ Oberon:
+  - Create entries for **Sprite**, **Tilemap**, **Camera 2D** and
+    **2D Player**.
+  - Inspector sections, including a clips editor and a tile palette. The
+    tile brush paints tiles and auto-tiles, with erase and undo.
+  - The **2D view** (key `2`): flat, with pan and zoom and no Z gizmo
+    axis. It opens by itself for 2D scenes.
+  - Sprites, the follow camera and 2D physics in Play mode.
+  - The `2d` project template now uses all of these.
+- ✅ **Done:** *Pixel Peaks* (`examples/oberon/platformer`) is a 64-cell
+  level with an auto-tiled ground, coins, slimes and a flag. The tutorial
+  builds it in Oberon. Besides the player script it has two short ones: a
+  slime patrol and a parallax sky. Manual: [2D games](docs/wiki/oberon/2d.md).
+  Tutorial: [A 2D platformer](docs/wiki/tutorials/platformer.md).
+  - Not done yet: script ray casts look at the 3D world only.
+    `Camera3D.ortho` isn't used by shadows, water, post effects, SSAO, the
+    editor view or the audio listener (2D sounds play without distance
+    fading). 2D scenes are unlit.
+
+---
+
+## Track D: UI and editor
+
+### D0. The `oberon` command: CLI, new projects, a bundled Python ✅ M
+One `oberon` binary for everything, and new projects that work in any IDE
+from the first minute, like an engine that ships its own SDK. Today
+`oberon` takes a scene path or `--bench`, uses whatever `python3` is on
+the PATH and finds a language server only if one is installed.
+- **Subcommands:**
+  - `oberon` / `oberon open [scene|folder]` opens the editor (a project
+    picker with no argument).
+  - `oberon new <name> [--template 3d|2d|empty]` makes a project.
+  - `oberon run [scene]` plays a scene in a window without the editor.
+  - `oberon test` runs the project's tests headless in its venv.
+  - `oberon export --target windows|linux|android …` wraps automata-cli.
+  - `oberon bench` (today's `--bench`).
+  - `oberon python …` / `oberon pip …` run the project's own interpreter.
+  - `oberon doctor` checks the GPU, Python, the venv and the language server.
+  - `--help` on each, with an exit code and messages a CI log can use.
+- **The template:** `oberon new` writes `level.ron`, `scripts/` (a typed
+  starter script), `models/`, `sounds/`, `tests/test_level.py`, `README.md`,
+  `.gitignore`, a `pyproject.toml` pinning `automata-engine` to the
+  editor's version, `pyrightconfig.json` and `.vscode/settings.json`
+  pointing at `.venv`.
+- **A bundled Python:** the Oberon download carries a standalone CPython
+  (python-build-standalone) and the matching `automata-engine` wheel.
+  `oberon new` makes `.venv` from them offline, with `uv` if it's there and
+  `python -m venv` if not, so a machine with no Python works. Opening an
+  older project offers to upgrade its wheel to the editor's version.
+- **Typing from the first line:** the wheel ships `_core.pyi`, `py.typed`
+  and typed `Entity` / `Context` / `Message` / `ComponentRef` classes for
+  behaviour scripts. Templates write
+  `def update(entity: Entity, ctx: Context)`, so VS Code, PyCharm and
+  Oberon's own editor complete `ctx.get(...)`, `entity.animation.play(...)`
+  and the rest, and flag typos. basedpyright goes into the venv as a dev
+  dependency, so Oberon's code editor has a language server with nothing
+  to install.
+- **One interpreter:** Play, `oberon run`, `oberon test` and the language
+  server all use the project's `.venv`. The preferences' Python path stays
+  as an override.
+- **Done when:** on a clean Windows and Linux machine with no Python, unzip
+  Oberon, run `oberon new mygame`, then `code mygame`. `ctx.` completes
+  with docs and a misspelt `entity.animaton` is underlined. `oberon open`,
+  Play, `oberon run` and `oberon test` all work, and the same steps pass in
+  CI.
+
+Done: `oberon` has `open`, `new`, `setup`, `run`, `test`, `export`, `bench`,
+`python`, `pip`, `doctor`, `help` and `--version`. Each has `--help`, and
+the exit codes are 0, 1, and 2 for bad usage. `run`, `test`, `python` and
+`pip` pass their child's code through. The parser is hand-written: no
+argument crate is vendored, and `oberon level.ron` and `--bench` still
+work. `oberon new` writes the three templates with a typed starter script,
+tests, a pinned `pyproject.toml`, `pyrightconfig.json` and `.vscode/`.
+It then makes `.venv` offline from the bundle, with uv when it's on the
+PATH and `python -m venv` otherwise.
+
+`scripts/bundle_oberon.py` assembles the download: `oberon`, a
+python-build-standalone CPython in `python/`, and `wheels/` with the
+engine built by that same interpreter, plus basedpyright and pytest.
+`OBERON_PYTHON` and `OBERON_WHEELS` stand in for the bundle in source
+builds. `automata.script_api` is fully annotated (99 signatures, with
+dynamic attributes hidden from type checkers). Oberon's new-script
+template is typed too.
+
+Play, `run`, `test`, `doctor` and the code editor's language server all
+resolve the project's `.venv`, and the preferences' interpreter still
+wins. The new Export-workflow job `oberon sdk` builds the bundle on Linux
+and Windows, hides every other Python, and on each runner:
+- runs `new` for each template, then `doctor`, `test`, `run --headless`
+  and `export check`
+- checks that `.venv` came from the bundled interpreter
+- runs `scripts/check_completions.py`, which drives
+  `basedpyright-langserver` over LSP: `ctx.` must complete with docs, and
+  `entity.animaton` must be flagged
+
+Different from the plan:
+- An outdated or missing `.venv` gets a Console message naming
+  `oberon setup --upgrade`, not an upgrade dialog.
+- `oberon open` with no argument opens the current folder's project, or the
+  starter scene, not a picker.
+- `export --target android` waits for E1.
+
+### D1. Game UI widgets ✅ M
+[`NEXT_PLANS.md` #3](NEXT_PLANS.md#3-game-ui-system--decided-phase-1--done)
+phase 2: `ctx.ui.button/label/progress/panel/toggle/slider`, with
+hover/press states and clicks consumed by the UI.
+
+Done:
+- **Widgets:** `ctx.ui` has immediate-mode `button`, `toggle`, `slider`,
+  `progress`, `label`, `panel` and `image`, placed by their top-left
+  corner in screen pixels.
+- **States and identity:** widgets show hover and pressed states and take
+  `enabled=`. They're told apart by their text and owner entity, or by an
+  `id=`.
+- **Theme:** `ctx.ui.theme` is monochrome by default, like Oberon, and
+  takes sRGB colours.
+- **Clicks stay with the UI:** a press that starts on a widget or panel is
+  the UI's until it's released, so `ctx.input` mouse queries and
+  mouse-bound actions don't see it. `ctx.input.mouse_position` and
+  `mouse_over_ui` are new.
+- **Shared code:** it's all in `script_api.py`, so Play, `run_scene` and
+  exports behave the same. Oberon now sends the cursor to scripts.
+- **Touch:** the engine's input treats the first finger down as the left
+  button where it touches.
+- **Settings:** assigning an unchanged value to `ctx.settings` no longer
+  writes it again.
+- **Demo:** `examples/oberon/pause_menu` has a pause menu, a settings
+  screen and a HUD with a Menu button over shapes that a click in the
+  game kicks. `render_still` gained `CURSOR=` and `CLICK=` to picture it.
+
+### D2. Custom fonts ✅ S
+#3 phase 3: `.ttf`/`.otf` files from the project, shown in Assets and
+checked on export.
+
+Done:
+- **Scripts:** `font="fonts/Pixel.ttf"` works on `ctx.hud.text`,
+  `ctx.screen.text`, `ctx.screen.measure_text` and `ctx.ui.label`, and
+  `ctx.ui.theme.font` sets it for every widget. Paths are relative to the
+  scene folder, like images.
+- **Renderer:** the text atlas holds several fonts. Each file loads once.
+  Characters a font lacks come from the built-in Geist, and a bad file is
+  reported once and drawn with Geist. The same code runs in Play,
+  `run_scene` and exports.
+- **Oberon:**
+  - The Assets tab has a **Fonts** filter with "Aa" previews and an
+    Import… button (also GameObject ▸ Import Font…).
+  - Dropping a font on the window copies it into `fonts/` and puts its
+    script path on the clipboard.
+  - The Files tree has a font icon and *Copy Path for Scripts*.
+  - Completions now cover `ctx.hud.` and `ctx.ui.theme.`.
+- **Export:** validation finds `.ttf`/`.otf` string literals in the
+  shipped scripts. A font that's missing, outside the project, excluded or
+  not a font is an error.
+- **Demo:** `examples/oberon/pause_menu` draws its titles and HUD numbers
+  in Press Start 2P (OFL) from its `fonts/` folder.
+
+### D3. UI layout, focus and screens ✅ M
+#3 phase 4:
+- Anchors and resolution scaling.
+- Rows, columns and stacks.
+- Gamepad and keyboard focus.
+- Menu, pause and HUD screens.
+
+Done:
+- **Layouts:** `ctx.ui.column`, `row` (with `columns=n` equal shares) and
+  `stack` are `with` blocks that nest. Widgets inside them leave out
+  `x, y`. A layout can draw a panel and a title behind its contents.
+- **Anchors and scaling:**
+  - Layouts take the nine anchors (`"top_left"` … `"bottom_right"`) with a
+    margin, and `ui.place` anchors a single box. Anchored layouts are
+    right on their first frame.
+  - `ui.design_size` scales the UI to fit any window, and the player's
+    saved `ctx.settings.ui_scale` multiplies that.
+- **Screens:**
+  - `ctx.ui.screens` is a stack (`show`, `hide`, `toggle`, `back`,
+    `clear`, `paused`, `modal`). `ui.screen(name)` puts the widgets drawn
+    after it on that screen.
+  - Modal screens draw on top and block the widgets and clicks under
+    them.
+  - Escape or the pad's B closes the top screen.
+- **Focus:**
+  - Inside a modal screen (or with `ui.keyboard_navigation`), the arrow
+    keys, the d-pad or the left stick move a focus ring to the nearest
+    widget.
+  - Enter, Space or A presses the focused widget, left and right move
+    sliders, and Tab cycles. Held directions repeat.
+  - Keys the UI used are hidden from `ctx.input`.
+- **Gamepads as keys:** `"pad_south"` … `"pad_r3"` work with
+  `ctx.input` and `settings.bind` in Play (Oberon now reads gamepads),
+  `run_scene` and exports.
+- **Oberon:** completions for the new `ctx.ui.` members, `ctx.ui.screens.`
+  and the `pad_*` key names.
+- **Demo:** `examples/oberon/pause_menu` is rebuilt with these. It's laid
+  out for 1280×720 and has menu and settings screens with a UI size
+  setting, and it works with the mouse, the keys or a gamepad.
+
+### D4. UI editor in Oberon ✅ L
+#3 phase 5: `hud.ui.ron` documents composed on a canvas, with themes;
+scripts bind to them by name.
+
+Done:
+- **Documents:** `ui/<name>.ui.ron` is plain RON: the screen's options
+  (HUD, modal, pause, escape), its design size, theme overrides and a tree
+  of nodes. The ten node kinds are column, row, stack, label, button,
+  toggle, slider, progress, image and space. Oberon writes only what
+  differs from the defaults. The screen's name is its path under `ui/`.
+- **The UI editor:** `.ui.ron` tabs open on a canvas that draws the screen
+  as the game does, on a choice of preview sizes. Next to it are a widget
+  tree and a properties panel for nodes, the screen and its theme.
+  - Click to select, drag top-level nodes, and use Add, Duplicate, Delete,
+    Up/Down, copy/paste and the arrow keys.
+  - The tab's text is the source of truth. Every change is one undo step,
+    and saving, reloading and *Edit as Text* work as they do for scripts.
+  - **File → New UI Screen…** makes one from a HUD or menu template. The
+    Files panel has an icon and an **Edit UI Screen** item for documents.
+- **Scripts:** `ctx.ui.screen(name)` returns a `UiScreen` with `set`,
+  `get`, `clicked`, `changed`, `set_visible`, `set_enabled`, `widgets`,
+  `visible` and `document`.
+  - A wrong name raises `KeyError` with "did you mean", and a wrong type
+    raises `TypeError`.
+  - HUD documents draw from the start, and screens draw while shown.
+    `screens.show` takes the document's options.
+  - Documents hot-reload, and a broken one is logged once.
+  - Everything works in Play, `run_scene` and exports.
+- **One layout:** `oberon::uidoc::layout` copies the script API's layout
+  rules. A shared fixture (`crates/oberon/tests/fixtures/ui_layout.json`)
+  is checked by both the Rust and the Python tests, so the canvas puts
+  every widget where the game does.
+- **Oberon:** completions for `ctx.ui.screen(...)` members and `ui.space`.
+- **Demo:** `examples/oberon/shape_signal` is a game whose title, HUD and
+  results screens are all documents. Its script only binds by name.
+
+### D5. Material assets and editor ✅ M
+`.mat.ron` material files shared across entities, with texture slots for
+primitives too; an Oberon material editor with a live preview; drag a
+material onto an object.
+
+Done:
+- **Material files:** `materials/<name>.mat.ron` holds a colour, roughness,
+  metalness, glow (emission, strength, glow light and shadows), four
+  texture slots (base colour, normal, glTF roughness-metal, emission),
+  normal strength, tiling, offset and *pixelated*. Map paths are relative
+  to the material file. A Mesh Renderer names one with `material:` in the
+  scene; it overrides the colour and surface (and a model's own
+  materials). Every entity naming a file shares one GPU material, so they
+  batch. A missing or broken file logs once and falls back to the
+  object's own colour.
+- **Renderer:** materials gained UV tiling and offset, applied to every
+  map and the normal perturbation.
+- **Hot reload:** `automata_assets::refresh` notices material and texture
+  changes on disk; editors preview unsaved edits everywhere with
+  `set_material_preview`.
+- **The material editor:** `.mat.ron` tabs open on a live GPU preview
+  (sphere, cube or plane, in a studio world of its own) beside sliders,
+  colour fields, texture slots with thumbnails, **Choose…** and drag-in
+  images, and tiling. The tab's text is the source of truth (undo, save,
+  *Edit as Text*); a slider drag is one undo step and shows on every
+  object using the material before it's saved.
+- **Using materials:** drag a material from the Files panel (or the
+  editor's preview) onto an object in the scene view, a Hierarchy row or
+  the Inspector; the Inspector's **Material** row chooses, opens or
+  clears it; **File → New Material…**; Files-panel icons and **Edit
+  Material** / **Use on** items. Moving a material retargets the scene.
+- **Python and export:** `MeshRenderer.cube/sphere/quad/model(material=…)`
+  (validated eagerly) and a read-only `.material`. Export validation
+  errors on missing, broken or outside-project materials and warns about
+  missing textures.
+- **Demo:** `examples/oberon/workshop`, a room dressed only with shared
+  materials whose textures `textures.py` draws with the standard library.
+- Not yet: a colour picker for material colours (hex fields today) and
+  editing materials at runtime from scripts.
+
+### D6. Editor workflow ✅ M
+Multi-select editing (change a field on 20 entities at once); prefab
+variants and per-instance overrides; a profiler panel (scripts / physics /
+render per frame); snapping and duplicate-along-a-line.
+
+Done:
+- **Linked prefabs:** an entity's `prefab: (path, index, overrides)` links
+  it to entity `index` of a `.prefab` file. Loading fills every field the
+  instance doesn't override from the prefab (`automata_core::prefab`), so
+  editing the file updates every instance; name, position, rotation and the
+  link are always the instance's own. Overrides are computed on save as
+  dotted field paths (`mesh_visual.color`, `attributes.hp`).
+- **Variants:** a `.prefab` whose entities are themselves linked to another
+  prefab stores only their differences (nesting up to 16 deep). Oberon's
+  **Create Variant…** writes one from a modified instance.
+- **Oberon's Prefab block:** the Inspector shows the file, the instance
+  count, **Apply** (writes the overrides into the prefab, updating every
+  other instance), **Revert** (all, or one override at a time), **Unlink**
+  and **Select All**; Hierarchy rows of instances are blue. Instantiating
+  from the Files panel links, and prefab files are watched (500 ms) and
+  re-applied on change.
+- **Multi-select:** Ctrl/Shift+click in the Hierarchy (Shift: a run) and
+  the scene view, Shift+drag box select, Ctrl+A. Every Inspector edit,
+  attribute, component add/remove/paste and the gizmo (about the lead,
+  keeping the layout) applies to the whole selection as one undo step;
+  duplicate, copy/paste, delete and nudge too.
+- **Snapping:** a Snap toggle with cycling steps for move (0.5 m), rotate
+  (15°) and scale (0.1); Ctrl flips it for one drag; saved in preferences.
+- **Duplicate Along a Line** (Ctrl+Shift+D): copies, a per-copy offset and
+  turn about Y; one undo step; prefab links kept.
+- **Profiler:** a bottom-dock tab graphing 240 frames of scripts (from the
+  script runner's own timing), physics, render and editor UI against the
+  whole frame, with now/avg/max, hover read-outs, Pause and Clear.
+- **Python:** `Prefab.load`, `Prefab.path`, linked `instantiate`,
+  `Entity.prefab` (set or unlink), and `Scene.save` writing overrides.
+  `Entity.add` now replaces an existing component of the same kind.
+- **Demo:** `examples/oberon/lamplight_lane`, a night street of linked
+  lamps (a warm variant), fence panels in a line and crates with an
+  overridden Heavy Crate, built by `build_level.py`.
+- Not yet: nested prefabs inside prefabs (other than variants), overriding
+  single vector components (a position-like field overrides as a whole),
+  and the profiler for exported games.
+
+### D7. Localization ✅ S
+- String tables (CSV) with `ctx.tr("menu.play")`, a language setting, and
+  fonts falling back per language.
+
+Done:
+- **String tables:** every `lang/*.csv` (UTF-8, BOM allowed) next to the
+  scene: a `key` column and one column per language code, `@name` and
+  `@font` rows, `#` comments, quoted cells and `\n`. Parsed the same way in
+  Rust (`automata_core::StringTable`) and Python. Duplicates, odd rows and
+  extra cells are warned about with file and line.
+- **`ctx.tr(key, language=None, **values)`:** fills `{name}` placeholders;
+  an empty cell gives the first language's text, a missing key gives the
+  key with a did-you-mean, and an unfilled placeholder stays. Each warns
+  once. Also `languages`, `language`, `name()`, `font()`, `has()`/`in`
+  and `keys(prefix)`. Edited tables hot-reload in Play.
+- **`ctx.settings.language`:** starts as the computer's language when a
+  table has it (`es-MX` → `es`, `pt` → `pt-BR`), else the first column.
+  It's saved in `settings.json`; an unknown code raises `ValueError` with
+  the list.
+- **UI documents translate themselves:** label, button, toggle and
+  progress text and panel titles that are table keys show in the player's
+  language. Full-width characters count double in layout estimates (Rust
+  and Python agree).
+- **Fonts per language:** HUD text carries the language's `@font` as a
+  fallback. The renderer tries the text's font, then the fallback, then
+  the built-in font, and reports characters no font has once. This works
+  in Oberon's Play, standalone `run_scene` and exports.
+- **Oberon:** `ctx.tr("` completes keys with their first-language text.
+  The UI editor's **Text** menu previews a document in any language or as
+  keys, and loads the tables' `@font`s into the editor canvas.
+- **Export** warns about table problems and untranslated keys. It errors
+  on a missing or unshippable `@font`, or on excluded tables.
+- **Right-to-left text** (`automata_renderer::bidi`), in every text layout:
+  - Arabic-script joining through presentation forms, including Persian
+    letters, ZWNJ/ZWJ and the لا ligature. Forms the fonts lack stay as the
+    plain letter.
+  - A simplified bidi algorithm: the line takes the direction of its first
+    strong letter, numbers and Latin runs keep their order, neutrals
+    resolve, brackets mirror.
+  - Right-to-left lines align right inside a left-aligned block. A space
+    takes the width of its neighbour's font.
+  - The UI editor's canvas and Text menu use it too.
+- **Demo:** Shape Signal in English, Spanish, Japanese and Persian, with a
+  Language button on the title, a 113 KB Rounded M+ subset for the kana
+  and a 54 KB Vazirmatn subset for Persian.
+- Not yet: plural rules (`{count}` picks a form), mark positioning from
+  GPOS, full shaping for Indic scripts and Thai, mirrored UI layouts, and
+  a table editor inside Oberon. Text in Oberon's own panels (entity and
+  file names, the code editor) isn't joined.
+
+---
+
+## Track E: Platforms
+
+### E1. Android export ✅ L
+The phases in [`NEXT_PLANS.md` #1](NEXT_PLANS.md#1-android-export--in-progress)
+(CPython on device, a template like Windows/Linux, emulator CI). The
+template is built in CI with python-for-android's **SDL3 launcher**. The
+engine gets an internal SDL3 driver for Android next to winit on desktop,
+and its own input types. The game-facing API stays the same everywhere.
+- ✅ **E1a, the engine's own input types:** `automata-input` has no winit
+  dependency; keys (105, named in one table shared by both script runners,
+  `at.Key` and Oberon's Play), mouse buttons, modifiers and touch phases
+  are its own, fed by an `InputEvent` from each driver. Losing focus lets
+  go of held keys. New keys: numpad, punctuation, navigation, locks and
+  Android's `"back_button"`.
+- ✅ **`ctx.input.touches`:** every finger, with a stable number, start
+  point, `moved` and `just_started`/`just_ended`; the first finger is
+  still the left mouse button. On desktop and in Oberon the left mouse
+  button is finger 0. `at.Touch` in the engine API.
+- ✅ **The SDL3 driver and a p4a build that renders on an emulator:**
+  windowed games run through a platform `Host` that any driver can
+  drive (winit on desktop; `android/engine`'s SDL3 driver installs itself
+  when `automata` is imported on Android). The renderer can drop and
+  recreate its surface (background/foreground) and keep every GPU
+  resource. The `Android` CI workflow builds the spike APK with
+  python-for-android, then runs it on an API 34 emulator. The test checks
+  that it draws, takes a tap, survives Home and coming back on a new
+  surface, and quits on Back (see `android/README.md`).
+- ✅ **Coin Run on the emulator:** `automata-cli stage` writes the
+  folder an export ships, and `android/build_apk.sh` packages it with an
+  entry point that runs it through `automata.player`, like the desktop
+  launcher. In CI, Coin Run loads, its scripts take keys, and its settings
+  survive Android killing the app (saves go to the app's private storage).
+- ✅ **Touch controls:** `ctx.input.touch_controls` puts thumbsticks
+  (which appear under the thumb and give `axis()` analog values), up to six
+  buttons, and a `look` drag area (`mouse_delta`) on the screen. They hold
+  key names or actions; an action also holds its keys. They show on touch
+  screens, or `Always` (the mouse works them). They're set up in
+  `build.ron` (Build Settings → Touch controls; `game.json` hands them to
+  the player and Oberon's Play) or from a script. There are built-in HUD
+  images `builtin:circle`/`builtin:ring`. Coin Run has a move stick, a turn
+  stick and Jump. On the emulator its stick walks into a coin and Jump
+  lights up.
+- ✅ **`--target android` with debug signing:** CI publishes a template
+  APK (Python, the engine and the player, for `arm64-v8a` and `x86_64`)
+  to the `export-templates` release. `automata-cli build --target android`
+  and Oberon's **Build for Android** add the game to a copy, give it the
+  game's app ID (`android.package` in `build.ron`), name and version (in
+  the compiled manifest and resource table), and align and sign it (APK
+  Signature Scheme v2) with a debug key made once per machine. This needs
+  no Android SDK, NDK or Java. The player unpacks the game on first start,
+  and again only when an update changes it. In CI, Coin Run built this
+  way installs and plays on the emulator.
+- ✅ **Size, startup time and release signing:** python-for-android's
+  `python3` and `sdl3` recipes are overridden in `android/recipes/`. The
+  stdlib zip loses the REPL, debugger, pydoc, doctest, unittest,
+  profilers, wsgiref/xmlrpc/dbm, the mail clients and the pure-Python
+  fallbacks. The bundle loses the CJK codecs, CPython's test modules and
+  SDL3_image/mixer/ttf. The engine is built with fat LTO. Each processor
+  type now adds 16.5 MB (arm64-v8a) / 17.3 MB (x86_64) instead of
+  20.5 / 21.5 MB, and the template went from 42.1 to 33.8 MB. CI fails above
+  18 MB per processor type (`android/ci/apk_size.py`), and the spike checks
+  on the emulator that 79 common stdlib modules import. First start (with
+  unpacking) on the CI emulator went from 5.3 s to 3.8 s until the scene
+  runs, and later starts take 3.6 s, mostly SwiftShader's GPU setup
+  (`android: startup`, from logcat milestones). `automata-cli keygen` makes
+  a release key (RSA 2048 plus a self-signed certificate, PEM). Builds sign
+  with `android.key` / `--key` / `$AUTOMATA_ANDROID_RELEASE_KEY`, which
+  also take existing PKCS #8 / PKCS #1 keys with their own certificate, so
+  apps published with them keep updating. `android.abis` / `--abis` ship
+  only some processors. Oberon has the **Android release key** (browse,
+  **New**) and **Android processors** fields. CI verifies release-signed
+  builds with `apksigner`. An Android App Bundle (`.aab`) for Google Play
+  is out of scope.
+
+### E2. macOS export ✅ M
+- A macOS template build in CI (Apple Silicon and Intel) and an `.app`
+  bundle from the Export dialog.
+- Signing and notarisation are documented.
+
+Done: `--target macos` (**Build ▸ Build for macOS**, the macOS platform
+toggle) writes `build/macos/<name>.app` from any host: one bundle for
+Apple Silicon and Intel, macOS 11+. CI builds a template on an arm64 and
+an Intel runner and merges them. The launcher is made universal with
+`lipo`, and each processor's Python sits next to the other as
+`Contents/MacOS/python3-<arch>` plus `Contents/Resources/runtime-<arch>/`.
+The interpreter's `libpython` link points into the bundle, so the
+interpreter running inside the app makes macOS treat the game as the app
+(name, icon, Dock). Started from Finder, the launcher `exec`s into Python
+and logs to `~/Library/Logs/<name>/`. `build.ron`'s `macos` section and
+Oberon's Build page set the bundle ID and an icon (a PNG is wrapped as
+`.icns`). The `Info.plist` gets the name, version and minimum OS. A
+universal zip keeps the executable flags. `scripts/sign_macos.sh` signs
+every native file innermost first, then the app, using the hardened runtime
+and `macos.entitlements`. The export page documents notarisation
+(`notarytool`, `stapler`) and Gatekeeper's **Open Anyway** for unsigned
+builds. CI runs the universal *Coin Run* natively, under Rosetta when the
+runner has it, unzipped, and ad-hoc signed.
+
+### E3. Web export ✅ L
+[`NEXT_PLANS.md` #7](NEXT_PLANS.md#7-web-export--decided-phases-15-done):
+Pyodide 314 (CPython 3.14), with the engine as a Pyodide extension module
+drawing through WebGL2 (wgpu's GLES backend under emscripten). Pyodide is
+bundled in every export, and it targets desktop and phone browsers.
+- ✅ Spike: a stepped run (the browser owns the loop), the engine wheel for
+  Pyodide, and a spinning cube in headless Chromium in CI, with size and
+  startup time: 17.1 MB download (10.0 MB gzipped), first frame 2.7 s
+  after navigation on SwiftShader. See [`web/README.md`](web/README.md).
+- ✅ Input and lifecycle: keys, mouse and pointer lock, touch, gamepads,
+  resizing, hidden tabs, full screen; audio through an AudioWorklet (kira
+  mixes each frame into a `stream` backend the page plays). CI drives the
+  test game with fake keys, mouse, touches and a fake gamepad.
+- ✅ Real games: the player runs an exported game from `game.zip`
+  (`automata-cli stage --zip`, reproducible), with saves and settings in
+  IndexedDB (IDBFS, synced after each write) and touch controls on touch
+  screens. CI plays Coin Run from the repo's `game.zip`: keys, a coin, the
+  setting and the best run surviving a reload, touch controls. `game.apk`
+  beside it is the same game for Android, committed by the Android
+  workflow after its emulator test. Playing a real level found two WebGL2
+  traps of wgpu's GL backend, now fixed and checked: the sky read a mesh's
+  uniform slot (and wasn't drawn), and one-layer shadow arrays were taken
+  for 2D textures.
+- ✅ Template and build: the `web` export template (Pyodide, the engine
+  wheel, the page, the audio worklet) is published to `export-templates`;
+  `automata-cli build --target web` writes `build/web/<name>/` and an
+  itch.io-ready `<name>-<version>-web.zip` (`index.html` at the top);
+  `automata-cli serve` plays a build locally; Oberon has **Build ▸ Build
+  for Web** and **Play in Browser** (builds, serves from the editor, opens
+  the browser). CI builds Coin Run from the template, checks its
+  `game.zip` is the repo's byte for byte, serves it with `automata-cli
+  serve` and plays it.
+- ✅ Size and startup budget: the template's standard library is trimmed
+  (`web/ci/stdlib-drop.txt`) and the modules a game imports at start are
+  precompiled, as is the engine wheel's Python; the package index is empty
+  and the page preloads Pyodide and fetches the game in parallel. Start-up
+  halved (first frame 3.2 s → 1.6 s in the smoke test, Coin Run 4.4 s →
+  2.2–3.7 s after a reload under SwiftShader) at the same 17.5 MB (10.4 MB gzipped). CI fails
+  over 18.5 MB, 11 MB gzipped, or a first frame later than 3 s, and posts
+  `web: size and start-up`.
+
+### E4. Steam integration ✅ M
+`ctx.steam` (and `automata.steam` for code-first games): a ctypes binding
+to the flat API of Valve's `steam_api` library, so nothing is compiled
+against the SDK. Every call is safe without Steam (Play, the web, Android,
+Steam not running): achievements and stats then last the session and are
+logged. See [Steam](docs/wiki/oberon/steam.md).
+- ✅ Achievements and stats: `unlock`, `progress`, `stat`, `set_stat`,
+  `add_stat`, `reset`. An unlock is stored at the end of its frame, while
+  stats go at most once a minute and at exit. Older libraries that need
+  `RequestCurrentStats` wait for `UserStatsReceived`. Manual callback
+  dispatch is used, so no C++ is needed.
+- ✅ The overlay: `open_overlay`, `open_store`, `open_url`, plus
+  `overlay_open` and `on_overlay` from `GameOverlayActivated`. Exported
+  games connect before their window opens.
+- ✅ Export: **Steam app ID** and **Steamworks SDK** in Build Settings
+  (`build.ron`'s `steam`). Windows, Linux and macOS builds ship the SDK's
+  `steam_api` library and put the app ID in `game.json`. `restart` hands
+  a copy started outside Steam to Steam.
+- ✅ Cloud saves: Steam Auto-Cloud on `saves/` in the user-data folder,
+  with root overrides so saves follow players across Windows, macOS and
+  the Deck. Settings stay on each computer. `ctx.steam.cloud` says whether
+  syncing is on.
+- ✅ Steam Deck and controller glyphs: `ctx.input.prompt(action)` gives the
+  key's label on the device used last (`device`), in the connected pad's
+  family (`controller`: Xbox, PlayStation, Switch, Steam Deck, generic,
+  from gilrs or browser `Gamepad.id` names). The built-in font gained
+  □ ☰ ⧉ for them.
+- Tests: a fake `steam_api` (C, built by the test) checks init, restart,
+  batching, the overlay callback, an older SDK, failure and offline use,
+  and exported games. The exporter's tests copy the library from a fake
+  SDK.
+
+---
+
+## Track F: Later, big and optional
+
+### F1. Multiplayer ⬜ L
+- Client–server with entity replication, prediction for the local
+  player, and lobbies over UDP.
+- This is a major design of its own and gets a planning round first.
+
+### F2. Video playback ⬜ M
+- Cutscenes and intro videos (a VP9/AV1 decoder) shown full screen or on
+  a mesh.
+
+### F3. Custom shaders ✅ M
+User WGSL for materials and post effects, with hot reload, behind a
+safe interface (fixed inputs, validated on load). You write one function.
+The engine owns the bindings, entry points, lighting and the web
+translation. See [Custom shaders](docs/wiki/oberon/shaders.md).
+- ✅ Material shaders: `fn material(in: MaterialInput) -> MaterialOutput`
+  runs after the standard material is read and before lighting. It gets
+  position, normal, view, uv, the standard surface, time and 8 numbers
+  (`p0`, `p1`), and may `discard`. A `.mat.ron` names it with `shader:`
+  and `shader_params:`.
+- ✅ Post shaders: `fn post(in: PostInput) -> vec3<f32>` runs over the
+  finished frame, before the HUD. It can read the image with `image(uv)`
+  and `image_pixel(px)`. A `PostShader` component carries it.
+- ✅ Safety: no bindings, entry points, attributes or globals, a 64 KB
+  cap, then naga's validator and the WebGL2 translation. A broken shader
+  keeps the standard look and reports `file:line:col: message` to the log
+  and Oberon's Console. `shader reloaded` is reported when it's fixed.
+- ✅ Hot reload: shader files are part of the material stamps, and post
+  shaders are re-read when changed.
+- ✅ Oberon:
+  - WGSL highlighting and live diagnostics in the code editor.
+  - **New Material/Post Shader…** from templates.
+  - The material editor's Shader section (choose, edit, p0–p7), which
+    shows errors.
+  - The Post Shader inspector, and dropping a `.wgsl` onto an entity.
+- ✅ Python: `at.PostShader`, and `at.check_shader(path)`, which checks a
+  shader without a GPU.
+- ✅ `automata check` and exports check material and post shaders.
+- ✅ Example: the Shader Lab (`examples/oberon/shader_lab`), with
+  hologram, dissolve and lava materials and CRT, ink and underwater post
+  effects.
+
+Consoles aren't planned: they need platform-holder dev kits and NDAs.
+
+---
+
+## Run order
+
+The order "proceed" follows. It finishes the graphics request first (as
+agreed: sky → materials → shadows → water → styles), then the two "later"
+projects the user asked for (spring bones, grass), then the rest by value
+per effort. Reorder any time by telling me.
+
+| # | Phase | Size | Status |
+|---|---|---|---|
+| 1 | A0 Sky, sun, flare, endless water | – | ✅ |
+| 2 | A0b Materials | – | ✅ |
+| 3 | A0c Glowing objects light surroundings | – | ✅ |
+| 4 | A4 Point light shadows (glowing objects) | M | ✅ |
+| 5 | A1 Crisp shadows on High/Ultra | M | ✅ |
+| 6 | A2 Contact-hardening shadows + AO | M | ✅ |
+| 7 | A3 Point lights and spotlights (+ spot shadows) | S | ✅ |
+| 8 | A5 Water ripples and wakes | M | ✅ |
+| 9 | A6 Particles | L | ✅ |
+| 10 | A7 Splashes, underwater, caustics | M | ✅ |
+| 11 | A8 Post chain + colour grading | M | ✅ |
+| 12 | A9 Height fog, god rays, DoF, dust | M | ✅ |
+| 13 | A10 Style presets | L | ✅ |
+| 14 | B1 Animation playback | L | ✅ |
+| 15 | B2 Spring bones | M | ✅ |
+| 16 | B2b Clips from other files | S | ✅ |
+| 17 | B3 Animation events, root motion | M | ✅ |
+| 18 | B3b Key store for scripts | M | ✅ |
+| 19 | A11 Culling, instancing, LOD | M | ✅ |
+| 20 | D0 The oberon command, new projects, bundled Python | M | ✅ |
+| 21 | A12 Grass and foliage | L | ✅ |
+| 22 | C2 Tweens and timers | S | ✅ |
+| 23 | C3 Save games and settings | S | ✅ |
+| 24 | C1 Physics joints | M | ✅ |
+| 25 | D1 UI widgets | M | ✅ |
+| 26 | D2 Custom fonts | S | ✅ |
+| 27 | D3 UI layout, focus, screens | M | ✅ |
+| 28 | B4 Animation state machine | L | ✅ |
+| 29 | B5 Attachments and IK | M | ✅ |
+| 30 | C4 Navigation | L | ✅ |
+| 31 | C5 AI helpers | S | ✅ |
+| 32 | D5 Material assets and editor | M | ✅ |
+| 33 | A13 Terrain | L | ✅ |
+| 34 | B6 Ragdolls | M | ✅ |
+| 35 | C6 2D toolkit | L | ✅ |
+| 36 | D6 Editor workflow | M | ✅ |
+| 37 | D4 UI editor | L | ✅ |
+| 38 | D7 Localization | S | ✅ |
+| 39 | E1 Android export | L | ✅ |
+| 40 | E2 macOS export | M | ✅ |
+| 41 | E3 Web export | L | ✅ |
+| 42 | E4 Steam integration | M | ✅ |
+| 43 | F3 Custom shaders | M | ✅ |
+| 44 | F2 Video playback | M | ⬜ |
+| 45 | F1 Multiplayer | L | ⬜ |
+
+Large phases may span several "proceed"s. Each one ends with a pushed,
+working step and a report on what's left in that phase.

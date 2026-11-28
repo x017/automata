@@ -1,0 +1,40 @@
+# Shape Signal's text in every language. One row per key, one column per
+# language; the game reads it with ctx.tr("title.play"), and UI documents
+# whose text is a key show it in the player's language. An empty cell shows
+# the first language's text. Open it in any spreadsheet app.
+key,en,es,ja,fa
+@name,English,Español,日本語,فارسی
+@font,,,fonts/MPLUSRounded1c-ShapeSignal.ttf,fonts/Vazirmatn-ShapeSignal.ttf
+
+# The title screen
+title.name,SHAPE SIGNAL,SEÑAL,シェイプ・シグナル,سیگنال شکل
+title.tagline,"One shape lifts. Pick it before it drops:
+click its button or press 1, 2 or 3.","Una forma se eleva. Elígela antes de que caiga:
+haz clic en su botón o pulsa 1, 2 o 3.","形がひとつ浮かびます。落ちる前に選ぼう：
+ボタンをクリックするか、1・2・3 を押します。","یک شکل بالا می‌رود. پیش از افتادن انتخابش کن:
+روی دکمه‌اش بزن یا ۱، ۲ یا ۳ را فشار بده."
+title.play,Play,Jugar,プレイ,بازی
+title.volume,Volume,Volumen,音量,صدا
+title.hints,Key hints on the HUD,Ayuda de teclas en el HUD,キーのヒントを表示,راهنمای کلیدها روی صفحه
+title.language,Language: {name},Idioma: {name},言語: {name},زبان: {name}
+title.best,Best {score},Récord {score},ベスト {score},بهترین {score}
+
+# The HUD
+hud.score,SCORE {score},PUNTOS {score},スコア {score},امتیاز {score}
+hud.streak,Streak x{count},Racha x{count},れんぞく x{count},پیاپی x{count}
+hud.time,TIME,TIEMPO,タイム,زمان
+hud.clock,{seconds} s,{seconds} s,{seconds} 秒,{seconds} ثانیه
+hud.lives,{value} / {max} lives,{value} / {max} vidas,ライフ {value} / {max},{value} / {max} جان
+hud.pick_1,1  Cube,1  Cubo,1  キューブ,۱  مکعب
+hud.pick_2,2  Tower,2  Torre,2  タワー,۲  برج
+hud.pick_3,3  Slab,3  Losa,3  スラブ,۳  تخته
+hud.keys,"Pick the shape that lifts: click its button or press 1, 2 or 3","Elige la forma que se eleva: haz clic en su botón o pulsa 1, 2 o 3",浮かんだ形を選ぼう：ボタンをクリックするか、1・2・3 を押す,شکلی را که بالا می‌رود انتخاب کن: روی دکمه‌اش بزن یا ۱، ۲ یا ۳ را فشار بده
+hud.miss,MISS,FALLO,ミス,اشتباه
+hud.slow,TOO SLOW,TARDE,おそい,دیر شد
+
+# The results screen
+results.time,TIME!,¡TIEMPO!,タイムアップ！,وقت تمام شد!
+results.out,OUT!,¡FUERA!,アウト！,باختی!
+results.detail,"{right} right, {missed} missed","{right} aciertos, {missed} fallos",せいかい {right}・ミス {missed},{right} درست، {missed} اشتباه
+results.again,Play again,Otra vez,もう一度,دوباره
+results.title,Title,Inicio,タイトル,صفحه اصلی

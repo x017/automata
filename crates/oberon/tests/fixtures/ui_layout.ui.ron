@@ -1,0 +1,56 @@
+// Layout cross-check: Oberon's UI editor (uidoc::layout) and the script
+// API (ctx.ui) must put every widget here at the same spot. Expected
+// positions are in ui_layout.json; both test suites check against it.
+(
+    design_size: (1280.0, 720.0),
+    hud: true,
+    theme: (text_size: Some(18.0)),
+    nodes: [
+        (
+            kind: Column,
+            name: "menu",
+            anchor: "center",
+            width: Some(400.0),
+            padding: 24.0,
+            gap: 12.0,
+            panel: true,
+            title: "Options",
+            children: [
+                (kind: Label, name: "heading", text: "Heading", size: Some(30.0), align: "center"),
+                (kind: Button, name: "play", text: "Play", height: Some(50.0)),
+                (kind: Row, columns: 3, gap: 8.0, height: Some(40.0), children: [
+                    (kind: Button, name: "low", text: "Low"),
+                    (kind: Button, name: "mid", text: "Mid"),
+                    (kind: Button, name: "high", text: "High"),
+                ]),
+                (kind: Space, height: Some(6.0)),
+                (kind: Slider, name: "volume", value: 0.4),
+                (kind: Toggle, name: "music", text: "Music", value: 1.0),
+                (kind: Row, gap: 6.0, children: [
+                    (kind: Label, name: "left", text: "Left"),
+                    (kind: Button, name: "small", text: "Go", width: Some(60.0), height: Some(30.0)),
+                    (kind: Image, width: Some(30.0), height: Some(30.0)),
+                    (kind: Label, name: "right", text: "Right", align: "right"),
+                ]),
+                (kind: Stack, height: Some(40.0), children: [
+                    (kind: Button, name: "under", text: "Under"),
+                    (kind: Label, name: "over", text: "Over", align: "center"),
+                ]),
+                (kind: Column, padding: 6.0, gap: 4.0, panel: true, children: [
+                    (kind: Label, name: "nested", text: "Nested\nlines", size: Some(14.0)),
+                    (kind: Button, name: "deep", text: "Deep", width: Some(100.0)),
+                ]),
+            ],
+        ),
+        (kind: Button, name: "corner", text: "Corner", anchor: "bottom_right", x: 20.0, y: 10.0,
+         width: Some(140.0)),
+        (kind: Label, name: "score", text: "Score 120", anchor: "top", y: 16.0, size: Some(28.0),
+         align: "center"),
+        (kind: Toggle, name: "free", text: "Free", x: 30.0, y: 40.0),
+        (kind: Row, anchor: "bottom_left", x: 16.0, y: 16.0, gap: 4.0, children: [
+            (kind: Slider, name: "row_slider", width: Some(150.0)),
+            (kind: Button, name: "row_button", text: "OK", width: Some(70.0)),
+        ]),
+        (kind: Label, name: "hidden", text: "Hidden", visible: false),
+    ],
+)

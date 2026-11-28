@@ -1,0 +1,12 @@
+{
+  "frames": 2,
+  "entities": {
+    "Probe": {
+      "attributes": {
+        "axis": 0.0, "shift": false, "space_down": false, "click": false, "dx": 0.0,
+        "locked_now": true, "unlocked_now": true, "delta_positive": true,
+        "elapsed_ok": true, "hud_center_ok": true, "done": true
+      }
+    }
+  }
+}

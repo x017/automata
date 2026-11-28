@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scripting in Oberon · AUTOMATA docs</title>
+<meta name="description" content="You write gameplay as behaviour scripts. A behaviour script is a Python file with up to three functions, and you attach it to an entity. Oberon calls those functions while the scene plays.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../../dither.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../tutorials/fps.html">A first-person shooter</a></li><li><a href="../tutorials/platformer.html">A 2D platformer</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="index.html">Introduction</a></li><li><a href="interface.html">The interface</a></li><li><a href="command-line.html">The oberon command</a></li><li><a href="scripting.html" aria-current="page">Scripting</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="graphics.html">Graphics</a></li><li><a href="code-editor.html">The code editor</a></li><li><a href="ui-editor.html">The UI editor</a></li><li><a href="materials.html">Materials</a></li><li><a href="shaders.html">Custom shaders</a></li><li><a href="models.html">Models</a></li><li><a href="animation-graphs.html">Animation graphs</a></li><li><a href="attachments-and-ik.html">Attachments &amp; IK</a></li><li><a href="ragdolls.html">Ragdolls</a></li><li><a href="navigation.html">Navigation</a></li><li><a href="ai.html">AI</a></li><li><a href="2d.html">2D games</a></li><li><a href="terrain.html">Terrain</a></li><li><a href="foliage.html">Grass &amp; foliage</a></li><li><a href="audio.html">Audio</a></li><li><a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="editor-workflow.html">Editor workflow</a></li><li><a href="exporting.html">Exporting your game</a></li><li><a href="steam.html">Steam</a></li><li><a href="shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/grass-and-foliage.html">Grass &amp; foliage</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/touch-controls.html">Touch controls</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li><li><a href="../guides/performance.html">Performance</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Scripting in Oberon</h1>
+<p>You write gameplay as <strong>behaviour scripts</strong>. A behaviour script is a Python
+file with up to three functions, and you attach it to an entity. Oberon
+calls those functions while the scene plays.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># scripts/spinner.py</span>
+SPEED = <span class="tok-n">1.5</span>  <span class="tok-c"># radians per second</span>
+
+
+<span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;turns&quot;</span>] = <span class="tok-n">0</span>
+    <span class="tok-b">print</span>(<span class="tok-s">f&quot;{entity.name} is spinning&quot;</span>)
+
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    x, y, z = entity.transform.rotation_euler
+    entity.transform.rotation_euler = (x, y + SPEED * ctx.time.delta, z)
+
+
+<span class="tok-k">def</span> <span class="tok-f">stop</span>(entity, ctx):
+    <span class="tok-b">print</span>(<span class="tok-s">&quot;stopped&quot;</span>)</code></pre></div>
+<p>All three functions are optional.</p>
+<ul><li><code>start(entity, ctx)</code> runs once, on the entity's first Play frame.</li><li><code>update(entity, ctx)</code> runs every frame.</li><li><code>stop(entity, ctx)</code> runs when you press Stop.</li></ul>
+<h2 id="types-and-completion">Types and completion<a class="anchor" href="#types-and-completion" aria-label="Link to this section">#</a></h2>
+<p>Add type hints, and your editor knows the whole API. Typing <code>ctx.</code> lists
+everything with its documentation, and a misspelt <code>entity.animaton</code> is
+underlined before you press Play:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">from</span> __future__ <span class="tok-k">import</span> annotations
+
+<span class="tok-k">from</span> typing <span class="tok-k">import</span> TYPE_CHECKING
+
+<span class="tok-k">if</span> TYPE_CHECKING:  <span class="tok-c"># types for your editor; nothing is imported when it runs</span>
+    <span class="tok-k">from</span> automata.script_api <span class="tok-k">import</span> Context, Entity
+
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity: Entity, ctx: Context) -&gt; <span class="tok-b">None</span>:
+    entity.character_velocity = (ctx.input.axis(<span class="tok-s">&quot;a&quot;</span>, <span class="tok-s">&quot;d&quot;</span>) * <span class="tok-n">5.0</span>, <span class="tok-n">0.0</span>, <span class="tok-n">0.0</span>)</code></pre></div>
+<p>New scripts from Oberon, and projects from
+<a href="command-line.html"><code>oberon new</code></a>, start like this. The types come from
+<code>automata.script_api</code>, which ships with the engine. Projects made by
+<code>oberon new</code> have it in <code>.venv</code>, together with the basedpyright language
+server, so VS Code, PyCharm and Oberon's <a href="code-editor.html">code editor</a>
+complete and check scripts with no setup.</p>
+<p>Members that can be missing are typed <code>Optional</code>. For example,
+<code>entity.animation</code> is <code>None</code> without an Animator:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">if</span> entity.animation <span class="tok-k">is</span> <span class="tok-k">not</span> <span class="tok-b">None</span>:
+    entity.animation.play(<span class="tok-s">&quot;Run&quot;</span>)</code></pre></div>
+<p><code>pyrightconfig.json</code> in new projects reports unguarded uses as warnings.</p>
+<h2 id="attach-a-script">Attach a script<a class="anchor" href="#attach-a-script" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Inspector → Add Component → Script…</strong>, or right-click an entity →
+<strong>Attach Script…</strong>.</li><li>Pick an existing <code>.py</code> file or type a new name. A new file starts from a
+template: a small character controller with a cheat-sheet docstring.</li><li>The script path is saved <strong>relative to the scene file</strong>. You can move the
+project folder and the link still works.</li></ul>
+<p>Several entities can share one script. Each entity gets its own <code>entity</code>
+handle and its own <code>entity.state</code>.</p>
+<h2 id="the-frame-model">The frame model<a class="anchor" href="#the-frame-model" aria-label="Link to this section">#</a></h2>
+<p>Every frame, Oberon sends the scene state to the Python runner. The runner
+calls every script, and the scripts' changes come back and apply before the
+frame renders. Two rules follow from this:</p>
+<ol><li><strong>Reads see the start of the frame</strong>, plus every write made earlier in
+the same frame, by any script. All scripts share one handle per entity.</li><li><strong>Writes reach the simulation after all scripts have run.</strong> Physics,
+rendering and sound see the frame's final values. If two scripts set the
+same value, the last one wins.</li></ol>
+<p>So when four drones each run
+<code>ctx.scene[&quot;Player&quot;].attributes[&quot;health&quot;] -= 5</code> in one frame, the player
+loses 20 health, not 5. A despawn also lands at the end of the frame:
+other scripts can still find the entity until then.</p>
+<p><code>run_scene</code> follows the same rules, because both runners use the same code
+for <code>entity</code> and <code>ctx</code>.</p>
+<h2 id="entity"><code>entity</code><a class="anchor" href="#entity" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Member</th><th>Meaning</th></tr></thead><tbody><tr><td><code>entity.name</code>, <code>entity.id</code></td><td>Name from the hierarchy; stable numeric id</td></tr><tr><td><code>entity.transform.position</code></td><td><code>(x, y, z)</code>. Read it, or assign a tuple</td></tr><tr><td><code>entity.transform.rotation_euler</code></td><td><code>(x, y, z)</code> in <strong>radians</strong> (the Inspector shows degrees)</td></tr><tr><td><code>entity.transform.scale</code></td><td><code>(x, y, z)</code></td></tr><tr><td><code>entity.transform.translate(d)</code> / <code>.rotate(d)</code></td><td>Add a delta to the position / rotation</td></tr><tr><td><code>entity.character_velocity</code></td><td>Set it to move a Character Controller</td></tr><tr><td><code>entity.grounded</code></td><td>True when a character is standing on something</td></tr><tr><td><code>entity.attributes[&quot;key&quot;]</code></td><td>Custom values from the Inspector; read and write like a dict</td></tr><tr><td><code>entity.camera</code></td><td>The entity's camera, or <code>None</code> (<a href="cameras.html">Cameras</a>)</td></tr><tr><td><code>entity.audio.play()</code> / <code>.stop()</code></td><td>Start (or restart) / stop the entity's Audio Source (<a href="audio.html">Audio</a>)</td></tr><tr><td><code>entity.audio.playing</code></td><td>Whether the Audio Source was playing at the start of the frame</td></tr><tr><td><code>entity.animation.play(&quot;Running&quot;, loop=True, fade=0.2)</code></td><td>Blend to a clip of the entity's animated model over <code>fade</code> seconds. An unknown clip raises <code>KeyError</code>. Asking for the clip that's already playing does nothing, so it's safe every frame (<a href="models.html#animation">Animation</a>)</td></tr><tr><td><code>entity.animation.stop(fade=0)</code></td><td>Blend back to the rest pose</td></tr><tr><td><code>entity.animation.clip</code> / <code>.time</code> / <code>.playing</code> / <code>.clips</code></td><td>The current clip, seconds into it (assign to jump), whether it's playing (False once a one-shot ends), and every clip name. <code>.speed</code> and <code>.root_motion</code> can be set too</td></tr><tr><td><code>entity.animation.set(&quot;speed&quot;, 3.0)</code> / <code>.trigger(&quot;jump&quot;)</code></td><td>Steer the entity's <a href="animation-graphs.html">animation graph</a>: set a parameter, or fire a trigger. Unknown names raise <code>KeyError</code>, the wrong kind <code>TypeError</code></td></tr><tr><td><code>entity.animation.state</code> / <code>.layer_state(&quot;Arms&quot;)</code> / <code>.get(&quot;speed&quot;)</code></td><td>Where the graph is (its first layer's state, or another layer's) and a parameter's value. Also <code>.parameters</code>, <code>.layers</code>, <code>.in_transition</code>, <code>.state_time</code>, <code>.graph</code> (assign a path to switch graphs) and <code>.play_state(&quot;Dance&quot;, layer=None, fade=0.2)</code></td></tr><tr><td><code>entity.animation.look_at(target)</code> / <code>.reach(&quot;Palm2.R&quot;, target)</code></td><td>Turn the head towards, or reach a hand for, an entity, a name or a point; <code>None</code> stops. <code>.foot_ik</code> plants the feet on the ground (<a href="attachments-and-ik.html">Attachments &amp; IK</a>)</td></tr><tr><td><code>entity.attach(&quot;Robot&quot;, &quot;Head&quot;, position=…)</code> / <code>.detach()</code> / <code>.attached_to</code></td><td>Follow a bone of another entity (a sword picked up into a hand), or let go (<a href="attachments-and-ik.html#picking-things-up-from-a-script">Attachments &amp; IK</a>)</td></tr><tr><td><code>entity.nav.go(&quot;Player&quot;)</code> / <code>.stop()</code> / <code>.arrived</code> / <code>.path</code></td><td>Send a Nav Agent somewhere (a point, an entity or a name); it finds the way round walls and takes the jumps (<a href="navigation.html#nav-agents">Navigation</a>)</td></tr><tr><td><code>entity.ragdoll.on(push=(0, 50, -300))</code> / <code>.off()</code> / <code>.resting</code> / <code>.hips</code></td><td>Make a character go limp (with a shove), and stand it back up where it fell once it has come to rest (<a href="ragdolls.html">Ragdolls</a>)</td></tr><tr><td><code>ctx.nav.path(a, b)</code> / <code>.nearest(p)</code> / <code>.reachable(a, b)</code></td><td>Ask the navigation mesh for the shortest walkable way (<a href="navigation.html#paths-from-scripts">Navigation</a>)</td></tr><tr><td><code>ctx.ai.can_see(entity, &quot;Player&quot;)</code> / <code>ctx.ai.hear(entity)</code></td><td>Sight (a cone, blocked by walls) and hearing (noises made with <code>ctx.ai.noise</code>) (<a href="ai.html#sight">AI</a>)</td></tr><tr><td><code>ctx.ai.state_machine({...})</code> / <code>ctx.ai.selector(...)</code></td><td>State machines and behaviour trees for enemy brains (<a href="ai.html">AI</a>)</td></tr><tr><td><code>entity.joint</code></td><td>The entity's Joint while it runs, or <code>None</code>: <code>.angle</code>, <code>.value</code>, <code>.force</code>, <code>.attached</code>, <code>.broken</code>; set <code>.motor_target</code>, <code>.motor_speed</code>, <code>.limits</code>, <code>.enabled</code>, <code>.connected</code>. <code>on_joint_broken(entity, ctx)</code> runs when it snaps (<a href="../guides/physics.html#joints">Physics → Joints</a>)</td></tr><tr><td><code>entity.despawn()</code></td><td>Remove the entity until Play stops</td></tr><tr><td><code>entity.state</code></td><td>A dict of your own that persists between frames (not saved)</td></tr></tbody></table></div>
+<h2 id="ctx"><code>ctx</code><a class="anchor" href="#ctx" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Member</th><th>Meaning</th></tr></thead><tbody><tr><td><code>ctx.time.delta</code></td><td>Seconds since the last frame (multiply speeds by it)</td></tr><tr><td><code>ctx.time.elapsed</code>, <code>ctx.time.frame</code></td><td>Seconds since Play started; frame number, starting at 1</td></tr><tr><td><code>ctx.input.pressed(&quot;w&quot;)</code></td><td>Key held down</td></tr><tr><td><code>ctx.input.just_pressed(&quot;space&quot;)</code></td><td>Pressed this frame</td></tr><tr><td><code>ctx.input.just_released(&quot;e&quot;)</code></td><td>Released this frame</td></tr><tr><td><code>ctx.input.axis(&quot;a&quot;, &quot;d&quot;)</code></td><td>−1, 0, or 1 from two keys; in between when a touch stick holds them</td></tr><tr><td><code>ctx.input.pressed(&quot;jump&quot;)</code></td><td>All of the above also take an action bound with <code>ctx.settings.bind</code> (<a href="#player-settings">Settings</a>)</td></tr><tr><td><code>ctx.input.any_just_pressed()</code></td><td>The key that went down this frame (<code>&quot;k&quot;</code>, <code>&quot;mouse_left&quot;</code>), or <code>None</code>. Use it for "press a key" screens</td></tr><tr><td><code>ctx.input.mouse_delta</code></td><td><code>(dx, dy)</code> mouse movement in pixels since last frame; +y is down</td></tr><tr><td><code>ctx.input.mouse_pressed(&quot;left&quot;)</code></td><td>Mouse button held (<code>&quot;left&quot;</code>, <code>&quot;right&quot;</code>, <code>&quot;middle&quot;</code>); also <code>mouse_just_pressed</code> and <code>mouse_just_released</code></td></tr><tr><td><code>ctx.input.lock_mouse(True)</code></td><td>Hide and capture the cursor for mouse look. <code>False</code> frees it, and Stop always frees it</td></tr><tr><td><code>ctx.input.touch_controls</code></td><td>On-screen sticks and buttons that hold keys on phones (<a href="../guides/touch-controls.html">Touch controls</a>)</td></tr><tr><td><code>ctx.input.mouse_locked</code></td><td>Whether the cursor is captured</td></tr><tr><td><code>ctx.input.mouse_position</code></td><td><code>(x, y)</code> cursor position in screen pixels from the top-left (like <code>ctx.hud</code>), or <code>None</code> when the cursor is outside the game view or captured</td></tr><tr><td><code>ctx.input.mouse_over_ui</code></td><td>Whether the cursor is over <a href="#game-ui"><code>ctx.ui</code></a></td></tr><tr><td><code>ctx.input.prompt(&quot;jump&quot;)</code></td><td>The label to show for an action or key on the device in use: <code>&quot;Space&quot;</code>, <code>&quot;A&quot;</code>, <code>&quot;×&quot;</code>… (<a href="#button-prompts">Button prompts</a>)</td></tr><tr><td><code>ctx.input.device</code>, <code>ctx.input.controller</code></td><td>What the player used last (<code>&quot;keyboard&quot;</code>, <code>&quot;gamepad&quot;</code> or <code>&quot;touch&quot;</code>), and the gamepad's family (<code>&quot;xbox&quot;</code>, <code>&quot;playstation&quot;</code>, <code>&quot;switch&quot;</code>, <code>&quot;steam_deck&quot;</code>, <code>&quot;generic&quot;</code> or <code>None</code>)</td></tr><tr><td><code>ctx.input.touches</code></td><td>The fingers on a touch screen, in the order they landed, as <code>Touch</code>es with <code>finger</code> (0 for the first, and it keeps its number while it's down), <code>position</code> and <code>start</code> in screen pixels, <code>moved</code>, <code>just_started</code>, <code>just_ended</code> (its last frame in the list) and <code>primary</code> (the finger that also works as the left mouse button). On a computer the held left mouse button is finger 0, so touch controls can be tried with a mouse. A finger that lands on <code>ctx.ui</code> belongs to the UI and isn't listed</td></tr><tr><td><code>ctx.physics.grounded(entity)</code></td><td>Same as <code>entity.grounded</code></td></tr><tr><td><code>ctx.physics.raycast(origin, direction, max_distance=100, ignore=None)</code></td><td>The first collider along a ray, or <code>None</code>. Returns a <code>Hit</code> with <code>.entity</code>, <code>.point</code>, <code>.normal</code> and <code>.distance</code>. <code>ignore</code> skips one entity, usually the caster. Sensors are skipped</td></tr><tr><td><code>ctx.physics.water_height(x, z)</code></td><td>Height of the water surface at a world point, waves included, or <code>None</code> where there's no water</td></tr><tr><td><code>ctx.water.height(x, z)</code></td><td>The same</td></tr><tr><td><code>ctx.water.splash(position, strength=1.0)</code></td><td>A splash at a point or an entity: rings spread out and foam gathers. <code>strength</code> runs from 0 to 10; 1 is about a crate dropped from a couple of metres. Things that fall in or move through water make their own ripples, and hard landings splash</td></tr><tr><td><code>ctx.particles.burst(&quot;sparks&quot;, position, direction=None, count=None, **fields)</code></td><td>A one-off particle effect at a point or an entity that cleans up after itself: <code>&quot;fire&quot;</code>, <code>&quot;smoke&quot;</code>, <code>&quot;sparks&quot;</code>, <code>&quot;dust&quot;</code>, <code>&quot;splash&quot;</code>, <code>&quot;magic&quot;</code> or <code>&quot;motes&quot;</code>, with any field changed (<code>color=(0.3, 1, 0.4, 1)</code>). <code>direction</code> aims it, for example along a hit's <code>normal</code>. <code>count</code> is how many particles. See <a href="../guides/rendering-and-lights.html#particles">Particles</a></td></tr><tr><td><code>ctx.particles.emit(entity, count)</code></td><td>Extra particles from the entity's own Particle Emitter</td></tr><tr><td><code>ctx.audio.play(&quot;sounds/hit.ogg&quot;, volume=1, pitch=1, position=None)</code></td><td>Play a sound once. With a <code>position</code> (a point or an entity) it fades with distance</td></tr><tr><td><code>ctx.hud.image(&quot;sprites/crosshair.png&quot;, x, y, size=None, color=(1,1,1,1))</code></td><td>Draw an image this frame, centred on <code>(x, y)</code> in screen pixels. <code>&quot;builtin:circle&quot;</code> and <code>&quot;builtin:ring&quot;</code> are a white disc and ring to tint with <code>color</code></td></tr><tr><td><code>ctx.hud.rect(x, y, width, height, color)</code></td><td>Draw a filled rectangle this frame, centred on <code>(x, y)</code></td></tr><tr><td><code>ctx.hud.text(&quot;100%&quot;, x, y, size=24, color=(1,1,1,1), align=&quot;left&quot;, shadow=None, outline=None, font=None)</code></td><td>Draw text this frame, in the built-in font or a <a href="#fonts">font file</a> (see below)</td></tr><tr><td><code>ctx.hud.size</code>, <code>ctx.hud.center</code></td><td>The game view's size in pixels, and its centre</td></tr><tr><td><code>ctx.ui.button(&quot;Play&quot;, x, y)</code> and friends</td><td>Buttons, labels, toggles, sliders, progress bars, panels and images (<a href="#game-ui">Game UI</a>)</td></tr><tr><td><code>ctx.scene[&quot;Name&quot;]</code></td><td>Another entity by name (raises <code>KeyError</code> if missing)</td></tr><tr><td><code>ctx.scene.find(&quot;Name&quot;)</code></td><td>The same, but returns <code>None</code> if missing</td></tr><tr><td><code>ctx.scene.by_id(id)</code></td><td>An entity by id (as in <code>hit.entity.id</code>), or <code>None</code></td></tr><tr><td><code>&quot;Name&quot; in ctx.scene</code></td><td>Whether an entity has that name</td></tr><tr><td><code>for e in ctx.scene:</code></td><td>Every entity</td></tr><tr><td><code>ctx.camera</code></td><td>The camera Play renders through, or <code>None</code></td></tr><tr><td><code>ctx.get(key)</code>, <code>ctx.set(key, value)</code>, <code>ctx.scan(pattern)</code>, <code>ctx.keys(pattern)</code>, <code>ctx.ref(key)</code></td><td>Other entities' state by key, like <code>&quot;Player:attr:health&quot;</code> (<a href="#keys">Keys</a>)</td></tr><tr><td><code>ctx.subscribe(pattern, fn)</code>, <code>ctx.unsubscribe(...)</code>, <code>ctx.publish(channel, data)</code></td><td>Channels: animation events and your own messages (<a href="#channels">Channels</a>)</td></tr><tr><td><code>ctx.tween(entity, &quot;position&quot;, to, seconds, ease=&quot;out_cubic&quot;)</code>, <code>ctx.tween_value(start, end, seconds)</code></td><td>Move a value smoothly over time (<a href="#tweens-and-timers">Tweens and timers</a>)</td></tr><tr><td><code>ctx.after(seconds, fn, *args)</code>, <code>ctx.every(seconds, fn, *args, times=None)</code></td><td>Call a function later, or again and again (<a href="#tweens-and-timers">Tweens and timers</a>)</td></tr><tr><td><code>ctx.ease(&quot;out_back&quot;, t)</code></td><td><code>t</code> (0 to 1) through an easing curve</td></tr><tr><td><code>ctx.save[&quot;coins&quot;] = 12</code></td><td>Values that last between runs, in save slots (<a href="#save-games">Save games</a>)</td></tr><tr><td><code>ctx.settings.volume</code>, <code>.graphics</code>, <code>.bind(&quot;jump&quot;, &quot;space&quot;)</code></td><td>The player's settings, remembered automatically (<a href="#player-settings">Settings</a>)</td></tr><tr><td><code>ctx.tr(&quot;menu.play&quot;)</code>, <code>ctx.tr(&quot;hud.coins&quot;, count=3)</code></td><td>Text in the player's language from <code>lang/*.csv</code> (<a href="#languages">Languages</a>)</td></tr><tr><td><code>ctx.steam.unlock(&quot;ACH_WIN&quot;)</code>, <code>.add_stat(&quot;coins&quot;)</code>, <code>.open_overlay()</code></td><td>Steam achievements, stats, the overlay and Cloud saves. Safe offline and in Play (<a href="steam.html">Steam</a>)</td></tr><tr><td><code>ctx.log(...)</code>, <code>ctx.warn(...)</code></td><td>Write to the Console. <code>print()</code> works too</td></tr></tbody></table></div>
+<p>HUD shapes last one frame, so draw them in <code>update</code> every frame you want
+them shown. Image paths are relative to the scene folder. Each call draws on
+top of the previous one.</p>
+<p><strong>Text</strong> uses the built-in font (Geist Medium) unless you give <code>font=</code>
+(<a href="#fonts">Fonts</a>):</p>
+<ul><li><code>size</code> is the line height in pixels.</li><li><code>align</code> says where <code>x</code> sits on each line: <code>&quot;left&quot;</code> (its left edge),
+<code>&quot;center&quot;</code> or <code>&quot;right&quot;</code>.</li><li><code>y</code> is the vertical centre, and <code>\n</code> starts a new line.</li><li><code>shadow</code> and <code>outline</code> take a colour, or <code>True</code> for a translucent black
+shadow or a solid black outline.</li></ul>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.hud.text(<span class="tok-s">f&quot;{health}%&quot;</span>, <span class="tok-n">290</span>, ctx.hud.size[<span class="tok-n">1</span>] - <span class="tok-n">48</span>, size=<span class="tok-n">26</span>, shadow=<span class="tok-b">True</span>)
+ctx.hud.text(<span class="tok-s">&quot;ARENA CLEAR&quot;</span>, *ctx.hud.center, size=<span class="tok-n">56</span>, align=<span class="tok-s">&quot;center&quot;</span>, outline=<span class="tok-b">True</span>)</code></pre></div>
+<p>Text looks the same in Play and in the exported game, because both draw it
+with the engine's own glyph atlas. Under <code>run_scene</code>,
+<code>ctx.screen.measure_text(text, size, font=None)</code> returns the
+<code>(width, height)</code> text will cover.</p>
+<h3 id="fonts">Fonts<a class="anchor" href="#fonts" aria-label="Link to this section">#</a></h3>
+<p>Put <code>.ttf</code> or <code>.otf</code> files in the project, usually in a <code>fonts/</code> folder,
+and name one with <code>font=</code>. The path is relative to the scene's folder,
+like image paths:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>PIXEL = <span class="tok-s">&quot;fonts/PressStart2P-Regular.ttf&quot;</span>
+ctx.hud.text(<span class="tok-s">f&quot;SCORE {score}&quot;</span>, <span class="tok-n">24</span>, <span class="tok-n">24</span>, size=<span class="tok-n">16</span>, font=PIXEL)
+ctx.ui.label(<span class="tok-s">&quot;PAUSED&quot;</span>, x, y, size=<span class="tok-n">28</span>, align=<span class="tok-s">&quot;center&quot;</span>, font=PIXEL)
+ctx.ui.theme.font = PIXEL   <span class="tok-c"># every widget&#x27;s text from now on</span></code></pre></div>
+<ul><li><strong>Getting fonts in:</strong> drop font files on Oberon's window, or use
+<strong>Import…</strong> in the Assets tab with <strong>Fonts</strong> chosen (also under
+GameObject ▸ Import Font…). Each file is copied into <code>fonts/</code>, and the
+path to write in scripts is put on the clipboard. Double-click a font
+in the Assets tab to copy its path again.</li><li><strong>Missing characters</strong> (accents, symbols a pixel font lacks) are drawn
+with the built-in font, so text never shows empty boxes. For scripts the
+built-in font lacks too (Japanese, Chinese, Korean, Greek, Arabic…),
+give the language a font in its string table and it's used next
+(<a href="#languages">Languages</a>). A character no font has is reported once in
+the Console.</li><li><strong>Mistakes:</strong> <code>font=</code> must be a string ending in <code>.ttf</code> or <code>.otf</code>
+(otherwise <code>TypeError</code> or <code>ValueError</code>). A file that's missing or isn't a
+font is reported once in the Console, and the text is drawn in the
+built-in font. <code>measure_text</code> raises <code>ValueError</code> for it instead.</li><li><strong>Export</strong> looks through the scripts that ship for strings ending in
+<code>.ttf</code> or <code>.otf</code>. It warns if a font is missing, isn't a font, sits
+outside the project, or is excluded from the build. The build still
+goes ahead, because that text falls back to the built-in font. A
+script's font can be named relative to the start scene's folder or any
+folder the script sits in, so a demo kept in a subfolder (with its own
+<code>fonts/</code>) is fine. Paths built at runtime (f-strings) can't be checked. Docstrings and other
+triple-quoted text, comments, test scripts (<code>tests/</code>, <code>test_*.py</code>) and
+installed packages are skipped, so a font named only as an example
+doesn't stop the build.</li><li><strong>Licences:</strong> most free fonts (such as the SIL Open Font License ones on
+Google Fonts) may ship inside games. Keep the licence file next to the
+font.</li></ul>
+<p><img src="../../../assets/ui/assets_fonts.jpg" alt="The Assets tab with Fonts chosen: "Aa" previews of Geist Medium and Press Start 2P" loading="lazy" decoding="async"></p>
+<p><strong>Key names</strong> are lowercase: <code>&quot;a&quot;</code>–<code>&quot;z&quot;</code>, <code>&quot;0&quot;</code>–<code>&quot;9&quot;</code>, <code>&quot;space&quot;</code>,
+<code>&quot;enter&quot;</code>, <code>&quot;escape&quot;</code>, <code>&quot;tab&quot;</code>, <code>&quot;backspace&quot;</code>, the arrows <code>&quot;arrow_left&quot;</code>,
+<code>&quot;arrow_right&quot;</code>, <code>&quot;arrow_up&quot;</code> and <code>&quot;arrow_down&quot;</code> (or just <code>&quot;left&quot;</code>,
+<code>&quot;right&quot;</code>, <code>&quot;up&quot;</code>, <code>&quot;down&quot;</code>), and <code>&quot;shift&quot;</code> / <code>&quot;ctrl&quot;</code> / <code>&quot;alt&quot;</code>. The last
+three match either side of the keyboard; use <code>&quot;shift_left&quot;</code> or
+<code>&quot;shift_right&quot;</code> (and likewise for ctrl, alt and <code>&quot;super_left&quot;</code> /
+<code>&quot;super_right&quot;</code>) to require one side. Also: <code>&quot;f1&quot;</code>–<code>&quot;f12&quot;</code>, <code>&quot;home&quot;</code>,
+<code>&quot;end&quot;</code>, <code>&quot;page_up&quot;</code>, <code>&quot;page_down&quot;</code>, <code>&quot;insert&quot;</code>, <code>&quot;delete&quot;</code>, punctuation by
+name (<code>&quot;minus&quot;</code>, <code>&quot;equal&quot;</code>, <code>&quot;comma&quot;</code>, <code>&quot;period&quot;</code>, <code>&quot;slash&quot;</code>,
+<code>&quot;backslash&quot;</code>, <code>&quot;semicolon&quot;</code>, <code>&quot;quote&quot;</code>, <code>&quot;backquote&quot;</code>, <code>&quot;bracket_left&quot;</code>,
+<code>&quot;bracket_right&quot;</code>), the numpad (<code>&quot;numpad_0&quot;</code>–<code>&quot;numpad_9&quot;</code>, <code>&quot;numpad_add&quot;</code>,
+<code>&quot;numpad_subtract&quot;</code>, <code>&quot;numpad_multiply&quot;</code>, <code>&quot;numpad_divide&quot;</code>,
+<code>&quot;numpad_decimal&quot;</code>, <code>&quot;numpad_enter&quot;</code>), the locks (<code>&quot;caps_lock&quot;</code>,
+<code>&quot;num_lock&quot;</code>, <code>&quot;scroll_lock&quot;</code>), <code>&quot;print_screen&quot;</code>, <code>&quot;pause&quot;</code>,
+<code>&quot;context_menu&quot;</code>, and <code>&quot;back_button&quot;</code>: Android's Back. <code>at.Key</code> has them
+all.</p>
+<p><strong>Gamepad buttons</strong> are key names too, on any connected pad: <code>&quot;pad_south&quot;</code>,
+<code>&quot;pad_east&quot;</code>, <code>&quot;pad_west&quot;</code> and <code>&quot;pad_north&quot;</code> (A, B, X and Y on an Xbox pad),
+<code>&quot;pad_up&quot;</code>, <code>&quot;pad_down&quot;</code>, <code>&quot;pad_left&quot;</code> and <code>&quot;pad_right&quot;</code> (the d-pad, or the
+left stick pushed past halfway), <code>&quot;pad_start&quot;</code>, <code>&quot;pad_select&quot;</code>, the
+shoulders <code>&quot;pad_lb&quot;</code> / <code>&quot;pad_rb&quot;</code>, the triggers <code>&quot;pad_lt&quot;</code> / <code>&quot;pad_rt&quot;</code>,
+and the stick clicks <code>&quot;pad_l3&quot;</code> / <code>&quot;pad_r3&quot;</code>. Bind them like keys
+(<code>ctx.settings.bind(&quot;jump&quot;, &quot;space&quot;, &quot;pad_south&quot;)</code>). They work in Play,
+under <code>run_scene</code> with the engine and in exported games.</p>
+<h2 id="game-ui">Game UI<a class="anchor" href="#game-ui" aria-label="Link to this section">#</a></h2>
+<p><code>ctx.ui</code> draws menus and HUD widgets over the game: buttons, labels,
+toggles, sliders, progress bars, panels and images. Call them in <code>update</code>
+every frame they should show (immediate mode). There are no widget objects
+to create or remove: whatever you call this frame is the UI.</p>
+<p><img src="../../../assets/ui/pause_menu.jpg" alt="A pause menu with Resume, Settings (focused by the keyboard, with a yellow ring) and Reset kicks buttons over a dusk scene of three shapes on pedestals" loading="lazy" decoding="async"></p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    ui = ctx.ui
+    s = entity.state
+    ui.panel(<span class="tok-n">20</span>, <span class="tok-n">20</span>, <span class="tok-n">260</span>, <span class="tok-n">220</span>, title=<span class="tok-s">&quot;Options&quot;</span>)
+    <span class="tok-k">if</span> ui.button(<span class="tok-s">&quot;Restart&quot;</span>, <span class="tok-n">40</span>, <span class="tok-n">70</span>, <span class="tok-n">220</span>, <span class="tok-n">44</span>):
+        ctx.publish(<span class="tok-s">&quot;restart&quot;</span>)
+    s[<span class="tok-s">&quot;music&quot;</span>] = ui.toggle(<span class="tok-s">&quot;Music&quot;</span>, s.get(<span class="tok-s">&quot;music&quot;</span>, <span class="tok-b">True</span>), <span class="tok-n">40</span>, <span class="tok-n">130</span>)
+    ctx.settings.volume = ui.slider(ctx.settings.volume, <span class="tok-n">40</span>, <span class="tok-n">180</span>, <span class="tok-n">220</span>, step=<span class="tok-n">0.05</span>)
+    ui.progress(s.get(<span class="tok-s">&quot;health&quot;</span>, <span class="tok-n">80</span>), <span class="tok-n">20</span>, <span class="tok-n">260</span>, <span class="tok-n">260</span>, <span class="tok-b">max</span>=<span class="tok-n">100</span>, text=<span class="tok-b">True</span>)</code></pre></div>
+<div class="table"><table><thead><tr><th>Widget</th><th>What it does</th></tr></thead><tbody><tr><td><code>ui.button(text, x, y, width=160, height=44, *, id=None, enabled=True, size=None)</code></td><td>Returns <code>True</code> on the frame it's clicked: pressed and released on it. Sliding off before letting go cancels</td></tr><tr><td><code>ui.toggle(text, value, x, y, *, id=None, enabled=True, size=None)</code></td><td>A check box with its label. Returns the new value, flipped when the box or the text is clicked</td></tr><tr><td><code>ui.slider(value, x, y, width=200, height=24, *, min=0, max=1, step=None, id=None, enabled=True)</code></td><td>Drag the knob, or press anywhere on the track. Returns the new value, rounded to <code>step</code> if given</td></tr><tr><td><code>ui.progress(value, x, y, width=200, height=18, *, max=1, color=None, text=None)</code></td><td>A bar filled to <code>value / max</code>. <code>text</code> is drawn on it, and <code>True</code> shows the percentage</td></tr><tr><td><code>ui.label(text, x, y, size=None, color=None, align=&quot;left&quot;, shadow=None, font=None)</code></td><td>Text with its top at <code>y</code>. <code>align</code> says where <code>x</code> is, like <code>ctx.hud.text</code>. <code>font</code> defaults to <code>ui.theme.font</code></td></tr><tr><td><code>ui.panel(x, y, width, height, *, color=None, title=None)</code></td><td>A background box. Clicks on it belong to the UI too</td></tr><tr><td><code>ui.image(path, x, y, width, height, color=(1,1,1,1))</code></td><td>An image stretched over the box</td></tr><tr><td><code>ui.mouse_over</code></td><td>The same as <code>ctx.input.mouse_over_ui</code></td></tr><tr><td><code>ui.theme</code></td><td>Colours, the default text size and font (below)</td></tr></tbody></table></div>
+<p>Rules that apply to every widget:</p>
+<ul><li><strong>Position:</strong> <code>x, y</code> is the <strong>top-left</strong> corner in UI units (screen
+pixels unless you set a <a href="#scaling-to-any-screen">design size</a>), unlike
+<code>ctx.hud</code> shapes, which are placed by their centre. Inside a
+<a href="#layouts">layout</a> leave <code>x, y</code> out, along with the size if the layout
+gives one.</li><li><strong>States:</strong> buttons show hover and pressed states.
+<code>enabled=False</code> dims a widget and ignores clicks on it.</li><li><strong>Clicks stay with the UI:</strong> a press that starts on a widget or a panel
+is the UI's until it's released. <code>ctx.input.mouse_pressed</code>,
+<code>mouse_just_pressed</code> and actions bound to mouse buttons don't see it, so
+a click on a button never also fires the gun. The UI decides from where
+things were drawn the frame before, so a widget takes clicks from the
+second frame it's shown.</li><li><strong>Keys and gamepads:</strong> see <a href="#keyboard-and-gamepad-focus">focus</a>.</li><li><strong>Identity:</strong> widgets are told apart by their text and the entity whose
+script draws them. Give <code>id=</code> when the text changes (<code>f&quot;Reset ({n})&quot;</code>)
+or two widgets share the same text.</li><li><strong>Touch:</strong> in the exported game, the first finger down on a touch screen
+acts as the left mouse button wherever it touches. Taps press buttons and
+drags move sliders.</li></ul>
+<p><code>ctx.ui.theme</code> holds the colours. The default is monochrome, like Oberon:
+paper-white text and fills on dark, translucent panels. Colours are RGBA
+from 0 to 1, as a paint program shows them. Change any of them at any time:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.ui.theme.accent = (<span class="tok-n">1.0</span>, <span class="tok-n">0.75</span>, <span class="tok-n">0.2</span>, <span class="tok-n">1.0</span>)   <span class="tok-c"># fills: sliders, bars, toggles</span>
+ctx.ui.theme.button = (<span class="tok-n">0.1</span>, <span class="tok-n">0.12</span>, <span class="tok-n">0.2</span>, <span class="tok-n">0.95</span>)  <span class="tok-c"># also hover, press, panel, text, text_dim, track, border</span>
+ctx.ui.theme.text_size = <span class="tok-n">24</span>
+ctx.ui.theme.font = <span class="tok-s">&quot;fonts/Pixel.ttf&quot;</span>            <span class="tok-c"># None: the built-in font</span>
+ctx.ui.theme.focus = (<span class="tok-n">1.0</span>, <span class="tok-n">0.78</span>, <span class="tok-n">0.3</span>, <span class="tok-n">1.0</span>)     <span class="tok-c"># the keyboard focus ring</span></code></pre></div>
+<h3 id="layouts">Layouts<a class="anchor" href="#layouts" aria-label="Link to this section">#</a></h3>
+<p>Columns, rows and stacks place the widgets drawn inside them, so you don't
+work out coordinates. They're <code>with</code> blocks and they nest:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    ui = ctx.ui
+    <span class="tok-k">with</span> ui.column(width=<span class="tok-n">380</span>, anchor=<span class="tok-s">&quot;center&quot;</span>, padding=<span class="tok-n">40</span>, gap=<span class="tok-n">14</span>, panel=<span class="tok-b">True</span>):
+        ui.label(<span class="tok-s">&quot;PAUSED&quot;</span>, size=<span class="tok-n">28</span>, align=<span class="tok-s">&quot;center&quot;</span>)
+        <span class="tok-k">if</span> ui.button(<span class="tok-s">&quot;Resume&quot;</span>, height=<span class="tok-n">52</span>):
+            ui.screens.clear()
+        <span class="tok-k">with</span> ui.row(columns=<span class="tok-n">3</span>, height=<span class="tok-n">40</span>, gap=<span class="tok-n">8</span>):   <span class="tok-c"># three equal buttons</span>
+            <span class="tok-k">for</span> preset <span class="tok-k">in</span> (<span class="tok-s">&quot;low&quot;</span>, <span class="tok-s">&quot;medium&quot;</span>, <span class="tok-s">&quot;high&quot;</span>):
+                <span class="tok-k">if</span> ui.button(preset.title()):
+                    ctx.settings.graphics = preset</code></pre></div>
+<div class="table"><table><thead><tr><th>Layout</th><th>Places widgets</th></tr></thead><tbody><tr><td><code>ui.column(x=None, y=None, width=None, height=None, *, gap=10, padding=0, anchor=None, margin=0, panel=False, title=None, id=None)</code></td><td>Top to bottom. With a <code>width</code>, each widget fills it</td></tr><tr><td><code>ui.row(..., columns=None, ...)</code></td><td>Left to right. With <code>columns=n</code> and a width (given, or from the layout around it), each widget gets an equal share</td></tr><tr><td><code>ui.stack(...)</code></td><td>On top of each other: an image with a label over it</td></tr></tbody></table></div>
+<ul><li><strong>Where:</strong> give <code>x, y</code>, or an <code>anchor</code> (below) with a <code>margin</code>, or
+neither inside another layout to take its next slot. A layout without a
+size grows to fit what's in it.</li><li><strong>Sizes:</strong> a widget's own <code>width</code> and <code>height</code> still apply. A button
+without one fills the column's width.</li><li><strong><code>panel=True</code></strong> draws a panel behind everything in the layout (or pass
+a colour), and <code>title=</code> adds a title to it. <code>padding</code> is the space
+inside it.</li><li><strong>Mistakes raise errors:</strong> an <code>x</code> without a <code>y</code>, or <code>columns=0</code>.</li></ul>
+<h3 id="scaling-to-any-screen">Scaling to any screen<a class="anchor" href="#scaling-to-any-screen" aria-label="Link to this section">#</a></h3>
+<p><strong>Anchors</strong> put things against the screen's edges and corners:
+<code>&quot;top_left&quot;</code>, <code>&quot;top&quot;</code>, <code>&quot;top_right&quot;</code>, <code>&quot;left&quot;</code>, <code>&quot;center&quot;</code>, <code>&quot;right&quot;</code>,
+<code>&quot;bottom_left&quot;</code>, <code>&quot;bottom&quot;</code> and <code>&quot;bottom_right&quot;</code>. Layouts take
+<code>anchor=</code>, and <code>ui.place(anchor, width, height, margin=0)</code> returns the
+top-left corner of a box anchored that way, for a single widget:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ui.button(<span class="tok-s">&quot;Menu&quot;</span>, *ui.place(<span class="tok-s">&quot;top_right&quot;</span>, <span class="tok-n">120</span>, <span class="tok-n">44</span>, margin=<span class="tok-n">24</span>), <span class="tok-n">120</span>, <span class="tok-n">44</span>)</code></pre></div>
+<p>An anchored layout uses its size from the frame before, then moves into
+place when the <code>with</code> block ends, so it's right on its first frame too.</p>
+<p><strong>Design size.</strong> Set <code>ui.design_size = (1280, 720)</code> once and lay the UI
+out for that screen. It scales to fit whatever window or phone the game
+runs on: <code>ui.scale</code> is the smaller of the width and height ratios. All
+<code>ctx.ui</code> positions and sizes are in these UI units, and so are
+<code>ui.size</code> (the screen, in UI units) and <code>ui.mouse_position</code>. Without a
+design size, one unit is one pixel.</p>
+<p>The player can make the UI bigger or smaller with
+<code>ctx.settings.ui_scale</code> (0.5 to 3, 1 by default), which multiplies the
+scale and is saved with the other <a href="#player-settings">settings</a>. Use it for
+high-DPI screens and phones.</p>
+<p><img src="../../../assets/ui/ui_portrait.jpg" alt="The same pause menu in a tall, phone-shaped window, scaled down to fit its width" loading="lazy" decoding="async"></p>
+<h3 id="screens">Screens<a class="anchor" href="#screens" aria-label="Link to this section">#</a></h3>
+<p><code>ctx.ui.screens</code> keeps track of which menus are open, as a stack: the
+pause menu, a settings screen over it, an inventory.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    ctx.settings.bind(<span class="tok-s">&quot;pause&quot;</span>, <span class="tok-s">&quot;p&quot;</span>, <span class="tok-s">&quot;escape&quot;</span>, <span class="tok-s">&quot;pad_start&quot;</span>)
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    ui = ctx.ui
+    <span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;pause&quot;</span>) <span class="tok-k">and</span> <span class="tok-k">not</span> ui.screens.top:
+        ui.screens.show(<span class="tok-s">&quot;pause&quot;</span>, pause=<span class="tok-b">True</span>)
+    <span class="tok-k">if</span> ui.screen(<span class="tok-s">&quot;pause&quot;</span>):          <span class="tok-c"># True while it&#x27;s shown</span>
+        <span class="tok-k">with</span> ui.column(width=<span class="tok-n">300</span>, anchor=<span class="tok-s">&quot;center&quot;</span>, panel=<span class="tok-b">True</span>):
+            <span class="tok-k">if</span> ui.button(<span class="tok-s">&quot;Resume&quot;</span>):
+                ui.screens.hide(<span class="tok-s">&quot;pause&quot;</span>)
+            <span class="tok-k">if</span> ui.button(<span class="tok-s">&quot;Settings&quot;</span>):
+                ui.screens.show(<span class="tok-s">&quot;settings&quot;</span>)
+    <span class="tok-k">if</span> ui.screen(<span class="tok-s">&quot;settings&quot;</span>):
+        ...</code></pre></div>
+<div class="table"><table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><code>show(name, *, modal=True, pause=False, escape=True)</code></td><td>Opens a screen on top (or moves it there)</td></tr><tr><td><code>hide(name)</code>, <code>toggle(name, **options)</code>, <code>back()</code>, <code>clear()</code></td><td>Close one, flip one, close the top one, close them all</td></tr><tr><td><code>shown(name)</code>, <code>top</code>, <code>names</code>, <code>modal</code></td><td>Is it open, the top one, all of them bottom to top, and the top modal one</td></tr><tr><td><code>paused</code></td><td>A screen shown with <code>pause=True</code> is open</td></tr></tbody></table></div>
+<ul><li><strong>Widgets belong to a screen:</strong> <code>ui.screen(name)</code> returns whether it's
+shown, and the widgets drawn after it belong to it. They draw above the
+screens under it, whatever order the scripts run in. <code>ui.screen(None)</code>
+goes back to the plain HUD.</li><li><strong>Modal</strong> screens (the default) take all the input: widgets under them
+draw but don't react, and clicks on them never reach the game.</li><li><strong>Pausing:</strong> <code>paused</code> is a flag your game scripts check
+(<code>if ctx.ui.screens.paused: return</code>). It doesn't stop physics.</li><li><strong>Escape</strong>, or B (<code>&quot;pad_east&quot;</code>) on a gamepad, closes the top screen, and
+the script doesn't see that press. Show a screen with <code>escape=False</code> to
+keep it open; then the script gets Escape as usual. With no screen open,
+Escape is the game's, so it can open the pause menu.</li></ul>
+<h3 id="keyboard-and-gamepad-focus">Keyboard and gamepad focus<a class="anchor" href="#keyboard-and-gamepad-focus" aria-label="Link to this section">#</a></h3>
+<p>While a modal screen is open, the arrow keys and the gamepad's d-pad (or
+left stick) move a focus ring to the nearest widget in that direction.
+<strong>Enter</strong>, <strong>Space</strong> or <strong>A</strong> (<code>&quot;pad_south&quot;</code>) presses the focused widget,
+and left and right move a focused slider by its <code>step</code> (or a twentieth of
+its range). <strong>Tab</strong> and <strong>Shift+Tab</strong> go through the widgets in order. A
+held direction repeats.</p>
+<ul><li>A screen opened from the keyboard or a gamepad focuses its first widget.
+The mouse still works, and a click hides the ring.</li><li>Outside screens, set <code>ui.keyboard_navigation = True</code> to get focus in the
+HUD too. <code>ui.focused</code> is the focused widget's id, or None.</li><li>Keys the UI uses are hidden from <code>ctx.input</code> until they're released, so
+Enter on a menu button doesn't also make the player jump.</li></ul>
+<p><code>ctx.ui</code> works the same way in Play, under <code>run_scene</code> and in exported games.
+<code>examples/oberon/pause_menu</code> is a complete pause menu, built from anchored
+columns and rows and laid out for 1280×720. It has a menu screen and a
+settings screen that changes <code>ctx.settings</code> (volume, graphics preset, UI
+size and a toggle of its own). Both work with the mouse, the keyboard or a
+gamepad. There's also a HUD with a spin meter and a Menu button, and
+shapes that turn faster when you click in the game but not when you click
+the UI. Its titles and HUD numbers use a pixel font from its <code>fonts/</code>
+folder.</p>
+<p><img src="../../../assets/ui/pause_settings.jpg" alt="The settings screen: a volume slider, a Spin meter toggle, and graphics preset and UI size buttons, with Small focused" loading="lazy" decoding="async"></p>
+<h3 id="ui-documents">UI documents<a class="anchor" href="#ui-documents" aria-label="Link to this section">#</a></h3>
+<p>Screens and HUDs can also be made in Oberon's <a href="ui-editor.html">UI editor</a>
+instead of in code. Each is a <code>ui/&lt;name&gt;.ui.ron</code> document in the project.
+The game draws it, with its own theme and design size: a HUD document from
+the start, under every screen, and any other document while its screen is
+shown. Scripts reach its widgets by the names given in the editor:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    hud = ctx.ui.screen(<span class="tok-s">&quot;hud&quot;</span>)                 <span class="tok-c"># ui/hud.ui.ron</span>
+    hud.<span class="tok-b">set</span>(<span class="tok-s">&quot;score&quot;</span>, <span class="tok-s">f&quot;SCORE {entity.state[&#x27;score&#x27;]}&quot;</span>)
+    hud.<span class="tok-b">set</span>(<span class="tok-s">&quot;health&quot;</span>, entity.attributes[<span class="tok-s">&quot;health&quot;</span>])
+    <span class="tok-k">if</span> hud.clicked(<span class="tok-s">&quot;menu&quot;</span>):
+        ctx.ui.screens.show(<span class="tok-s">&quot;pause&quot;</span>)           <span class="tok-c"># ui/pause.ui.ron, with its own options</span>
+    pause = ctx.ui.screen(<span class="tok-s">&quot;pause&quot;</span>)
+    <span class="tok-k">if</span> pause.changed(<span class="tok-s">&quot;volume&quot;</span>):
+        ctx.settings.volume = pause.get(<span class="tok-s">&quot;volume&quot;</span>)</code></pre></div>
+<div class="table"><table><thead><tr><th><code>ctx.ui.screen(name)</code></th><th></th></tr></thead><tbody><tr><td><code>set(widget, value)</code></td><td>A label's or button's text, a progress bar's or slider's value, a toggle's state, an image's file</td></tr><tr><td><code>get(widget)</code></td><td>Its value now: what <code>set</code> gave it, or what the player chose</td></tr><tr><td><code>clicked(widget)</code></td><td>The button was clicked (or the toggle or slider used) the last time the document drew</td></tr><tr><td><code>changed(widget)</code></td><td>The player changed the slider or toggle the last time it drew</td></tr><tr><td><code>set_visible(widget, visible=True)</code>, <code>set_enabled(widget, enabled=True)</code></td><td>Show or hide a widget (a column, row or stack hides its children too), and enable or dim one</td></tr><tr><td><code>visible</code></td><td>Whether the screen shows; set a HUD document's to <code>False</code> to hide it</td></tr><tr><td><code>widgets</code>, <code>document</code>, <code>name</code></td><td>Its widget names, its <code>UiDocument</code>, and its name</td></tr></tbody></table></div>
+<ul><li><strong>Names are checked.</strong> A widget name that isn't in the document raises
+<code>KeyError</code> with the closest match (`ui/hud.ui.ron has no widget named
+'scroe'; did you mean 'score'?`). A value of the wrong type raises
+<code>TypeError</code> (<code>&#x27;health&#x27; is a progress: set it to a number</code>). A screen with
+no document raises <code>LookupError</code> as soon as you <code>set</code> or <code>clicked</code>.</li><li><strong>Clicks arrive a frame later</strong>, like any widget's: the document draws
+after every script's <code>update</code>, so <code>clicked</code> reports the click made
+when it was last drawn.</li><li><strong>Screens:</strong> <code>ctx.ui.screens.show(&quot;pause&quot;)</code> takes the document's Modal,
+Pause and Escape settings unless the call passes its own. Keys,
+gamepads and focus work as on any screen.</li><li><strong>Hot reload:</strong> saving a document in Oberon redraws it in the running
+game within half a second. A broken document is reported once in the
+Console, and the others keep drawing.</li><li><strong>Mixing:</strong> <code>ui.screen(name)</code> is still truthy while the screen is shown,
+so a script can draw extra widgets onto a document's screen with
+<code>if ui.screen(&quot;pause&quot;): ...</code>.</li></ul>
+<p><code>examples/oberon/shape_signal</code> is a game whose title screen, HUD and
+results screen are all documents. Its script only calls <code>set</code>, <code>clicked</code>
+and <code>changed</code>.</p>
+<h2 id="keys">Keys<a class="anchor" href="#keys" aria-label="Link to this section">#</a></h2>
+<p>Scripts can read and write any entity's state with a key, Redis style.
+A key is <code>entity:component:field</code>:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.get(<span class="tok-s">&quot;Player:animation:clip&quot;</span>)            <span class="tok-c"># &quot;Run&quot;</span>
+ctx.<span class="tok-b">set</span>(<span class="tok-s">&quot;Player:animation:speed&quot;</span>, <span class="tok-n">1.5</span>)
+ctx.get(<span class="tok-s">&quot;Player:attr:health&quot;</span>)                <span class="tok-c"># its attributes</span>
+ctx.<span class="tok-b">set</span>(<span class="tok-s">&quot;Door:transform:position&quot;</span>, (<span class="tok-n">0</span>, <span class="tok-n">3</span>, <span class="tok-n">0</span>))
+
+<span class="tok-k">for</span> anim <span class="tok-k">in</span> ctx.scan(<span class="tok-s">&quot;Enemy_*:animation&quot;</span>):   <span class="tok-c"># every enemy that has one</span>
+    anim.play(<span class="tok-s">&quot;Dance&quot;</span>, fade=<span class="tok-n">0.3</span>)
+ctx.scan(<span class="tok-s">&quot;Enemy_*:attr:health&quot;</span>)              <span class="tok-c"># [30, 12, 50]</span>
+ctx.keys(<span class="tok-s">&quot;Player:attr:*&quot;</span>)                    <span class="tok-c"># [&quot;Player:attr:health&quot;, ...]</span></code></pre></div>
+<div class="table"><table><thead><tr><th>Component</th><th>Fields</th></tr></thead><tbody><tr><td><code>animation</code></td><td><code>clip</code> (setting it plays that clip), <code>time</code>, <code>speed</code>, <code>root_motion</code>, <code>graph</code>; read-only <code>playing</code>, <code>looping</code>, <code>duration</code>, <code>clips</code>, <code>springs</code>, <code>state</code></td></tr><tr><td><code>transform</code></td><td><code>position</code>, <code>rotation</code> (radians, same as <code>rotation_euler</code>), <code>scale</code></td></tr><tr><td><code>joint</code></td><td><code>motor_speed</code>, <code>motor_target</code>, <code>limits</code>, <code>enabled</code>, <code>connected</code>, <code>break_force</code>; read-only <code>angle</code>, <code>value</code>, <code>force</code>, <code>attached</code>, <code>broken</code>, <code>kind</code></td></tr><tr><td><code>attr</code></td><td>The entity's <a href="prefabs-and-attributes.html">attributes</a>, by name</td></tr></tbody></table></div>
+<p>A shorter key gives more: <code>&quot;Player:animation&quot;</code> is the same handle as
+<code>entity.animation</code>, and <code>&quot;Player&quot;</code> is the entity. Reads and writes follow
+the <a href="#the-frame-model">frame model</a>, like everything else.</p>
+<ul><li><p><strong><code>get</code>, <code>set</code> and <code>ref</code> take one exact key.</strong> If two entities share the
+name, <code>get</code> raises an error instead of guessing. <code>scan</code> returns every match,
+in hierarchy order. It skips entities that lack the component or field,
+and accepts <code>*</code> and <code>?</code> wildcards.</p></li><li><p><strong>A wrong key raises <code>KeyError</code> and suggests the nearest right one</strong>:
+`'Player:animaton:clip': there's no component 'animaton'; did you mean
+'animation'?<code>. Read-only fields raise</code>AttributeError<code>.</code>set` won't create
+attributes, so a typo can't make a new one; add them with
+<code>entity.attributes[&quot;mana&quot;] = 10</code>.</p></li><li><p><strong><code>ctx.ref(key)</code></strong> makes a handle to keep, usually from <code>start</code>. It looks
+the key up again each time it's used, so it always shows this frame's
+values:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;boss&quot;</span>] = ctx.ref(<span class="tok-s">&quot;Boss:animation&quot;</span>)
+    entity.state[<span class="tok-s">&quot;hp&quot;</span>] = ctx.ref(<span class="tok-s">&quot;Boss:attr:health&quot;</span>)
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    <span class="tok-k">if</span> entity.state[<span class="tok-s">&quot;hp&quot;</span>].value &lt; <span class="tok-n">20</span>:
+        entity.state[<span class="tok-s">&quot;boss&quot;</span>].play(<span class="tok-s">&quot;Enraged&quot;</span>, fade=<span class="tok-n">0.2</span>)</code></pre></div></li></ul>
+<ul><li><strong>Names:</strong> keys find entities by name, so entity names can't contain <code>:</code>.
+Oberon refuses the rename, and <code>at.Entity(&quot;a:b&quot;)</code> raises <code>ValueError</code>.
+When several entities share a name, the Inspector says so under the name.
+<code>entity.animation.play(...)</code> is still the everyday way to drive your own
+entity. Keys are for reaching the others.</li></ul>
+<h2 id="channels">Channels<a class="anchor" href="#channels" aria-label="Link to this section">#</a></h2>
+<p><code>ctx.subscribe(pattern, fn)</code> calls <code>fn(msg)</code> for every message published
+on a matching channel. A pattern is an exact name or uses <code>*</code> and <code>?</code>.
+Animation events arrive on their own, as <code>&lt;entity&gt;:animation:&lt;event&gt;</code>
+(see <a href="models.html#animation-events">Animation events</a>), and scripts can
+publish their own messages:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">opened</span>(msg):
+    msg.ctx.log(<span class="tok-s">&quot;door opened by&quot;</span>, msg.data)
+
+<span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    ctx.subscribe(<span class="tok-s">&quot;door:*&quot;</span>, opened)
+    ctx.subscribe(<span class="tok-s">&quot;*:animation:footstep&quot;</span>, <span class="tok-k">lambda</span> msg: msg.ctx.audio.play(<span class="tok-s">&quot;step.ogg&quot;</span>, position=msg.entity))
+
+<span class="tok-c"># elsewhere</span>
+ctx.publish(<span class="tok-s">&quot;door:open&quot;</span>, <span class="tok-s">&quot;Player&quot;</span>)</code></pre></div>
+<p><code>msg</code> has <code>channel</code>, <code>data</code> and <code>ctx</code>. Animation events also set <code>entity</code>,
+<code>event</code> and <code>clip</code>. <code>publish</code> delivers at once and returns how many
+subscribers got the message.</p>
+<p>Subscribing the same function to the same pattern again does nothing, so
+it's safe in <code>update</code>. A subscription ends when the entity whose script
+made it goes away. You can also end one with <code>ctx.unsubscribe(pattern)</code> or
+by calling <code>cancel()</code> on what <code>subscribe</code> returned. If a subscriber raises,
+its script pauses like any other script error.</p>
+<h2 id="tweens-and-timers">Tweens and timers<a class="anchor" href="#tweens-and-timers" aria-label="Link to this section">#</a></h2>
+<p><code>ctx.tween</code> moves one of an entity's values to a target over some seconds,
+along an easing curve. <code>ctx.after</code> and <code>ctx.every</code> call a function later.
+Each returns a handle with <code>cancel()</code>:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    door = ctx.scene[<span class="tok-s">&quot;Door&quot;</span>]
+    ctx.tween(door, <span class="tok-s">&quot;position&quot;</span>, (<span class="tok-n">0</span>, <span class="tok-n">3</span>, <span class="tok-n">0</span>), <span class="tok-n">1.5</span>, ease=<span class="tok-s">&quot;in_out_sine&quot;</span>)
+    ctx.after(<span class="tok-n">2.0</span>, ctx.audio.play, <span class="tok-s">&quot;sounds/clunk.ogg&quot;</span>)
+    entity.state[<span class="tok-s">&quot;spawner&quot;</span>] = ctx.every(<span class="tok-n">5.0</span>, spawn_wave, ctx)
+
+<span class="tok-k">def</span> <span class="tok-f">collected</span>(coin, ctx):
+    ctx.tween(coin, <span class="tok-s">&quot;scale&quot;</span>, (<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>), <span class="tok-n">0.3</span>, ease=<span class="tok-s">&quot;in_back&quot;</span>, on_done=coin.despawn)</code></pre></div>
+<p><strong>What a tween can move.</strong> <code>&quot;position&quot;</code>, <code>&quot;rotation&quot;</code> (Euler angles in
+radians) and <code>&quot;scale&quot;</code>, or an attribute by name (<code>&quot;score&quot;</code>). Any writable
+<a href="#keys">key</a> field works as <code>component:field</code>, such as
+<code>&quot;animation:speed&quot;</code> or <code>&quot;attr:glow&quot;</code>. Numbers and tuples of numbers
+tween. If both ends are whole numbers, the value stays whole, so a score
+counts up 1, 2, 3.</p>
+<div class="table"><table><thead><tr><th><code>ctx.tween(...)</code> argument</th><th>Meaning</th></tr></thead><tbody><tr><td><code>entity</code></td><td>The entity, or its name</td></tr><tr><td><code>field</code>, <code>to</code>, <code>duration</code></td><td>What moves, where to, and how many seconds it takes</td></tr><tr><td><code>ease</code></td><td>A curve name (below) or your own function of <code>t</code>. Default <code>&quot;out_cubic&quot;</code>: fast, then settling</td></tr><tr><td><code>start=</code></td><td>Where it starts. Otherwise it starts from the value it has when it begins</td></tr><tr><td><code>delay=</code></td><td>Seconds to wait before it starts</td></tr><tr><td><code>loop=</code></td><td><code>True</code> repeats it forever. A number plays it that many times</td></tr><tr><td><code>yoyo=</code></td><td>Every other play runs backwards. <code>yoyo=True, loop=True</code> swings back and forth</td></tr><tr><td><code>on_update=</code>, <code>on_done=</code></td><td><code>on_update(value)</code> runs each frame it moves, and <code>on_done()</code> runs when it ends</td></tr></tbody></table></div>
+<p>A <code>Tween</code> has <code>value</code>, <code>progress</code> (0 to 1) and <code>done</code>, plus <code>cancel()</code>
+(stop where it is), <code>finish()</code> (jump to the end and call <code>on_done</code>),
+<code>pause()</code> and <code>resume()</code>. Starting a tween on the same entity and field
+replaces the old one, so a door told to close halfway through opening
+turns round smoothly.</p>
+<p><code>ctx.tween_value(start, end, seconds, on_update=None, ease=...)</code> tweens a
+value of your own. It's handy for fades, because HUD drawing happens every
+frame:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;fade&quot;</span>] = ctx.tween_value(<span class="tok-n">1.0</span>, <span class="tok-n">0.0</span>, <span class="tok-n">1.2</span>, ease=<span class="tok-s">&quot;in_quad&quot;</span>, delay=<span class="tok-n">1.0</span>)
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    alpha = entity.state[<span class="tok-s">&quot;fade&quot;</span>].value
+    ctx.hud.text(<span class="tok-s">&quot;LEVEL 1&quot;</span>, *ctx.hud.center, size=<span class="tok-n">64</span>, align=<span class="tok-s">&quot;center&quot;</span>, color=(<span class="tok-n">1</span>, <span class="tok-n">1</span>, <span class="tok-n">1</span>, alpha))</code></pre></div>
+<p><strong>Easing curves</strong> (31 of them, the standard set that
+<a href="https://easings.net" rel="noopener">easings.net</a> draws): <code>&quot;linear&quot;</code>, plus <code>in_</code>, <code>out_</code>
+and <code>in_out_</code> versions of <code>sine</code>, <code>quad</code>, <code>cubic</code>, <code>quart</code>, <code>quint</code>,
+<code>expo</code>, <code>circ</code>, <code>back</code>, <code>elastic</code> and <code>bounce</code>. <code>in_</code> starts slow, <code>out_</code>
+ends slow, and <code>in_out_</code> does both. <code>back</code> overshoots a little and
+<code>elastic</code> wobbles past the end. <code>bounce</code> bounces at the end. Spellings like
+<code>&quot;easeOutCubic&quot;</code> work too, and a misspelt name gets a suggestion.</p>
+<p><strong>Timers.</strong> <code>ctx.after(seconds, fn, *args)</code> calls <code>fn(*args)</code> once.
+<code>ctx.every(seconds, fn, *args, times=None)</code> calls it every <code>seconds</code>,
+forever or <code>times</code> times. A <code>Timer</code> has <code>remaining</code>, <code>count</code> and <code>done</code>,
+and <code>cancel()</code>, <code>pause()</code> and <code>resume()</code>. Make an <code>every</code> timer in <code>start</code>
+or once on an event, not in <code>update</code>, or you'll start a new one each
+frame. To repeat at random intervals, let the function book itself again,
+like <code>examples/oberon/campfire/scripts/crackle.py</code>:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">pop</span>(entity, ctx):
+    ctx.particles.emit(entity, random.randint(<span class="tok-n">8</span>, <span class="tok-n">20</span>))
+    ctx.after(random.uniform(<span class="tok-n">0.8</span>, <span class="tok-n">3.0</span>), pop, entity, ctx)</code></pre></div>
+<p><strong>When they run.</strong> Timers and tweens move once a frame by
+<code>ctx.time.delta</code>. They run in the order they were made, after animation
+events and before any <code>update</code>, so <code>update</code> already sees this frame's
+tweened values. Something made during a frame starts counting the next
+frame. After a long hitch, an <code>every</code> timer catches up, but at most 8
+calls in one frame. Timers and tweens stop when the entity whose script
+made them goes away, and a tween also stops when the entity it moves goes
+away. They pause while their script is paused by an error, and Stop ends
+them all. Functions they call follow hot reloads like subscribers do. If
+one raises, its script pauses like any other script error.</p>
+<h2 id="save-games">Save games<a class="anchor" href="#save-games" aria-label="Link to this section">#</a></h2>
+<p><code>ctx.save</code> is a dict that outlives the run. Put anything in it that a
+player expects to find next time:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    <span class="tok-k">if</span> <span class="tok-s">&quot;checkpoint&quot;</span> <span class="tok-k">in</span> ctx.save:
+        entity.transform.position = ctx.save[<span class="tok-s">&quot;checkpoint&quot;</span>]
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    ...
+    ctx.save[<span class="tok-s">&quot;coins&quot;</span>] = ctx.save.get(<span class="tok-s">&quot;coins&quot;</span>, <span class="tok-n">0</span>) + <span class="tok-n">1</span>
+    ctx.save[<span class="tok-s">&quot;inventory&quot;</span>].append(<span class="tok-s">&quot;key&quot;</span>)   <span class="tok-c"># changes inside lists count too</span></code></pre></div>
+<ul><li><p><strong>Values</strong> are JSON: numbers, strings, <code>True</code>/<code>False</code>/<code>None</code>, and lists
+and dicts of those. Tuples come back as lists. Anything else, such as an
+entity or a <code>NaN</code>, raises an error when you assign it, so nothing bad
+reaches the file.</p></li><li><p><strong>Writing</strong> happens at the end of the frame, and only if something
+changed. Use <code>ctx.save.flush()</code> to write now. Writes are atomic (a temp
+file, then a rename), so a crash can't leave half a save. A file that
+won't parse is renamed to <code>….broken</code>, a warning goes to the Console, and
+the slot starts empty.</p></li><li><p><strong>Slots.</strong> Everything goes to the slot named <code>&quot;default&quot;</code> until you switch:</p>
+<div class="table"><table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><code>ctx.save.use(2)</code> / <code>use(&quot;hard mode&quot;)</code></td><td>Switch slots (the old one is written first). A new slot starts empty</td></tr><tr><td><code>ctx.save.slot</code></td><td>The current slot's name</td></tr><tr><td><code>ctx.save.slots()</code></td><td>Saved slots: each has <code>name</code>, <code>saved_at</code> (<code>time.time()</code> seconds) and <code>keys</code> (how many values). Use them for a load screen</td></tr><tr><td><code>ctx.save.exists(slot=None)</code>, <code>ctx.save.saved_at</code></td><td>Whether a slot was saved; when the current one was</td></tr><tr><td><code>ctx.save.delete(slot=None)</code>, <code>ctx.save.clear()</code></td><td>Delete a slot's file; empty the current slot</td></tr><tr><td><code>get</code>, <code>setdefault</code>, <code>pop</code>, <code>update</code>, <code>keys</code>, <code>items</code>, <code>in</code>, <code>len</code>, <code>del</code></td><td>The usual dict methods</td></tr></tbody></table></div></li></ul>
+<ul><li><p><strong>Where the files go.</strong> Each slot is <code>saves/&lt;slot&gt;.json</code> in the save
+folder:</p>
+<div class="table"><table><thead><tr><th>Running in</th><th>Save folder</th></tr></thead><tbody><tr><td>Oberon's Play</td><td><code>&lt;project&gt;/.oberon/save</code> (delete it to start fresh)</td></tr><tr><td><code>run_scene(...)</code></td><td><code>.oberon/save</code> next to the scene. Headless runs keep nothing unless you pass <code>save_dir=</code></td></tr><tr><td>An exported game</td><td>A folder named after the game (<code>game.json</code>'s <code>name</code>) in the player's user-data folder: <code>%APPDATA%</code> on Windows, <code>~/Library/Application Support</code> on macOS, <code>$XDG_DATA_HOME</code> or <code>~/.local/share</code> on Linux</td></tr></tbody></table></div>
+<p>Setting the <code>AUTOMATA_SAVE_DIR</code> environment variable overrides all of
+them. <code>.oberon/</code> is never exported, so your test saves don't ship.</p></li><li><p><strong>Steam Cloud</strong> can sync the <code>saves/</code> folder between a player's
+computers with no code (<a href="steam.html#steam-cloud">Steam Cloud</a>).</p></li></ul>
+<h2 id="player-settings">Player settings<a class="anchor" href="#player-settings" aria-label="Link to this section">#</a></h2>
+<p><code>ctx.settings</code> holds the player's settings. It's saved in the same folder
+as <code>settings.json</code>, shared by every save slot, and applied as soon as the
+game starts:</p>
+<div class="table"><table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><code>ctx.settings.volume = 0.5</code></td><td>Master volume, 0 to 1 (1 by default)</td></tr><tr><td><code>ctx.settings.graphics = &quot;low&quot;</code></td><td>Graphics preset: <code>&quot;low&quot;</code>, <code>&quot;medium&quot;</code>, <code>&quot;high&quot;</code>, <code>&quot;ultra&quot;</code> or <code>&quot;beautiful&quot;</code>. Until the player picks one, it reads as the preset the game is running at</td></tr><tr><td><code>ctx.settings.ui_scale = 1.25</code></td><td>How big <code>ctx.ui</code> draws, 0.5 to 3 (1 by default). See <a href="#scaling-to-any-screen">scaling</a></td></tr><tr><td><code>ctx.settings.language = &quot;ja&quot;</code></td><td>The language <code>ctx.tr</code> gives text in. Until the player picks one, it's the computer's language if the string tables have it, else their first. See <a href="#languages">Languages</a></td></tr><tr><td><code>ctx.settings[&quot;sensitivity&quot;] = 0.4</code></td><td>Any other setting, with the same JSON rules as <code>ctx.save</code></td></tr><tr><td><code>ctx.settings.reset()</code></td><td>Everything back to the game's defaults</td></tr></tbody></table></div>
+<p>In Oberon's Play mode, the graphics setting overrides the editor's preset
+until you press Stop.</p>
+<p><strong>Key bindings.</strong> Name your controls as <em>actions</em> and give them default
+keys in <code>start</code>. Then ask <code>ctx.input</code> about the action instead of a key:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    ctx.settings.bind(<span class="tok-s">&quot;jump&quot;</span>, <span class="tok-s">&quot;space&quot;</span>)
+    ctx.settings.bind(<span class="tok-s">&quot;fire&quot;</span>, <span class="tok-s">&quot;mouse_left&quot;</span>, <span class="tok-s">&quot;f&quot;</span>)
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    <span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;jump&quot;</span>):
+        ...</code></pre></div>
+<p>A settings screen changes them with <code>rebind</code>. The change is saved, and it
+wins over <code>bind</code> from then on:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    <span class="tok-k">if</span> entity.state.get(<span class="tok-s">&quot;waiting&quot;</span>):
+        key = ctx.input.any_just_pressed()
+        <span class="tok-k">if</span> key <span class="tok-k">and</span> key != <span class="tok-s">&quot;escape&quot;</span>:
+            ctx.settings.rebind(<span class="tok-s">&quot;jump&quot;</span>, key)
+            entity.state[<span class="tok-s">&quot;waiting&quot;</span>] = <span class="tok-b">False</span>
+        <span class="tok-k">return</span>
+    <span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;f1&quot;</span>):
+        entity.state[<span class="tok-s">&quot;waiting&quot;</span>] = <span class="tok-b">True</span>
+    ctx.hud.text(<span class="tok-s">f&quot;Jump: {&#x27;, &#x27;.join(ctx.settings.keys(&#x27;jump&#x27;))}&quot;</span>, <span class="tok-n">16</span>, <span class="tok-n">16</span>)</code></pre></div>
+<div class="table"><table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><code>bind(action, *keys)</code></td><td>Default keys: <a href="#ctx">key names</a>, gamepad buttons (<code>&quot;pad_south&quot;</code>) or <code>&quot;mouse_left&quot;</code>/<code>&quot;mouse_right&quot;</code>/<code>&quot;mouse_middle&quot;</code>. Binding again replaces the defaults</td></tr><tr><td><code>rebind(action, *keys)</code></td><td>The player's keys, saved. With no keys, the action has none</td></tr><tr><td><code>keys(action)</code>, <code>bindings()</code></td><td>One action's keys now, or every action's</td></tr><tr><td><code>reset_keys(action=None)</code></td><td>Back to the defaults (one action or all)</td></tr></tbody></table></div>
+<p>A misspelt key (<code>&quot;spce&quot;</code>) raises an error that suggests the right one. An
+action name that was never bound is treated as a key name, so
+<code>ctx.input.pressed(&quot;space&quot;)</code> keeps working.</p>
+<h3 id="button-prompts">Button prompts<a class="anchor" href="#button-prompts" aria-label="Link to this section">#</a></h3>
+<p>Tell players which button to press in terms of the controller in their
+hands. <code>ctx.input.prompt(action)</code> gives the label of the action's key on
+the device they used last, and it follows their rebinding:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    ctx.settings.bind(<span class="tok-s">&quot;jump&quot;</span>, <span class="tok-s">&quot;space&quot;</span>, <span class="tok-s">&quot;pad_south&quot;</span>)
+    ctx.settings.bind(<span class="tok-s">&quot;interact&quot;</span>, <span class="tok-s">&quot;e&quot;</span>, <span class="tok-s">&quot;pad_west&quot;</span>)
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    ctx.hud.text(<span class="tok-s">f&quot;{ctx.input.prompt(&#x27;jump&#x27;)} to jump&quot;</span>, <span class="tok-n">24</span>, <span class="tok-n">24</span>, size=<span class="tok-n">22</span>)</code></pre></div>
+<p>This shows "Space to jump" until the player touches a gamepad. Then it
+shows "A to jump" on an Xbox pad or a Steam Deck, "× to jump" on a
+PlayStation pad, and "B to jump" on a Switch pad. It switches back as
+soon as they type or click.</p>
+<ul><li><strong><code>ctx.input.device</code></strong> is what the player used last: <code>&quot;keyboard&quot;</code> (with
+the mouse), <code>&quot;gamepad&quot;</code> or <code>&quot;touch&quot;</code>. Before any input, it's
+<code>&quot;gamepad&quot;</code> if one is connected or the game runs on a Steam Deck,
+<code>&quot;touch&quot;</code> on a touch screen, else <code>&quot;keyboard&quot;</code>.</li><li><strong><code>ctx.input.controller</code></strong> is the gamepad's family, from its name:
+<code>&quot;xbox&quot;</code>, <code>&quot;playstation&quot;</code>, <code>&quot;switch&quot;</code>, <code>&quot;steam_deck&quot;</code> or <code>&quot;generic&quot;</code>
+(which gets Xbox labels). It's <code>None</code> without a gamepad.</li><li><strong><code>prompt(name, device=&quot;gamepad&quot;)</code></strong> asks for one device, for example
+to show both labels. <code>name</code> can also be a key (<code>prompt(&quot;f5&quot;)</code> is <code>&quot;F5&quot;</code>).
+The action's first key for the device is used, and an action with no
+keys gives <code>&quot;&quot;</code>.</li></ul>
+<div class="table"><table><thead><tr><th>Key</th><th>Xbox, generic</th><th>PlayStation</th><th>Switch</th><th>Steam Deck</th></tr></thead><tbody><tr><td><code>pad_south</code> / <code>east</code> / <code>west</code> / <code>north</code></td><td>A B X Y</td><td>× ○ □ △</td><td>B A Y X</td><td>A B X Y</td></tr><tr><td><code>pad_lb</code> / <code>rb</code> / <code>lt</code> / <code>rt</code></td><td>LB RB LT RT</td><td>L1 R1 L2 R2</td><td>L R ZL ZR</td><td>L1 R1 L2 R2</td></tr><tr><td><code>pad_start</code> / <code>select</code></td><td>☰ ⧉</td><td>Options Create</td><td>+ −</td><td>☰ ⧉</td></tr><tr><td><code>pad_l3</code> / <code>r3</code></td><td>LS RS</td><td>L3 R3</td><td>LS RS</td><td>L3 R3</td></tr><tr><td><code>pad_up</code> / <code>down</code> / <code>left</code> / <code>right</code></td><td>↑ ↓ ← →</td><td>↑ ↓ ← →</td><td>↑ ↓ ← →</td><td>↑ ↓ ← →</td></tr></tbody></table></div>
+<p>Labels go by <strong>position</strong>. <code>pad_south</code> is the bottom face button, so on a
+Switch pad it's labelled B. Keys get short names: <code>Space</code>, <code>W</code>, <code>↑</code>,
+<code>Left click</code>, <code>Num 7</code>. The built-in font has every symbol here.</p>
+<h2 id="languages">Languages<a class="anchor" href="#languages" aria-label="Link to this section">#</a></h2>
+<p><img src="../../../assets/ui/shape_signal_ja.jpg" alt="Shape Signal's title in Japanese: シェイプ・シグナル in amber over the tagline, プレイ, 音量, キーのヒントを表示 and the 言語: 日本語 button" loading="lazy" decoding="async"></p>
+<p>Put the words your game shows in <strong>string tables</strong>: CSV files in a <code>lang/</code>
+folder next to the scene. The first column is a key, and each other
+column is a language:</p>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>key,en,es,ja
+@name,English,Español,日本語
+@font,,,fonts/MPLUSRounded1c-Medium.ttf
+# menus
+menu.play,Play,Jugar,プレイ
+hud.coins,Coins: {count},Monedas: {count},コイン: {count}
+&quot;menu.quit&quot;,&quot;Quit, now&quot;,Salir,終了</code></pre></div>
+<p>Then ask for text by key:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ctx.ui.button(ctx.tr(<span class="tok-s">&quot;menu.play&quot;</span>), x, y)              <span class="tok-c"># &quot;Play&quot;, &quot;Jugar&quot;, &quot;プレイ&quot;</span>
+ctx.hud.text(ctx.tr(<span class="tok-s">&quot;hud.coins&quot;</span>, count=coins), <span class="tok-n">16</span>, <span class="tok-n">16</span>)</code></pre></div>
+<p><strong>The file.</strong> Save it as UTF-8 from any spreadsheet app or text editor.</p>
+<ul><li>The header names the languages with codes like <code>en</code>, <code>es</code>, <code>pt-BR</code> or
+<code>zh-Hans</code>. The first one is the default.</li><li><code>@name</code> gives each language's name in itself, for a language menu.</li><li><code>@font</code> gives a language a font for the characters other fonts lack.</li><li>Rows starting with <code>#</code>, and blank rows, are skipped. A cell with a comma
+or a line break goes in "double quotes", and <code>\n</code> also makes a line
+break.</li><li>Every <code>lang/*.csv</code> file is read, in name order, so you can split a big
+game into <code>menus.csv</code>, <code>dialogue.csv</code> and so on. They needn't have the
+same columns.</li></ul>
+<p><strong><code>ctx.tr(key, language=None, **values)</code></strong> gives the key's text in the
+player's language. <code>{name}</code> placeholders are filled from the keyword
+arguments, with Python's format rules (<code>{score:,}</code>, <code>{time:.1f}</code>).
+Nothing in a table stops the game:</p>
+<div class="table"><table><thead><tr><th>What went wrong</th><th>What you see</th></tr></thead><tbody><tr><td>The language's cell is empty</td><td>The first language's text, and a Console warning naming the file and line (<code>lang/strings.csv:5: hud.coins has no ja text; using en</code>)</td></tr><tr><td>The key isn't in any table</td><td>The key itself, and a warning that suggests a close one</td></tr><tr><td>A placeholder wasn't given</td><td>It's left as written (<code>Coins: {count}</code>), with a warning</td></tr><tr><td>A duplicate key, an odd <code>@</code> row, too many cells</td><td>A warning with the file and line; the first entry wins</td></tr></tbody></table></div>
+<p>Each warning shows once. <code>ctx.tr</code> also has:</p>
+<div class="table"><table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><code>ctx.tr.languages</code></td><td>The language codes, in column order: <code>(&quot;en&quot;, &quot;es&quot;, &quot;ja&quot;)</code></td></tr><tr><td><code>ctx.tr.language</code></td><td>The language text comes in now (the same as <code>ctx.settings.language</code>)</td></tr><tr><td><code>ctx.tr.name(&quot;es&quot;)</code></td><td><code>&quot;Español&quot;</code> (from <code>@name</code>; the code when there's none). No argument: the current language</td></tr><tr><td><code>ctx.tr.font(&quot;ja&quot;)</code></td><td>The language's <code>@font</code>, or <code>None</code></td></tr><tr><td><code>ctx.tr.has(&quot;menu.play&quot;)</code>, <code>&quot;menu.play&quot; in ctx.tr</code></td><td>Whether a table has the key</td></tr><tr><td><code>ctx.tr.keys(&quot;menu.&quot;)</code></td><td>The keys, sorted, optionally only those starting with a prefix</td></tr></tbody></table></div>
+<p><strong>Choosing the language.</strong> <code>ctx.settings.language</code> starts as the
+computer's language when a table has it. <code>es-MX</code> finds <code>es</code>, and <code>pt</code>
+finds <code>pt-BR</code>. Otherwise it's the first column. Setting it switches every
+text at once and is saved with the other settings. A language the tables
+don't have raises <code>ValueError</code>, listing the ones they do. A language
+button can step through them:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">if</span> ctx.ui.button(ctx.tr(<span class="tok-s">&quot;menu.language&quot;</span>, name=ctx.tr.name()), x, y):
+    langs = ctx.tr.languages
+    ctx.settings.language = langs[(langs.index(ctx.tr.language) + <span class="tok-n">1</span>) % <span class="tok-b">len</span>(langs)]</code></pre></div>
+<p><strong>UI documents</strong> translate themselves. When a label's, button's, toggle's
+or progress bar's text, or a panel's title, is a key of the tables, the
+player sees that key's text. Write <code>menu.play</code> as the Play button's text
+in the <a href="ui-editor.html">UI editor</a>; <code>screen.get()</code> still gives the key.
+Text a script sets with <code>screen.set()</code> is translated the same way, so
+<code>set(&quot;verdict&quot;, &quot;hud.miss&quot;)</code> works, and so does
+<code>set(&quot;score&quot;, ctx.tr(&quot;hud.score&quot;, score=s))</code>.</p>
+<p><strong>Fonts per language.</strong> Text in a language with an <code>@font</code> is drawn with
+your font first and the language's font for the characters your font
+lacks. The pixel title above is Press Start 2P in English and Spanish, and
+its kana come from M+ Rounded in Japanese. Fonts for Chinese, Japanese and
+Korean are large (3–20 MB). For a game with a fixed script, a subset
+with only the characters you use keeps it small; Shape Signal's is 113 KB.
+fontTools' <code>pyftsubset</code> makes one:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>pyftsubset MPLUSRounded1c-Medium.ttf --text-file=lang/strings.csv --output-file=fonts/JP.ttf</code></pre></div>
+<p>Full-width characters count as twice as wide when layouts estimate text
+size, so Japanese labels get the room they need.</p>
+<p><strong>Right-to-left languages</strong> (Persian, Arabic, Urdu, Hebrew) need nothing
+special in the table: write the text in reading order, as you'd type it.
+The renderer takes care of the rest:</p>
+<ul><li><strong>Joining:</strong> Persian and Arabic letters take their joined forms from
+their neighbours, including پ چ ژ گ ک ی, and لا becomes one ligature.
+The half-space (ZWNJ, U+200C) breaks a join, as in «می‌روم».</li><li><strong>Ordering:</strong> a line whose first letter is right-to-left reads right to
+left. Numbers (<code>120</code>, <code>۴۵</code>, <code>1,250</code>, <code>80%</code>) and Latin words inside it
+keep their own order, and brackets are mirrored.</li><li><strong>Alignment:</strong> in a left-aligned label of several lines, right-to-left
+lines line up on its right edge.</li></ul>
+<p>This uses the presentation-form characters most Persian and Arabic fonts
+have. Vazirmatn, which Shape Signal uses, does. When you cut a font down,
+keep U+FB50–U+FDFF and U+FE70–U+FEFF:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>pyftsubset Vazirmatn.ttf --unicodes=&quot;U+0020-007E,U+0600-06FF,U+200C-200F,U+FB50-FDFF,U+FE70-FEFF&quot; --output-file=fonts/FA.ttf</code></pre></div>
+<p>Not yet: diacritics placed by a font's positioning rules (they're drawn at
+the font's default spot, which suits Persian's occasional marks), scripts
+that need full shaping (Devanagari, Bengali, Thai), and mirrored layouts
+(widgets keep their places; set a label's <code>align=&quot;right&quot;</code> for
+right-to-left text).</p>
+<p><img src="../../../assets/ui/shape_signal_fa.jpg" alt="Shape Signal's title in Persian: سیگنال شکل in amber over the tagline, the بازی button, صدا with the volume slider, the hints toggle and the زبان: فارسی button" loading="lazy" decoding="async"></p>
+<p><strong>In Oberon</strong>, edited tables reload while the game plays, and <code>ctx.tr(&quot;</code>
+completes keys with their text in the first language. The UI editor's
+<strong>Text</strong> menu shows a document in any language, or as keys.</p>
+<p><strong>Export</strong> ships <code>lang/</code>. It warns about mistakes in the tables and lists
+the keys each language lacks. It stops with an error if a language's
+<code>@font</code> is missing, isn't a font, or won't ship, or if <code>lang/</code> is excluded
+from the build.</p>
+<h2 id="hot-reload">Hot reload<a class="anchor" href="#hot-reload" aria-label="Link to this section">#</a></h2>
+<p>Save a script (Ctrl+S in the code editor, or from any external editor)
+while the scene is playing. Oberon reloads it within half a second, and the
+Console shows <code>Reloaded spinner.py</code>. <code>entity.state</code> survives the reload,
+and <code>start</code> is <strong>not</strong> called again. To rerun <code>start</code>, press Stop and then
+Play.</p>
+<h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Link to this section">#</a></h2>
+<p>When a script raises an exception, the Console shows the traceback with a
+clickable <strong>file:line</strong> link that jumps to the code editor. That script
+then <strong>pauses</strong> so you don't get the same error 60 times a second. The rest
+of the scene keeps running. Fix the file and save, and the script resumes.</p>
+<p>A syntax error found when the script loads works the same way.</p>
+<h2 id="testing-scripts-headless">Testing scripts headless<a class="anchor" href="#testing-scripts-headless" aria-label="Link to this section">#</a></h2>
+<p><code>run_scene(..., headless=True)</code> runs frames as fast as it can, so
+<code>ctx.time.delta</code> is close to zero and timers barely move. To test gameplay
+that depends on time (cooldowns, falling, damage over time), pace the run:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>frames = at.run_scene(<span class="tok-s">&quot;level.ron&quot;</span>, headless=<span class="tok-b">True</span>, max_frames=<span class="tok-n">90</span>, target_fps=<span class="tok-n">60</span>)</code></pre></div>
+<p>The <a href="../tutorials/fps.html">FPS tutorial</a> and
+<code>examples/oberon/fps/tests/test_fps.py</code> show this in practice.</p>
+<h2 id="which-python">Which Python?<a class="anchor" href="#which-python" aria-label="Link to this section">#</a></h2>
+<p>Oberon runs scripts with the project's own <code>.venv</code>, the same interpreter
+that <code>oberon run</code>, <code>oberon test</code> and the language server use (see
+<a href="command-line.html#the-projects-python">The project's Python</a>). A folder
+without <code>.venv</code> uses <code>python3</code> from your <code>PATH</code>. <strong>Settings → Python →
+Interpreter</strong> overrides both. The runner needs only the standard library.
+Packages you install with <code>oberon pip install …</code> can be imported from your
+scripts.</p>
+<h2 id="same-scripts-real-engine">Same scripts, real engine<a class="anchor" href="#same-scripts-real-engine" aria-label="Link to this section">#</a></h2>
+<p>The scene file plus its scripts run unchanged outside Oberon:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+at.run_scene(<span class="tok-s">&quot;level.ron&quot;</span>)                          <span class="tok-c"># windowed</span>
+at.run_scene(<span class="tok-s">&quot;level.ron&quot;</span>, headless=<span class="tok-b">True</span>, max_frames=<span class="tok-n">600</span>)   <span class="tok-c"># CI test</span></code></pre></div>
+<p>Everything on this page works in both places: one module
+(<code>automata/script_api.py</code>) implements <code>entity</code> and <code>ctx</code> for Oberon and for
+<code>run_scene</code>. A shared test suite (<code>tests/script_conformance/</code>) runs the same
+scenes through both runners in CI.</p>
+<p>Under <code>run_scene</code>, <code>ctx</code> also exposes the full engine:</p>
+<ul><li><code>ctx.events</code></li><li><code>ctx.resources</code></li><li>the complete <code>ctx.physics</code> (impulses, queued casts, and more)</li><li><code>ctx.quit()</code></li><li><code>ctx.raw</code>, the engine's own frame context</li></ul>
+<p>In Oberon these raise an error that names the member and says it needs
+<code>run_scene</code>. See <a href="../tutorials/oberon-to-python.html">From Oberon to Python</a>.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="command-line.html"><small>Previous</small>The oberon command</a><a class="next" href="cameras.html"><small>Next</small>Cameras</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/scripting.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#types-and-completion">Types and completion</a></li><li class="l2"><a href="#attach-a-script">Attach a script</a></li><li class="l2"><a href="#the-frame-model">The frame model</a></li><li class="l2"><a href="#entity">entity</a></li><li class="l2"><a href="#ctx">ctx</a></li><li class="l3"><a href="#fonts">Fonts</a></li><li class="l2"><a href="#game-ui">Game UI</a></li><li class="l3"><a href="#layouts">Layouts</a></li><li class="l3"><a href="#scaling-to-any-screen">Scaling to any screen</a></li><li class="l3"><a href="#screens">Screens</a></li><li class="l3"><a href="#keyboard-and-gamepad-focus">Keyboard and gamepad focus</a></li><li class="l3"><a href="#ui-documents">UI documents</a></li><li class="l2"><a href="#keys">Keys</a></li><li class="l2"><a href="#channels">Channels</a></li><li class="l2"><a href="#tweens-and-timers">Tweens and timers</a></li><li class="l2"><a href="#save-games">Save games</a></li><li class="l2"><a href="#player-settings">Player settings</a></li><li class="l3"><a href="#button-prompts">Button prompts</a></li><li class="l2"><a href="#languages">Languages</a></li><li class="l2"><a href="#hot-reload">Hot reload</a></li><li class="l2"><a href="#errors">Errors</a></li><li class="l2"><a href="#testing-scripts-headless">Testing scripts headless</a></li><li class="l2"><a href="#which-python">Which Python?</a></li><li class="l2"><a href="#same-scripts-real-engine">Same scripts, real engine</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

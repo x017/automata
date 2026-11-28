@@ -1,0 +1,18 @@
+# The Android build of the `automata` package, for python-for-android.
+# android/build_apk.sh copies the repository to a staging folder and puts
+# this file at its root; the `automata` recipe builds the wheel from there.
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "automata-engine"
+description = "AUTOMATA game engine — Python bindings (Android)"
+requires-python = ">=3.10"
+license = { text = "MIT OR Apache-2.0" }
+dynamic = ["version"]
+
+[tool.maturin]
+manifest-path = "android/engine/Cargo.toml"
+module-name = "automata._core"
+python-source = "crates/automata-python/python"

@@ -1,0 +1,262 @@
+name: Web
+
+# Builds the engine's Python module for Pyodide (web/engine, WebGL2 through
+# wgpu's GL backend under Emscripten), puts the web player together with
+# the spike game, and loads it in headless Chromium (WebGL2 on SwiftShader):
+# frames must advance, the cube must be on screen. Reports the download
+# size and the start-up time. Then the web export template is packed and
+# Coin Run built from it as users build (`automata-cli build --target
+# web`; its game.zip must be the one at the top of the repo) and served
+# with `automata-cli serve`: it must load, play, and keep its settings and
+# saves in IndexedDB across a reload. The template is then published to
+# the `export-templates` release, where `automata-cli templates download`
+# and Oberon find it. See web/README.md.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, "arena/**"]
+    paths:
+      - "web/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "game.zip"
+      - "scripts/game_zip.sh"
+      - "examples/oberon/coin_run/**"
+      - ".github/workflows/web.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  PYODIDE_VERSION: "314.0.8"
+  PYODIDE_BUILD_VERSION: "0.39.4"
+
+defaults:
+  run:
+    shell: bash
+
+# Reports (logs, screenshots) are published as check runs, so they can be
+# read through the API (android/ci/report.py).
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  check:
+    # Fast feedback: the web crate is fmt- and clippy-clean, on the host
+    # and for the browser target (no Emscripten needed: nothing links).
+    name: check (wasm32-unknown-emscripten)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-emscripten
+          components: clippy, rustfmt
+      - name: Linux packages
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libudev-dev
+      - name: fmt
+        run: cargo fmt --manifest-path web/engine/Cargo.toml --check
+      - name: clippy
+        env:
+          PYO3_CROSS_PYTHON_VERSION: "3.14"
+        run: |
+          s=0
+          cargo clippy --manifest-path web/engine/Cargo.toml -- -D warnings 2>&1 | tee clippy.log || s=1
+          cargo clippy --manifest-path web/engine/Cargo.toml \
+            --target wasm32-unknown-emscripten -- -D warnings 2>&1 | tee -a clippy.log || s=1
+          exit $s
+      - name: Report clippy
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 android/ci/report.py "web: clippy log" --log clippy.log --lines 300
+      - name: game.zip matches Coin Run
+        run: scripts/game_zip.sh --check
+
+  player:
+    name: Pyodide wheel and browser smoke test
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # pyodide-build wants the host Python to match Pyodide's.
+          python-version: "3.14"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Linux packages
+        # automata-cli (built for the export step) links libudev.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libudev-dev
+
+      - name: pyodide-build
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pyodide-build==${PYODIDE_BUILD_VERSION}" pillow
+
+      - name: Build the wheel
+        run: |
+          s=0
+          web/ci/build_wheel.sh > build.log 2>&1 || s=1
+          tail -60 build.log
+          exit $s
+
+      - name: Build log (on failure)
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f build.log ]; then
+            python3 android/ci/report.py "web: wheel build log" --log build.log --lines 500 \
+              --exclude '^\s+(Compiling|Downloaded|Downloading) '
+          fi
+
+      - name: Package the player
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          s=0
+          web/ci/package.sh > package.log 2>&1 || s=1
+          cat package.log
+          if [ $s != 0 ]; then
+            python3 android/ci/report.py "web: package log" --log package.log --lines 300 --conclusion failure
+          fi
+          exit $s
+
+      - name: Chromium
+        working-directory: web/ci
+        run: |
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1
+          npx playwright install --with-deps chromium
+
+      - name: Smoke test
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          (cd web/dist/site && python -m http.server 8000 --bind 127.0.0.1 > ../server.log 2>&1 &)
+          sleep 1
+          s=0
+          NODE_PATH=web/ci/node_modules node web/ci/smoke.mjs http://127.0.0.1:8000/ web/dist/site || s=1
+          python3 web/ci/check_screenshot.py web/dist/smoke/screenshot.png | tee -a web/dist/smoke/report.txt || s=1
+          { echo '### Web player'; echo '```'; head -30 web/dist/smoke/report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python3 android/ci/report.py "web: smoke" --log web/dist/smoke/report.txt --lines 400 \
+            --conclusion $([ $s = 0 ] && echo neutral || echo failure)
+          python3 android/ci/report.py "web: screenshot" --image web/dist/smoke/screenshot.jpg
+          exit $s
+
+      - name: Web template, and Coin Run built from it
+        # As users build: the template installed from its archive,
+        # build.ron from `init`, then `build --target web`.
+        id: template
+        if: success() || failure()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          s=0
+          {
+            web/ci/template.sh web/dist/template &&
+            cargo build -q -p automata-cli &&
+            cli=target/debug/automata-cli &&
+            export AUTOMATA_TEMPLATES="$RUNNER_TEMP/templates" &&
+            $cli templates pack web/dist/template --target web --out web/dist/automata-template-web.tar.gz &&
+            $cli templates install web/dist/automata-template-web.tar.gz --target web &&
+            cp -r examples/oberon/coin_run "$RUNNER_TEMP/coin_run" &&
+            rm -rf "$RUNNER_TEMP/coin_run/.oberon" "$RUNNER_TEMP/coin_run/build.ron" &&
+            $cli init "$RUNNER_TEMP/coin_run" --scene level.ron --name "Coin Run" --package org.automata.coinrun &&
+            $cli build "$RUNNER_TEMP/coin_run" --target web &&
+            ls -la "$RUNNER_TEMP/coin_run/build/web" "$RUNNER_TEMP/coin_run/build/web/Coin Run"
+          } > template.log 2>&1 || s=1
+          cat template.log
+          if [ $s = 0 ] && ! cmp "$RUNNER_TEMP/coin_run/build/web/Coin Run/game.zip" game.zip; then
+            echo "the web build's game.zip differs from game.zip at the top of the repo" | tee -a template.log
+            s=1
+          fi
+          python3 android/ci/report.py "web: template" --log template.log --lines 300 \
+            --conclusion $([ $s = 0 ] && echo neutral || echo failure)
+          if [ $s != 0 ]; then
+            python3 android/ci/report.py "web: coin run" --log template.log --lines 300 --conclusion failure
+          fi
+          cp "$RUNNER_TEMP/coin_run/build/web/Coin Run-0.1.0-web.zip" web/dist/coin_run-web.zip || s=1
+          exit $s
+
+      - name: Coin Run (automata-cli build --target web)
+        if: steps.template.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          s=0
+          (target/debug/automata-cli serve "$RUNNER_TEMP/coin_run" --port 8001 > web/dist/coin_server.log 2>&1 &)
+          for i in $(seq 50); do curl -fs -o /dev/null http://127.0.0.1:8001/player.json && break; sleep 0.2; done
+          curl -fsS http://127.0.0.1:8001/player.json
+          NODE_PATH=web/ci/node_modules node web/ci/coin_run.mjs http://127.0.0.1:8001/ || s=1
+          python3 web/ci/check_screenshot.py --any web/dist/coin_run/1-start.png | tee -a web/dist/coin_run/report.txt || s=1
+          { echo '### Coin Run (web)'; echo '```'; head -20 web/dist/coin_run/report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python3 android/ci/report.py "web: coin run" --log web/dist/coin_run/report.txt --lines 400 \
+            --conclusion $([ $s = 0 ] && echo neutral || echo failure)
+          if [ -f web/dist/coin_run/3-touch.jpg ]; then
+            python3 android/ci/report.py "web: coin run screenshot" --image web/dist/coin_run/3-touch.jpg
+          fi
+          exit $s
+
+      - name: Size and start-up budget
+        # What the download is made of, next to the published template, and
+        # whether Coin Run's build and the smoke test's start fit the budget.
+        if: steps.template.outcome == 'success' && (success() || failure())
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          gh release download export-templates --repo "$GITHUB_REPOSITORY" \
+            --pattern automata-template-web.tar.gz --output "$RUNNER_TEMP/published-web.tar.gz" || true
+          s=0
+          python3 web/ci/web_size.py "$RUNNER_TEMP/coin_run/build/web/Coin Run" \
+            --before "$RUNNER_TEMP/published-web.tar.gz" \
+            --budget-mb 18.5 --budget-gz 11 \
+            --stats web/dist/smoke/stats.json --budget-start 3 > web/dist/size.txt || s=1
+          cat web/dist/size.txt
+          { echo '### Web build size and start-up'; echo '```'; cat web/dist/size.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python3 android/ci/report.py "web: size and start-up" --log web/dist/size.txt --lines 200 \
+            --conclusion $([ $s = 0 ] && echo neutral || echo failure)
+          exit $s
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: automata-web
+          path: |
+            web/dist/site
+            web/dist/smoke
+            web/dist/coin_run
+            web/dist/coin_run-web.zip
+            web/dist/automata-template-web.tar.gz
+            web/dist/size.txt
+
+  publish:
+    # The template every web build starts from, once Coin Run passed with it.
+    name: publish the template
+    needs: player
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: automata-web
+          path: dist
+      - name: Update the export-templates release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -la dist
+          gh release view export-templates >/dev/null 2>&1 || \
+            gh release create export-templates --title "Export templates" --prerelease \
+              --notes "Templates for automata-cli / Oberon Build. Installed with: automata-cli templates download"
+          gh release upload export-templates dist/automata-template-web.tar.gz --clobber

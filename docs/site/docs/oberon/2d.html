@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2D games · AUTOMATA docs</title>
+<meta name="description" content="The picture is the whole level of Pixel Peaks (examples/oberon/platformer), built from its own tileset and sprite sheets. The platformer tutorial walks through it.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../../dither.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../tutorials/fps.html">A first-person shooter</a></li><li><a href="../tutorials/platformer.html">A 2D platformer</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="index.html">Introduction</a></li><li><a href="interface.html">The interface</a></li><li><a href="command-line.html">The oberon command</a></li><li><a href="scripting.html">Scripting</a></li><li><a href="cameras.html">Cameras</a></li><li><a href="graphics.html">Graphics</a></li><li><a href="code-editor.html">The code editor</a></li><li><a href="ui-editor.html">The UI editor</a></li><li><a href="materials.html">Materials</a></li><li><a href="shaders.html">Custom shaders</a></li><li><a href="models.html">Models</a></li><li><a href="animation-graphs.html">Animation graphs</a></li><li><a href="attachments-and-ik.html">Attachments &amp; IK</a></li><li><a href="ragdolls.html">Ragdolls</a></li><li><a href="navigation.html">Navigation</a></li><li><a href="ai.html">AI</a></li><li><a href="2d.html" aria-current="page">2D games</a></li><li><a href="terrain.html">Terrain</a></li><li><a href="foliage.html">Grass &amp; foliage</a></li><li><a href="audio.html">Audio</a></li><li><a href="prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="editor-workflow.html">Editor workflow</a></li><li><a href="exporting.html">Exporting your game</a></li><li><a href="steam.html">Steam</a></li><li><a href="shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/grass-and-foliage.html">Grass &amp; foliage</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/touch-controls.html">Touch controls</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li><li><a href="../guides/performance.html">Performance</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>2D games</h1>
+<p>AUTOMATA makes side-on and top-down 2D games with the same editor, scripts
+and physics as 3D ones. A 2D scene is built from five parts:</p>
+<ul><li><strong>Sprites</strong> are images, or sprite sheets with named animation clips.</li><li><strong>Tilemaps</strong> are grids painted with tiles from one tileset image. They
+can be solid, and their auto-tiles pick their own edge pieces.</li><li>A <strong>Camera 2D</strong> shows a flat, scaled view with no perspective.</li><li><strong>Camera Follow 2D</strong> makes that camera trail the player.</li><li><strong>2D colliders</strong> and <strong>character controllers</strong> use 2D physics, which is
+its own world, separate from 3D.</li></ul>
+<p><img src="../../../assets/oberon/platformer.png" alt="Pixel Peaks, the 2D example: a painted tilemap with auto-tiled ground, bricks, crates, coins, slimes and the goal flag over a parallax sky" loading="lazy" decoding="async"></p>
+<p>The picture is the whole level of <em>Pixel Peaks</em>
+(<code>examples/oberon/platformer</code>), built from its own tileset and sprite
+sheets. The <a href="../tutorials/platformer.html">platformer tutorial</a> walks through
+it.</p>
+<h2 id="units-and-the-2d-view">Units and the 2D view<a class="anchor" href="#units-and-the-2d-view" aria-label="Link to this section">#</a></h2>
+<p>One world unit is one cell. Sprites are 1 × 1 unless you change <strong>Size</strong>,
+and a tile is 1 × 1 unless you change the map's <strong>Cell Size</strong>. X points
+right and Y points up. Everything 2D lies on the plane z = 0. <strong>Layer</strong>
+decides what draws on top: higher layers draw over lower ones.</p>
+<p>Oberon opens a 2D scene in its <strong>2D view</strong>: a flat view looking straight
+at that plane. Press <strong>2</strong> or click <strong>2D</strong> on the viewport toolbar to switch
+between the 2D view and the 3D view. In the 2D view, dragging pans, the
+wheel zooms, and the Move gizmo has no Z arrow.</p>
+<p>A scene counts as 2D when it has sprites, tilemaps, 2D colliders or a 2D
+camera, and no 3D meshes or terrain.</p>
+<h2 id="starting-out">Starting out<a class="anchor" href="#starting-out" aria-label="Link to this section">#</a></h2>
+<p><code>oberon new mygame --template 2d</code> makes a project with a painted tilemap,
+a 2D player and a camera that follows it. In any scene, <strong>+ Create</strong> has the
+2D pieces:</p>
+<div class="table"><table><thead><tr><th>Create</th><th>What you get</th></tr></thead><tbody><tr><td><strong>Sprite</strong></td><td>An entity with a plain white Sprite, ready for an image</td></tr><tr><td><strong>Tilemap</strong></td><td>A 16 × 9 grid with a solid floor painted along the bottom</td></tr><tr><td><strong>Camera 2D</strong></td><td>A Camera 2D with a Camera Follow 2D aimed at the entity called "Player"</td></tr><tr><td><strong>2D Player</strong></td><td>A Sprite with a 2D box collider and a character controller. In Play it runs with A/D or the arrows and jumps with Space until you give it your own script</td></tr></tbody></table></div>
+<h2 id="sprites">Sprites<a class="anchor" href="#sprites" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><strong>Image</strong></td><td>A PNG or JPEG in the project. <strong>None</strong> draws a plain coloured rectangle</td></tr><tr><td><strong>Size</strong></td><td>Width and height in world units</td></tr><tr><td><strong>Color</strong></td><td>A tint, multiplied with the image. Lower the alpha to fade it</td></tr><tr><td><strong>Flip X / Flip Y</strong></td><td>Mirror the image (face the way you walk)</td></tr><tr><td><strong>Pixel Art</strong></td><td>Sharp, unblurred pixels when scaled up. Turn it off for smooth art</td></tr><tr><td><strong>Layer</strong></td><td>Drawing order</td></tr><tr><td><strong>Sheet</strong></td><td>Columns × rows of equal frames, counted left to right, top to bottom</td></tr><tr><td><strong>Frame</strong></td><td>The frame shown when no clip plays</td></tr><tr><td><strong>Clips</strong></td><td>Named runs of frames: <strong>First</strong>, <strong>Last</strong>, <strong>FPS</strong> and <strong>Loop</strong></td></tr><tr><td><strong>Plays First</strong></td><td>The clip that starts playing when the game begins</td></tr></tbody></table></div>
+<p><strong>+ Add Clip</strong> suggests the usual names (idle, run, jump, fall). A clip
+that doesn't loop stops on its last frame.</p>
+<p>From a script:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    sprite = entity.sprite
+    <span class="tok-k">if</span> <span class="tok-k">not</span> entity.grounded:
+        sprite.play(<span class="tok-s">&quot;jump&quot;</span>)
+    <span class="tok-k">elif</span> <span class="tok-b">abs</span>(vx) &gt; <span class="tok-n">0.5</span>:
+        sprite.play(<span class="tok-s">&quot;run&quot;</span>)          <span class="tok-c"># asking for the clip already playing does nothing</span>
+    <span class="tok-k">else</span>:
+        sprite.play(<span class="tok-s">&quot;idle&quot;</span>)
+    sprite.flip_x = vx &lt; <span class="tok-n">0</span></code></pre></div>
+<div class="table"><table><thead><tr><th><code>entity.sprite</code></th><th></th></tr></thead><tbody><tr><td><code>play(clip, restart=False)</code></td><td>Play a clip. <code>restart=True</code> starts it over even if it's already playing</td></tr><tr><td><code>stop()</code></td><td>Stop on the current frame</td></tr><tr><td><code>clip</code></td><td>The clip playing (<code>None</code> when stopped)</td></tr><tr><td><code>clips</code></td><td>The clip names</td></tr><tr><td><code>finished</code></td><td>A non-looping clip has reached its end</td></tr><tr><td><code>frame</code></td><td>The frame shown. Setting it stops the clip</td></tr><tr><td><code>flip_x</code>, <code>flip_y</code>, <code>color</code>, <code>layer</code></td><td>Settable</td></tr></tbody></table></div>
+<h2 id="tilemaps">Tilemaps<a class="anchor" href="#tilemaps" aria-label="Link to this section">#</a></h2>
+<p>A tilemap's grid starts at its entity's position and grows right and up:
+cell (0, 0) is the bottom-left one.</p>
+<div class="table"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><strong>Tileset</strong></td><td>The image the tiles come from</td></tr><tr><td><strong>Tiles</strong></td><td>Its columns × rows of tiles</td></tr><tr><td><strong>Grid</strong></td><td>Width × height in cells</td></tr><tr><td><strong>Cell Size</strong></td><td>World units per cell</td></tr><tr><td><strong>Solid</strong></td><td>The painted cells collide with 2D bodies and characters. Turn it off for scenery</td></tr><tr><td><strong>Color</strong>, <strong>Pixel Art</strong>, <strong>Layer</strong></td><td>As for sprites</td></tr><tr><td><strong>Auto-tiles</strong></td><td>Named sets of 16 tiles painted as one (below)</td></tr></tbody></table></div>
+<h3 id="painting">Painting<a class="anchor" href="#painting" aria-label="Link to this section">#</a></h3>
+<p>Select the tilemap, then pick a tile in the Inspector's palette. You can
+also pick an auto-tile, or <strong>Erase</strong>. While a tile is picked, dragging in
+the viewport paints cells; picking it again stops painting. Each stroke is
+one undo step. <strong>Clear All</strong> empties the grid. If you make the grid smaller,
+cells outside it are dropped; if you make it bigger, what's painted stays.</p>
+<h3 id="auto-tiles">Auto-tiles<a class="anchor" href="#auto-tiles" aria-label="Link to this section">#</a></h3>
+<p>An auto-tile paints ground, walls or water with the right edge on every
+side, without picking edge pieces by hand. It uses 16 tiles in a row of the
+tileset, starting at <strong>First</strong>. Each painted cell picks one of them from the
+neighbours painted with the same auto-tile:</p>
+<div class="table"><table><thead><tr><th>Neighbour</th><th>Adds</th></tr></thead><tbody><tr><td>above</td><td>1</td></tr><tr><td>right</td><td>2</td></tr><tr><td>below</td><td>4</td></tr><tr><td>left</td><td>8</td></tr></tbody></table></div>
+<p>A lone cell uses tile <code>First + 0</code>. A cell with neighbours on every side uses
+<code>First + 15</code>. A cell on a flat top, with neighbours left, right and below,
+uses <code>First + 14</code>. Draw your 16 tiles in that order.</p>
+<h3 id="from-python">From Python<a class="anchor" href="#from-python" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>ground = at.Tilemap.from_rows(
+    [<span class="tok-s">&quot;....##..&quot;</span>, <span class="tok-s">&quot;########&quot;</span>],          <span class="tok-c"># top row first</span>
+    legend={<span class="tok-s">&quot;#&quot;</span>: -<span class="tok-n">1</span>},                  <span class="tok-c"># -1: auto-tile 0</span>
+    tileset=<span class="tok-s">&quot;sprites/tiles.png&quot;</span>, columns=<span class="tok-n">8</span>, rows=<span class="tok-n">4</span>,
+    autotiles=[at.AutoTile(<span class="tok-s">&quot;Ground&quot;</span>, first=<span class="tok-n">0</span>)],
+)
+ground = ground.<span class="tok-b">set</span>(<span class="tok-n">0</span>, <span class="tok-n">1</span>, <span class="tok-n">17</span>)          <span class="tok-c"># tile 16; edits return a changed copy</span></code></pre></div>
+<p>In a cell, <code>0</code> is empty, <code>n</code> is tileset tile <code>n - 1</code> and <code>-n</code> is auto-tile
+<code>n - 1</code>. <code>get(x, y)</code> returns a cell's value, <code>tile_at(x, y)</code> returns the tile
+it shows (with auto-tiles worked out), and <code>cell_at(x, y)</code> returns the cell
+under a point.</p>
+<h2 id="cameras">Cameras<a class="anchor" href="#cameras" aria-label="Link to this section">#</a></h2>
+<p>A <strong>Camera 2D</strong> sees <strong>Half Height</strong> world units above and below its
+centre. Its width follows the window's shape. It looks at its entity's
+position, and the first Camera 2D in the scene is the one that draws.</p>
+<p><strong>Camera Follow 2D</strong> moves that entity after a target:</p>
+<div class="table"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><strong>Target</strong></td><td>The name of the entity to follow</td></tr><tr><td><strong>Offset</strong></td><td>Where to aim relative to the target, such as a little above it</td></tr><tr><td><strong>Smoothing (s)</strong></td><td>About how long the camera takes to catch up. 0 snaps to the target</td></tr><tr><td><strong>Dead Zone</strong></td><td>How far the target can move from the centre before the camera follows</td></tr><tr><td><strong>Bounds</strong></td><td>Left, bottom, right and top edges the view stays inside (all 0 means no limit)</td></tr></tbody></table></div>
+<p>Set <strong>Bounds</strong> to the level's edges, and the player never sees past the
+end of the map.</p>
+<h2 id="physics">Physics<a class="anchor" href="#physics" aria-label="Link to this section">#</a></h2>
+<p>2D physics is its own world: 2D colliders only ever touch other 2D
+colliders. The rules are those of 3D <a href="../guides/physics.html">physics</a>:</p>
+<ul><li>An entity with a <strong>Collider 2D</strong> and no <strong>Rigidbody</strong> is fixed ground
+that stays where it is. Moving its Transform moves it.</li><li>A <strong>Rigidbody</strong> makes it dynamic or kinematic.</li><li>A <strong>Character Controller</strong>, a kinematic Rigidbody and a Collider 2D make
+a character. A script sets <code>entity.character_velocity</code>, and
+<code>entity.grounded</code> says whether it's standing on something.</li><li>A solid tilemap makes boxes for its painted cells. Cells side by side
+in a row share one box, so characters running along don't catch on the
+seams. Changing the cells or moving the map rebuilds the boxes.</li></ul>
+<p>Collider 2D shapes are <strong>Box</strong>, <strong>Circle</strong> and <strong>Capsule</strong>, with an
+<strong>Offset</strong>. <strong>Is Trigger</strong> makes a sensor that reports overlaps but doesn't
+block. Moving a character's Transform from a script teleports it, which is
+how respawning works.</p>
+<h2 id="limits">Limits<a class="anchor" href="#limits" aria-label="Link to this section">#</a></h2>
+<ul><li>Ray casts from scripts (<code>ctx.physics.raycast</code>) look at the 3D world only.
+<code>ctx.physics2d</code> has <code>apply_impulse</code>, <code>grounded</code> and <code>body_count</code>.</li><li>Lighting, shadows, water, fog and post effects are for 3D scenes.
+Sprites and tiles are drawn unlit with their own colours.</li><li>The audio listener is placed for 3D cameras. In 2D, sounds play without
+distance fading.</li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="ai.html"><small>Previous</small>AI</a><a class="next" href="terrain.html"><small>Next</small>Terrain</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/2d.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#units-and-the-2d-view">Units and the 2D view</a></li><li class="l2"><a href="#starting-out">Starting out</a></li><li class="l2"><a href="#sprites">Sprites</a></li><li class="l2"><a href="#tilemaps">Tilemaps</a></li><li class="l3"><a href="#painting">Painting</a></li><li class="l3"><a href="#auto-tiles">Auto-tiles</a></li><li class="l3"><a href="#from-python">From Python</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l2"><a href="#physics">Physics</a></li><li class="l2"><a href="#limits">Limits</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

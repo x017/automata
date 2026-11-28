@@ -1,0 +1,11 @@
+// A material. Entities that use it share its colour, surface and
+// textures: material: "materials/brick.mat.ron" on a Mesh Renderer. Texture paths are
+// relative to this file's folder.
+(
+    color: (1.0, 1.0, 1.0, 1.0),
+    roughness: 1.0,
+    base_map: "../textures/brick.png",
+    normal_map: "../textures/brick_normal.png",
+    roughness_metal_map: "../textures/brick_rm.png",
+    tiling: (8.0, 5.0),
+)

@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AUTOMATA: Rust underneath, Python on top</title>
+<meta name="description" content="AUTOMATA is a 2D and 3D game engine with a Rust core and a Python gameplay API, plus Oberon, a native editor where you build the scene, write the scripts, and press Play.">
+<meta name="theme-color" content="#000000">
+<meta property="og:title" content="AUTOMATA">
+<meta property="og:description" content="Rust underneath. Python on top. A game engine and editor you can read.">
+<meta property="og:image" content="../assets/oberon/editor.png">
+<script>document.documentElement.classList.add("js")</script>
+<link rel="preload" href="fonts/BricolageGrotesque-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  @font-face {
+    font-family: "Bricolage";
+    src: url("fonts/BricolageGrotesque-Variable.woff2") format("woff2");
+    font-weight: 200 800; font-stretch: 75% 100%; font-display: swap;
+  }
+  @font-face {
+    font-family: "Michroma";
+    src: url("fonts/Michroma-Regular.woff2") format("woff2");
+    font-weight: 400; font-display: swap;
+  }
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url("fonts/JetBrainsMono-Variable.woff2") format("woff2");
+    font-weight: 100 800; font-display: swap;
+  }
+
+  :root {
+    --bg: #000;
+    --panel: #080808;
+    --raised: #121212;
+    --line: #1f1f1e;
+    --line-2: #2c2c2a;
+    --text: #f2f0eb;
+    --body: #cfccc5;     /* 12.6:1 on black */
+    --dim: #a19f98;      /* 7.9:1 */
+    --faint: #7c7a75;    /* 4.6:1, small labels only */
+    --x: #e65c5c;
+    --y: #78cc70;
+    --z: #5c90e6;
+    --coin: #f2c14e;
+    --sans: "Bricolage", ui-sans-serif, system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    --display: "Michroma", "Bricolage", ui-sans-serif, sans-serif;
+    --gutter: clamp(20px, 4.5vw, 72px);
+    --max: 1320px;
+    --ease: cubic-bezier(.2, .7, .2, 1);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { background: var(--bg); scroll-behavior: smooth; scrollbar-color: var(--line-2) var(--bg); }
+  body {
+    margin: 0;
+    color: var(--body);
+    font: 400 17px/1.6 var(--sans);
+    font-stretch: 100%;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection { background: var(--text); color: #000; }
+  :focus-visible { outline: 2px solid var(--text); outline-offset: 3px; border-radius: 4px; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 10px; border: 2px solid var(--bg); }
+
+  a { color: inherit; }
+  img { display: block; max-width: 100%; height: auto; }
+  h1, h2, h3 { margin: 0; color: var(--text); text-wrap: balance; }
+  p { margin: 0; text-wrap: pretty; }
+  code, pre, kbd { font-family: var(--mono); font-size: .88em; }
+  p code { color: var(--text); background: var(--raised); padding: .1em .38em; border-radius: 5px; }
+
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter); }
+  .skip { position: absolute; left: -999px; top: 8px; z-index: 50; background: var(--text); color: #000; padding: 8px 14px; border-radius: 8px; }
+  .skip:focus { left: 8px; }
+
+  /* ---------- header ---------- */
+  .top {
+    position: fixed; inset: 0 0 auto 0; z-index: 20;
+    transition: background .3s var(--ease), border-color .3s var(--ease);
+    border-bottom: 1px solid transparent;
+  }
+  .top.scrolled { background: rgba(0, 0, 0, .92); border-color: var(--line); }
+  .top .wrap { display: flex; align-items: center; gap: 28px; height: 64px; }
+  .mark { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); font-family: var(--display); font-weight: 400; letter-spacing: .2em; font-size: 13px; }
+  .mark svg { width: 18px; height: 18px; }
+  .top nav { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+  .top nav a { text-decoration: none; color: var(--dim); font-size: 15px; padding: 8px 12px; border-radius: 8px; transition: color .2s; }
+  .top nav a:hover { color: var(--text); }
+  .top nav a.gh { color: var(--text); border: 1px solid var(--line-2); margin-left: 8px; }
+  .top nav a.gh:hover { border-color: var(--dim); }
+
+  /* ---------- buttons ---------- */
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    height: 48px; padding: 0 22px; border-radius: 999px;
+    font: 600 16px/1 var(--sans); text-decoration: none; white-space: nowrap;
+    transition: transform .2s var(--ease), background .2s, border-color .2s, color .2s;
+  }
+  .btn svg { width: 16px; height: 16px; transition: transform .2s var(--ease); }
+  .btn:hover svg { transform: translateX(3px); }
+  .btn-solid { background: var(--text); color: #000; }
+  .btn-solid:hover { background: #fff; }
+  .btn-line { color: var(--text); border: 1px solid var(--line-2); }
+  .btn-line:hover { border-color: var(--dim); }
+
+  /* ---------- hero ---------- */
+  .hero {
+    position: relative; min-height: max(680px, 100svh);
+    display: flex; align-items: flex-end;
+    overflow: hidden; border-bottom: 1px solid var(--line);
+  }
+  #world { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: pan-y; }
+  #world.dragging { cursor: grabbing; }
+  .hero::after {
+    /* keeps the headline readable over the scene; never over the art's right side */
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(90deg, #000 0%, rgba(0,0,0,.82) 28%, rgba(0,0,0,0) 58%),
+                linear-gradient(0deg, #000 0%, rgba(0,0,0,0) 30%);
+  }
+  .hero .wrap { position: relative; z-index: 2; width: 100%; padding-bottom: clamp(48px, 9vh, 112px); pointer-events: none; }
+  .hero .wrap > * { pointer-events: auto; }
+  /* Michroma has one weight: contrast comes from color, not weight. */
+  h1 {
+    font-family: var(--display); font-weight: 400;
+    font-size: clamp(34px, 5.6vw, 92px);
+    line-height: 1.04;
+    letter-spacing: -.03em;
+    max-width: 13ch;
+    margin-left: -.03em;
+  }
+  h1 .heavy { display: block; color: var(--text); }
+  h1 .light { display: block; color: var(--faint); margin-top: .08em; }
+  .lede { max-width: 44ch; margin-top: clamp(26px, 4vh, 40px); font-size: clamp(17px, 1.35vw, 20px); line-height: 1.55; color: var(--body); }
+  .lede strong { color: var(--text); font-weight: 600; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+  .hint {
+    position: absolute; z-index: 2; right: var(--gutter); bottom: clamp(48px, 9vh, 112px);
+    display: flex; align-items: center; gap: 10px; color: var(--faint); font-size: 13px;
+  }
+  .hint svg { width: 18px; height: 18px; }
+
+  /* ---------- sections ---------- */
+  section.block { padding: clamp(96px, 14vw, 180px) 0 0; }
+  .head { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 24px 64px; align-items: end; margin-bottom: clamp(40px, 6vw, 72px); }
+  h2 {
+    font-family: var(--display); font-weight: 400;
+    font-size: clamp(26px, 3.4vw, 50px);
+    line-height: 1.12; letter-spacing: -.025em;
+  }
+  h2 .light { color: var(--faint); }
+  .head p { max-width: 46ch; color: var(--dim); font-size: 18px; }
+  .head p strong { color: var(--text); font-weight: 600; }
+
+  /* ---------- live script ---------- */
+  .live { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--panel); }
+  .editor { border-right: 1px solid var(--line); min-width: 0; display: flex; flex-direction: column; }
+  .bar { display: flex; align-items: center; gap: 4px; height: 44px; padding: 0 10px 0 6px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--faint); }
+  .bar .tab { position: relative; height: 100%; display: flex; align-items: center; padding: 0 12px; color: var(--text); }
+  .bar .tab::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; background: var(--text); border-radius: 2px; }
+  .bar .path { color: var(--faint); }
+  .bar button { margin-left: auto; font: 500 13px var(--sans); color: var(--dim); background: none; border: 1px solid var(--line-2); border-radius: 8px; height: 28px; padding: 0 12px; cursor: pointer; }
+  .bar button:hover { color: var(--text); border-color: var(--dim); }
+  pre.code {
+    margin: 0; padding: 18px 0 22px; overflow-x: auto; flex: 1;
+    font-size: 13.5px; line-height: 1.72; color: #c9c6bf;
+    counter-reset: ln; tab-size: 4;
+  }
+  pre.code .line { display: block; padding: 0 22px 0 0; }
+  pre.code .line::before {
+    counter-increment: ln; content: counter(ln);
+    display: inline-block; width: 4.2ch; margin-right: 2.2ch; text-align: right;
+    color: #4a4946; user-select: none;
+  }
+  pre.code .k { color: var(--text); font-weight: 600; }
+  pre.code .f { color: var(--text); }
+  pre.code .s { color: #a9c9a0; }
+  pre.code .n { color: #c9a98a; }
+  pre.code .b { color: #9fb6e0; }
+  .num {
+    font: inherit; color: var(--coin); background: rgba(242, 193, 78, .1);
+    border: 0; border-bottom: 1px dashed rgba(242, 193, 78, .6);
+    border-radius: 4px 4px 0 0; padding: 0 3px; margin: 0 -3px;
+    cursor: ew-resize; touch-action: none; user-select: none;
+    transition: background .15s;
+  }
+  .num:hover, .num.active { background: rgba(242, 193, 78, .2); }
+  .num:focus-visible { outline: 2px solid var(--coin); outline-offset: 2px; }
+  .stage { display: flex; flex-direction: column; min-width: 0; background: #000; }
+  .stage canvas { display: block; width: 100%; flex: 1; min-height: 340px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 14px 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--dim); }
+  .legend b { color: var(--coin); font-weight: 600; }
+  .console { border-top: 1px solid var(--line); background: var(--panel); }
+  .console .bar { height: 38px; padding-left: 0; }
+  .console .count { margin-left: auto; padding-right: 8px; color: var(--dim); }
+  .console ol { list-style: none; margin: 0; padding: 8px 0 12px; height: 118px; overflow: hidden; font: 12.5px/1.7 var(--mono); }
+  .console li { display: flex; gap: 14px; padding: 0 18px; color: var(--body); animation: logIn .35s var(--ease); }
+  .console li span { color: var(--faint); }
+  .console li .src { margin-left: auto; color: #5f5e5a; font-style: normal; }
+  .console .empty { color: var(--faint); font-family: var(--sans); }
+  @keyframes logIn { from { opacity: 0; transform: translateY(6px); } }
+  .note { margin-top: 18px; font-size: 14px; color: var(--faint); }
+
+  /* ---------- Oberon tour ---------- */
+  .tour { display: grid; grid-template-columns: minmax(250px, .32fr) minmax(0, 1fr); gap: clamp(24px, 4vw, 56px); align-items: start; }
+  .stops { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+  .stops li { border-bottom: 1px solid var(--line); }
+  .stops button {
+    all: unset; box-sizing: border-box; display: block; width: 100%; padding: 15px 4px; cursor: pointer;
+  }
+  .stops .name { display: flex; align-items: center; gap: 12px; font-size: 19px; font-weight: 600; color: var(--faint); transition: color .2s; }
+  .stops .name::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: var(--line-2); transition: background .2s, transform .3s var(--ease); }
+  .stops .desc { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .35s var(--ease); }
+  .stops .desc > span { overflow: hidden; color: var(--dim); font-size: 15px; line-height: 1.55; padding-left: 19px; }
+  .stops button:hover .name { color: var(--body); }
+  .stops button[aria-pressed="true"] .name { color: var(--text); }
+  .stops button[aria-pressed="true"] .name::before { background: var(--text); transform: rotate(45deg); }
+  .stops button[aria-pressed="true"] .desc { grid-template-rows: 1fr; }
+  .stops button[aria-pressed="true"] .desc > span { padding-top: 6px; }
+  .stops button:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; border-radius: 6px; }
+  .shot { position: relative; margin: 0; border: 1px solid var(--line-2); border-radius: 14px; overflow: hidden; aspect-ratio: 1600 / 950; background: #000; }
+  .shot img { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity .45s var(--ease); }
+  .shot img.on { opacity: 1; }
+  .focus {
+    position: absolute; border-radius: 6px;
+    box-shadow: 0 0 0 1.5px var(--text), 0 0 0 200vmax rgba(0, 0, 0, .62);
+    transition: left .5s var(--ease), top .5s var(--ease), width .5s var(--ease), height .5s var(--ease);
+    pointer-events: none;
+  }
+  .focus span {
+    position: absolute; left: -1.5px; top: -30px; background: var(--text); color: #000;
+    font-size: 12px; font-weight: 600; padding: 4px 9px; border-radius: 6px 6px 6px 0; white-space: nowrap;
+  }
+  .focus.below span { top: auto; bottom: -30px; border-radius: 0 6px 6px 6px; }
+
+  /* ---------- crates ---------- */
+  .inside { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: clamp(32px, 6vw, 96px); align-items: start; }
+  .inside .stick { position: sticky; top: 112px; }
+  .inside .stick p { margin-top: 22px; max-width: 40ch; color: var(--dim); font-size: 18px; }
+  .inside .stick .btn { margin-top: 30px; }
+  .ledger { margin: 0; border-top: 1px solid var(--line-2); }
+  .ledger > div {
+    display: grid; grid-template-columns: 11.5em minmax(0, 1fr) auto; gap: 8px 24px; align-items: baseline;
+    padding: 20px 0; border-bottom: 1px solid var(--line);
+  }
+  .ledger dt { font: 500 14.5px var(--mono); color: var(--text); }
+  .ledger dd { margin: 0; color: var(--body); }
+  .ledger dd.on { color: var(--faint); font-size: 14px; text-align: right; }
+  .ledger > div:hover dt { color: #fff; }
+  .ledger > div.ed { border-bottom-color: var(--line-2); }
+  .ledger > div.ed dt { color: var(--text); }
+
+  /* ---------- start ---------- */
+  .start { margin-top: clamp(96px, 14vw, 180px); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel); }
+  .start .wrap { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: clamp(32px, 5vw, 80px); padding-top: clamp(64px, 9vw, 120px); padding-bottom: clamp(64px, 9vw, 120px); align-items: center; }
+  .start p { margin-top: 20px; max-width: 42ch; color: var(--dim); font-size: 18px; }
+  .start .links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
+  .term { border: 1px solid var(--line-2); border-radius: 14px; background: #000; overflow: hidden; }
+  .term .bar { padding-left: 16px; }
+  .term .dots { display: flex; gap: 7px; }
+  .term .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--line-2); }
+  .term .bar span { margin-left: 8px; }
+  .term pre { margin: 0; padding: 22px 24px 26px; overflow-x: auto; font-size: 14px; line-height: 1.9; color: var(--text); }
+  .term pre .p { color: var(--faint); user-select: none; }
+  .term pre .c { color: var(--faint); }
+
+  /* ---------- footer ---------- */
+  footer { padding: 28px 0 0; overflow: hidden; }
+  footer .row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; font-size: 14px; color: var(--faint); }
+  footer nav { display: flex; gap: 22px; margin-left: auto; }
+  footer nav a { text-decoration: none; color: var(--dim); }
+  footer nav a:hover { color: var(--text); }
+  .giant {
+    display: inline-block; margin: clamp(28px, 4vw, 56px) 0 0; white-space: nowrap;
+    font-family: var(--display); font-weight: 400; letter-spacing: -.02em; line-height: .8;
+    color: var(--text); font-size: 20vw; user-select: none;
+    transform: translateY(.1em);
+  }
+
+  /* ---------- motion ---------- */
+  .js .rise { opacity: 0; transform: translateY(18px); transition: opacity .8s var(--ease), transform .8s var(--ease); }
+  .js .rise.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .js .rise { opacity: 1; transform: none; transition: none; }
+    .focus, .shot img, .stops .desc { transition: none; }
+    .console li { animation: none; }
+  }
+
+  /* ---------- small screens ---------- */
+  @media (max-width: 1000px) {
+    .live, .tour, .inside, .start .wrap { grid-template-columns: minmax(0, 1fr); }
+    .editor { border-right: 0; border-bottom: 1px solid var(--line); }
+    .head { grid-template-columns: minmax(0, 1fr); }
+    .inside .stick { position: static; }
+    .stops { display: flex; flex-wrap: wrap; gap: 6px; border: 0; }
+    .stops li { border: 0; }
+    .stops button { padding: 8px 14px; border: 1px solid var(--line-2); border-radius: 999px; }
+    .stops .name { font-size: 15px; }
+    .stops .name::before { display: none; }
+    .stops .desc { display: none; }
+    .tour .caption { display: block; }
+  }
+  @media (max-width: 760px) {
+    .top nav a:not(.gh) { display: none; }
+    .hero { flex-direction: column; align-items: stretch; min-height: 0; }
+    #world { position: relative; height: 54svh; min-height: 360px; }
+    .hero::after { background: linear-gradient(0deg, #000 0%, rgba(0,0,0,0) 40%); height: 54svh; min-height: 360px; }
+    .hero .wrap { margin-top: -64px; }
+    .hint { display: none; }
+    pre.code { font-size: 12px; }
+    .ledger > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    .ledger dd.on { text-align: left; }
+  }
+  .caption { display: none; margin-top: 16px; color: var(--dim); font-size: 15px; }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top" id="top">
+  <div class="wrap">
+    <a class="mark" href="#main" aria-label="AUTOMATA home">
+      <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+        <path d="M6 12.5V2.5" stroke="#78cc70" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M6 12.5h10" stroke="#e65c5c" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M6 12.5l-4 4" stroke="#5c90e6" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      AUTOMATA
+    </a>
+    <nav aria-label="Main">
+      <a href="#script">Scripting</a>
+      <a href="#oberon">Oberon</a>
+      <a href="docs/tutorials/index.html">Tutorials</a>
+      <a href="docs/index.html">Docs</a>
+      <a class="gh" href="https://github.com/x017/automata">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <div class="hero">
+    <canvas id="world" aria-hidden="true"></canvas>
+    <div class="wrap">
+      <h1><span class="heavy">Rust underneath.</span> <span class="light">Python on top.</span></h1>
+      <p class="lede">
+        AUTOMATA is a 2D and 3D game engine. A Rust core runs the physics and
+        the renderer, and your game is plain Python. <strong>Oberon</strong>, the
+        native editor, puts the scene, the scripts and Play in one window.
+      </p>
+      <div class="actions">
+        <a class="btn btn-solid" href="docs/tutorials/first-scene.html">
+          Make your first scene
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+        <a class="btn btn-line" href="#start">Run it locally</a>
+      </div>
+    </div>
+    <p class="hint" id="hint">
+      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 10a7 3.2 0 1 0 14 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M15 7.6l2 2.4-2.7 1.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Live in your browser. Drag to orbit.
+    </p>
+  </div>
+
+  <section class="block" id="script" aria-labelledby="script-h">
+    <div class="wrap">
+      <div class="head rise">
+        <h2 id="script-h">Change a number. <span class="light">The coins follow.</span></h2>
+        <p>
+          This is <code>coin.py</code> from the Coin Run tutorial, written against the
+          real script API. <strong>Drag a yellow number</strong> sideways, or focus it and
+          use the arrow keys.
+        </p>
+      </div>
+
+      <div class="live rise">
+        <div class="editor">
+          <div class="bar">
+            <span class="tab">coin.py</span>
+            <span class="path">scripts/</span>
+            <button type="button" id="reset">Reset values</button>
+          </div>
+<pre class="code" id="code"><span class="k">import</span> math
+
+PICKUP_RADIUS = <button class="num" type="button" data-k="radius" data-min="0.3" data-max="2.4" data-step="0.1" data-dec="1" aria-label="Pickup radius">1.1</button>
+
+
+<span class="k">def</span> <span class="f">start</span>(entity, ctx):
+    entity.state[<span class="s">"home"</span>] = entity.transform.position
+    entity.attributes[<span class="s">"collected"</span>] = <span class="k">False</span>
+
+
+<span class="k">def</span> <span class="f">update</span>(entity, ctx):
+    <span class="k">if</span> entity.attributes.get(<span class="s">"collected"</span>):
+        <span class="k">return</span>
+    hx, hy, hz = entity.state[<span class="s">"home"</span>]
+    t = ctx.time.elapsed
+    bob = <button class="num" type="button" data-k="amp" data-min="0" data-max="0.6" data-step="0.01" data-dec="2" aria-label="Bob height">0.15</button> * math.sin(t * <button class="num" type="button" data-k="freq" data-min="0" data-max="10" data-step="0.1" data-dec="1" aria-label="Bob speed">3.0</button> + hx)
+    entity.transform.position = (hx, hy + bob, hz)
+    entity.transform.rotation_euler = (<span class="n">0.0</span>, t * <button class="num" type="button" data-k="spin" data-min="-12" data-max="12" data-step="0.1" data-dec="1" aria-label="Spin speed">2.5</button>, <span class="n">0.0</span>)
+
+    px, py, pz = ctx.scene[<span class="s">"Player"</span>].transform.position
+    <span class="k">if</span> math.dist((px, py, pz), (hx, hy, hz)) &lt; PICKUP_RADIUS:
+        entity.attributes[<span class="s">"collected"</span>] = <span class="k">True</span>
+        entity.transform.position = (hx, <span class="n">-100.0</span>, hz)
+        <span class="b">print</span>(<span class="s">f"+{entity.attributes.get('value', 1)}"</span>)</pre>
+        </div>
+
+        <div class="stage">
+          <canvas id="coins" role="img" aria-label="Three coins spinning and bobbing on a grid while a player walks past. Dashed rings show each coin's pickup radius; coins inside the player's path get collected."></canvas>
+          <div class="console">
+            <div class="bar"><span class="tab">Console</span><span class="count" id="count">0 collected</span></div>
+            <ol id="log" aria-hidden="true"><li class="empty">print() output from your scripts lands here.</li></ol>
+          </div>
+        </div>
+      </div>
+      <p class="note">In Oberon you save the file and press Play. Here the preview runs the same logic as you drag, and the player starts a new lap at each end.</p>
+    </div>
+  </section>
+
+  <section class="block" id="oberon" aria-labelledby="oberon-h">
+    <div class="wrap">
+      <div class="head rise">
+        <h2 id="oberon-h">Oberon. <span class="light">The whole loop in one window.</span></h2>
+        <p>A native editor written in Rust, rendering through the engine's own wgpu
+          renderer. Build the level, write the scripts, set the look, then press Play.</p>
+      </div>
+
+      <div class="tour rise">
+        <ul class="stops" id="stops">
+          <li><button type="button" aria-pressed="true" data-img="editor" data-rect="250 40 1010 696"><span class="name">Scene view</span><span class="desc"><span>The engine's renderer, live. Move, rotate and scale gizmos; drag to orbit, F to frame.</span></span></button></li>
+          <li><button type="button" aria-pressed="false" data-img="editor" data-rect="0 40 250 555"><span class="name">Hierarchy</span><span class="desc"><span>Every entity, with an icon for what it is. Right-click to rename, duplicate, save as a prefab or attach a script.</span></span></button></li>
+          <li><button type="button" aria-pressed="false" data-img="editor" data-rect="0 595 250 332"><span class="name">Files</span><span class="desc"><span>Your project folder as a tree. Double-click a script to edit it or a scene to open it.</span></span></button></li>
+          <li><button type="button" aria-pressed="false" data-img="editor" data-rect="1260 40 340 887"><span class="name">Inspector</span><span class="desc"><span>Components as plain fields. Drag a label to scrub a value; every edit is one undo step.</span></span></button></li>
+          <li><button type="button" aria-pressed="false" data-img="code" data-rect="250 40 1010 696"><span class="name">Code editor</span><span class="desc"><span>A native Python editor in a tab, with completion, find and replace, diagnostics and go to definition.</span></span></button></li>
+          <li><button type="button" aria-pressed="false" data-img="graphics" data-rect="1260 40 340 887"><span class="name">Graphics</span><span class="desc"><span>Sun, sky, tone mapping, fog and quality in one tab, plus one-click test scenes.</span></span></button></li>
+          <li><button type="button" aria-pressed="false" data-img="camera" data-rect="826 484 420 240"><span class="name">Cameras</span><span class="desc"><span>Scene cameras draw their frustum and show a live preview of exactly what they see.</span></span></button></li>
+          <li><button type="button" aria-pressed="false" data-img="editor" data-rect="250 736 1010 191"><span class="name">Console</span><span class="desc"><span>print() from your scripts and Python errors, with clickable file and line links.</span></span></button></li>
+        </ul>
+        <div>
+          <figure class="shot" id="shot">
+            <img class="on" data-name="editor" src="../assets/oberon/editor.png" width="1600" height="950" alt="Oberon with the Coin Run level open: hierarchy and file tree on the left, a wireframe scene view in the middle, the inspector on the right and the console below.">
+            <img data-name="code" src="../assets/oberon/code.png" width="1600" height="950" alt="Oberon's code editor with a Python file open and find in progress." loading="lazy">
+            <img data-name="graphics" src="../assets/oberon/graphics.png" width="1600" height="950" alt="Oberon's Graphics tab with renderer quality, sun, environment and camera settings." loading="lazy">
+            <img data-name="camera" src="../assets/oberon/camera.png" width="1600" height="950" alt="A selected scene camera drawing its frustum, with a live preview inset in the corner." loading="lazy">
+            <div class="focus" id="focus" aria-hidden="true"><span>Scene view</span></div>
+          </figure>
+          <p class="caption" id="caption" aria-live="polite"></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="engine" aria-labelledby="engine-h">
+    <div class="wrap inside">
+      <div class="stick rise">
+        <h2 id="engine-h">Eight crates. <span class="light">No black boxes.</span></h2>
+        <p>Each crate does one job and stays small enough to read. Every push
+          runs formatting, Clippy with warnings as errors, and the Rust and Python test
+          suites.</p>
+        <a class="btn btn-line" href="docs/engine/architecture.html">How it fits together</a>
+      </div>
+      <dl class="ledger rise">
+        <div><dt>automata-core</dt><dd>Lifecycle, the fixed-timestep loop, the window runtime</dd><dd class="on">winit</dd></div>
+        <div><dt>automata-scene</dt><dd>Entity component system, events and resources</dd><dd class="on">hecs</dd></div>
+        <div><dt>automata-renderer</dt><dd>2D and 3D rendering, shadows, tone mapping and fog</dd><dd class="on">wgpu</dd></div>
+        <div><dt>automata-physics</dt><dd>Rigid bodies, raycasts and character controllers in 2D and 3D</dd><dd class="on">Rapier</dd></div>
+        <div><dt>automata-input</dt><dd>Keyboard, mouse and gamepad, with action maps</dd><dd class="on">gilrs</dd></div>
+        <div><dt>automata-audio</dt><dd>Sounds and music</dd><dd class="on">Kira</dd></div>
+        <div><dt>automata-python</dt><dd>The <code>automata</code> Python package your games import</dd><dd class="on">PyO3</dd></div>
+        <div class="ed"><dt>oberon</dt><dd>The editor: its own UI, code editor and Python bridge</dd><dd class="on">tiny-skia</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="start" id="start" aria-labelledby="start-h">
+    <div class="wrap">
+      <div class="rise">
+        <h2 id="start-h">Open the tutorial level.</h2>
+        <p>You need a Rust toolchain and Python 3.10 or newer. Oberon opens Coin Run,
+          a small platformer with six coins, a follow camera and four scripts. Press
+          Ctrl+P to play it.</p>
+        <div class="links">
+          <a class="btn btn-solid" href="docs/tutorials/index.html">
+            Tutorials
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a>
+          <a class="btn btn-line" href="docs/oberon/index.html">Oberon manual</a>
+          <a class="btn btn-line" href="docs/api-reference.html">Python API</a>
+        </div>
+      </div>
+      <div class="term rise">
+        <div class="bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Terminal</span><button type="button" id="copy">Copy</button></div>
+<pre id="cmds"><span class="p">$ </span>git clone https://github.com/x017/automata
+<span class="p">$ </span>cd automata
+<span class="p">$ </span>cargo run -p oberon --release \
+    examples/oberon/coin_run/level.ron</pre>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="row">
+      <span>AUTOMATA · MIT or Apache-2.0</span>
+      <nav aria-label="Footer">
+        <a href="docs/index.html">Docs</a>
+        <a href="docs/api-reference.html">API</a>
+        <a href="docs/tutorials/index.html">Tutorials</a>
+        <a href="https://github.com/x017/automata">GitHub</a>
+      </nav>
+    </div>
+    <span class="giant" id="giant" aria-hidden="true">AUTOMATA</span>
+  </div>
+</footer>
+
+<script src="landing.js"></script>
+</body>
+</html>

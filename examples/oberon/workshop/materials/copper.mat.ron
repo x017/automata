@@ -1,0 +1,10 @@
+// A material. Entities that use it share its colour, surface and
+// textures: material: "materials/copper.mat.ron" on a Mesh Renderer. Texture paths are
+// relative to this file's folder.
+(
+    color: (0.95, 0.6, 0.42, 1.0),
+    roughness: 1.0,
+    metallic: 1.0,
+    roughness_metal_map: "../textures/brushed_rm.png",
+    tiling: (2.0, 1.0),
+)

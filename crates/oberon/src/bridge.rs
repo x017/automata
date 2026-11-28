@@ -1,0 +1,2706 @@
+//! The Python script bridge: Play mode runs behaviour scripts out of process.
+//!
+//! Oberon never embeds a Python interpreter. When a scene with scripts
+//! enters Play mode, it starts the project's `python3` on a small runner
+//! (`bridge.py`, compiled into the editor and written to
+//! `<project>/.oberon/bridge.py` next to `_automata_script_api.py`, the
+//! script API shared with `automata.run_scene`) and exchanges one JSON
+//! object per line:
+//!
+//! * Oberon → runner: `frame` (time, held keys, every entity's transform,
+//!   character velocity, grounded flag, attributes and script path), and
+//!   `stop`.
+//! * runner → Oberon: `ready`, `log` (`print` output), `error` (with the
+//!   script file and line, so the Console can jump there), `reloaded` (hot
+//!   reload after a save) and `frame` (the writes scripts made).
+//!
+//! Frames are pipelined, never awaited: Oberon sends the next frame only
+//! after the previous reply arrived and applies replies as they come, so a
+//! slow script lowers the script tick rate instead of freezing the editor.
+
+use std::collections::{BTreeMap, HashSet};
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use automata_core::scene_file::TransformData;
+use automata_core::AttributeValue;
+
+use crate::json::Json;
+
+/// The runner script (pure standard-library Python).
+pub const RUNNER: &str = include_str!("bridge.py");
+
+/// The behaviour-script API (`entity`, `ctx`, loading, errors), the same
+/// module the engine's `run_scene` uses. The runner imports it from its own
+/// folder, so Play needs no installed packages.
+pub const SCRIPT_API: &str = include_str!("../../automata-python/python/automata/script_api.py");
+
+/// The file name [`SCRIPT_API`] is written under, next to the runner.
+pub const SCRIPT_API_FILE: &str = "_automata_script_api.py";
+
+/// `ctx.steam` (`automata/steam.py`). In Play there's no Steam: it works
+/// offline, logging unlocked achievements to the Console.
+pub const STEAM_API: &str = include_str!("../../automata-python/python/automata/steam.py");
+
+/// The file name [`STEAM_API`] is written under, next to the runner.
+pub const STEAM_API_FILE: &str = "_automata_steam.py";
+
+/// The environment variable that hands Play the project's touch controls
+/// (`build.ron`'s `touch_controls` as JSON; empty for none).
+pub const TOUCH_CONTROLS_ENV: &str = "OBERON_TOUCH_CONTROLS";
+
+/// The default interpreter when the preferences don't name one.
+#[must_use]
+pub fn default_python() -> &'static str {
+    if cfg!(windows) {
+        "python"
+    } else {
+        "python3"
+    }
+}
+
+/// One entity's state, sent to scripts every frame.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EntityState {
+    /// Document entity id (stable for the session).
+    pub id: u64,
+    /// Entity name.
+    pub name: String,
+    /// Absolute path of the attached script, if any.
+    pub script: Option<PathBuf>,
+    /// Local position.
+    pub position: [f32; 3],
+    /// Euler rotation (XYZ, radians).
+    pub rotation: [f32; 3],
+    /// Scale.
+    pub scale: [f32; 3],
+    /// Character velocity, for character-controlled entities.
+    pub velocity: Option<[f32; 3]>,
+    /// Whether a character stands on something.
+    pub grounded: bool,
+    /// Custom attributes.
+    pub attributes: BTreeMap<String, AttributeValue>,
+    /// The entity's camera as `[eye xyz, target xyz, fov°]`, if it has one.
+    pub camera: Option<[f32; 7]>,
+    /// Whether the entity has an Audio Source.
+    pub has_audio: bool,
+    /// An animated model's playback, if the entity shows one.
+    pub anim: Option<automata_scene::AnimationState>,
+    /// The entity's joint and how it's holding, if it has one.
+    pub joint: Option<(automata_physics::Joint, automata_physics::JointState)>,
+    /// What the entity follows, `(entity name, bone)`, if it's attached.
+    pub attached: Option<(String, String)>,
+    /// The entity's Nav Agent and how it's getting on, if it has one.
+    pub nav: Option<automata_nav::NavAgent>,
+    /// The entity's ragdoll and whether it's limp, if it has one.
+    pub rag: Option<automata_scene::RagdollStatus>,
+    /// The entity's sprite (clip playing, frame, flips), if it has one.
+    pub spr: Option<automata_scene::Sprite2D>,
+}
+
+/// A collider as the runner sees it (for `ctx.physics.raycast`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ColliderShape {
+    /// A box: entity id, centre, rotation `[x, y, z, w]`, half extents.
+    Cuboid {
+        /// Document entity id.
+        id: u64,
+        /// World centre.
+        center: [f32; 3],
+        /// World rotation quaternion.
+        rotation: [f32; 4],
+        /// Half extents.
+        half: [f32; 3],
+    },
+    /// A sphere.
+    Ball {
+        /// Document entity id.
+        id: u64,
+        /// World centre.
+        center: [f32; 3],
+        /// Radius.
+        radius: f32,
+    },
+    /// A capsule along its local Y axis.
+    Capsule {
+        /// Document entity id.
+        id: u64,
+        /// World centre.
+        center: [f32; 3],
+        /// World rotation quaternion.
+        rotation: [f32; 4],
+        /// Half the straight part's length.
+        half_height: f32,
+        /// Radius.
+        radius: f32,
+    },
+    /// Triangles (a mesh collider or a convex hull), shared by key: the
+    /// geometry itself travels once per session in [`FrameInput::meshes`].
+    Mesh {
+        /// Document entity id.
+        id: u64,
+        /// World position of the triangles' origin.
+        center: [f32; 3],
+        /// World rotation quaternion.
+        rotation: [f32; 4],
+        /// Key of the geometry in [`FrameInput::meshes`].
+        mesh: u64,
+    },
+}
+
+/// Collision triangles in a collider's local space.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeshTris {
+    /// Vertex positions.
+    pub vertices: Vec<[f32; 3]>,
+    /// Triangles as vertex indices.
+    pub triangles: Vec<[u32; 3]>,
+    /// A terrain's grid, `[columns, rows]`: the vertices are laid out row
+    /// by row and `triangles` left empty, scripts walking the grid instead.
+    pub grid: Option<[u32; 2]>,
+}
+
+/// Everything besides entities that a frame tells scripts.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FrameInput {
+    /// Mouse buttons held (`"left"`, `"right"`, `"middle"`).
+    pub mouse_buttons: Vec<&'static str>,
+    /// Mouse movement since the last frame (pixels, +y down).
+    pub mouse_delta: [f32; 2],
+    /// Whether the cursor is captured for mouse-look.
+    pub mouse_locked: bool,
+    /// The cursor in game-view pixels from its top-left (`None` outside
+    /// the view or while captured).
+    pub mouse_pos: Option<[f32; 2]>,
+    /// The game view's size in pixels (for the HUD).
+    pub screen: [u32; 2],
+    /// Solid colliders, for raycasts.
+    pub colliders: Vec<ColliderShape>,
+    /// The triangles behind every [`ColliderShape::Mesh`] key in
+    /// `colliders`. The bridge sends each key's geometry only once.
+    pub meshes: Vec<(u64, Arc<MeshTris>)>,
+    /// Entities whose Audio Source is playing.
+    pub playing: Vec<u64>,
+    /// Water surfaces at the last physics step, packed by
+    /// [`automata_renderer::WaterSurface::pack`] (for `water_height`).
+    pub water: Vec<Vec<f32>>,
+    /// The graphics preset Play renders at (`"high"`), for
+    /// `ctx.settings.graphics`; empty when unknown.
+    pub graphics: &'static str,
+    /// The scene's navigation mesh, for `ctx.nav`. The bridge sends it
+    /// when it changes.
+    pub nav: Option<Arc<automata_nav::NavMesh>>,
+    /// The connected gamepads' names, for `ctx.input.controller` and
+    /// `ctx.input.prompt`.
+    pub pads: Vec<String>,
+}
+
+/// What a script asked of an entity's Audio Source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioWrite {
+    /// Start (or restart) it.
+    Play,
+    /// Stop it.
+    Stop,
+}
+
+/// A one-shot sound requested by `ctx.audio.play`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OneShot {
+    /// The file, relative to the scene folder.
+    pub path: String,
+    /// Volume (1 = as recorded).
+    pub volume: f32,
+    /// Pitch / speed (1 = as recorded).
+    pub pitch: f32,
+    /// Where it plays (fades with distance), or `None` for everywhere.
+    pub position: Option<[f32; 3]>,
+}
+
+/// What a HUD item draws.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HudKind {
+    /// An image file (relative to the scene folder).
+    Image(String),
+    /// A filled rectangle.
+    Rect,
+    /// A string, anchored at the item's `x`, `y`.
+    Text {
+        /// The string (`\n` starts a new line).
+        text: String,
+        /// Line height in pixels.
+        size: f32,
+        /// Where `x` sits on each line.
+        align: automata_renderer::TextAlign,
+        /// Drop-shadow colour.
+        shadow: Option<[f32; 4]>,
+        /// Outline colour.
+        outline: Option<[f32; 4]>,
+        /// A `.ttf` / `.otf` file relative to the scene folder (`None`:
+        /// the built-in font).
+        font: Option<String>,
+        /// A font for characters `font` lacks, tried before the built-in
+        /// one: the language's (`@font` in `lang/*.csv`).
+        fallback: Option<String>,
+    },
+}
+
+/// One thing `ctx.hud` drew this frame (pixels, top-left origin, placed by
+/// its centre).
+#[derive(Debug, Clone, PartialEq)]
+pub struct HudItem {
+    /// Image or rectangle.
+    pub kind: HudKind,
+    /// Centre x.
+    pub x: f32,
+    /// Centre y.
+    pub y: f32,
+    /// Size; `None` for an image's own size.
+    pub size: Option<[f32; 2]>,
+    /// RGBA tint.
+    pub color: [f32; 4],
+    /// Rotation in radians.
+    pub rotation: f32,
+}
+
+/// The runner's reply to one frame.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FrameReply {
+    /// Entity changes.
+    pub writes: Vec<EntityWrite>,
+    /// One-shot sounds to start.
+    pub sounds: Vec<OneShot>,
+    /// The HUD to draw until the next reply.
+    pub hud: Vec<HudItem>,
+    /// A cursor lock request.
+    pub lock: Option<bool>,
+    /// Splashes in the water (`ctx.water.splash`): position and strength.
+    pub splashes: Vec<([f32; 3], f32)>,
+    /// One-off particle effects (`ctx.particles.burst`).
+    pub bursts: Vec<BurstRequest>,
+    /// Extra particles from entities' own emitters (`ctx.particles.emit`):
+    /// document entity id and count.
+    pub emits: Vec<(u64, u32)>,
+    /// How long the scripts took to run this frame, in milliseconds (as
+    /// the runner measured it, without the trip over the pipe).
+    pub script_ms: Option<f32>,
+    /// Player settings to apply now (`ctx.settings.volume`, `.graphics`).
+    pub settings: PlayerSettings,
+}
+
+/// Player settings a script changed (or that were loaded from the
+/// project's `.oberon/save/settings.json` at the start).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct PlayerSettings {
+    /// The master volume, 0 to 1.
+    pub volume: Option<f32>,
+    /// The graphics preset.
+    pub graphics: Option<automata_renderer::GraphicsQuality>,
+}
+
+/// A graphics preset's script name (`"high"`), as `ctx.settings.graphics`
+/// spells it.
+#[must_use]
+pub fn quality_key(quality: automata_renderer::GraphicsQuality) -> &'static str {
+    use automata_renderer::GraphicsQuality as Q;
+    match quality {
+        Q::Low => "low",
+        Q::Medium => "medium",
+        Q::High => "high",
+        Q::Ultra => "ultra",
+        Q::Beautiful => "beautiful",
+    }
+}
+
+fn parse_settings(v: Option<&Json>) -> PlayerSettings {
+    let Some(v) = v else {
+        return PlayerSettings::default();
+    };
+    #[allow(clippy::cast_possible_truncation)]
+    PlayerSettings {
+        volume: v
+            .get("volume")
+            .and_then(Json::as_f64)
+            .filter(|x| x.is_finite())
+            .map(|x| x.clamp(0.0, 1.0) as f32),
+        graphics: v.get("graphics").and_then(Json::as_str).and_then(|name| {
+            automata_renderer::GraphicsQuality::ALL
+                .into_iter()
+                .find(|q| quality_key(*q) == name)
+        }),
+    }
+}
+
+/// A one-off particle effect a script asked for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BurstRequest {
+    /// The effect, preset and changed fields applied.
+    pub emitter: automata_scene::ParticleEmitter,
+    /// Where (world space).
+    pub position: [f32; 3],
+    /// Which way it flies instead of the effect's up, if given.
+    pub direction: Option<[f32; 3]>,
+    /// How many particles, if not the effect's own burst.
+    pub count: Option<u32>,
+}
+
+/// What a script changed on one entity.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EntityWrite {
+    /// Document entity id.
+    pub id: u64,
+    /// New position.
+    pub position: Option<[f32; 3]>,
+    /// New Euler rotation (radians).
+    pub rotation: Option<[f32; 3]>,
+    /// New scale.
+    pub scale: Option<[f32; 3]>,
+    /// New character velocity.
+    pub velocity: Option<[f32; 3]>,
+    /// The full new attribute map.
+    pub attributes: Option<BTreeMap<String, AttributeValue>>,
+    /// New camera `[eye xyz, target xyz, fov°]`.
+    pub camera: Option<[f32; 7]>,
+    /// Play or stop the entity's Audio Source.
+    pub audio: Option<AudioWrite>,
+    /// Requests to the entity's animation, in call order.
+    pub anim: Vec<automata_scene::AnimationCommand>,
+    /// Changes to the entity's joint.
+    pub joint: Option<automata_physics::JointEdit>,
+    /// Attach the entity to a bone, or detach it.
+    pub attach: Option<AttachWrite>,
+    /// Changes to the entity's Nav Agent (`entity.nav.go`, `speed`).
+    pub nav: Option<automata_nav::NavEdit>,
+    /// Changes to the entity's ragdoll (`entity.ragdoll.on()`, pushes).
+    pub rag: Option<automata_scene::RagdollEdit>,
+    /// Changes to the entity's sprite (`entity.sprite.play("run")`, flips).
+    pub spr: Option<automata_scene::SpriteEdit>,
+    /// Remove the entity from the running scene.
+    pub despawn: bool,
+}
+
+/// A script attaching an entity to a bone (`entity.attach`) or detaching
+/// it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AttachWrite {
+    /// Follow `bone` of the entity named `to`, at `offset` in its space.
+    To {
+        /// The name of the entity followed.
+        to: String,
+        /// The bone ("" for the entity's origin).
+        bone: String,
+        /// Where it sits in the bone's space.
+        offset: TransformData,
+    },
+    /// Stop following, staying put.
+    Detach,
+}
+
+/// A message from the runner.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BridgeMsg {
+    /// The runner started.
+    Ready {
+        /// Interpreter version, e.g. `3.12.1`.
+        python: String,
+    },
+    /// Script output (`print`) or a runner notice.
+    Log {
+        /// `info`, `warn` or `error`.
+        level: String,
+        /// The line.
+        msg: String,
+    },
+    /// A script raised.
+    Error {
+        /// One-line summary.
+        msg: String,
+        /// The script file.
+        file: PathBuf,
+        /// 1-based line in `file` (0 when unknown).
+        line: u32,
+        /// The (user-frames-only) traceback.
+        traceback: String,
+    },
+    /// A script file was hot-reloaded.
+    Reloaded(PathBuf),
+    /// The scripts' writes (and sounds, HUD, cursor lock) for one frame.
+    Frame(FrameReply),
+    /// The runner finished its stop hooks and is exiting.
+    Bye,
+    /// The runner exited (or could not be talked to).
+    Exited(String),
+}
+
+enum Event {
+    Line(String),
+    Stderr(String),
+    Eof,
+}
+
+/// A running script runner process.
+pub struct ScriptBridge {
+    child: Child,
+    stdin: Option<ChildStdin>,
+    rx: Receiver<Event>,
+    in_flight: Option<Instant>,
+    frame: u64,
+    exited: bool,
+    /// Mesh keys whose triangles the runner already has.
+    sent_meshes: HashSet<u64>,
+    /// The navigation mesh last sent (by address; 0 for none).
+    sent_nav: usize,
+    /// Frames answered (for the status readout).
+    pub answered: u64,
+}
+
+impl ScriptBridge {
+    /// Writes the runner into `runtime_dir` and starts `python` on it with
+    /// `cwd` as the working directory (the scene's folder, so relative
+    /// paths in scripts behave as in the game).
+    ///
+    /// # Errors
+    ///
+    /// Fails when the runner can't be written or the interpreter can't be
+    /// started (not installed / wrong path in preferences).
+    pub fn start(python: &str, runtime_dir: &Path, cwd: &Path) -> std::io::Result<Self> {
+        // The interpreter runs in `cwd`, so a relative runner path would be
+        // looked up from there instead of from here.
+        let runtime_dir = &std::path::absolute(runtime_dir)?;
+        std::fs::create_dir_all(runtime_dir)?;
+        let runner = runtime_dir.join("bridge.py");
+        for (path, text) in [
+            (runner.clone(), RUNNER),
+            (runtime_dir.join(SCRIPT_API_FILE), SCRIPT_API),
+            (runtime_dir.join(STEAM_API_FILE), STEAM_API),
+        ] {
+            if std::fs::read_to_string(&path).ok().as_deref() != Some(text) {
+                std::fs::write(&path, text)?;
+            }
+        }
+        // The project's touch controls (build.ron), so Play shows them as
+        // the game would; the runtime folder is the project's `.oberon/`.
+        let touch = runtime_dir
+            .parent()
+            .and_then(|project| automata_cli::BuildConfig::load(project).ok())
+            .and_then(|cfg| cfg.touch_controls)
+            .map(|t| t.to_json())
+            .unwrap_or_default();
+        let mut child = Command::new(python)
+            .arg("-u")
+            .arg(&runner)
+            .current_dir(cwd)
+            .env("PYTHONDONTWRITEBYTECODE", "1")
+            .env("PYTHONIOENCODING", "utf-8")
+            .env(TOUCH_CONTROLS_ENV, touch)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let (tx, rx) = mpsc::channel();
+        if let Some(out) = child.stdout.take() {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                for line in BufReader::new(out).lines() {
+                    let Ok(line) = line else { break };
+                    if tx.send(Event::Line(line)).is_err() {
+                        return;
+                    }
+                }
+                let _ = tx.send(Event::Eof);
+            });
+        }
+        if let Some(err) = child.stderr.take() {
+            std::thread::spawn(move || {
+                for line in BufReader::new(err).lines() {
+                    let Ok(line) = line else { break };
+                    if tx.send(Event::Stderr(line)).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+        let stdin = child.stdin.take();
+        Ok(Self {
+            child,
+            stdin,
+            rx,
+            in_flight: None,
+            frame: 0,
+            exited: false,
+            sent_meshes: HashSet::new(),
+            sent_nav: 0,
+            answered: 0,
+        })
+    }
+
+    /// Whether a frame is awaiting its reply.
+    #[must_use]
+    pub fn busy(&self) -> bool {
+        self.in_flight.is_some()
+    }
+
+    /// How long the current frame has been awaiting its reply.
+    #[must_use]
+    pub fn waiting_for(&self) -> Option<Duration> {
+        self.in_flight.map(|t| t.elapsed())
+    }
+
+    /// Whether the runner process is gone.
+    #[must_use]
+    pub fn exited(&self) -> bool {
+        self.exited
+    }
+
+    fn send(&mut self, msg: &Json) -> bool {
+        let Some(stdin) = &mut self.stdin else {
+            return false;
+        };
+        let mut line = msg.dump();
+        line.push('\n');
+        stdin
+            .write_all(line.as_bytes())
+            .and_then(|()| stdin.flush())
+            .is_ok()
+    }
+
+    /// Sends a frame unless the previous one is still being processed.
+    /// Returns whether it was sent.
+    pub fn send_frame(
+        &mut self,
+        dt: f32,
+        time: f32,
+        keys: &[&str],
+        entities: &[EntityState],
+    ) -> bool {
+        self.send_frame_with(dt, time, keys, entities, &FrameInput::default())
+    }
+
+    /// [`send_frame`](Self::send_frame) with mouse, colliders, playing
+    /// sounds and the screen size.
+    pub fn send_frame_with(
+        &mut self,
+        dt: f32,
+        time: f32,
+        keys: &[&str],
+        entities: &[EntityState],
+        input: &FrameInput,
+    ) -> bool {
+        if self.busy() || self.exited {
+            return false;
+        }
+        self.frame += 1;
+        #[allow(clippy::cast_possible_wrap)]
+        let mut msg = Json::obj([
+            ("op", Json::from("frame")),
+            ("frame", Json::Int(self.frame as i64)),
+            ("dt", Json::Float(f64::from(dt))),
+            ("time", Json::Float(f64::from(time))),
+            (
+                "keys",
+                Json::Arr(keys.iter().map(|k| Json::from(*k)).collect()),
+            ),
+            (
+                "entities",
+                Json::Arr(entities.iter().map(state_json).collect()),
+            ),
+        ]);
+        frame_input_json(&mut msg, input);
+        let new_meshes: Vec<Json> = input
+            .meshes
+            .iter()
+            .filter(|(key, _)| self.sent_meshes.insert(*key))
+            .map(|(key, tris)| mesh_json(*key, tris))
+            .collect();
+        if !new_meshes.is_empty() {
+            msg.set("meshes", Json::Arr(new_meshes));
+        }
+        let nav = input.nav.as_ref().map_or(0, |n| Arc::as_ptr(n) as usize);
+        if nav != self.sent_nav {
+            self.sent_nav = nav;
+            msg.set("navmesh", input.nav.as_deref().map_or(Json::Null, nav_json));
+        }
+        if self.send(&msg) {
+            self.in_flight = Some(Instant::now());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Drains the runner's messages.
+    pub fn poll(&mut self) -> Vec<BridgeMsg> {
+        let mut out = Vec::new();
+        loop {
+            match self.rx.try_recv() {
+                Ok(event) => self.handle(event, &mut out),
+                Err(TryRecvError::Disconnected) => {
+                    self.handle(Event::Eof, &mut out);
+                    break;
+                }
+                Err(TryRecvError::Empty) => break,
+            }
+            if self.exited {
+                break;
+            }
+        }
+        out
+    }
+
+    /// Like [`poll`](Self::poll), but first blocks up to `timeout` for the
+    /// runner to say something (for tools that run frames in lock-step).
+    pub fn wait(&mut self, timeout: Duration) -> Vec<BridgeMsg> {
+        let mut out = Vec::new();
+        match self.rx.recv_timeout(timeout) {
+            Ok(event) => self.handle(event, &mut out),
+            Err(mpsc::RecvTimeoutError::Disconnected) => self.handle(Event::Eof, &mut out),
+            Err(mpsc::RecvTimeoutError::Timeout) => return out,
+        }
+        if !self.exited {
+            out.extend(self.poll());
+        }
+        out
+    }
+
+    fn handle(&mut self, event: Event, out: &mut Vec<BridgeMsg>) {
+        match event {
+            Event::Line(line) => {
+                if let Some(msg) = parse_msg(&line) {
+                    if matches!(msg, BridgeMsg::Frame(_)) {
+                        self.in_flight = None;
+                        self.answered += 1;
+                    }
+                    out.push(msg);
+                } else if !line.trim().is_empty() {
+                    // Something wrote to the real stdout (e.g. a C
+                    // extension); show it rather than lose it.
+                    out.push(BridgeMsg::Log {
+                        level: "info".into(),
+                        msg: line,
+                    });
+                }
+            }
+            Event::Stderr(line) => out.push(BridgeMsg::Log {
+                level: "error".into(),
+                msg: line,
+            }),
+            Event::Eof => {
+                if !self.exited {
+                    self.exited = true;
+                    self.in_flight = None;
+                    let status = self
+                        .child
+                        .try_wait()
+                        .ok()
+                        .flatten()
+                        .map_or_else(|| "closed".to_string(), |s| s.to_string());
+                    out.push(BridgeMsg::Exited(status));
+                }
+            }
+        }
+    }
+
+    /// Asks the runner to call `stop` hooks and exit, then makes sure it
+    /// is gone. Returns the messages it sent while stopping.
+    #[must_use]
+    pub fn stop(mut self) -> Vec<BridgeMsg> {
+        let _ = self.send(&Json::obj([("op", Json::from("stop"))]));
+        self.stdin = None; // EOF also ends the runner's read loop
+        let deadline = Instant::now() + Duration::from_millis(400);
+        while Instant::now() < deadline {
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+        let mut out = self.poll();
+        out.retain(|m| {
+            !matches!(
+                m,
+                BridgeMsg::Exited(_) | BridgeMsg::Frame(_) | BridgeMsg::Bye
+            )
+        });
+        out
+    }
+}
+
+impl Drop for ScriptBridge {
+    fn drop(&mut self) {
+        if !matches!(self.child.try_wait(), Ok(Some(_))) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+/// An attribute value as JSON (vectors and colors become arrays).
+#[must_use]
+pub fn attr_json(value: &AttributeValue) -> Json {
+    match value {
+        AttributeValue::Bool(b) => Json::Bool(*b),
+        AttributeValue::Int(i) => Json::Int(*i),
+        AttributeValue::Float(f) => Json::Float(*f),
+        AttributeValue::Text(s) => Json::Str(s.clone()),
+        AttributeValue::Vec3(v) => Json::floats(v),
+        AttributeValue::Color(c) => Json::floats(c),
+    }
+}
+
+/// An attribute value from JSON (`None` for unsupported shapes).
+#[must_use]
+pub fn attr_from_json(value: &Json) -> Option<AttributeValue> {
+    Some(match value {
+        Json::Bool(b) => AttributeValue::Bool(*b),
+        Json::Int(i) => AttributeValue::Int(*i),
+        Json::Float(f) => AttributeValue::Float(*f),
+        Json::Str(s) => AttributeValue::Text(s.clone()),
+        Json::Arr(a) if a.len() == 3 => AttributeValue::Vec3(value.as_floats::<3>()?),
+        Json::Arr(a) if a.len() == 4 => AttributeValue::Color(value.as_floats::<4>()?),
+        _ => return None,
+    })
+}
+
+#[allow(clippy::cast_possible_wrap)]
+fn collider_json(c: &ColliderShape) -> Json {
+    let f = |v: f32| Json::Float(f64::from(v));
+    let mut out = Vec::with_capacity(12);
+    match *c {
+        ColliderShape::Cuboid {
+            id,
+            center,
+            rotation,
+            half,
+        } => {
+            out.push(Json::Int(id as i64));
+            out.push(Json::from("box"));
+            out.extend(center.into_iter().chain(rotation).chain(half).map(f));
+        }
+        ColliderShape::Ball { id, center, radius } => {
+            out.push(Json::Int(id as i64));
+            out.push(Json::from("ball"));
+            out.extend(center.into_iter().chain([radius]).map(f));
+        }
+        ColliderShape::Capsule {
+            id,
+            center,
+            rotation,
+            half_height,
+            radius,
+        } => {
+            out.push(Json::Int(id as i64));
+            out.push(Json::from("capsule"));
+            out.extend(
+                center
+                    .into_iter()
+                    .chain(rotation)
+                    .chain([half_height, radius])
+                    .map(f),
+            );
+        }
+        ColliderShape::Mesh {
+            id,
+            center,
+            rotation,
+            mesh,
+        } => {
+            out.push(Json::Int(id as i64));
+            out.push(Json::from("mesh"));
+            out.extend(center.into_iter().chain(rotation).map(f));
+            out.push(Json::Int(mesh as i64));
+        }
+    }
+    Json::Arr(out)
+}
+
+/// One mesh's geometry for the runner: `[key, [x, y, z, ...], [i, j, k, ...]]`.
+#[allow(clippy::cast_possible_wrap)]
+fn mesh_json(key: u64, tris: &MeshTris) -> Json {
+    let verts: Vec<f32> = tris.vertices.iter().flatten().copied().collect();
+    let mut parts = vec![
+        Json::Int(key as i64),
+        Json::floats(&verts),
+        Json::Arr(
+            tris.triangles
+                .iter()
+                .flatten()
+                .map(|&i| Json::Int(i64::from(i)))
+                .collect(),
+        ),
+    ];
+    if let Some([columns, rows]) = tris.grid {
+        parts.push(Json::Arr(vec![
+            Json::Int(i64::from(columns)),
+            Json::Int(i64::from(rows)),
+        ]));
+    }
+    Json::Arr(parts)
+}
+
+#[allow(clippy::cast_possible_wrap)]
+fn frame_input_json(msg: &mut Json, input: &FrameInput) {
+    if !input.graphics.is_empty() {
+        msg.set("gfx", Json::from(input.graphics));
+    }
+    let mut mouse = Json::obj([
+        (
+            "buttons",
+            Json::Arr(input.mouse_buttons.iter().map(|b| Json::from(*b)).collect()),
+        ),
+        ("delta", Json::floats(&input.mouse_delta)),
+        ("locked", Json::Bool(input.mouse_locked)),
+    ]);
+    if let Some(pos) = input.mouse_pos {
+        mouse.set("pos", Json::floats(&pos));
+    }
+    msg.set("mouse", mouse);
+    if !input.pads.is_empty() {
+        msg.set(
+            "pads",
+            Json::Arr(input.pads.iter().map(|p| Json::from(p.as_str())).collect()),
+        );
+    }
+    msg.set(
+        "screen",
+        Json::Arr(
+            input
+                .screen
+                .iter()
+                .map(|&v| Json::Int(i64::from(v)))
+                .collect(),
+        ),
+    );
+    if !input.colliders.is_empty() {
+        msg.set(
+            "cols",
+            Json::Arr(input.colliders.iter().map(collider_json).collect()),
+        );
+    }
+    if !input.water.is_empty() {
+        msg.set(
+            "water",
+            Json::Arr(input.water.iter().map(|w| Json::floats(w)).collect()),
+        );
+    }
+    if !input.playing.is_empty() {
+        msg.set(
+            "playing",
+            Json::Arr(
+                input
+                    .playing
+                    .iter()
+                    .map(|&id| Json::Int(id as i64))
+                    .collect(),
+            ),
+        );
+    }
+}
+
+fn state_json(e: &EntityState) -> Json {
+    #[allow(clippy::cast_possible_wrap)]
+    let mut obj = Json::obj([
+        ("id", Json::Int(e.id as i64)),
+        ("name", Json::from(e.name.as_str())),
+        ("p", Json::floats(&e.position)),
+        ("r", Json::floats(&e.rotation)),
+        ("s", Json::floats(&e.scale)),
+        ("g", Json::Bool(e.grounded)),
+        (
+            "attrs",
+            Json::Obj(
+                e.attributes
+                    .iter()
+                    .map(|(k, v)| (k.clone(), attr_json(v)))
+                    .collect(),
+            ),
+        ),
+    ]);
+    if let Some(v) = e.velocity {
+        obj.set("v", Json::floats(&v));
+    }
+    if let Some(c) = e.camera {
+        obj.set("cam", Json::floats(&c));
+    }
+    if let Some(script) = &e.script {
+        obj.set("script", Json::from(script.display().to_string()));
+    }
+    if e.has_audio {
+        obj.set("snd", Json::Bool(true));
+    }
+    if let Some((to, bone)) = &e.attached {
+        obj.set(
+            "att",
+            Json::Arr(vec![Json::from(to.as_str()), Json::from(bone.as_str())]),
+        );
+    }
+    if let Some(a) = &e.anim {
+        obj.set("anim", anim_json(a));
+    }
+    if let Some((joint, state)) = &e.joint {
+        obj.set("joint", joint_json(joint, state));
+    }
+    if let Some(agent) = &e.nav {
+        obj.set("nav", nav_state_json(agent));
+    }
+    if let Some(rag) = &e.rag {
+        obj.set("rag", rag_state_json(rag));
+    }
+    if let Some(spr) = &e.spr {
+        obj.set("spr", spr_state_json(spr));
+    }
+    obj
+}
+
+/// A sprite's state: `{"clip", "frame", "done", "clips", "fx", "fy",
+/// "layer", "color", "image", "size"}` (see the script API's
+/// `EntitySprite`).
+fn spr_state_json(s: &automata_scene::Sprite2D) -> Json {
+    Json::obj([
+        (
+            "clip",
+            if s.playing.is_empty() {
+                Json::Null
+            } else {
+                Json::str(s.playing.as_str())
+            },
+        ),
+        ("frame", Json::Int(i64::from(s.frame))),
+        ("done", Json::Bool(s.finished)),
+        (
+            "clips",
+            Json::Arr(s.clips.iter().map(|c| Json::str(c.name.as_str())).collect()),
+        ),
+        ("fx", Json::Bool(s.flip_x)),
+        ("fy", Json::Bool(s.flip_y)),
+        ("layer", Json::Int(i64::from(s.layer))),
+        ("color", Json::floats(&s.color)),
+        ("image", Json::str(s.image.as_str())),
+        ("size", Json::floats(&s.size)),
+    ])
+}
+
+/// `{"play": [clip, restart], "stop", "frame", "flip_x", "flip_y",
+/// "color", "layer", "image", "size"}`; anything missing or malformed is
+/// left alone (non-positive sizes and negative frames too).
+fn parse_spr(v: &Json) -> Option<automata_scene::SpriteEdit> {
+    v.as_obj()?;
+    let play = v.get("play").and_then(Json::as_arr).and_then(|p| {
+        let clip = p.first()?.as_str()?.to_string();
+        Some((clip, p.get(1).and_then(Json::as_bool).unwrap_or(false)))
+    });
+    let color = v.get("color").and_then(|c| {
+        c.as_floats::<4>()
+            .or_else(|| c.as_floats::<3>().map(|[r, g, b]| [r, g, b, 1.0]))
+            .filter(|c| c.iter().all(|x| x.is_finite()))
+    });
+    let size = v
+        .get("size")
+        .and_then(Json::as_floats::<2>)
+        .filter(|s| s.iter().all(|x| x.is_finite() && *x > 0.0));
+    Some(automata_scene::SpriteEdit {
+        play,
+        stop: matches!(v.get("stop"), Some(Json::Bool(true))),
+        flip_x: v.get("flip_x").and_then(Json::as_bool),
+        flip_y: v.get("flip_y").and_then(Json::as_bool),
+        frame: v
+            .get("frame")
+            .and_then(Json::as_i64)
+            .and_then(|f| u32::try_from(f).ok()),
+        color,
+        layer: v
+            .get("layer")
+            .and_then(Json::as_i64)
+            .and_then(|l| i32::try_from(l).ok()),
+        image: v.get("image").and_then(Json::as_str).map(str::to_string),
+        size,
+    })
+}
+
+/// A ragdoll's state: `{"on", "mass", "stiff", "blend", "limp", "w",
+/// "rest", "hips"}` (see the script API's `EntityRagdoll`).
+fn rag_state_json(s: &automata_scene::RagdollStatus) -> Json {
+    let f = |v: f32| Json::Float(f64::from(v));
+    Json::obj([
+        ("on", Json::Bool(s.ragdoll.active)),
+        ("mass", f(s.ragdoll.mass)),
+        ("stiff", f(s.ragdoll.stiffness)),
+        ("blend", f(s.ragdoll.blend_time)),
+        ("limp", Json::Bool(s.limp)),
+        ("w", f(s.weight)),
+        ("rest", Json::Bool(s.resting)),
+        (
+            "hips",
+            s.hips.map_or(Json::Null, |h| Json::floats(&h.to_array())),
+        ),
+    ])
+}
+
+/// `{"on", "mass", "stiffness", "blend_time", "push": [[[x, y, z], bone or
+/// null], ...]}`; anything missing is left alone, non-finite pushes are
+/// dropped.
+fn parse_rag(v: &Json) -> Option<automata_scene::RagdollEdit> {
+    v.as_obj()?;
+    let pushes = v
+        .get("push")
+        .and_then(Json::as_arr)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|p| {
+            let p = p.as_arr()?;
+            let impulse = glam::Vec3::from(p.first()?.as_floats::<3>()?);
+            impulse.is_finite().then(|| automata_scene::RagdollPush {
+                bone: p.get(1).and_then(Json::as_str).map(str::to_string),
+                impulse,
+            })
+        })
+        .collect();
+    let finite = |key: &str| v.get(key).and_then(num).filter(|x| x.is_finite());
+    Some(automata_scene::RagdollEdit {
+        active: match v.get("on") {
+            Some(Json::Bool(b)) => Some(*b),
+            _ => None,
+        },
+        mass: finite("mass"),
+        stiffness: finite("stiffness"),
+        blend_time: finite("blend_time"),
+        pushes,
+    })
+}
+
+/// A Nav Agent's state: `{"spd", "stop", "hov", "t", "arr", "jmp", "vel",
+/// "path"}` (see the script API's `EntityNav`).
+fn nav_state_json(agent: &automata_nav::NavAgent) -> Json {
+    let s = &agent.state;
+    let target = match &agent.target {
+        Some(automata_nav::NavTarget::Point(p)) => Json::floats(&p.to_array()),
+        Some(automata_nav::NavTarget::Entity(n)) => Json::from(n.as_str()),
+        None => Json::Null,
+    };
+    let path = s
+        .path
+        .get(s.next..)
+        .unwrap_or_default()
+        .iter()
+        .map(|p| Json::floats(&p.position.to_array()))
+        .collect();
+    Json::obj([
+        ("spd", Json::Float(f64::from(agent.speed))),
+        ("stop", Json::Float(f64::from(agent.stop_distance))),
+        ("hov", Json::Float(f64::from(agent.hover))),
+        ("t", target),
+        ("arr", Json::Bool(s.arrived)),
+        ("jmp", Json::Bool(s.jumping)),
+        ("vel", Json::floats(&s.velocity.to_array())),
+        ("path", Json::Arr(path)),
+    ])
+}
+
+/// The navigation mesh for the runner's `NavGraph`: `{"polys": [[x0, z0,
+/// x1, z1, y0, dx, dz], ...], "edges": [[[to, a xyz, b xyz, link], ...],
+/// ...]}`.
+fn nav_json(mesh: &automata_nav::NavMesh) -> Json {
+    let (polys, edges) = mesh.export();
+    Json::obj([
+        (
+            "polys",
+            Json::Arr(polys.iter().map(|p| Json::floats(p)).collect()),
+        ),
+        (
+            "edges",
+            Json::Arr(
+                edges
+                    .iter()
+                    .map(|es| {
+                        Json::Arr(
+                            es.iter()
+                                .map(|(to, a, b, link)| {
+                                    let mut v = vec![Json::Int(i64::from(*to))];
+                                    v.extend(a.to_array().map(|x| Json::Float(f64::from(x))));
+                                    v.extend(b.to_array().map(|x| Json::Float(f64::from(x))));
+                                    v.push(Json::Bool(*link));
+                                    Json::Arr(v)
+                                })
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+            ),
+        ),
+    ])
+}
+
+/// `entity.nav` changes: `{"go": point | name | null, "speed",
+/// "stop_distance"}`.
+fn parse_nav(v: &Json) -> Option<automata_nav::NavEdit> {
+    let mut edit = automata_nav::NavEdit::default();
+    if let Some(go) = v.get("go") {
+        edit.target = Some(match go {
+            Json::Null => None,
+            Json::Str(name) => Some(automata_nav::NavTarget::Entity(name.clone())),
+            other => {
+                let p = other.as_floats::<3>()?;
+                if !p.iter().all(|x| x.is_finite()) {
+                    return None;
+                }
+                Some(automata_nav::NavTarget::Point(glam::Vec3::from(p)))
+            }
+        });
+    }
+    edit.speed = v.get("speed").and_then(num);
+    edit.stop_distance = v.get("stop_distance").and_then(num);
+    edit.hover = v.get("hover").and_then(num);
+    Some(edit)
+}
+
+/// `{"kind", "to", "on", "value", "attached", "broken", "force", "motor",
+/// "limits", "bf"}` (see the script API's frame model).
+fn joint_json(j: &automata_physics::Joint, st: &automata_physics::JointState) -> Json {
+    let f = |v: f32| Json::Float(f64::from(v));
+    Json::obj([
+        ("kind", Json::from(j.kind.key())),
+        ("to", j.connected.as_deref().map_or(Json::Null, Json::from)),
+        ("on", Json::Bool(j.enabled)),
+        ("value", f(st.value)),
+        ("attached", Json::Bool(st.attached)),
+        ("broken", Json::Bool(st.broken)),
+        ("force", f(st.force)),
+        (
+            "motor",
+            j.motor.map_or(Json::Null, |m| {
+                Json::Arr(vec![f(m.speed), m.target.map_or(Json::Null, f)])
+            }),
+        ),
+        ("limits", j.limits.map_or(Json::Null, |l| Json::floats(&l))),
+        ("bf", f(j.break_force)),
+    ])
+}
+
+/// One `entity.joint` write: only the keys a script set (`"on"`,
+/// `"motor"`: `[speed, target or null]` or null, `"limits"`: `[min, max]`
+/// or null, `"bf"`, `"to"`: a name or null).
+fn parse_joint(v: &Json) -> Option<automata_physics::JointEdit> {
+    v.as_obj()?;
+    let finite = |v: &Json| num(v).filter(|x| x.is_finite());
+    let edit = automata_physics::JointEdit {
+        enabled: v.get("on").and_then(Json::as_bool),
+        motor: v.get("motor").map(|m| {
+            let a = m.as_arr()?;
+            Some((a.first().and_then(finite)?, a.get(1).and_then(finite)))
+        }),
+        limits: v.get("limits").map(Json::as_floats::<2>),
+        break_force: v.get("bf").and_then(finite),
+        connected: v.get("to").map(|t| t.as_str().map(str::to_string)),
+    };
+    (!edit.is_empty()).then_some(edit)
+}
+
+/// `{"clip", "time", "len", "playing", "speed", "loop", "clips", "lens",
+/// "springs", "rm", "ev"}`, plus with an animation graph `"graph"` (its
+/// path), `"gl"` (layers: `[name, state, time, from or null, fade,
+/// weight, [states]]`) and `"gp"` (parameters: `[name, kind, value]`).
+/// See the script API's frame model.
+fn anim_json(a: &automata_scene::AnimationState) -> Json {
+    let events = a.events.iter().map(|e| {
+        let seq = Json::Int(i64::try_from(e.seq).unwrap_or(i64::MAX));
+        Json::Arr(vec![
+            seq,
+            Json::from(e.clip.as_str()),
+            Json::from(e.name.as_str()),
+        ])
+    });
+    let mut out = Json::obj([
+        ("clip", a.clip.as_deref().map_or(Json::Null, Json::from)),
+        ("time", Json::Float(f64::from(a.time))),
+        ("len", Json::Float(f64::from(a.duration))),
+        ("playing", Json::Bool(a.playing)),
+        ("speed", Json::Float(f64::from(a.speed))),
+        ("loop", Json::Bool(a.looping)),
+        (
+            "clips",
+            Json::Arr(a.clips.iter().map(|c| Json::from(c.as_str())).collect()),
+        ),
+        ("lens", Json::floats(&a.lengths)),
+        ("springs", Json::Bool(a.springs)),
+        ("rm", Json::Bool(a.root_motion)),
+        // The latest events passed: [seq, clip, name], oldest first.
+        ("ev", Json::Arr(events.collect())),
+        // Inverse kinematics: feet on the ground, the head looking, the
+        // bones reaching.
+        ("fik", Json::Bool(a.foot_ik)),
+        ("look", Json::Bool(a.looking)),
+        (
+            "reach",
+            Json::Arr(a.reaching.iter().map(|b| Json::from(b.as_str())).collect()),
+        ),
+    ]);
+    if let (Some(path), Some(graph)) = (&a.graph_path, &a.graph) {
+        out.set("graph", Json::from(path.as_str()));
+        out.set("gl", graph_layers_json(graph));
+        let params = graph.params.iter().map(|p| {
+            Json::Arr(vec![
+                Json::from(p.name.as_str()),
+                Json::from(p.kind),
+                Json::Float(f64::from(p.value)),
+            ])
+        });
+        out.set("gp", Json::Arr(params.collect()));
+    }
+    out
+}
+
+/// A graph's layers for the script API: `[name, state, time, from or
+/// null, fade, weight, [states]]` each.
+fn graph_layers_json(graph: &automata_scene::GraphState) -> Json {
+    let layers = graph.layers.iter().map(|l| {
+        Json::Arr(vec![
+            Json::from(l.name.as_str()),
+            Json::from(l.state.as_str()),
+            Json::Float(f64::from(l.time)),
+            l.from.as_deref().map_or(Json::Null, Json::from),
+            Json::Float(f64::from(l.fade)),
+            Json::Float(f64::from(l.weight)),
+            Json::Arr(l.states.iter().map(|s| Json::from(s.as_str())).collect()),
+        ])
+    });
+    Json::Arr(layers.collect())
+}
+
+/// One `entity.animation` request: `["play", clip, loop, fade, speed or
+/// null, restart]`, `["stop", fade]`, `["seek", t]`, `["speed", s]`,
+/// `["reset_springs"]`, `["root_motion", on]`, or for animation graphs
+/// `["graph", path]`, `["set", name, value]`, `["trigger", name]`,
+/// `["reset_trigger", name]`, `["layer_weight", layer, weight]` and
+/// `["play_state", layer, state, fade]`, and for inverse kinematics
+/// `["look_at", target, weight]`, `["reach", bone, target, weight]` and
+/// `["foot_ik", on]`, a target being null (stop), an entity's name or a
+/// point `[x, y, z]`.
+fn parse_anim(v: &Json) -> Option<automata_scene::AnimationCommand> {
+    use automata_scene::{AnimationCommand as C, PlayOptions};
+    let a = v.as_arr()?;
+    let n = |i: usize| a.get(i).and_then(num).filter(|x| x.is_finite());
+    let text = |i: usize| a.get(i).and_then(Json::as_str).map(str::to_string);
+    Some(match a.first()?.as_str()? {
+        "play" => C::Play {
+            clip: a.get(1)?.as_str()?.to_string(),
+            options: PlayOptions {
+                looping: a.get(2).and_then(Json::as_bool).unwrap_or(true),
+                fade: n(3).unwrap_or(0.0).max(0.0),
+                speed: n(4),
+                restart: a.get(5).and_then(Json::as_bool).unwrap_or(false),
+            },
+        },
+        "stop" => C::Stop(n(1).unwrap_or(0.0).max(0.0)),
+        "seek" => C::Seek(n(1)?),
+        "speed" => C::Speed(n(1)?),
+        "reset_springs" => C::ResetSprings,
+        "root_motion" => C::RootMotion(a.get(1)?.as_bool()?),
+        "graph" => C::Graph(text(1)?),
+        "set" => C::Set(
+            text(1)?,
+            match a.get(2)? {
+                Json::Bool(b) => f32::from(u8::from(*b)),
+                _ => n(2)?,
+            },
+        ),
+        "trigger" => C::Trigger(text(1)?),
+        "reset_trigger" => C::ResetTrigger(text(1)?),
+        "layer_weight" => C::LayerWeight(text(1)?, n(2)?),
+        "play_state" => C::PlayState {
+            layer: text(1)?,
+            state: text(2)?,
+            fade: n(3).unwrap_or(0.0).max(0.0),
+        },
+        "look_at" => C::LookAt {
+            target: ik_target(a.get(1)?)?,
+            weight: n(2).unwrap_or(1.0).clamp(0.0, 1.0),
+        },
+        "reach" => C::Reach {
+            bone: text(1)?,
+            target: ik_target(a.get(2)?)?,
+            weight: n(3).unwrap_or(1.0).clamp(0.0, 1.0),
+        },
+        "foot_ik" => C::FootIk(a.get(1)?.as_bool()?),
+        _ => return None,
+    })
+}
+
+/// An IK target on the wire: `Some(None)` for null (stop), else an
+/// entity's name or a point; `None` when it's neither.
+#[allow(clippy::option_option)]
+fn ik_target(v: &Json) -> Option<Option<automata_scene::ik::IkTarget>> {
+    use automata_scene::ik::IkTarget;
+    match v {
+        Json::Null => Some(None),
+        Json::Str(name) => Some(Some(IkTarget::Entity(name.clone()))),
+        _ => v
+            .as_floats::<3>()
+            .filter(|p| p.iter().all(|x| x.is_finite()))
+            .map(|p| Some(IkTarget::Point(glam::Vec3::from(p)))),
+    }
+}
+
+/// `entity.attach`: `[to, bone, position, rotation, scale]`, or `false`
+/// to detach.
+fn parse_attach(v: &Json) -> Option<AttachWrite> {
+    if matches!(v, Json::Bool(false) | Json::Null) {
+        return Some(AttachWrite::Detach);
+    }
+    let a = v.as_arr()?;
+    let finite = |f: [f32; 3]| f.iter().all(|x| x.is_finite()).then_some(f);
+    let three = |i: usize, or: [f32; 3]| match a.get(i) {
+        None => Some(or),
+        Some(j) => j.as_floats::<3>().and_then(finite),
+    };
+    Some(AttachWrite::To {
+        to: a.first()?.as_str()?.to_string(),
+        bone: a
+            .get(1)
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        offset: TransformData {
+            position: three(2, [0.0; 3])?,
+            rotation_euler: three(3, [0.0; 3])?,
+            scale: three(4, [1.0; 3])?,
+        },
+    })
+}
+
+fn parse_write(w: &Json) -> Option<EntityWrite> {
+    let id = u64::try_from(w.get("id")?.as_i64()?).ok()?;
+    Some(EntityWrite {
+        id,
+        position: w.get("p").and_then(Json::as_floats::<3>),
+        rotation: w.get("r").and_then(Json::as_floats::<3>),
+        scale: w.get("s").and_then(Json::as_floats::<3>),
+        velocity: w.get("v").and_then(Json::as_floats::<3>),
+        camera: w.get("cam").and_then(Json::as_floats::<7>),
+        attributes: w.get("attrs").and_then(Json::as_obj).map(|pairs| {
+            pairs
+                .iter()
+                .filter_map(|(k, v)| Some((k.clone(), attr_from_json(v)?)))
+                .collect()
+        }),
+        audio: match w.get("audio").and_then(Json::as_str) {
+            Some("play") => Some(AudioWrite::Play),
+            Some("stop") => Some(AudioWrite::Stop),
+            _ => None,
+        },
+        anim: w
+            .get("anim")
+            .and_then(Json::as_arr)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(parse_anim)
+            .collect(),
+        joint: w.get("joint").and_then(parse_joint),
+        attach: w.get("att").and_then(parse_attach),
+        nav: w.get("nav").and_then(parse_nav),
+        rag: w.get("rag").and_then(parse_rag),
+        spr: w.get("spr").and_then(parse_spr),
+        despawn: matches!(w.get("despawn"), Some(Json::Bool(true))),
+    })
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn num(v: &Json) -> Option<f32> {
+    match v {
+        Json::Int(i) => Some(*i as f32),
+        Json::Float(f) => Some(*f as f32),
+        _ => None,
+    }
+}
+
+fn parse_sound(v: &Json) -> Option<OneShot> {
+    let a = v.as_arr()?;
+    Some(OneShot {
+        path: a.first()?.as_str()?.to_string(),
+        volume: a.get(1).and_then(num).unwrap_or(1.0).max(0.0),
+        pitch: a.get(2).and_then(num).unwrap_or(1.0).clamp(0.01, 16.0),
+        position: a.get(3).and_then(Json::as_floats::<3>),
+    })
+}
+
+/// `[x, y, z, strength]`.
+fn parse_splash(v: &Json) -> Option<([f32; 3], f32)> {
+    let a = v.as_arr()?;
+    let n = |i: usize| a.get(i).and_then(num).filter(|v| v.is_finite());
+    Some(([n(0)?, n(1)?, n(2)?], n(3)?.clamp(0.0, 10.0)))
+}
+
+/// `{"e": preset or null, "f": {field: value}, "p": [x, y, z], "d": [x, y, z] or null, "n": count or null}`.
+/// Unknown presets or bad fields drop the burst.
+fn parse_burst(v: &Json) -> Option<BurstRequest> {
+    use automata_scene::{ParticleEmitter, ParticleField};
+    let mut emitter = match v.get("e").and_then(Json::as_str) {
+        Some(name) => ParticleEmitter::preset(name)?,
+        None => ParticleEmitter::default(),
+    };
+    for (key, value) in v.get("f").and_then(Json::as_obj).unwrap_or_default() {
+        #[allow(clippy::cast_possible_truncation)]
+        let field = match value {
+            Json::Bool(b) => ParticleField::Bool(*b),
+            Json::Str(s) => ParticleField::Text(s.clone()),
+            Json::Null => ParticleField::Text(String::new()),
+            Json::Arr(items) => {
+                ParticleField::Numbers(items.iter().map(|x| num(x).unwrap_or(f32::NAN)).collect())
+            }
+            other => ParticleField::Number(other.as_f64()? as f32),
+        };
+        emitter.set_field(key, &field).ok()?;
+    }
+    let finite = |a: [f32; 3]| a.iter().all(|x| x.is_finite()).then_some(a);
+    Some(BurstRequest {
+        emitter,
+        position: finite(v.get("p")?.as_floats::<3>()?)?,
+        direction: v.get("d").and_then(Json::as_floats::<3>).and_then(finite),
+        count: v
+            .get("n")
+            .and_then(Json::as_i64)
+            .map(|n| u32::try_from(n.clamp(0, 100_000)).unwrap_or(0)),
+    })
+}
+
+/// `[entity id, count]`.
+fn parse_emit(v: &Json) -> Option<(u64, u32)> {
+    let a = v.as_arr()?;
+    let id = u64::try_from(a.first()?.as_i64()?).ok()?;
+    let n = u32::try_from(a.get(1)?.as_i64()?.clamp(0, 100_000)).ok()?;
+    Some((id, n))
+}
+
+fn parse_hud(v: &Json) -> Option<HudItem> {
+    let field = |k: &str| v.get(k).and_then(num);
+    let kind = match v.get("k")?.as_str()? {
+        "img" => HudKind::Image(v.get("path")?.as_str()?.to_string()),
+        "rect" => HudKind::Rect,
+        "text" => HudKind::Text {
+            text: v.get("text")?.as_str()?.to_string(),
+            size: field("size").unwrap_or(24.0),
+            align: v
+                .get("align")
+                .and_then(Json::as_str)
+                .and_then(automata_renderer::TextAlign::parse)
+                .unwrap_or_default(),
+            shadow: v.get("shadow").and_then(Json::as_floats::<4>),
+            outline: v.get("outline").and_then(Json::as_floats::<4>),
+            font: v.get("font").and_then(Json::as_str).map(str::to_string),
+            fallback: v.get("fallback").and_then(Json::as_str).map(str::to_string),
+        },
+        _ => return None,
+    };
+    Some(HudItem {
+        kind,
+        x: field("x")?,
+        y: field("y")?,
+        size: field("w").zip(field("h")).map(|(w, h)| [w, h]),
+        color: v
+            .get("c")
+            .and_then(Json::as_floats::<4>)
+            .unwrap_or([1.0; 4]),
+        rotation: field("rot").unwrap_or(0.0),
+    })
+}
+
+/// Parses one runner line (`None` for anything that isn't a message).
+#[must_use]
+pub fn parse_msg(line: &str) -> Option<BridgeMsg> {
+    let v = Json::parse(line).ok()?;
+    let text = |key: &str| {
+        v.get(key)
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    Some(match v.get("op")?.as_str()? {
+        "ready" => BridgeMsg::Ready {
+            python: text("python"),
+        },
+        "log" => BridgeMsg::Log {
+            level: text("level"),
+            msg: text("msg"),
+        },
+        "error" => BridgeMsg::Error {
+            msg: text("msg"),
+            file: PathBuf::from(text("file")),
+            line: v
+                .get("line")
+                .and_then(Json::as_i64)
+                .and_then(|l| u32::try_from(l).ok())
+                .unwrap_or(0),
+            traceback: text("traceback"),
+        },
+        "reloaded" => BridgeMsg::Reloaded(PathBuf::from(text("file"))),
+        "frame" => {
+            let list = |key: &str| v.get(key).and_then(Json::as_arr).unwrap_or_default();
+            BridgeMsg::Frame(FrameReply {
+                writes: list("writes").iter().filter_map(parse_write).collect(),
+                sounds: list("sounds").iter().filter_map(parse_sound).collect(),
+                hud: list("hud").iter().filter_map(parse_hud).collect(),
+                splashes: list("splashes").iter().filter_map(parse_splash).collect(),
+                bursts: list("bursts").iter().filter_map(parse_burst).collect(),
+                emits: list("emits").iter().filter_map(parse_emit).collect(),
+                lock: match v.get("lock") {
+                    Some(Json::Bool(b)) => Some(*b),
+                    _ => None,
+                },
+                #[allow(clippy::cast_possible_truncation)]
+                script_ms: v.get("ms").and_then(Json::as_f64).map(|ms| ms as f32),
+                settings: parse_settings(v.get("settings")),
+            })
+        }
+        "bye" => BridgeMsg::Bye,
+        _ => return None,
+    })
+}
+
+/// Gamepad buttons and the script key names they press (`ctx.input`'s
+/// `"pad_*"` keys, the same in `run_scene` and exports).
+const PAD_BUTTONS: &[(automata_input::GamepadButton, &str)] = {
+    use automata_input::GamepadButton as B;
+    &[
+        (B::South, "pad_south"),
+        (B::East, "pad_east"),
+        (B::West, "pad_west"),
+        (B::North, "pad_north"),
+        (B::DPadUp, "pad_up"),
+        (B::DPadDown, "pad_down"),
+        (B::DPadLeft, "pad_left"),
+        (B::DPadRight, "pad_right"),
+        (B::Start, "pad_start"),
+        (B::Select, "pad_select"),
+        (B::LeftTrigger, "pad_lb"),
+        (B::RightTrigger, "pad_rb"),
+        (B::LeftTrigger2, "pad_lt"),
+        (B::RightTrigger2, "pad_rt"),
+        (B::LeftThumb, "pad_l3"),
+        (B::RightThumb, "pad_r3"),
+    ]
+};
+
+/// The `"pad_*"` keys one gamepad holds: its buttons, with the left
+/// stick pushed past halfway counting as the d-pad (`+y` is up).
+pub fn pad_keys(
+    pressed: impl Fn(automata_input::GamepadButton) -> bool,
+    stick: (f32, f32),
+    out: &mut Vec<&'static str>,
+) {
+    for &(button, name) in PAD_BUTTONS {
+        if pressed(button) {
+            out.push(name);
+        }
+    }
+    let (x, y) = stick;
+    for (on, name) in [
+        (x < -0.5, "pad_left"),
+        (x > 0.5, "pad_right"),
+        (y > 0.5, "pad_up"),
+        (y < -0.5, "pad_down"),
+    ] {
+        if on {
+            out.push(name);
+        }
+    }
+}
+
+/// The `"pad_*"` keys held on any connected gamepad, sorted, no repeats.
+#[must_use]
+pub fn held_pad_keys(pads: &automata_input::Gamepads) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    for id in pads.connected_ids() {
+        pad_keys(|b| pads.pressed(id, b), pads.left_stick(id), &mut out);
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// The Python key name (`"a"`, `"space"`, `"arrow_left"` …) of a physical
+/// key: the engine's own table (`automata_input::KeyCode::name`), so Play
+/// knows the same keys as `run_scene` and exported games.
+#[must_use]
+pub fn key_name(code: winit::keyboard::KeyCode) -> Option<&'static str> {
+    automata_core::winit_input::key_code(code).map(automata_input::KeyCode::name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_runner_messages() {
+        assert_eq!(
+            parse_msg(r#"{"op":"ready","protocol":1,"python":"3.12.1"}"#),
+            Some(BridgeMsg::Ready {
+                python: "3.12.1".into()
+            })
+        );
+        let frame = parse_msg(
+            r#"{"op":"frame","frame":3,"writes":[{"id":7,"p":[1.0,2.0,3.0],"attrs":{"hp":2,"tint":[1.0,0.0,0.0,1.0]}}]}"#,
+        );
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = frame else {
+            panic!("{frame:?}");
+        };
+        assert_eq!(writes[0].id, 7);
+        assert_eq!(writes[0].position, Some([1.0, 2.0, 3.0]));
+        assert_eq!(writes[0].velocity, None);
+        let attrs = writes[0].attributes.as_ref().unwrap();
+        assert_eq!(attrs["hp"], AttributeValue::Int(2));
+        assert_eq!(attrs["tint"], AttributeValue::Color([1.0, 0.0, 0.0, 1.0]));
+        assert!(parse_msg("not json").is_none());
+        assert!(parse_msg(r#"{"op":"???"}"#).is_none());
+    }
+
+    #[test]
+    fn splashes_cross_the_bridge() {
+        let msg = parse_msg(
+            r#"{"op":"frame","frame":1,"writes":[],"splashes":[[1,0.5,-2,2.0],[0,0,0,99],["x",0,0,1]]}"#,
+        );
+        let Some(BridgeMsg::Frame(FrameReply { splashes, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        // Strength is clamped to 0..10; malformed entries are skipped.
+        assert_eq!(splashes, vec![([1.0, 0.5, -2.0], 2.0), ([0.0; 3], 10.0)]);
+    }
+
+    #[test]
+    fn player_settings_cross_the_bridge() {
+        use automata_renderer::GraphicsQuality as Q;
+        let msg = parse_msg(
+            r#"{"op":"frame","frame":1,"writes":[],"settings":{"volume":1.5,"graphics":"low"}}"#,
+        );
+        let Some(BridgeMsg::Frame(FrameReply { settings, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(
+            settings,
+            PlayerSettings {
+                volume: Some(1.0),
+                graphics: Some(Q::Low)
+            }
+        );
+        let msg = parse_msg(r#"{"op":"frame","frame":2,"settings":{"graphics":"potato"}}"#);
+        let Some(BridgeMsg::Frame(FrameReply { settings, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(settings, PlayerSettings::default());
+        for q in Q::ALL {
+            assert_eq!(q.label().to_lowercase(), quality_key(q));
+        }
+    }
+
+    #[test]
+    fn particle_bursts_cross_the_bridge() {
+        let msg = parse_msg(concat!(
+            r#"{"op":"frame","frame":1,"writes":[],"bursts":["#,
+            r#"{"e":"sparks","f":{"color":[6,1.6,0.4,1]},"p":[1,2,3],"d":[0,0,1],"n":12},"#,
+            r#"{"e":null,"f":{"rate":5,"sprite":"puff","lit":true},"p":[0,0,0],"d":null,"n":null},"#,
+            r#"{"e":"lava","f":{},"p":[0,0,0]},"#,
+            r#"{"e":"fire","f":{"shape":"donut"},"p":[0,0,0]},"#,
+            r#"{"e":"fire","f":{},"p":[0,"x",0]}],"#,
+            r#""emits":[[7,5],[-1,2],[8,"x"]]}"#
+        ));
+        let Some(BridgeMsg::Frame(FrameReply { bursts, emits, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        // Unknown presets, bad fields and bad positions drop the burst.
+        assert_eq!(bursts.len(), 2, "{bursts:?}");
+        let mut sparks = automata_scene::ParticleEmitter::preset("sparks").unwrap();
+        sparks.color = [6.0, 1.6, 0.4, 1.0];
+        assert_eq!(bursts[0].emitter, sparks);
+        assert_eq!(bursts[0].position, [1.0, 2.0, 3.0]);
+        assert_eq!(bursts[0].direction, Some([0.0, 0.0, 1.0]));
+        assert_eq!(bursts[0].count, Some(12));
+        assert_eq!(
+            bursts[1].emitter.sprite,
+            automata_scene::ParticleSprite::Puff
+        );
+        assert!(bursts[1].emitter.lit);
+        assert_eq!(bursts[1].direction, None);
+        assert_eq!(bursts[1].count, None);
+        assert_eq!(emits, vec![(7, 5)]);
+    }
+
+    #[test]
+    fn joint_edits_and_state_cross_the_bridge() {
+        use automata_physics::{Joint, JointEdit, JointMotor, JointState};
+        let msg = parse_msg(concat!(
+            r#"{"op":"frame","frame":1,"writes":[{"id":3,"joint":{"on":false,"#,
+            r#""motor":[0.5,1.2],"limits":null,"to":"Frame"}},"#,
+            r#"{"id":4,"joint":{"motor":null,"bf":120}},{"id":5,"joint":{"nope":1}}]}"#
+        ));
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(writes[2].joint, None, "unknown keys change nothing");
+        assert_eq!(
+            writes[0].joint,
+            Some(JointEdit {
+                enabled: Some(false),
+                motor: Some(Some((0.5, Some(1.2)))),
+                limits: Some(None),
+                connected: Some(Some("Frame".into())),
+                ..JointEdit::default()
+            })
+        );
+        assert_eq!(
+            writes[1].joint,
+            Some(JointEdit {
+                motor: Some(None),
+                break_force: Some(120.0),
+                ..JointEdit::default()
+            })
+        );
+        let state = EntityState {
+            joint: Some((
+                Joint::hinge(glam::Vec3::Y)
+                    .connected_to("Frame")
+                    .motor(JointMotor::target(1.0)),
+                JointState {
+                    value: 0.25,
+                    attached: true,
+                    ..JointState::default()
+                },
+            )),
+            ..EntityState::default()
+        };
+        let json = state_json(&state).dump();
+        assert!(
+            json.contains(r#""joint":{"kind":"hinge","to":"Frame","on":true,"value":0.25,"attached":true,"broken":false"#),
+            "{json}"
+        );
+        assert!(
+            json.contains(r#""motor":[0.0,1.0]"#) || json.contains(r#""motor":[0,1]"#),
+            "{json}"
+        );
+        assert!(!state_json(&EntityState::default()).dump().contains("joint"));
+    }
+
+    #[test]
+    fn animation_requests_and_state_cross_the_bridge() {
+        use automata_scene::{AnimationCommand as C, AnimationState, PlayOptions};
+        let msg = parse_msg(concat!(
+            r#"{"op":"frame","frame":1,"writes":[{"id":3,"anim":["#,
+            r#"["play","Walking",true,0.2,null,false],["play","Jump",false,0,1.5,true],"#,
+            r#"["stop",0.5],["seek",1.25],["speed",-1],["seek","x"],["dance"],[],"#,
+            r#"["reset_springs"],["root_motion",true],["root_motion"]]}]}"#
+        ));
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(
+            writes[0].anim,
+            vec![
+                C::Play {
+                    clip: "Walking".into(),
+                    options: PlayOptions {
+                        fade: 0.2,
+                        ..PlayOptions::default()
+                    },
+                },
+                C::Play {
+                    clip: "Jump".into(),
+                    options: PlayOptions {
+                        looping: false,
+                        speed: Some(1.5),
+                        fade: 0.0,
+                        restart: true,
+                    },
+                },
+                C::Stop(0.5),
+                C::Seek(1.25),
+                C::Speed(-1.0),
+                C::ResetSprings,
+                C::RootMotion(true),
+            ],
+            "malformed requests are skipped"
+        );
+        let state = EntityState {
+            anim: Some(AnimationState {
+                clip: Some("Idle".into()),
+                time: 0.5,
+                duration: 2.0,
+                playing: true,
+                speed: 1.0,
+                looping: true,
+                clips: vec!["Idle".into(), "Wave".into()],
+                lengths: vec![2.0, 1.5],
+                springs: false,
+                root_motion: true,
+                events: vec![automata_scene::FiredEvent {
+                    seq: 7,
+                    clip: "Idle".into(),
+                    name: "blink".into(),
+                }],
+                graph_path: None,
+                graph: None,
+                foot_ik: true,
+                looking: false,
+                reaching: vec!["Palm2.R".into()],
+            }),
+            ..EntityState::default()
+        };
+        let json = state_json(&state).dump();
+        assert!(
+            json.contains(r#""anim":{"clip":"Idle","time":0.5,"len":2.0,"playing":true"#)
+                && json.contains(r#""clips":["Idle","Wave"],"lens":[2.0,1.5]"#)
+                && json.contains(r#""rm":true,"ev":[[7,"Idle","blink"]]"#)
+                && json.contains(r#""fik":true,"look":false,"reach":["Palm2.R"]"#),
+            "{json}"
+        );
+        assert!(!state_json(&EntityState::default()).dump().contains("anim"));
+    }
+
+    #[test]
+    fn ik_requests_cross_the_bridge() {
+        use automata_scene::ik::IkTarget;
+        use automata_scene::AnimationCommand as C;
+        let msg = parse_msg(concat!(
+            r#"{"op":"frame","frame":1,"writes":[{"id":3,"anim":["#,
+            r#"["look_at","Player",0.5],["look_at",[1,2,3]],["look_at",null],"#,
+            r#"["reach","Palm2.R",[0,1,2],2],["reach","Palm2.R",null],"#,
+            r#"["foot_ik",true],["look_at",7],["reach",null,null],["foot_ik"]]}]}"#
+        ));
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(
+            writes[0].anim,
+            vec![
+                C::LookAt {
+                    target: Some(IkTarget::Entity("Player".into())),
+                    weight: 0.5
+                },
+                C::LookAt {
+                    target: Some(IkTarget::Point(glam::Vec3::new(1.0, 2.0, 3.0))),
+                    weight: 1.0
+                },
+                C::LookAt {
+                    target: None,
+                    weight: 1.0
+                },
+                C::Reach {
+                    bone: "Palm2.R".into(),
+                    target: Some(IkTarget::Point(glam::Vec3::new(0.0, 1.0, 2.0))),
+                    weight: 1.0
+                },
+                C::Reach {
+                    bone: "Palm2.R".into(),
+                    target: None,
+                    weight: 1.0
+                },
+                C::FootIk(true),
+            ]
+        );
+    }
+
+    #[test]
+    fn attachments_cross_the_bridge() {
+        let msg = parse_msg(concat!(
+            r#"{"op":"frame","frame":1,"writes":["#,
+            r#"{"id":1,"att":["Robot","Head",[0,0.4,0],[0,90,0],[1,1,1]]},"#,
+            r#"{"id":2,"att":["Robot"]},{"id":3,"att":null},{"id":4,"att":false},"#,
+            r#"{"id":5,"att":[7]},{"id":6}]}"#
+        ));
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(
+            writes[0].attach,
+            Some(AttachWrite::To {
+                to: "Robot".into(),
+                bone: "Head".into(),
+                offset: TransformData {
+                    position: [0.0, 0.4, 0.0],
+                    rotation_euler: [0.0, 90.0, 0.0],
+                    scale: [1.0; 3],
+                },
+            })
+        );
+        assert_eq!(
+            writes[1].attach,
+            Some(AttachWrite::To {
+                to: "Robot".into(),
+                bone: String::new(),
+                offset: TransformData {
+                    position: [0.0; 3],
+                    rotation_euler: [0.0; 3],
+                    scale: [1.0; 3],
+                },
+            })
+        );
+        assert_eq!(writes[2].attach, Some(AttachWrite::Detach));
+        assert_eq!(writes[3].attach, Some(AttachWrite::Detach));
+        assert_eq!(writes[4].attach, None, "a name is needed");
+        assert_eq!(writes[5].attach, None);
+        let state = EntityState {
+            attached: Some(("Robot".into(), "Palm2.R".into())),
+            ..EntityState::default()
+        };
+        let json = state_json(&state).dump();
+        assert!(json.contains(r#""att":["Robot","Palm2.R"]"#), "{json}");
+        assert!(!state_json(&EntityState::default())
+            .dump()
+            .contains("\"att\""));
+    }
+
+    #[test]
+    fn animation_graph_requests_and_state_cross_the_bridge() {
+        use automata_scene::{
+            AnimationCommand as C, AnimationState, GraphLayerState, GraphParam, GraphState,
+        };
+        let msg = parse_msg(concat!(
+            r#"{"op":"frame","frame":1,"writes":[{"id":3,"anim":["#,
+            r#"["graph","anims/robot.anim.ron"],["graph",""],["set","speed",2.5],"#,
+            r#"["set","grounded",false],["set","speed"],["trigger","jump"],"#,
+            r#"["reset_trigger","jump"],["layer_weight","Arms",0.5],"#,
+            r#"["play_state","Arms","Wave",0.2],["play_state","","Move"]]}]}"#
+        ));
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(
+            writes[0].anim,
+            vec![
+                C::Graph("anims/robot.anim.ron".into()),
+                C::Graph(String::new()),
+                C::Set("speed".into(), 2.5),
+                C::Set("grounded".into(), 0.0),
+                C::Trigger("jump".into()),
+                C::ResetTrigger("jump".into()),
+                C::LayerWeight("Arms".into(), 0.5),
+                C::PlayState {
+                    layer: "Arms".into(),
+                    state: "Wave".into(),
+                    fade: 0.2
+                },
+                C::PlayState {
+                    layer: String::new(),
+                    state: "Move".into(),
+                    fade: 0.0
+                },
+            ]
+        );
+        let graph = GraphState {
+            layers: vec![GraphLayerState {
+                name: "Base".into(),
+                state: "Jump".into(),
+                time: 0.5,
+                from: Some("Move".into()),
+                fade: 0.25,
+                weight: 1.0,
+                states: vec!["Move".into(), "Jump".into()],
+            }],
+            params: vec![GraphParam {
+                name: "jump".into(),
+                kind: "trigger",
+                value: 0.0,
+            }],
+        };
+        let state = EntityState {
+            anim: Some(AnimationState {
+                clip: Some("Jump".into()),
+                time: 0.5,
+                duration: 1.0,
+                playing: true,
+                speed: 1.0,
+                looping: true,
+                clips: vec!["Jump".into()],
+                lengths: vec![1.0],
+                springs: false,
+                root_motion: false,
+                events: Vec::new(),
+                graph_path: Some("anims/robot.anim.ron".into()),
+                graph: Some(graph),
+                foot_ik: false,
+                looking: true,
+                reaching: Vec::new(),
+            }),
+            ..EntityState::default()
+        };
+        let json = state_json(&state).dump();
+        assert!(
+            json.contains(r#""graph":"anims/robot.anim.ron""#)
+                && json.contains(r#""gl":[["Base","Jump",0.5,"Move",0.25,1.0,["Move","Jump"]]]"#)
+                && json.contains(r#""gp":[["jump","trigger",0.0]]"#),
+            "{json}"
+        );
+    }
+
+    #[test]
+    fn gamepad_buttons_and_the_stick_become_pad_keys() {
+        use automata_input::GamepadButton as B;
+        let mut out = Vec::new();
+        pad_keys(|b| matches!(b, B::South | B::Start), (0.0, 0.0), &mut out);
+        assert_eq!(out, ["pad_south", "pad_start"]);
+        out.clear();
+        pad_keys(|b| b == B::DPadUp, (-0.8, 0.9), &mut out);
+        assert_eq!(out, ["pad_up", "pad_left", "pad_up"]);
+        out.clear();
+        pad_keys(|_| false, (0.4, -0.6), &mut out);
+        assert_eq!(out, ["pad_down"]);
+        // Every name is one the script API knows (script_api.PAD_KEYS).
+        let api = include_str!("../../automata-python/python/automata/script_api.py");
+        for &(_, name) in PAD_BUTTONS {
+            assert!(api.contains(&format!("\"{name}\"")), "{name}");
+        }
+    }
+
+    #[test]
+    fn hud_text_crosses_the_bridge() {
+        let msg = parse_msg(
+            r#"{"op":"frame","frame":1,"writes":[],"hud":[{"k":"text","text":"100%","x":10,"y":20,"size":26,"c":[1,1,1,1],"align":"center","shadow":[0,0,0,0.6]},{"k":"text","text":"x","x":0,"y":0,"size":12,"c":[1,0,0,1],"align":"sideways","font":"fonts/Pixel.ttf","fallback":"fonts/JP.otf"}]}"#,
+        );
+        let Some(BridgeMsg::Frame(FrameReply { hud, .. })) = msg else {
+            panic!("frame expected: {msg:?}");
+        };
+        assert_eq!(
+            hud[0].kind,
+            HudKind::Text {
+                text: "100%".into(),
+                size: 26.0,
+                align: automata_renderer::TextAlign::Center,
+                shadow: Some([0.0, 0.0, 0.0, 0.6]),
+                outline: None,
+                font: None,
+                fallback: None,
+            }
+        );
+        assert_eq!((hud[0].x, hud[0].y), (10.0, 20.0));
+        assert!(
+            matches!(
+                hud[1].kind,
+                HudKind::Text {
+                    align: automata_renderer::TextAlign::Left,
+                    ..
+                }
+            ),
+            "unknown alignments fall back to left"
+        );
+        assert!(
+            matches!(&hud[1].kind, HudKind::Text { font: Some(f), fallback: Some(b), .. }
+                if f == "fonts/Pixel.ttf" && b == "fonts/JP.otf"),
+            "{:?}",
+            hud[1].kind
+        );
+    }
+
+    #[test]
+    fn camera_state_and_writes_cross_the_bridge() {
+        let state = EntityState {
+            id: 4,
+            camera: Some([0.0, 2.0, 6.0, 0.0, 0.0, 0.0, 60.0]),
+            ..EntityState::default()
+        };
+        let json = state_json(&state);
+        assert_eq!(
+            json.get("cam").and_then(Json::as_floats::<7>),
+            Some([0.0, 2.0, 6.0, 0.0, 0.0, 0.0, 60.0])
+        );
+        let msg =
+            parse_msg(r#"{"op":"frame","frame":1,"writes":[{"id":4,"cam":[1,2,3,4,5,6,50]}]}"#);
+        let Some(BridgeMsg::Frame(FrameReply { writes, .. })) = msg else {
+            panic!("frame expected");
+        };
+        assert_eq!(writes[0].camera, Some([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 50.0]));
+    }
+
+    #[test]
+    fn attribute_values_round_trip_through_json() {
+        for v in [
+            AttributeValue::Bool(true),
+            AttributeValue::Int(-4),
+            AttributeValue::Float(2.0),
+            AttributeValue::Text("hi \"there\"".into()),
+            AttributeValue::Vec3([1.0, 2.0, 3.0]),
+            AttributeValue::Color([0.5, 0.25, 0.0, 1.0]),
+        ] {
+            let text = attr_json(&v).dump();
+            assert_eq!(attr_from_json(&Json::parse(&text).unwrap()), Some(v));
+        }
+    }
+
+    fn python() -> Option<&'static str> {
+        Command::new(default_python())
+            .arg("--version")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|_| default_python())
+    }
+
+    fn pump(bridge: &mut ScriptBridge, until: impl Fn(&BridgeMsg) -> bool) -> Vec<BridgeMsg> {
+        let mut all = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            let msgs = bridge.poll();
+            let done = msgs.iter().any(&until);
+            all.extend(msgs);
+            if done {
+                return all;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("timed out; got {all:?}");
+    }
+
+    /// End to end with a real interpreter (skipped when none is installed).
+    #[test]
+    fn a_relative_runtime_dir_still_starts_the_runner() {
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        // Python runs in `cwd`; the runner path must not be relative to us.
+        let cwd = std::env::temp_dir().join(format!("oberon_bridge_cwd_{}", std::process::id()));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let runtime = PathBuf::from(format!(
+            "../../target/oberon_bridge_rel_{}",
+            std::process::id()
+        ));
+        let mut bridge = ScriptBridge::start(python, &runtime, &cwd).unwrap();
+        let msgs = pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+        assert!(
+            msgs.iter().any(|m| matches!(m, BridgeMsg::Ready { .. })),
+            "{msgs:?}"
+        );
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&runtime);
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    /// `ctx.nav` answers from the mesh sent once; `entity.nav` reads the
+    /// agent's state and its writes come back as a `NavEdit`.
+    #[test]
+    fn scripts_find_paths_and_steer_nav_agents_through_the_bridge() {
+        use glam::Vec3;
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("oberon_bridge_nav_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("guard.py");
+        std::fs::write(
+            &script,
+            "def update(entity, ctx):\n    \
+             path = ctx.nav.path((-3, 0, -3), (3, 0, -3))\n    \
+             entity.attributes['ready'] = ctx.nav.ready\n    \
+             entity.attributes['corners'] = len(path) if path else 0\n    \
+             entity.attributes['speed'] = entity.nav.speed\n    \
+             entity.nav.go('Intruder')\n    \
+             entity.nav.speed = 2.0\n",
+        )
+        .unwrap();
+        // A floor with a wall across it: the way round has corners.
+        let (mut v, mut t) = (Vec::new(), Vec::new());
+        let mut add_box = |lo: Vec3, hi: Vec3| {
+            let base = u32::try_from(v.len()).unwrap();
+            for i in 0..8u8 {
+                v.push(Vec3::new(
+                    if i & 1 == 0 { lo.x } else { hi.x },
+                    if i & 2 == 0 { lo.y } else { hi.y },
+                    if i & 4 == 0 { lo.z } else { hi.z },
+                ));
+            }
+            for f in [
+                [0, 2, 1],
+                [1, 2, 3],
+                [4, 5, 6],
+                [5, 7, 6],
+                [0, 1, 4],
+                [1, 5, 4],
+                [2, 6, 3],
+                [3, 6, 7],
+                [0, 4, 2],
+                [2, 4, 6],
+                [1, 3, 5],
+                [3, 7, 5],
+            ] {
+                t.push(f.map(|k: u32| base + k));
+            }
+        };
+        add_box(Vec3::new(-6.0, -1.0, -6.0), Vec3::new(6.0, 0.0, 6.0));
+        add_box(Vec3::new(-0.5, 0.0, -6.0), Vec3::new(0.5, 2.0, 3.0));
+        let mesh = automata_nav::bake(&v, &t, &[], automata_nav::NavSettings::default()).unwrap();
+        let input = FrameInput {
+            nav: Some(Arc::new(mesh)),
+            ..FrameInput::default()
+        };
+        let entities = vec![EntityState {
+            id: 1,
+            name: "Guard".into(),
+            script: Some(script.clone()),
+            scale: [1.0; 3],
+            nav: Some(automata_nav::NavAgent::default()),
+            ..EntityState::default()
+        }];
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+        for frame in 0..2 {
+            assert!(bridge.send_frame_with(0.016, 0.016, &[], &entities, &input));
+            let msgs = pump(&mut bridge, |m| {
+                matches!(m, BridgeMsg::Frame(_) | BridgeMsg::Error { .. })
+            });
+            let reply = msgs
+                .iter()
+                .find_map(|m| match m {
+                    BridgeMsg::Frame(r) => Some(r.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{msgs:?}"));
+            let w = reply.writes.iter().find(|w| w.id == 1).unwrap();
+            let attrs = w.attributes.as_ref().unwrap();
+            assert_eq!(attrs["ready"], AttributeValue::Bool(true), "frame {frame}");
+            let AttributeValue::Int(corners) = attrs["corners"] else {
+                panic!("{attrs:?}");
+            };
+            // Sent on the first frame only, and still known on the second.
+            assert!(corners >= 3, "round the wall on frame {frame}: {corners}");
+            assert_eq!(attrs["speed"], AttributeValue::Float(3.5));
+            let edit = w.nav.as_ref().unwrap();
+            assert_eq!(
+                edit.target,
+                Some(Some(automata_nav::NavTarget::Entity("Intruder".into())))
+            );
+            assert_eq!(edit.speed, Some(2.0));
+        }
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `entity.ragdoll` reads the ragdoll's state; switching it on and
+    /// pushing comes back as a `RagdollEdit`.
+    #[test]
+    fn scripts_knock_ragdolls_over_through_the_bridge() {
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("oberon_bridge_rag_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("robot.py");
+        std::fs::write(
+            &script,
+            "def update(entity, ctx):\n    \
+             rag = entity.ragdoll\n    \
+             entity.attributes['limp'] = rag.limp\n    \
+             entity.attributes['hips'] = rag.hips[1]\n    \
+             entity.attributes['mass'] = rag.mass\n    \
+             rag.on(push=(0, 0, -40), bone='Chest')\n    \
+             rag.stiffness = 0.5\n",
+        )
+        .unwrap();
+        let rag = automata_scene::RagdollStatus {
+            ragdoll: automata_scene::Ragdoll::default(),
+            limp: true,
+            weight: 1.0,
+            resting: false,
+            hips: Some(glam::Vec3::new(0.0, 0.25, 0.0)),
+        };
+        let entities = vec![EntityState {
+            id: 1,
+            name: "Robot".into(),
+            script: Some(script.clone()),
+            scale: [1.0; 3],
+            rag: Some(rag),
+            ..EntityState::default()
+        }];
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+        assert!(bridge.send_frame_with(0.016, 0.016, &[], &entities, &FrameInput::default()));
+        let msgs = pump(&mut bridge, |m| {
+            matches!(m, BridgeMsg::Frame(_) | BridgeMsg::Error { .. })
+        });
+        let reply = msgs
+            .iter()
+            .find_map(|m| match m {
+                BridgeMsg::Frame(r) => Some(r.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{msgs:?}"));
+        let w = reply.writes.iter().find(|w| w.id == 1).unwrap();
+        let attrs = w.attributes.as_ref().unwrap();
+        assert_eq!(attrs["limp"], AttributeValue::Bool(true));
+        assert_eq!(attrs["hips"], AttributeValue::Float(0.25));
+        assert_eq!(attrs["mass"], AttributeValue::Float(70.0));
+        let edit = w.rag.as_ref().unwrap();
+        assert_eq!(edit.active, Some(true));
+        assert_eq!(edit.stiffness, Some(0.5));
+        assert_eq!(edit.mass, None);
+        assert_eq!(
+            edit.pushes,
+            [automata_scene::RagdollPush {
+                bone: Some("Chest".into()),
+                impulse: glam::Vec3::new(0.0, 0.0, -40.0),
+            }]
+        );
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `entity.sprite` reads the sprite's clip and flips; playing a clip
+    /// and flipping it come back as a sprite edit.
+    #[test]
+    fn scripts_play_sprite_clips_through_the_bridge() {
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("oberon_bridge_spr_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("hero.py");
+        std::fs::write(
+            &script,
+            "def update(entity, ctx):\n    \
+             spr = entity.sprite\n    \
+             entity.attributes['was'] = spr.clip\n    \
+             entity.attributes['n'] = len(spr.clips)\n    \
+             entity.attributes['fx'] = spr.flip_x\n    \
+             spr.play('run')\n    \
+             spr.flip_x = True\n    \
+             spr.color = (1, 0, 0)\n",
+        )
+        .unwrap();
+        let mut sprite = automata_scene::Sprite2D {
+            columns: 4,
+            clips: vec![
+                automata_scene::SpriteClip::new("idle", 0, 1, 8.0),
+                automata_scene::SpriteClip::new("run", 2, 3, 8.0),
+            ],
+            play: "idle".into(),
+            ..automata_scene::Sprite2D::default()
+        };
+        sprite.play_clip("idle", true);
+        let entities = vec![EntityState {
+            id: 1,
+            name: "Hero".into(),
+            script: Some(script.clone()),
+            scale: [1.0; 3],
+            spr: Some(sprite),
+            ..EntityState::default()
+        }];
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+        assert!(bridge.send_frame_with(0.016, 0.016, &[], &entities, &FrameInput::default()));
+        let msgs = pump(&mut bridge, |m| {
+            matches!(m, BridgeMsg::Frame(_) | BridgeMsg::Error { .. })
+        });
+        let reply = msgs
+            .iter()
+            .find_map(|m| match m {
+                BridgeMsg::Frame(r) => Some(r.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{msgs:?}"));
+        let w = reply.writes.iter().find(|w| w.id == 1).unwrap();
+        let attrs = w.attributes.as_ref().unwrap();
+        assert_eq!(attrs["was"], AttributeValue::Text("idle".into()));
+        assert_eq!(attrs["n"], AttributeValue::Int(2));
+        assert_eq!(attrs["fx"], AttributeValue::Bool(false));
+        let edit = w.spr.as_ref().unwrap();
+        assert_eq!(edit.play, Some(("run".into(), false)));
+        assert_eq!(edit.flip_x, Some(true));
+        assert_eq!(edit.color, Some([1.0, 0.0, 0.0, 1.0]));
+        assert!(!edit.stop);
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bad_sprite_writes_are_cleaned_up() {
+        let w = Json::parse(
+            r#"{"play": [3], "frame": -1, "size": [0, 2], "color": [1, 0, 0], "layer": 2, "flip_y": 1}"#,
+        )
+        .unwrap();
+        let edit = super::parse_spr(&w).unwrap();
+        assert_eq!(edit.play, None, "a clip is named");
+        assert_eq!(edit.frame, None, "no negative frames");
+        assert_eq!(edit.size, None, "sizes are positive");
+        assert_eq!(edit.color, Some([1.0, 0.0, 0.0, 1.0]));
+        assert_eq!(edit.layer, Some(2));
+        assert_eq!(edit.flip_y, None, "not a bool");
+        assert!(super::parse_spr(&Json::Int(1)).is_none());
+    }
+
+    #[test]
+    fn bad_ragdoll_writes_are_cleaned_up() {
+        let w =
+            Json::parse(r#"{"on": 1, "mass": 80, "push": [[[1, 2, 3], null], [["x"], "Head"]]}"#)
+                .unwrap();
+        let edit = super::parse_rag(&w).unwrap();
+        assert_eq!(edit.active, None, "not a bool");
+        assert_eq!(edit.mass, Some(80.0));
+        assert_eq!(edit.pushes.len(), 1);
+        assert_eq!(edit.pushes[0].bone, None);
+    }
+
+    /// `ctx.ai` (the shared script API's AI helpers) sees through the
+    /// frame's colliders: walls block sight, and the cone ignores what's
+    /// behind. Noises are heard once, and state machines run.
+    #[test]
+    fn scripts_see_hear_and_think_through_the_bridge() {
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("oberon_bridge_ai_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("guard.py");
+        std::fs::write(
+            &script,
+            "def start(entity, ctx):\n    \
+             entity.state['brain'] = ctx.ai.state_machine({\n        \
+             'idle': lambda e, c: 'alert' if c.ai.can_see(e, 'Front') else None,\n        \
+             'alert': lambda e, c: None}, initial='idle')\n\n\
+             def update(entity, ctx):\n    \
+             for name in ('Front', 'Behind', 'Walled'):\n        \
+             entity.attributes[name] = ctx.ai.can_see(entity, name)\n    \
+             if ctx.time.frame == 1:\n        \
+             ctx.ai.noise((0, 0, -5), radius=10, kind='shot')\n    \
+             entity.attributes['heard'] = len(ctx.ai.hear(entity, kinds='shot'))\n    \
+             entity.attributes['state'] = entity.state['brain'].update(entity, ctx)\n",
+        )
+        .unwrap();
+        let target = |id: u64, name: &str, position: [f32; 3]| EntityState {
+            id,
+            name: name.into(),
+            position,
+            scale: [1.0; 3],
+            ..EntityState::default()
+        };
+        let entities = vec![
+            EntityState {
+                script: Some(script.clone()),
+                ..target(1, "Guard", [0.0; 3])
+            },
+            target(2, "Front", [0.0, 0.0, -8.0]),
+            target(3, "Behind", [0.0, 0.0, 8.0]),
+            target(4, "Walled", [-4.0, 0.0, -6.0]),
+            target(5, "Wall", [-2.0, 0.0, -3.0]),
+        ];
+        let ball = |id: u64, center: [f32; 3]| ColliderShape::Ball {
+            id,
+            center,
+            radius: 0.5,
+        };
+        let input = FrameInput {
+            colliders: vec![
+                ball(2, [0.0, 1.0, -8.0]),
+                ball(3, [0.0, 1.0, 8.0]),
+                ball(4, [-4.0, 1.0, -6.0]),
+                ColliderShape::Cuboid {
+                    id: 5,
+                    center: [-2.0, 1.0, -3.0],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    half: [1.0, 2.0, 0.2],
+                },
+            ],
+            ..FrameInput::default()
+        };
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+        for (frame, heard) in [(1, 1), (2, 0)] {
+            assert!(bridge.send_frame_with(0.016, 0.016, &[], &entities, &input));
+            let msgs = pump(&mut bridge, |m| {
+                matches!(m, BridgeMsg::Frame(_) | BridgeMsg::Error { .. })
+            });
+            let reply = msgs
+                .iter()
+                .find_map(|m| match m {
+                    BridgeMsg::Frame(r) => Some(r.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{msgs:?}"));
+            let w = reply.writes.iter().find(|w| w.id == 1).unwrap();
+            let attrs = w.attributes.as_ref().unwrap();
+            assert_eq!(attrs["Front"], AttributeValue::Bool(true), "frame {frame}");
+            assert_eq!(
+                attrs["Behind"],
+                AttributeValue::Bool(false),
+                "frame {frame}"
+            );
+            assert_eq!(
+                attrs["Walled"],
+                AttributeValue::Bool(false),
+                "frame {frame}"
+            );
+            assert_eq!(attrs["heard"], AttributeValue::Int(heard), "frame {frame}");
+            assert_eq!(attrs["state"], AttributeValue::Text("alert".into()));
+        }
+        drop(bridge.stop());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saves_and_settings_live_in_the_project() {
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("oberon_bridge_save_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("saver.py");
+        std::fs::write(
+            &script,
+            "def start(entity, ctx):\n    ctx.save['coins'] = ctx.save.get('coins', 0) + 12\n    \
+             entity.attributes['gfx'] = ctx.settings.graphics\n    \
+             ctx.settings.graphics = 'low'\n    ctx.settings.volume = 0.25\n",
+        )
+        .unwrap();
+        let entities = vec![EntityState {
+            id: 1,
+            name: "Saver".into(),
+            script: Some(script.clone()),
+            scale: [1.0; 3],
+            ..EntityState::default()
+        }];
+        let input = FrameInput {
+            graphics: "medium",
+            ..FrameInput::default()
+        };
+        for run in 1..=2 {
+            let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+            pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+            assert!(bridge.send_frame_with(0.016, 0.016, &[], &entities, &input));
+            let msgs = pump(&mut bridge, |m| matches!(m, BridgeMsg::Frame(_)));
+            let reply = msgs
+                .iter()
+                .find_map(|m| match m {
+                    BridgeMsg::Frame(r) => Some(r.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(
+                reply.settings,
+                PlayerSettings {
+                    volume: Some(0.25),
+                    graphics: Some(automata_renderer::GraphicsQuality::Low),
+                },
+                "{msgs:?}"
+            );
+            // The first run sees Play's preset; the second the saved one.
+            let gfx = reply.writes[0].attributes.as_ref().unwrap()["gfx"].clone();
+            let want = if run == 1 { "medium" } else { "low" };
+            assert_eq!(gfx, AttributeValue::Text(want.into()));
+            drop(bridge.stop());
+            let saved =
+                std::fs::read_to_string(dir.join(".oberon/save/saves/default.json")).unwrap();
+            assert!(
+                saved.contains(&format!("\"coins\": {}", 12 * run)),
+                "{saved}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn runs_scripts_and_reports_errors() {
+        let Some(python) = python() else {
+            eprintln!("no python; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("oberon_bridge_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mover = dir.join("mover.py");
+        std::fs::write(
+            &mover,
+            "def start(entity, ctx):\n    print('hello', entity.name)\n\n\
+             def update(entity, ctx):\n    x, y, z = entity.transform.position\n    \
+             entity.transform.position = (x + 1.0, y, z)\n    \
+             entity.attributes['ticks'] = entity.attributes.get('ticks', 0) + 1\n    \
+             if ctx.input.pressed('space'):\n        entity.character_velocity = (0, 5, 0)\n",
+        )
+        .unwrap();
+        let broken = dir.join("broken.py");
+        std::fs::write(&broken, "def update(entity, ctx):\n    return 1 / 0\n").unwrap();
+
+        let mut bridge = ScriptBridge::start(python, &dir.join(".oberon"), &dir).unwrap();
+        let msgs = pump(&mut bridge, |m| matches!(m, BridgeMsg::Ready { .. }));
+        assert!(msgs.iter().any(|m| matches!(m, BridgeMsg::Ready { .. })));
+
+        let entities = vec![
+            EntityState {
+                id: 1,
+                name: "Hero".into(),
+                script: Some(mover.clone()),
+                velocity: Some([0.0; 3]),
+                scale: [1.0; 3],
+                ..EntityState::default()
+            },
+            EntityState {
+                id: 2,
+                name: "Bad".into(),
+                script: Some(broken.clone()),
+                ..EntityState::default()
+            },
+        ];
+        assert!(bridge.send_frame(0.016, 0.016, &["space"], &entities));
+        assert!(bridge.busy());
+        assert!(
+            !bridge.send_frame(0.016, 0.032, &[], &entities),
+            "one frame in flight"
+        );
+        let msgs = pump(&mut bridge, |m| matches!(m, BridgeMsg::Frame(_)));
+        assert!(!bridge.busy());
+        assert!(
+            msgs.iter()
+                .any(|m| matches!(m, BridgeMsg::Log { msg, .. } if msg == "hello Hero")),
+            "{msgs:?}"
+        );
+        let err = msgs
+            .iter()
+            .find_map(|m| match m {
+                BridgeMsg::Error {
+                    file,
+                    line,
+                    traceback,
+                    ..
+                } => Some((file.clone(), *line, traceback.clone())),
+                _ => None,
+            })
+            .expect("error reported");
+        assert_eq!(err.0, broken);
+        assert_eq!(err.1, 2);
+        assert!(
+            err.2.contains("ZeroDivisionError")
+                && !err.2.contains("bridge.py")
+                && !err.2.contains(SCRIPT_API_FILE),
+            "{}",
+            err.2
+        );
+        let writes = msgs
+            .iter()
+            .find_map(|m| match m {
+                BridgeMsg::Frame(w) => Some(w.writes.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let hero = writes.iter().find(|w| w.id == 1).unwrap();
+        assert_eq!(hero.position, Some([1.0, 0.0, 0.0]));
+        assert_eq!(hero.velocity, Some([0.0, 5.0, 0.0]));
+        assert_eq!(
+            hero.attributes.as_ref().unwrap()["ticks"],
+            AttributeValue::Int(1)
+        );
+        assert!(
+            writes.iter().all(|w| w.id != 2),
+            "a broken script writes nothing"
+        );
+
+        let leftover = bridge.stop();
+        assert!(leftover
+            .iter()
+            .all(|m| !matches!(m, BridgeMsg::Error { .. })));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

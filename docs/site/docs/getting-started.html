@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting Started · AUTOMATA docs</title>
+<meta name="description" content="This page takes you from a fresh checkout to a window on screen, and ends with the two problems everyone hits once.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="_static/docs.css">
+<script>window.DOCS_ROOT = "";</script>
+<script defer src="_static/search-index.js"></script>
+<script defer src="../dither.js"></script>
+<script defer src="_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../index.html">AUTOMATA</a>
+  <a class="section" href="index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="index.html">Overview</a></li><li><a href="getting-started.html" aria-current="page">Getting started</a></li><li><a href="tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="tutorials/first-scene.html">Your first scene</a></li><li><a href="tutorials/coin-collector.html">Coin collector</a></li><li><a href="tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="tutorials/fps.html">A first-person shooter</a></li><li><a href="tutorials/platformer.html">A 2D platformer</a></li><li><a href="zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="oberon/index.html">Introduction</a></li><li><a href="oberon/interface.html">The interface</a></li><li><a href="oberon/command-line.html">The oberon command</a></li><li><a href="oberon/scripting.html">Scripting</a></li><li><a href="oberon/cameras.html">Cameras</a></li><li><a href="oberon/graphics.html">Graphics</a></li><li><a href="oberon/code-editor.html">The code editor</a></li><li><a href="oberon/ui-editor.html">The UI editor</a></li><li><a href="oberon/materials.html">Materials</a></li><li><a href="oberon/shaders.html">Custom shaders</a></li><li><a href="oberon/models.html">Models</a></li><li><a href="oberon/animation-graphs.html">Animation graphs</a></li><li><a href="oberon/attachments-and-ik.html">Attachments &amp; IK</a></li><li><a href="oberon/ragdolls.html">Ragdolls</a></li><li><a href="oberon/navigation.html">Navigation</a></li><li><a href="oberon/ai.html">AI</a></li><li><a href="oberon/2d.html">2D games</a></li><li><a href="oberon/terrain.html">Terrain</a></li><li><a href="oberon/foliage.html">Grass &amp; foliage</a></li><li><a href="oberon/audio.html">Audio</a></li><li><a href="oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="oberon/editor-workflow.html">Editor workflow</a></li><li><a href="oberon/exporting.html">Exporting your game</a></li><li><a href="oberon/steam.html">Steam</a></li><li><a href="oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="guides/game-loop.html">The game loop</a></li><li><a href="guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="guides/grass-and-foliage.html">Grass &amp; foliage</a></li><li><a href="guides/cameras.html">Cameras</a></li><li><a href="guides/input.html">Input</a></li><li><a href="guides/touch-controls.html">Touch controls</a></li><li><a href="guides/physics.html">Physics</a></li><li><a href="guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="guides/oop-style.html">OOP style</a></li><li><a href="guides/scene-files.html">Scene files</a></li><li><a href="guides/project-structure.html">Project structure</a></li><li><a href="guides/testing.html">Testing</a></li><li><a href="guides/performance.html">Performance</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="api-reference.html">API reference</a></li><li><a href="cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="engine/architecture.html">Architecture</a></li><li><a href="engine/development.html">Development</a></li><li><a href="engine/api.html">API design</a></li><li><a href="engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Getting Started</h1>
+<p>This page takes you from a fresh checkout to a window on screen, and ends
+with the two problems everyone hits once.</p>
+<h2 id="requirements">Requirements<a class="anchor" href="#requirements" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Requirement</th><th>Why</th></tr></thead><tbody><tr><td>Python 3.11+</td><td>The gameplay language</td></tr><tr><td>A Rust toolchain</td><td>The engine core is Rust</td></tr><tr><td>A display/GPU (for windowed mode)</td><td>Headless mode needs neither</td></tr><tr><td><code>patchelf</code> (Linux only)</td><td>Wheel repair during builds</td></tr></tbody></table></div>
+<h2 id="install">Install<a class="anchor" href="#install" aria-label="Link to this section">#</a></h2>
+<p>From a checkout of the repository:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>python scripts/build.py</code></pre></div>
+<p>That one script compiles the Rust workspace, builds the Python wheel with
+maturin, and installs it into your active virtualenv. For a full
+build-plus-verify pass:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>python scripts/build.py --all   # also runs fmt, clippy, tests, docs</code></pre></div>
+<h2 id="your-first-window-15-lines">Your first window (15 lines)<a class="anchor" href="#your-first-window-15-lines" aria-label="Link to this section">#</a></h2>
+<p>Save as <code>hello.py</code> and run <code>python hello.py</code>:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+game = at.Game(title=<span class="tok-s">&quot;hello&quot;</span>, clear_color=(<span class="tok-n">0.1</span>, <span class="tok-n">0.1</span>, <span class="tok-n">0.15</span>, <span class="tok-n">1.0</span>))
+game.load_scene(
+    at.Scene()
+    .add(at.Entity(<span class="tok-s">&quot;camera&quot;</span>).add(at.Camera3D(position=(<span class="tok-n">0</span>, <span class="tok-n">1</span>, <span class="tok-n">5</span>), target=(<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>))))
+    .add(
+        at.Entity(<span class="tok-s">&quot;cube&quot;</span>)
+        .add(at.Transform(position=(<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>)))
+        .add(at.MeshRenderer.cube(size=<span class="tok-n">1.0</span>, color=(<span class="tok-n">0.4</span>, <span class="tok-n">0.8</span>, <span class="tok-n">0.4</span>, <span class="tok-n">1.0</span>)))
+    )
+)
+game.run(<span class="tok-k">lambda</span> ctx: ctx.quit() <span class="tok-k">if</span> ctx.input.just_pressed(at.Key.ESCAPE) <span class="tok-k">else</span> <span class="tok-b">None</span>)</code></pre></div>
+<p>A window opens, a green cube sits in it (lit by a default light), and
+<code>Esc</code> closes it. <code>game.run</code> returns the number of frames rendered when the
+loop ends.</p>
+<h2 id="the-two-problems-everyone-hits-once">The two problems everyone hits once<a class="anchor" href="#the-two-problems-everyone-hits-once" aria-label="Link to this section">#</a></h2>
+<p><strong>1. "The window opens but I see nothing."</strong>
+A 3D scene is invisible until it has <strong>both</strong> of these:</p>
+<ul><li>a <code>Camera3D</code> entity (the first camera entity wins each frame), and</li><li>at least one entity with <strong>both</strong> <code>Transform</code> and <code>MeshRenderer</code>.</li></ul>
+<p>Check those before anything else. (For atmosphere, add a
+<code>DirectionalLight</code>; without one, a default shadowless light is used.)</p>
+<p><strong>2. "It says <code>module &#x27;automata&#x27; has no attribute ...</code>"</strong>
+Your installed wheel is older than your checkout. Rebuild and reinstall:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>python scripts/build.py</code></pre></div>
+<h2 id="headless-mode-no-window">Headless mode (no window)<a class="anchor" href="#headless-mode-no-window" aria-label="Link to this section">#</a></h2>
+<p>For tests, CI, and servers, run the same game without a window or GPU:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>game = at.Game(headless=<span class="tok-b">True</span>)
+game.run(update, max_frames=<span class="tok-n">300</span>)   <span class="tok-c"># stops after 300 frames</span></code></pre></div>
+<p><code>MeshRenderer</code> components are inert in headless mode — physics, input
+logic, and events all behave identically. Every example supports a
+<code>--headless</code> flag; see <a href="guides/testing.html">Testing</a>.</p>
+<h2 id="next-step">Next step<a class="anchor" href="#next-step" aria-label="Link to this section">#</a></h2>
+<p><a href="zero-to-hero.html">Zero to Hero</a> — build a complete platformer, one concept
+at a time.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="index.html"><small>Previous</small>Overview</a><a class="next" href="tutorials/index.html"><small>Next</small>All tutorials</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/getting-started.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#requirements">Requirements</a></li><li class="l2"><a href="#install">Install</a></li><li class="l2"><a href="#your-first-window-15-lines">Your first window (15 lines)</a></li><li class="l2"><a href="#the-two-problems-everyone-hits-once">The two problems everyone hits once</a></li><li class="l2"><a href="#headless-mode-no-window">Headless mode (no window)</a></li><li class="l2"><a href="#next-step">Next step</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

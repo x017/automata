@@ -1,0 +1,26 @@
+[package]
+name = "automata-audio"
+description = "AUTOMATA audio: mixing and playback via kira, with a silent backend for headless runs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# `cpal` selects the real device backend. It is opt-in (off by default) so
+# headless runs, CI, and machines without audio hardware build and run with
+# the silent backend and no native dependencies (no ALSA on Linux). Consumers
+# opt in with `--features automata-audio/cpal`; the Python wheel exposes the
+# same switch as `automata-python/audio-cpal`.
+default = []
+cpal = ["kira/cpal", "dep:tracing"]
+
+[dependencies]
+kira.workspace = true
+thiserror.workspace = true
+tracing = { workspace = true, optional = true }

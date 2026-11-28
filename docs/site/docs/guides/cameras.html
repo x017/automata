@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide: Cameras · AUTOMATA docs</title>
+<meta name="description" content="How the engine picks a view, the two camera types, and the patterns almost every game needs: follow, orbit, rails, shake, and zoom.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../../dither.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../tutorials/fps.html">A first-person shooter</a></li><li><a href="../tutorials/platformer.html">A 2D platformer</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/command-line.html">The oberon command</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/ui-editor.html">The UI editor</a></li><li><a href="../oberon/materials.html">Materials</a></li><li><a href="../oberon/shaders.html">Custom shaders</a></li><li><a href="../oberon/models.html">Models</a></li><li><a href="../oberon/animation-graphs.html">Animation graphs</a></li><li><a href="../oberon/attachments-and-ik.html">Attachments &amp; IK</a></li><li><a href="../oberon/ragdolls.html">Ragdolls</a></li><li><a href="../oberon/navigation.html">Navigation</a></li><li><a href="../oberon/ai.html">AI</a></li><li><a href="../oberon/2d.html">2D games</a></li><li><a href="../oberon/terrain.html">Terrain</a></li><li><a href="../oberon/foliage.html">Grass &amp; foliage</a></li><li><a href="../oberon/audio.html">Audio</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/editor-workflow.html">Editor workflow</a></li><li><a href="../oberon/exporting.html">Exporting your game</a></li><li><a href="../oberon/steam.html">Steam</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="game-loop.html">The game loop</a></li><li><a href="scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="grass-and-foliage.html">Grass &amp; foliage</a></li><li><a href="cameras.html" aria-current="page">Cameras</a></li><li><a href="input.html">Input</a></li><li><a href="touch-controls.html">Touch controls</a></li><li><a href="physics.html">Physics</a></li><li><a href="events-and-resources.html">Events &amp; resources</a></li><li><a href="oop-style.html">OOP style</a></li><li><a href="scene-files.html">Scene files</a></li><li><a href="project-structure.html">Project structure</a></li><li><a href="testing.html">Testing</a></li><li><a href="performance.html">Performance</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="../engine/architecture.html">Architecture</a></li><li><a href="../engine/development.html">Development</a></li><li><a href="../engine/api.html">API design</a></li><li><a href="../engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Guide: Cameras</h1>
+<p>How the engine picks a view, the two camera types, and the patterns
+almost every game needs: follow, orbit, rails, shake, and zoom.</p>
+<p>If you build scenes in Oberon, read <a href="../oberon/cameras.html">Oberon: Cameras</a>
+as well. It covers the editor tools (frustums, preview, Look Through) and
+the <code>entity.camera</code> scripting helper.</p>
+<h2 id="the-rules">The rules<a class="anchor" href="#the-rules" aria-label="Link to this section">#</a></h2>
+<ul><li>A camera is a <strong>component</strong>. Put <code>at.Camera3D</code> or <code>at.Camera2D</code> on any
+entity.</li><li>The <strong>first entity</strong> with a <code>Camera3D</code> is the view for meshes. The first
+with a <code>Camera2D</code> is the view for sprites.</li><li>No <code>Camera3D</code> means meshes are seen from <code>(0, 0, 5)</code> looking at the
+origin. No <code>Camera2D</code> means sprites use screen pixels.</li><li>Cameras are plain values. To move one, <strong>assign a new camera</strong> every
+frame. It applies after your update, like every other write.</li></ul>
+<h2 id="camera3d">Camera3D<a class="anchor" href="#camera3d" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Camera3D(position=(<span class="tok-n">0</span>, <span class="tok-n">3.5</span>, <span class="tok-n">9</span>), target=(<span class="tok-n">0</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>), fov=<span class="tok-n">60.0</span>)</code></pre></div>
+<div class="table"><table><thead><tr><th>Argument</th><th>Meaning</th></tr></thead><tbody><tr><td><code>position</code></td><td>Where the eye is</td></tr><tr><td><code>target</code></td><td>The point it looks at. "Up" is always world +Y</td></tr><tr><td><code>fov</code></td><td>Vertical field of view in <strong>degrees</strong></td></tr></tbody></table></div>
+<p>The aspect ratio follows the window automatically. Near and far clip are
+0.1 and 1000 when built from Python; Oberon lets you edit them.</p>
+<h2 id="camera2d">Camera2D<a class="anchor" href="#camera2d" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.Camera2D(center=(<span class="tok-n">0</span>, <span class="tok-n">0</span>), half_height=<span class="tok-n">100.0</span>)</code></pre></div>
+<p><code>half_height</code> is how many world units fit between the screen centre and
+its top edge. Halve it to zoom in 2×.</p>
+<h2 id="follow-camera">Follow camera<a class="anchor" href="#follow-camera" aria-label="Link to this section">#</a></h2>
+<p>The basic pattern stores the camera state on your game object, eases it
+toward a goal every frame, and assigns a new camera.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> math
+<span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+
+<span class="tok-k">class</span> <span class="tok-f">Game</span>(at.Game):
+    <span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">self</span>.cam = [<span class="tok-n">0.0</span>, <span class="tok-n">4.0</span>, <span class="tok-n">10.0</span>]
+        <span class="tok-b">self</span>.load_scene(build_level())
+
+    <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+        px, py, pz = ctx.scene[<span class="tok-s">&quot;player&quot;</span>].transform.position
+        goal = (px, py + <span class="tok-n">3.0</span>, pz + <span class="tok-n">8.0</span>)
+        k = <span class="tok-n">1.0</span> - math.exp(-<span class="tok-n">8.0</span> * ctx.time.delta)   <span class="tok-c"># frame-rate independent</span>
+        <span class="tok-b">self</span>.cam = [c + (g - c) * k <span class="tok-k">for</span> c, g <span class="tok-k">in</span> <span class="tok-b">zip</span>(<span class="tok-b">self</span>.cam, goal)]
+        ctx.scene[<span class="tok-s">&quot;camera&quot;</span>].camera_3d = at.Camera3D(
+            position=<span class="tok-b">tuple</span>(<span class="tok-b">self</span>.cam), target=(px, py + <span class="tok-n">0.6</span>, pz)
+        )</code></pre></div>
+<p>Why <code>1 - exp(-rate * dt)</code> and not <code>rate * dt</code>? It gives the same feel at
+30 fps and at 240 fps, and it can never overshoot.</p>
+<h2 id="orbit-camera">Orbit camera<a class="anchor" href="#orbit-camera" aria-label="Link to this section">#</a></h2>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    turn = <span class="tok-b">float</span>(ctx.input.pressed(<span class="tok-s">&quot;e&quot;</span>)) - <span class="tok-b">float</span>(ctx.input.pressed(<span class="tok-s">&quot;q&quot;</span>))
+    <span class="tok-b">self</span>.yaw += turn * <span class="tok-n">2.0</span> * ctx.time.delta
+    px, py, pz = ctx.scene[<span class="tok-s">&quot;player&quot;</span>].transform.position
+    ctx.scene[<span class="tok-s">&quot;camera&quot;</span>].camera_3d = at.Camera3D(
+        position=(px + <span class="tok-n">9</span> * math.sin(<span class="tok-b">self</span>.yaw), py + <span class="tok-n">3.5</span>, pz + <span class="tok-n">9</span> * math.cos(<span class="tok-b">self</span>.yaw)),
+        target=(px, py + <span class="tok-n">0.6</span>, pz),
+    )</code></pre></div>
+<p>To make movement camera-relative, rotate the input by the yaw:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>f = <span class="tok-b">float</span>(ctx.input.pressed(<span class="tok-s">&quot;w&quot;</span>)) - <span class="tok-b">float</span>(ctx.input.pressed(<span class="tok-s">&quot;s&quot;</span>))
+r = <span class="tok-b">float</span>(ctx.input.pressed(<span class="tok-s">&quot;d&quot;</span>)) - <span class="tok-b">float</span>(ctx.input.pressed(<span class="tok-s">&quot;a&quot;</span>))
+s, c = math.sin(<span class="tok-b">self</span>.yaw), math.cos(<span class="tok-b">self</span>.yaw)
+vx, vz = r * c - f * s, -r * s - f * c</code></pre></div>
+<h2 id="camera-rail-cutscenes">Camera rail (cutscenes)<a class="anchor" href="#camera-rail-cutscenes" aria-label="Link to this section">#</a></h2>
+<p>Move along a list of keyframes with smooth easing:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>SHOTS = [  <span class="tok-c"># (time, position, target)</span>
+    (<span class="tok-n">0.0</span>, (-<span class="tok-n">8</span>, <span class="tok-n">2</span>, <span class="tok-n">8</span>), (<span class="tok-n">0</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>)),
+    (<span class="tok-n">3.0</span>, (<span class="tok-n">8</span>, <span class="tok-n">3</span>, <span class="tok-n">6</span>), (<span class="tok-n">0</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>)),
+    (<span class="tok-n">6.0</span>, (<span class="tok-n">0</span>, <span class="tok-n">12</span>, <span class="tok-n">0.1</span>), (<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>)),
+]
+
+<span class="tok-k">def</span> <span class="tok-f">lerp</span>(a, b, t):
+    <span class="tok-k">return</span> <span class="tok-b">tuple</span>(x + (y - x) * t <span class="tok-k">for</span> x, y <span class="tok-k">in</span> <span class="tok-b">zip</span>(a, b))
+
+<span class="tok-k">def</span> <span class="tok-f">smooth</span>(t):
+    <span class="tok-k">return</span> t * t * (<span class="tok-n">3</span> - <span class="tok-n">2</span> * t)
+
+<span class="tok-k">def</span> <span class="tok-f">rail</span>(time):
+    <span class="tok-k">for</span> (t0, p0, a0), (t1, p1, a1) <span class="tok-k">in</span> <span class="tok-b">zip</span>(SHOTS, SHOTS[<span class="tok-n">1</span>:]):
+        <span class="tok-k">if</span> time &lt;= t1:
+            k = smooth((time - t0) / (t1 - t0))
+            <span class="tok-k">return</span> lerp(p0, p1, k), lerp(a0, a1, k)
+    <span class="tok-k">return</span> SHOTS[-<span class="tok-n">1</span>][<span class="tok-n">1</span>], SHOTS[-<span class="tok-n">1</span>][<span class="tok-n">2</span>]
+
+<span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    position, target = rail(ctx.time.elapsed)
+    ctx.scene[<span class="tok-s">&quot;camera&quot;</span>].camera_3d = at.Camera3D(position=position, target=target)</code></pre></div>
+<h2 id="screen-shake">Screen shake<a class="anchor" href="#screen-shake" aria-label="Link to this section">#</a></h2>
+<p>Shake the <em>target</em> a little, not the position. It reads as impact without
+making the player feel ill.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> random
+
+<span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    <span class="tok-b">self</span>.trauma = <span class="tok-b">max</span>(<span class="tok-n">0.0</span>, <span class="tok-b">self</span>.trauma - ctx.time.delta * <span class="tok-n">1.5</span>)
+    amount = <span class="tok-b">self</span>.trauma ** <span class="tok-n">2</span> * <span class="tok-n">0.3</span>
+    jitter = <span class="tok-b">tuple</span>(random.uniform(-amount, amount) <span class="tok-k">for</span> _ <span class="tok-k">in</span> <span class="tok-b">range</span>(<span class="tok-n">3</span>))
+    tx, ty, tz = <span class="tok-b">self</span>.look
+    ctx.scene[<span class="tok-s">&quot;camera&quot;</span>].camera_3d = at.Camera3D(
+        position=<span class="tok-b">self</span>.eye, target=(tx + jitter[<span class="tok-n">0</span>], ty + jitter[<span class="tok-n">1</span>], tz + jitter[<span class="tok-n">2</span>])
+    )
+
+<span class="tok-c"># on a hit:  self.trauma = min(1.0, self.trauma + 0.6)</span></code></pre></div>
+<h2 id="zoom">Zoom<a class="anchor" href="#zoom" aria-label="Link to this section">#</a></h2>
+<p>Animate <code>fov</code>: about 60 normally, 30–40 when aiming, 75+ while sprinting
+for a sense of speed.</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>goal = <span class="tok-n">35.0</span> <span class="tok-k">if</span> ctx.input.pressed(<span class="tok-s">&quot;z&quot;</span>) <span class="tok-k">else</span> <span class="tok-n">60.0</span>
+<span class="tok-b">self</span>.fov += (goal - <span class="tok-b">self</span>.fov) * <span class="tok-b">min</span>(<span class="tok-n">1.0</span>, <span class="tok-n">10</span> * ctx.time.delta)</code></pre></div>
+<h2 id="several-cameras">Several cameras<a class="anchor" href="#several-cameras" aria-label="Link to this section">#</a></h2>
+<p>Only the first camera renders. To cut between views, mark each shot with
+an empty entity: its position is the eye, and a Vec3 attribute <code>look</code>
+holds the target. Then copy the shot you want into the main camera:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>shot = ctx.scene[<span class="tok-s">&quot;shot_door&quot;</span>]
+ctx.scene[<span class="tok-s">&quot;camera&quot;</span>].camera_3d = at.Camera3D(
+    position=shot.transform.position, target=shot.attributes[<span class="tok-s">&quot;look&quot;</span>]
+)</code></pre></div>
+<h2 id="behaviour-scripts">Behaviour scripts<a class="anchor" href="#behaviour-scripts" aria-label="Link to this section">#</a></h2>
+<p>Scripts attached in Oberon (and run with <code>at.run_scene</code>) get a helper that
+does the bookkeeping for you:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    ctx.camera.follow(ctx.scene[<span class="tok-s">&quot;Player&quot;</span>], offset=(<span class="tok-n">0</span>, <span class="tok-n">3</span>, <span class="tok-n">8</span>), smooth=<span class="tok-n">8</span>)
+    ctx.camera.fov = <span class="tok-n">70</span> <span class="tok-k">if</span> ctx.input.pressed(<span class="tok-s">&quot;shift&quot;</span>) <span class="tok-k">else</span> <span class="tok-n">60</span></code></pre></div>
+<p>See <a href="../oberon/cameras.html#driving-a-camera-from-a-script">Oberon: Cameras</a>.</p>
+    </article>
+    <footer class="pager"><a class="prev" href="grass-and-foliage.html"><small>Previous</small>Grass &amp; foliage</a><a class="next" href="input.html"><small>Next</small>Input</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/guides/cameras.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#the-rules">The rules</a></li><li class="l2"><a href="#camera3d">Camera3D</a></li><li class="l2"><a href="#camera2d">Camera2D</a></li><li class="l2"><a href="#follow-camera">Follow camera</a></li><li class="l2"><a href="#orbit-camera">Orbit camera</a></li><li class="l2"><a href="#camera-rail-cutscenes">Camera rail (cutscenes)</a></li><li class="l2"><a href="#screen-shake">Screen shake</a></li><li class="l2"><a href="#zoom">Zoom</a></li><li class="l2"><a href="#several-cameras">Several cameras</a></li><li class="l2"><a href="#behaviour-scripts">Behaviour scripts</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

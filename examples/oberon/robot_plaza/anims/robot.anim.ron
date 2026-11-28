@@ -1,0 +1,44 @@
+// robot.anim.ron: the player robot's animation graph (Robot Plaza).
+// scripts/player.py sets speed and grounded and fires jump and wave;
+// this file picks the clips. Open it in Oberon to see it as a graph.
+(
+    parameters: [
+        (name: "speed", kind: Float(0.0)),
+        (name: "grounded", kind: Bool(true)),
+        (name: "jump", kind: Trigger),
+        (name: "wave", kind: Trigger),
+    ],
+    layers: [
+        (
+            name: "Base",
+            states: [
+                (
+                    name: "Move",
+                    motion: Blend1D(param: "speed", points: [
+                        (clip: "Idle", at: 0.0),
+                        (clip: "Walking", at: 2.2),
+                        (clip: "Running", at: 5.0),
+                    ]),
+                    position: (0.0, 0.0),
+                ),
+                (name: "Jump", motion: Clip("Jump"), looping: false, position: (240.0, 0.0)),
+            ],
+            transitions: [
+                (from: "*", to: "Jump", when: [Triggered("jump")], fade: 0.1),
+                (from: "Jump", to: "Move", when: [IsTrue("grounded")], fade: 0.25, exit_time: 0.6),
+            ],
+        ),
+        (
+            name: "Arms",
+            mask: ["Torso"],  // the chest, arms and head
+            states: [
+                (name: "Off", motion: Empty, position: (0.0, 0.0)),
+                (name: "Wave", motion: Clip("Wave"), looping: false, position: (240.0, 0.0)),
+            ],
+            transitions: [
+                (from: "Off", to: "Wave", when: [Triggered("wave")], fade: 0.2),
+                (from: "Wave", to: "Off", fade: 0.3),
+            ],
+        ),
+    ],
+)

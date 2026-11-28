@@ -1,0 +1,89 @@
+# Bootstrap a Rust toolchain and vendored dependencies for network-restricted
+# development environments (sandboxes that cannot reach static.rust-lang.org,
+# crates.io, or the GitHub artifact/log hosts). GitHub-hosted runners have
+# full network access; this workflow publishes the pieces to the
+# `dev-artifacts` orphan branch, which restricted environments can fetch with
+# plain `git`. See docs/development.md, "Offline / sandboxed environments".
+#
+# `dev-artifacts` is automation-owned: force-pushed on every run, never branched
+# from, never merged. Tarballs are split into <100 MB chunks to satisfy
+# GitHub's per-file push limit; rejoin with `cat file.part-* > file`.
+#
+# This workflow runs automatically when dependency manifests change and can
+# be dispatched manually.
+
+name: bootstrap-toolchain
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/bootstrap-toolchain.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**/Cargo.toml"
+
+permissions:
+  contents: write # required to force-push the dev-artifacts branch
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable, minimal profile)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Package toolchain and vendored dependencies
+        run: |
+          set -euo pipefail
+          toolchain_dir="$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu"
+          test -x "$toolchain_dir/bin/cargo"
+
+          tar -C "$HOME/.rustup/toolchains" \
+            --exclude='stable-x86_64-unknown-linux-gnu/share' \
+            -czf rust-toolchain.tar.gz \
+            stable-x86_64-unknown-linux-gnu
+          split -b 90m rust-toolchain.tar.gz rust-toolchain.tar.gz.part-
+
+          cargo generate-lockfile
+          cargo vendor vendor
+          tar -czf cargo-vendor.tar.gz vendor Cargo.lock
+          split -b 90m cargo-vendor.tar.gz cargo-vendor.tar.gz.part-
+
+          ls -lh *.part-*
+
+      - name: Publish to the dev-artifacts branch
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          mv *.part-* "$work/"
+          cd "$work"
+
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          cat > README.md <<'EOF'
+          # dev-artifacts
+
+          Automation-owned branch carrying the Rust toolchain and vendored
+          dependencies for network-restricted development environments.
+          Force-pushed by the `bootstrap-toolchain` workflow.
+
+          - Do not branch from it, do not merge it, do not develop on it.
+          - Consume it with `scripts/setup-offline-env.sh`.
+          - Rejoin split tarballs with: `cat <name>.part-* > <name>`
+          EOF
+
+          git add -A
+          git commit -qm "artifacts from ${GITHUB_SHA}"
+          git push --force \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            HEAD:refs/heads/dev-artifacts

@@ -1,0 +1,19 @@
+// Gradle init script for CI (installed into ~/.gradle/init.d by
+// .github/workflows/android.yml): look in Google's mirror of Maven Central
+// before Maven Central itself, which sometimes turns GitHub's runners away
+// with "429 Too Many Requests". The build's own repositories (google(),
+// mavenCentral()) still follow, so nothing is lost if the mirror lacks a
+// file. This runs before python-for-android's build.gradle, so the mirror
+// comes first in both the buildscript and the project repositories.
+def mirror = 'https://maven-central.storage-download.googleapis.com/maven2/'
+
+allprojects {
+    buildscript {
+        repositories {
+            maven { url mirror }
+        }
+    }
+    repositories {
+        maven { url mirror }
+    }
+}

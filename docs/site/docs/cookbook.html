@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cookbook · AUTOMATA docs</title>
+<meta name="description" content="Small recipes for problems every game hits. Each is complete enough to paste into the capstone platformer (examples/python/oop_platformer.py) and adapt. The names (WALK_SPEED, GRAVITY, JUMP_SPEED,…">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="_static/docs.css">
+<script>window.DOCS_ROOT = "";</script>
+<script defer src="_static/search-index.js"></script>
+<script defer src="../dither.js"></script>
+<script defer src="_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../index.html">AUTOMATA</a>
+  <a class="section" href="index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="index.html">Overview</a></li><li><a href="getting-started.html">Getting started</a></li><li><a href="tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="tutorials/first-scene.html">Your first scene</a></li><li><a href="tutorials/coin-collector.html">Coin collector</a></li><li><a href="tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="tutorials/fps.html">A first-person shooter</a></li><li><a href="tutorials/platformer.html">A 2D platformer</a></li><li><a href="zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="oberon/index.html">Introduction</a></li><li><a href="oberon/interface.html">The interface</a></li><li><a href="oberon/command-line.html">The oberon command</a></li><li><a href="oberon/scripting.html">Scripting</a></li><li><a href="oberon/cameras.html">Cameras</a></li><li><a href="oberon/graphics.html">Graphics</a></li><li><a href="oberon/code-editor.html">The code editor</a></li><li><a href="oberon/ui-editor.html">The UI editor</a></li><li><a href="oberon/materials.html">Materials</a></li><li><a href="oberon/shaders.html">Custom shaders</a></li><li><a href="oberon/models.html">Models</a></li><li><a href="oberon/animation-graphs.html">Animation graphs</a></li><li><a href="oberon/attachments-and-ik.html">Attachments &amp; IK</a></li><li><a href="oberon/ragdolls.html">Ragdolls</a></li><li><a href="oberon/navigation.html">Navigation</a></li><li><a href="oberon/ai.html">AI</a></li><li><a href="oberon/2d.html">2D games</a></li><li><a href="oberon/terrain.html">Terrain</a></li><li><a href="oberon/foliage.html">Grass &amp; foliage</a></li><li><a href="oberon/audio.html">Audio</a></li><li><a href="oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="oberon/editor-workflow.html">Editor workflow</a></li><li><a href="oberon/exporting.html">Exporting your game</a></li><li><a href="oberon/steam.html">Steam</a></li><li><a href="oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="guides/game-loop.html">The game loop</a></li><li><a href="guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="guides/grass-and-foliage.html">Grass &amp; foliage</a></li><li><a href="guides/cameras.html">Cameras</a></li><li><a href="guides/input.html">Input</a></li><li><a href="guides/touch-controls.html">Touch controls</a></li><li><a href="guides/physics.html">Physics</a></li><li><a href="guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="guides/oop-style.html">OOP style</a></li><li><a href="guides/scene-files.html">Scene files</a></li><li><a href="guides/project-structure.html">Project structure</a></li><li><a href="guides/testing.html">Testing</a></li><li><a href="guides/performance.html">Performance</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="api-reference.html">API reference</a></li><li><a href="cookbook.html" aria-current="page">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="engine/architecture.html">Architecture</a></li><li><a href="engine/development.html">Development</a></li><li><a href="engine/api.html">API design</a></li><li><a href="engine/oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Cookbook</h1>
+<p>Small recipes for problems every game hits. Each is complete enough to
+paste into the <a href="zero-to-hero.html#module-11--capstone-coin-runner">capstone platformer</a>
+(<code>examples/python/oop_platformer.py</code>) and adapt. The names (<code>WALK_SPEED</code>,
+<code>GRAVITY</code>, <code>JUMP_SPEED</code>, <code>self.controls</code>, <code>self.cam_x</code>) are the capstone's.</p>
+<p><strong>All of them, pasted in:</strong>
+<a href="https://github.com/x017/automata/blob/main/examples/python/cookbook_platformer.py" rel="noopener"><code>examples/python/cookbook_platformer.py</code></a>
+is the capstone with every recipe on this page working together, and
+<a href="https://github.com/x017/automata/blob/main/examples/python/tests/test_cookbook_platformer.py" rel="noopener"><code>examples/python/tests/test_cookbook_platformer.py</code></a>
+tests them headless:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>python examples/python/cookbook_platformer.py
+pytest examples/python/tests</code></pre></div>
+<p>When recipes combine, they share state. The finished file merges the three
+movement recipes into one <code>move</code> method, for example.</p>
+<h2 id="movement">Movement<a class="anchor" href="#movement" aria-label="Link to this section">#</a></h2>
+<h3 id="double-jump">Double jump<a class="anchor" href="#double-jump" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()          <span class="tok-c"># the capstone loads the level and controls</span>
+    <span class="tok-b">self</span>.jumps_left = <span class="tok-n">2</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    player = ctx.scene[<span class="tok-s">&quot;player&quot;</span>]
+    dx = <span class="tok-b">self</span>.controls.axis(<span class="tok-s">&quot;move_x&quot;</span>, ctx.input)
+    <span class="tok-k">if</span> ctx.physics.grounded(player) <span class="tok-k">and</span> <span class="tok-b">self</span>.vy &lt;= <span class="tok-n">0.0</span>:
+        <span class="tok-b">self</span>.jumps_left = <span class="tok-n">2</span>
+        <span class="tok-b">self</span>.vy = -<span class="tok-n">1.0</span>
+    <span class="tok-k">else</span>:
+        <span class="tok-b">self</span>.vy -= GRAVITY * ctx.time.delta
+
+    <span class="tok-k">if</span> <span class="tok-b">self</span>.controls.just_pressed(<span class="tok-s">&quot;jump&quot;</span>, ctx.input) <span class="tok-k">and</span> <span class="tok-b">self</span>.jumps_left &gt; <span class="tok-n">0</span>:
+        <span class="tok-b">self</span>.vy = JUMP_SPEED
+        <span class="tok-b">self</span>.jumps_left -= <span class="tok-n">1</span>
+    player.character_velocity = (dx * WALK_SPEED, <span class="tok-b">self</span>.vy, <span class="tok-n">0.0</span>)</code></pre></div>
+<p><code>self.vy &lt;= 0.0</code> matters: right after a jump the player can still touch
+the ground for a frame, and refilling <code>jumps_left</code> then would allow a
+third jump.</p>
+<h3 id="coyote-time-jump-shortly-after-leaving-a-ledge">Coyote time (jump shortly after leaving a ledge)<a class="anchor" href="#coyote-time-jump-shortly-after-leaving-a-ledge" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>COYOTE = <span class="tok-n">0.12</span>  <span class="tok-c"># seconds</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()
+    <span class="tok-b">self</span>.coyote = <span class="tok-n">0.0</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    <span class="tok-k">if</span> ctx.physics.grounded(ctx.scene[<span class="tok-s">&quot;player&quot;</span>]):
+        <span class="tok-b">self</span>.coyote = COYOTE
+    <span class="tok-k">else</span>:
+        <span class="tok-b">self</span>.coyote = <span class="tok-b">max</span>(<span class="tok-n">0.0</span>, <span class="tok-b">self</span>.coyote - ctx.time.delta)
+    can_jump = <span class="tok-b">self</span>.coyote &gt; <span class="tok-n">0.0</span>
+    <span class="tok-c"># ... allow jump while can_jump</span></code></pre></div>
+<h3 id="jump-buffering-jump-pressed-just-before-landing-still-works">Jump buffering (jump pressed just before landing still works)<a class="anchor" href="#jump-buffering-jump-pressed-just-before-landing-still-works" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>BUFFER = <span class="tok-n">0.12</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()
+    <span class="tok-b">self</span>.jump_buffer = <span class="tok-n">0.0</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    <span class="tok-b">self</span>.jump_buffer = BUFFER <span class="tok-k">if</span> <span class="tok-b">self</span>.controls.just_pressed(<span class="tok-s">&quot;jump&quot;</span>, ctx.input) \
+        <span class="tok-k">else</span> <span class="tok-b">max</span>(<span class="tok-n">0.0</span>, <span class="tok-b">self</span>.jump_buffer - ctx.time.delta)
+    <span class="tok-k">if</span> ctx.physics.grounded(ctx.scene[<span class="tok-s">&quot;player&quot;</span>]) <span class="tok-k">and</span> <span class="tok-b">self</span>.jump_buffer &gt; <span class="tok-n">0.0</span>:
+        <span class="tok-b">self</span>.vy = JUMP_SPEED
+        <span class="tok-b">self</span>.jump_buffer = <span class="tok-n">0.0</span></code></pre></div>
+<h2 id="cameras">Cameras<a class="anchor" href="#cameras" aria-label="Link to this section">#</a></h2>
+<h3 id="orbit-camera">Orbit camera<a class="anchor" href="#orbit-camera" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> math
+
+<span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    t = ctx.time.elapsed * <span class="tok-n">0.6</span>
+    ctx.scene[<span class="tok-s">&quot;camera&quot;</span>].camera_3d = at.Camera3D(
+        position=(<span class="tok-n">8.0</span> * math.sin(t), <span class="tok-n">3.0</span>, <span class="tok-n">8.0</span> * math.cos(t)),
+        target=(<span class="tok-n">0</span>, <span class="tok-n">1</span>, <span class="tok-n">0</span>),
+    )</code></pre></div>
+<h3 id="screen-shake">Screen shake<a class="anchor" href="#screen-shake" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> random
+
+<span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()
+    <span class="tok-b">self</span>.shake = <span class="tok-n">0.0</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_hit</span>(<span class="tok-b">self</span>, payload):
+    <span class="tok-b">self</span>.shake = <span class="tok-n">0.25</span>  <span class="tok-c"># seconds of shake</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    <span class="tok-b">self</span>.shake = <span class="tok-b">max</span>(<span class="tok-n">0.0</span>, <span class="tok-b">self</span>.shake - ctx.time.delta)
+    mag = <span class="tok-n">0.3</span> * (<span class="tok-b">self</span>.shake / <span class="tok-n">0.25</span>)
+    ox, oy = random.uniform(-mag, mag), random.uniform(-mag, mag)
+    ctx.scene[<span class="tok-s">&quot;camera&quot;</span>].camera_3d = at.Camera3D(
+        position=(<span class="tok-b">self</span>.cam_x + ox, <span class="tok-b">self</span>.cam_y + oy, <span class="tok-n">10.0</span>),
+        target=(<span class="tok-b">self</span>.cam_x, <span class="tok-b">self</span>.cam_y - <span class="tok-n">1.4</span>, <span class="tok-n">0.0</span>),
+    )</code></pre></div>
+<h2 id="spawning--timing">Spawning &amp; timing<a class="anchor" href="#spawning--timing" aria-label="Link to this section">#</a></h2>
+<h3 id="spawn-waves-on-a-timer">Spawn waves on a timer<a class="anchor" href="#spawn-waves-on-a-timer" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()
+    <span class="tok-b">self</span>.next_wave, <span class="tok-b">self</span>.wave = <span class="tok-n">5.0</span>, <span class="tok-n">0</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    <span class="tok-b">self</span>.next_wave -= ctx.time.delta
+    <span class="tok-k">if</span> <span class="tok-b">self</span>.next_wave &lt;= <span class="tok-n">0.0</span>:
+        <span class="tok-b">self</span>.next_wave = <span class="tok-n">5.0</span>
+        <span class="tok-b">self</span>.wave += <span class="tok-n">1</span>
+        <span class="tok-k">for</span> i <span class="tok-k">in</span> <span class="tok-b">range</span>(<span class="tok-b">self</span>.wave):
+            ctx.scene.spawn(Crate(position=(<span class="tok-n">2.0</span> + i * <span class="tok-n">1.5</span>, <span class="tok-n">8.0</span>, <span class="tok-n">0.0</span>)))   <span class="tok-c"># appears next frame</span></code></pre></div>
+<p><code>Crate</code> is the capstone's; any <code>Entity</code> subclass works.</p>
+<h3 id="pickup-by-proximity-no-physics-sensors-needed">Pickup by proximity (no physics sensors needed)<a class="anchor" href="#pickup-by-proximity-no-physics-sensors-needed" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    px, py, _ = ctx.scene[<span class="tok-s">&quot;player&quot;</span>].transform.position
+    <span class="tok-k">for</span> name, (cx, cy) <span class="tok-k">in</span> <span class="tok-b">list</span>(<span class="tok-b">self</span>.coins.items()):
+        coin = ctx.scene.find(name)
+        <span class="tok-k">if</span> coin <span class="tok-k">is</span> <span class="tok-b">None</span>:  <span class="tok-c"># spawned this frame; it exists from the next</span>
+            <span class="tok-k">continue</span>
+        <span class="tok-k">if</span> <span class="tok-b">abs</span>(px - cx) &lt; <span class="tok-n">0.8</span> <span class="tok-k">and</span> <span class="tok-b">abs</span>(py - cy) &lt; <span class="tok-n">1.0</span>:
+            coin.despawn()
+            <span class="tok-k">del</span> <span class="tok-b">self</span>.coins[name]
+            <span class="tok-b">self</span>.score += <span class="tok-n">1</span>
+            ctx.events.send(<span class="tok-s">&quot;coin_pickup&quot;</span>, {<span class="tok-s">&quot;score&quot;</span>: <span class="tok-b">self</span>.score})</code></pre></div>
+<h2 id="flow-control">Flow control<a class="anchor" href="#flow-control" aria-label="Link to this section">#</a></h2>
+<h3 id="pause">Pause<a class="anchor" href="#pause" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()
+    <span class="tok-b">self</span>.paused = <span class="tok-b">False</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    <span class="tok-k">if</span> ctx.input.just_pressed(at.Key.ESCAPE):
+        <span class="tok-b">self</span>.paused = <span class="tok-k">not</span> <span class="tok-b">self</span>.paused
+    <span class="tok-k">if</span> <span class="tok-b">self</span>.paused:
+        ctx.scene[<span class="tok-s">&quot;player&quot;</span>].character_velocity = (<span class="tok-n">0.0</span>, <span class="tok-n">0.0</span>, <span class="tok-n">0.0</span>)
+        <span class="tok-k">return</span>  <span class="tok-c"># the game logic below only runs unpaused</span>
+    <span class="tok-c"># ... game logic</span></code></pre></div>
+<p>Physics keeps stepping while paused. A character's velocity stays at
+whatever you last wrote, so set it to zero or the player keeps sliding.
+Dynamic bodies (crates) keep settling.</p>
+<h3 id="switching-levels">Switching levels<a class="anchor" href="#switching-levels" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_level_complete</span>(<span class="tok-b">self</span>, payload):
+    <span class="tok-b">self</span>.level += <span class="tok-n">1</span>
+    <span class="tok-b">self</span>.load_scene(make_level(<span class="tok-b">self</span>.level))   <span class="tok-c"># the next frame is the new level</span></code></pre></div>
+<p><code>make_level(n)</code> is your own function returning a <code>Scene</code>. Send
+<code>level_complete</code> when the last coin goes, and reset per-level state (the
+coin table, timers) after loading.</p>
+<h2 id="input">Input<a class="anchor" href="#input" aria-label="Link to this section">#</a></h2>
+<h3 id="rebindable-controls-screen-core-loop">Rebindable controls screen (core loop)<a class="anchor" href="#rebindable-controls-screen-core-loop" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):
+    <span class="tok-b">super</span>().on_start()
+    <span class="tok-b">self</span>.listening_for = <span class="tok-b">None</span>
+
+<span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):
+    <span class="tok-k">if</span> <span class="tok-b">self</span>.listening_for <span class="tok-k">is</span> <span class="tok-b">None</span> <span class="tok-k">and</span> ctx.input.just_pressed(at.Key.F1):
+        <span class="tok-b">self</span>.listening_for = <span class="tok-s">&quot;jump&quot;</span>          <span class="tok-c"># entering &quot;listen&quot; mode</span>
+        <span class="tok-k">return</span>
+    <span class="tok-k">if</span> <span class="tok-b">self</span>.listening_for:
+        <span class="tok-k">for</span> key <span class="tok-k">in</span> at.Key:
+            <span class="tok-k">if</span> key != at.Key.F1 <span class="tok-k">and</span> ctx.input.just_pressed(key):
+                <span class="tok-b">self</span>.controls.rebind(<span class="tok-b">self</span>.listening_for, [at.Binding.key(key)])
+                <span class="tok-b">self</span>.listening_for = <span class="tok-b">None</span>
+                <span class="tok-k">break</span>
+        <span class="tok-k">return</span>                               <span class="tok-c"># swallow input while listening</span>
+    <span class="tok-c"># ... normal game logic</span></code></pre></div>
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="zero-to-hero.html">Zero to Hero</a> — the guided path</li><li><a href="api-reference.html">API Reference</a></li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="api-reference.html"><small>Previous</small>API reference</a><a class="next" href="engine/architecture.html"><small>Next</small>Architecture</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/cookbook.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#movement">Movement</a></li><li class="l3"><a href="#double-jump">Double jump</a></li><li class="l3"><a href="#coyote-time-jump-shortly-after-leaving-a-ledge">Coyote time (jump shortly after leaving a ledge)</a></li><li class="l3"><a href="#jump-buffering-jump-pressed-just-before-landing-still-works">Jump buffering (jump pressed just before landing still works)</a></li><li class="l2"><a href="#cameras">Cameras</a></li><li class="l3"><a href="#orbit-camera">Orbit camera</a></li><li class="l3"><a href="#screen-shake">Screen shake</a></li><li class="l2"><a href="#spawning--timing">Spawning &amp; timing</a></li><li class="l3"><a href="#spawn-waves-on-a-timer">Spawn waves on a timer</a></li><li class="l3"><a href="#pickup-by-proximity-no-physics-sensors-needed">Pickup by proximity (no physics sensors needed)</a></li><li class="l2"><a href="#flow-control">Flow control</a></li><li class="l3"><a href="#pause">Pause</a></li><li class="l3"><a href="#switching-levels">Switching levels</a></li><li class="l2"><a href="#input">Input</a></li><li class="l3"><a href="#rebindable-controls-screen-core-loop">Rebindable controls screen (core loop)</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

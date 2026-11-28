@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened-runtime exceptions an exported AUTOMATA game needs (used by
+     sign_macos.sh). Python's ctypes and cffi write small trampolines into
+     memory they then run. Add com.apple.security.cs.disable-library-validation
+     only if the game loads native libraries you didn't sign yourself. -->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
+</plist>

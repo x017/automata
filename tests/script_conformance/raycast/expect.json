@@ -1,0 +1,11 @@
+{
+  "frames": 3,
+  "entities": {
+    "Shooter": {
+      "attributes": {
+        "hit": "Wall", "dist": 4.5, "normal": [0, 0, 1], "point": [0, 1, -4.5],
+        "by_id": "Wall", "miss": true, "short": true, "zero": true
+      }
+    }
+  }
+}

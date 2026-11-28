@@ -1,0 +1,18 @@
+[package]
+name = "automata-player"
+description = "The launcher for exported AUTOMATA games: runs the game in the Python runtime shipped next to it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Standard library only: the player is copied into every exported game, so
+# it stays tiny and builds for any desktop target without extra crates.
+[lints]
+workspace = true
+
+[[bin]]
+name = "automata-player"
+path = "src/main.rs"

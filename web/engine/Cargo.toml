@@ -1,0 +1,50 @@
+# The web build of the engine's Python module: `automata._core` for
+# Pyodide (wasm32-unknown-emscripten), with a step driver: the page runs
+# one frame per `requestAnimationFrame`. Built only in CI, with
+# pyodide-build (see web/README.md). It's outside the main workspace, like
+# android/engine, so the workspace never needs the emscripten target.
+[package]
+name = "automata-web"
+description = "AUTOMATA in the browser: the Python module for Pyodide, with a step driver"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.86"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "automata_web"
+crate-type = ["cdylib"]
+
+[dependencies]
+automata-audio = { path = "../../crates/automata-audio", default-features = false }
+automata-core = { path = "../../crates/automata-core" }
+automata-input = { path = "../../crates/automata-input" }
+# Its `module` feature (the desktop entry point) stays off: this crate
+# defines `automata._core` itself.
+automata-python = { path = "../../crates/automata-python", default-features = false }
+pyo3 = "0.30"
+raw-window-handle = "0.6"
+tracing = "0.1"
+
+[lints.rust]
+# FFI glue: the few unsafe items are marked and explained where they are.
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+[profile.release]
+# Download size: no debug symbols, whole-program optimization (drops the
+# parts of wgpu, naga and the rest the engine never calls), and size over
+# speed where it barely costs. Panics keep unwinding (PyO3 turns them into
+# Python exceptions; Pyodide's ABI has wasm exceptions).
+strip = true
+lto = "fat"
+codegen-units = 1
+opt-level = "s"
+
+# Not part of the repository's workspace.
+[workspace]

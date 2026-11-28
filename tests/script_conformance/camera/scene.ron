@@ -1,0 +1,32 @@
+(
+    version: 1,
+    entities: [
+        (
+            name: Some("Cam"),
+            transform: Some((
+                position: (0.0, 2.0, 10.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            camera_3d: Some((
+                position: (0.0, 2.0, 10.0),
+                target: (0.0, 0.0, 0.0),
+                up: (0.0, 1.0, 0.0),
+                fov_y_degrees: 60.0,
+                near: 0.1,
+                far: 1000.0,
+            )),
+            script: Some((
+                path: "camera.py",
+            )),
+        ),
+        (
+            name: Some("Target"),
+            transform: Some((
+                position: (4.0, 0.0, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+        ),
+    ],
+)

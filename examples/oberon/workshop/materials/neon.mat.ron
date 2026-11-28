@@ -1,0 +1,10 @@
+// A material. Entities that use it share its colour, surface and
+// textures: material: "materials/neon.mat.ron" on a Mesh Renderer. Texture paths are
+// relative to this file's folder.
+(
+    color: (0.04, 0.04, 0.05, 1.0),
+    roughness: 0.4,
+    emissive: (0.25, 0.9, 1.0),
+    emissive_strength: 4.0,
+    emissive_map: "../textures/neon.png",
+)

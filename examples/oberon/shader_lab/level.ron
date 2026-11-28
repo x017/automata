@@ -1,0 +1,237 @@
+(
+    version: 1,
+    entities: [
+        (
+            name: Some("Environment"),
+            environment: Some((
+                sky_color: (0.25, 0.3, 0.5),
+                ground_color: (0.05, 0.05, 0.08),
+                background: (0.008, 0.01, 0.02),
+                exposure: 1.0,
+                tonemapping: Aces,
+                fog: true,
+                fog_color: (0.008, 0.01, 0.02),
+                fog_density: 0.05,
+                fog_start: 2.0,
+                sky: true,
+                zenith_color: (0.002, 0.003, 0.01),
+                sun_size: 1.6,
+                sun_glow: 0.3,
+                clouds: 0.0,
+                lens_flare: 0.0,
+                ambient_occlusion: 1.0,
+                fog_height: 1.0,
+                fog_falloff: 0.2,
+                fog_sun: 0.0,
+                god_rays: 0.0,
+                depth_of_field: 0.0,
+                focus_distance: 0.0,
+                focus_range: 1.0,
+                toon_bands: 0,
+                toon_softness: 0.15,
+                shadow_tint: (1.0, 1.0, 1.0),
+                rim_light: 0.0,
+                painted_sky: false,
+                outline: 0.0,
+                outline_color: (0.05, 0.04, 0.06),
+                pixelate: 0.0,
+                palette: 0,
+                post: (
+                    bloom: 1.0,
+                    contrast: 1.0,
+                    saturation: 1.0,
+                    temperature: 0.0,
+                    tint: 0.0,
+                    lift: (0.0, 0.0, 0.0),
+                    gamma: (1.0, 1.0, 1.0),
+                    gain: (1.0, 1.0, 1.0),
+                    vignette: 0.0,
+                    grain: 0.0,
+                    chromatic_aberration: 0.0,
+                ),
+                wind: 0.0,
+                wind_direction: 0.0,
+            )),
+        ),
+        (
+            name: Some("Moon"),
+            directional_light: Some((
+                direction: (0.4, -1.0, -0.5),
+                color: (0.7, 0.78, 1.0),
+                ambient: 0.35,
+                shadows: true,
+            )),
+        ),
+        (
+            name: Some("Look"),
+            post_shader: Some((
+                shader: "shaders/crt.wgsl",
+                params: [
+                    0.08,
+                    0.35,
+                    1.5,
+                    0.6,
+                ],
+            )),
+        ),
+        (
+            name: Some("Floor"),
+            transform: Some((
+                position: (0.0, -0.05, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (10.0, 0.1, 8.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.16, 0.17, 0.2, 1.0),
+                surface: (
+                    roughness: Some(0.8),
+                ),
+            )),
+        ),
+        (
+            name: Some("Back Wall"),
+            transform: Some((
+                position: (0.0, 2.0, -3.2),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (10.0, 4.0, 0.2),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.22, 0.23, 0.27, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Hologram Plinth"),
+            transform: Some((
+                position: (-2.0, 0.35, -0.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.9, 0.7, 0.9),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.3, 0.3, 0.33, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Hologram"),
+            transform: Some((
+                position: (-2.0, 1.2, -0.6),
+                rotation_euler: (-0.0, 0.5, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.9,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/hologram.mat.ron",
+            )),
+        ),
+        (
+            name: Some("Dissolving Crate Plinth"),
+            transform: Some((
+                position: (0.0, 0.35, -0.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.9, 0.7, 0.9),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.3, 0.3, 0.33, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Dissolving Crate"),
+            transform: Some((
+                position: (0.0, 1.2, -0.6),
+                rotation_euler: (-0.0, 0.5, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 0.9,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/dissolve.mat.ron",
+            )),
+        ),
+        (
+            name: Some("Lava Ball Plinth"),
+            transform: Some((
+                position: (2.0, 0.35, -0.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.9, 0.7, 0.9),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.3, 0.3, 0.33, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Lava Ball"),
+            transform: Some((
+                position: (2.0, 1.2, -0.6),
+                rotation_euler: (-0.0, 0.5, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.9,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/lava.mat.ron",
+            )),
+        ),
+        (
+            name: Some("Glow"),
+            transform: Some((
+                position: (2.0, 1.4, 0.4),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            point_light: Some((
+                color: (1.0, 0.45, 0.15),
+                intensity: 6.0,
+                range: 5.0,
+            )),
+        ),
+        (
+            name: Some("Main Camera"),
+            transform: Some((
+                position: (0.0, 2.2, 5.2),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            camera_3d: Some((
+                position: (0.0, 2.2, 5.2),
+                target: (0.0, 1.0, -0.6),
+                up: (0.0, 1.0, 0.0),
+                fov_y_degrees: 60.0,
+                near: 0.1,
+                far: 1000.0,
+            )),
+        ),
+    ],
+)

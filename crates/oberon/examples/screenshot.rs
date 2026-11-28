@@ -1,0 +1,442 @@
+//! Renders the Oberon editor UI to a PNG for visual review, headless.
+//!
+//! Run from the repo root:
+//!
+//! ```sh
+//! cargo run --offline -p oberon --example screenshot -- /tmp/oberon.png
+//! ```
+
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+
+use oberon::canvas::Canvas;
+use oberon::doc::Document;
+use oberon::ui::{Layout, Pointer, Ui};
+
+#[allow(clippy::too_many_lines)]
+fn main() {
+    let out = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "/tmp/oberon.png".to_string());
+    let (w, h) = (1600u32, 950u32);
+    let mut canvas = Canvas::new(w, h);
+    // `OBERON_SCENE=level.ron` screenshots a scene file instead of the starter.
+    let mut doc = std::env::var("OBERON_SCENE")
+        .ok()
+        .and_then(|p| Document::load(std::path::Path::new(&p)).ok())
+        .unwrap_or_else(Document::starter);
+    // Pre-select the cube (or `OBERON_SELECT=<name>`) so the inspector
+    // shows content.
+    let pick = std::env::var("OBERON_SELECT").unwrap_or_else(|_| "Cube".to_string());
+    if let Some(e) = doc.entities.iter().find(|e| e.name() == pick) {
+        doc.select(Some(e.id));
+    }
+    if let Some(dir) = doc.path.as_ref().map(|_| doc.base_dir()) {
+        automata_assets::set_root(Some(&dir));
+    }
+    let mut ui = Ui::new();
+    // A 2D scene opens in the flat view, as in the editor.
+    ui.camera.set_two_d(oberon::doc::scene_is_2d(&doc));
+    if doc.path.is_some() {
+        ui.project_root = doc.base_dir();
+    }
+    // `OBERON_VIEW=scene` looks through the scene's own camera.
+    if std::env::var("OBERON_VIEW").is_ok_and(|v| v == "scene") {
+        if let Some(cam) = doc.entities.iter().find_map(|e| e.data.camera_3d) {
+            ui.camera = oberon::view::ViewCamera::from_camera3d(&cam);
+        }
+    }
+
+    // `OBERON_CAMERA="yaw pitch distance x y z"` places the editor camera.
+    if let Ok(v) = std::env::var("OBERON_CAMERA") {
+        let n: Vec<f32> = v
+            .split_whitespace()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        if let [yaw, pitch, distance, x, y, z] = n[..] {
+            ui.camera = oberon::view::ViewCamera {
+                yaw,
+                pitch,
+                distance,
+                target: [x, y, z],
+                two_d: std::env::var("OBERON_2D").is_ok_and(|v| v == "1")
+                    || oberon::doc::scene_is_2d(&doc),
+            };
+        }
+    }
+    // `OBERON_NAV=1` bakes the scene's navigation mesh for the overlay.
+    if std::env::var("OBERON_NAV").is_ok_and(|v| v == "1") {
+        match oberon::play::PlaySession::bake_nav(&doc) {
+            Ok(mesh) => {
+                ui.nav_overlay = Some((std::path::PathBuf::new(), std::sync::Arc::new(mesh)));
+            }
+            Err(e) => eprintln!("couldn't bake: {e}"),
+        }
+    }
+
+    // Render the viewport frame on an offscreen GPU renderer when one is
+    // available; otherwise use the software wireframe fallback.
+    let view = Layout::compute(w as f32, h as f32).viewport;
+    let (vw, vh) = (view.w as u32, view.h as u32);
+    let mut gpu = pollster::block_on(automata_renderer::Renderer::new_offscreen((vw, vh))).ok();
+    let mut viewport = oberon::render::ViewportRenderer::new();
+    let (frame, fw, fh) = viewport.render(gpu.as_mut(), &doc, ui.camera, vw, vh);
+    let frame = frame.to_vec();
+
+    // Optional scene: `picker`, `menu`, `dialog`, `project`, `code`,
+    // `code-complete`, `code-api`, `settings`, `build`, `build-menu`, `palette`,
+    // `assets`, `assets-sounds`, `assets-fonts`, `bone-picker`, `clip-picker`, `workflow`.
+    let scene = std::env::args().nth(2).unwrap_or_default();
+    let selected = doc.selected;
+    let pointer = Pointer {
+        x: 1180.0,
+        y: 330.0,
+        ..Pointer::default()
+    };
+    let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+    // `OBERON_SCROLL=<pixels>` scrolls the Inspector down first.
+    if let Some(px) = std::env::var("OBERON_SCROLL")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok())
+    {
+        let insp = Layout::compute(w as f32, h as f32).inspector;
+        let wheel = Pointer {
+            x: insp.x + insp.w / 2.0,
+            y: insp.y + insp.h / 2.0,
+            scroll: -px / 48.0,
+            ..Pointer::default()
+        };
+        let _ = ui.frame(&mut canvas, &doc, wheel, Some((&frame, fw, fh)));
+        let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+    }
+    match scene.as_str() {
+        "workflow" => {
+            // D6: a multi-selection whose lead is a prefab instance with
+            // overrides, Snap on, and the Profiler with a few seconds of
+            // (synthetic, typical) frame timings.
+            let names = ["Crate 1", "Crate 2", "Heavy Crate"];
+            let ids: Vec<u64> = names
+                .iter()
+                .filter_map(|n| doc.entities.iter().find(|e| e.name() == *n).map(|e| e.id))
+                .collect();
+            doc.select_many(&ids);
+            ui.prefs.snap.enabled = true;
+            ui.panels.show_bottom = true;
+            ui.bottom_tab = oberon::ui::BottomTab::Profiler;
+            for i in 0..oberon::ui::profiler::HISTORY {
+                let t = i as f32;
+                let wobble = (t * 0.37).sin() * 0.35 + (t * 0.11).cos() * 0.25;
+                let spike = if i % 61 == 40 { 6.5 } else { 0.0 };
+                record_sample(
+                    &mut ui,
+                    0.9 + wobble * 0.3 + spike * 0.6,
+                    1.6 + wobble * 0.4,
+                    5.2 + wobble + spike * 0.4,
+                    3.1 + wobble * 0.5,
+                );
+            }
+            // Scroll the Hierarchy to its end, where the crates are.
+            let hier = Layout::compute(w as f32, h as f32).hierarchy;
+            let wheel = Pointer {
+                x: hier.x + hier.w / 2.0,
+                y: hier.y + hier.h / 2.0,
+                scroll: -100.0,
+                ..Pointer::default()
+            };
+            let _ = ui.frame(&mut canvas, &doc, wheel, Some((&frame, fw, fh)));
+            let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+        }
+        "picker" => {
+            if let Some(id) = selected {
+                ui.open_color_picker(&doc, id, oberon::ui::ColorTarget::Mesh);
+            }
+        }
+        "menu" => ui.open_bar_menu(0, &doc),
+        "dialog" => ui.open_dialog_kind(oberon::ui::DialogKind::SaveSceneAs, &doc),
+        "browser" | "browser-filter" => {
+            if scene == "browser-filter" {
+                ui.open_dialog_kind(oberon::ui::DialogKind::OpenScript, &doc);
+                ui.type_text("c");
+            } else {
+                ui.open_dialog_kind(oberon::ui::DialogKind::OpenScene, &doc);
+            }
+        }
+        "files-menu" => {
+            let root = ui.project_root.clone();
+            if let Some(script) = std::fs::read_dir(root.join("scripts"))
+                .ok()
+                .and_then(|d| d.flatten().map(|e| e.path()).find(|p| p.is_file()))
+            {
+                ui.reveal_in_files(&script);
+                ui.begin_file_rename(&script);
+                ui.type_text("hero");
+            }
+        }
+        "project" | "files" => {
+            // Reveal a script so the Files tree shows a couple of open folders.
+            let root = ui.project_root.clone();
+            if let Some(script) = ["scripts/coin.py", "scripts/player.py"]
+                .iter()
+                .map(|s| root.join(s))
+                .find(|p| p.is_file())
+            {
+                ui.reveal_in_files(&script);
+            }
+        }
+        "code" | "code-complete" => {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/python/oop_platformer.py");
+            ui.open_code(&path, Some(40));
+            ui.code.focused = true;
+            if let Some(tab) = ui.code.current_mut() {
+                tab.diagnostics.push(oberon::code::Diagnostic {
+                    start: oberon::code::Pos::new(44, 8),
+                    end: oberon::code::Pos::new(44, 20),
+                    severity: oberon::code::Severity::Error,
+                    message: "\"velocty\" is not defined".to_string(),
+                });
+                tab.diagnostics.push(oberon::code::Diagnostic {
+                    start: oberon::code::Pos::new(30, 4),
+                    end: oberon::code::Pos::new(30, 10),
+                    severity: oberon::code::Severity::Warning,
+                    message: "Import \"math\" is not accessed".to_string(),
+                });
+            }
+            if scene == "code-complete" {
+                use oberon::code::CompletionKind as K;
+                ui.code_text("\n        self.");
+                let item = |label: &str, detail: &str, kind| oberon::code::CompletionItem {
+                    label: label.to_string(),
+                    detail: detail.to_string(),
+                    insert: label.to_string(),
+                    kind,
+                };
+                ui.code.show_completions(vec![
+                    item("entity", "Entity", K::Class),
+                    item("on_update", "(self, ctx) -> None", K::Method),
+                    item("speed", "float", K::Variable),
+                    item("jump", "(self) -> None", K::Function),
+                    item("transform", "Transform", K::Property),
+                    item("MAX_SPEED", "int", K::Constant),
+                    item("math", "module", K::Module),
+                    item("return", "", K::Keyword),
+                ]);
+            } else {
+                ui.code_key(
+                    oberon::code::Key::Char('f'),
+                    oberon::code::Mods {
+                        ctrl: true,
+                        ..Default::default()
+                    },
+                );
+                ui.code_text("ctx");
+            }
+        }
+        "ui-editor" | "ui-editor-hud" | "ui-editor-ja" | "ui-editor-fa" => {
+            // The UI editor on the Shape Signal demo's title screen (or HUD),
+            // with a widget selected so the properties show.
+            let ui_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/oberon/shape_signal/ui");
+            let hud = scene == "ui-editor-hud";
+            let file = if hud { "hud.ui.ron" } else { "title.ui.ron" };
+            ui.open_code(&ui_dir.join(file), None);
+            ui.code.focused = true;
+            let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+            ui.select_ui_node(Some(if hud { vec![3] } else { vec![0, 3] }));
+            if hud {
+                ui.set_ui_preview(1);
+            }
+            // `ui-editor-ja`: the canvas in Japanese (with OBERON_SCENE set
+            // to the demo's level, so its lang/strings.csv is found).
+            if let Some(lang) = scene.strip_prefix("ui-editor-").filter(|l| *l != "hud") {
+                ui.set_ui_language(Some(lang));
+            }
+        }
+        "material" => {
+            // The material editor on the Material Workshop's copper (or
+            // `OBERON_MATERIAL=<file>`), with its live GPU preview.
+            let name = std::env::var("OBERON_MATERIAL").unwrap_or_else(|_| "copper.mat.ron".into());
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/oberon/workshop/materials")
+                .join(name);
+            ui.open_code(&path, None);
+            ui.code.focused = true;
+            if let Ok(shape) = std::env::var("OBERON_SHAPE") {
+                if let Some(s) = oberon::ui::MaterialShape::ALL
+                    .into_iter()
+                    .find(|s| s.label().eq_ignore_ascii_case(&shape))
+                {
+                    ui.set_material_shape(s);
+                }
+            }
+            let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+            if let Some((p, shape, pw, ph)) = ui.material_preview_request(canvas.scale()) {
+                let img = viewport.render_material(gpu.as_mut(), &p, shape, pw, ph);
+                ui.set_material_preview_image(img);
+            }
+        }
+        "code-tabs" | "code-switcher" => {
+            // Many tabs (the strip scrolls), multi-caret editing, and the
+            // Ctrl+Tab switcher.
+            let dir =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/python");
+            let mut files: Vec<_> = std::fs::read_dir(&dir)
+                .map(|d| d.flatten().map(|e| e.path()).collect())
+                .unwrap_or_default();
+            if let Ok(d) = std::fs::read_dir(dir.join("zero_to_hero")) {
+                files.extend(d.flatten().map(|e| e.path()));
+            }
+            files.retain(|p| p.extension().is_some_and(|e| e == "py"));
+            files.sort();
+            for f in files.iter().take(12) {
+                ui.open_code(f, None);
+            }
+            let platformer = dir.join("oop_platformer.py");
+            ui.open_code(&platformer, Some(60));
+            ui.code.focused = true;
+            if let Some(tab) = ui.code.current_mut() {
+                // On "self" of `self.add(at.Transform(...))`.
+                tab.buf.move_to(oberon::code::Pos::new(62, 9), false);
+            }
+            let ctrl = oberon::code::Mods {
+                ctrl: true,
+                ..Default::default()
+            };
+            if scene == "code-tabs" {
+                for _ in 0..3 {
+                    ui.code_key(oberon::code::Key::Char('d'), ctrl);
+                }
+            } else {
+                ui.code_key(oberon::code::Key::Tab, ctrl);
+                ui.code_key(oberon::code::Key::Tab, ctrl);
+            }
+        }
+        "graphics" | "camera" => {
+            let existing = doc
+                .entities
+                .iter()
+                .find(|e| e.data.camera_3d.is_some())
+                .map(|e| e.id);
+            let cam = existing.unwrap_or_else(|| doc.create(oberon::doc::CreateKind::Camera));
+            if let (None, Some(i)) = (existing, doc.index_of(cam)) {
+                let d = &mut doc.entities[i].data;
+                d.name = Some("Main Camera".into());
+                d.camera_3d = Some(automata_renderer::Camera3D::new(
+                    glam::Vec3::new(6.0, 4.0, 8.0),
+                    glam::Vec3::new(0.0, 0.5, 0.0),
+                ));
+                if let Some(t) = &mut d.transform {
+                    t.position = [6.0, 4.0, 8.0];
+                }
+            }
+            doc.select(Some(cam));
+            if scene == "graphics" {
+                if !doc.entities.iter().any(|e| e.data.environment.is_some()) {
+                    doc.create(oberon::doc::CreateKind::Environment);
+                }
+                ui.right_tab = oberon::ui::RightTab::Graphics;
+                ui.stats = oberon::ui::FrameStats {
+                    frame_ms: 4.2,
+                    meshes: 6,
+                };
+                doc.select(selected);
+            } else {
+                let c = doc.entities[doc.index_of(cam).unwrap()]
+                    .data
+                    .camera_3d
+                    .unwrap();
+                let (pw, ph) = (416u32, 234u32);
+                let px = oberon::render::render_wireframe::render(
+                    &doc,
+                    oberon::ui::ViewCamera::from_camera3d(&c),
+                    pw,
+                    ph,
+                );
+                ui.set_camera_preview(Some((&px, pw, ph)));
+            }
+        }
+        "settings" => {
+            ui.open_settings_page(oberon::ui::settings::SettingsPage::Editor);
+        }
+        "build" => {
+            ui.open_settings_page(oberon::ui::settings::SettingsPage::Build);
+            ui.build_last = Some((true, "Build finished in 1.4 s → build".to_string()));
+        }
+        "build-menu" => ui.open_bar_menu(5, &doc),
+        "assets" | "assets-sounds" | "assets-fonts" => {
+            ui.toggle_assets();
+            if scene == "assets-sounds" {
+                ui.assets.filter = oberon::ui::assets_panel::AssetFilter::Sounds;
+            } else if scene == "assets-fonts" {
+                ui.assets.filter = oberon::ui::assets_panel::AssetFilter::Fonts;
+            }
+            // Thumbnails fill in a few per frame.
+            for _ in 0..6 {
+                let _ = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+            }
+        }
+        "bone-picker" => {
+            // The spring chain bone picker for the selected model, as if it
+            // had no chains yet (so the suggestions show).
+            let entity = selected.and_then(|id| doc.entities.iter().find(|e| e.id == id));
+            if let Some(e) = entity {
+                let rig = oberon::doc::model_rig(&e.data);
+                let path = oberon::doc::model_path(&e.data).map(|p| doc.base_dir().join(p));
+                if let (Some(rig), Some(path)) = (rig, path) {
+                    let mut bare = (*rig).clone();
+                    bare.springs = automata_assets::springs::Springs::default();
+                    ui.open_bone_picker(&path, &bare, oberon::ui::springs::SpringPick::Chain);
+                }
+            }
+        }
+        "clip-picker" => {
+            // The "+ Clips from file…" picker for the selected model.
+            let entity = selected.and_then(|id| doc.entities.iter().find(|e| e.id == id));
+            if let Some(path) = entity
+                .and_then(|e| oberon::doc::model_path(&e.data))
+                .map(|p| doc.base_dir().join(p))
+            {
+                ui.open_clip_file_picker(&path);
+            }
+        }
+        "palette" => {
+            ui.open_palette(&doc);
+            ui.palette_text("sa");
+        }
+        "code-api" => {
+            let path = std::env::temp_dir().join("oberon_screenshot_player.py");
+            let src = "SPEED = 6.0\n\n\ndef start(entity, ctx):\n    ctx.log(\"ready\", entity.name)\n\n\ndef update(entity, ctx):\n    move = ctx.input.axis(\"a\", \"d\") * SPEED\n    entity.transform.translate((move * ctx.time.delta, 0.0, 0.0))\n    \n";
+            std::fs::write(&path, src).expect("write script");
+            ui.open_code(&path, Some(11));
+            ui.code.focused = true;
+            if let Some(tab) = ui.code.current_mut() {
+                tab.buf.move_to(oberon::code::Pos::new(10, 4), false);
+            }
+            ui.code_text("if ctx.input.just_pressed(\"");
+        }
+        _ => {}
+    }
+    let _intents = ui.frame(&mut canvas, &doc, pointer, Some((&frame, fw, fh)));
+
+    // tiny-skia pixels are premultiplied RGBA; the UI is opaque, so write
+    // them straight out as PNG.
+    image::save_buffer(&out, canvas.pixels(), w, h, image::ExtendedColorType::Rgba8)
+        .expect("write png");
+    println!("wrote {out} ({w}x{h})");
+}
+
+/// One Profiler sample for the `workflow` screenshot (frame time paced
+/// to 60 fps, as with V-Sync).
+fn record_sample(ui: &mut Ui, scripts: f32, physics: f32, render: f32, interface: f32) {
+    let busy = scripts + physics + render + interface;
+    ui.profiler.record(oberon::ui::profiler::FrameSample {
+        scripts,
+        physics,
+        render,
+        ui: interface,
+        total: busy.max(1000.0 / 60.0),
+    });
+}

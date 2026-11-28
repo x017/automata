@@ -1,0 +1,1981 @@
+"""Type stubs for the native automata._core extension module."""
+
+import os
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Union
+
+#: A custom attribute value: bool, int, float, str, a Vec3 or an RGBA color.
+AttributeValue = Union[
+    bool, int, float, str, tuple[float, float, float], tuple[float, float, float, float]
+]
+
+__version__: str
+
+Vec3 = tuple[float, float, float]
+Vec2 = tuple[float, float]
+
+class Error(Exception):
+    """An error raised by the AUTOMATA engine runtime."""
+
+class Transform:
+    """Position, rotation, and scale of an entity, relative to its parent."""
+
+    def __init__(
+        self,
+        position: Vec3 = (0.0, 0.0, 0.0),
+        rotation_euler: Vec3 = (0.0, 0.0, 0.0),
+        scale: Vec3 = (1.0, 1.0, 1.0),
+    ) -> None: ...
+    @property
+    def position(self) -> Vec3: ...
+    @position.setter
+    def position(self, value: Vec3) -> None: ...
+    @property
+    def rotation_euler(self) -> Vec3: ...
+    @rotation_euler.setter
+    def rotation_euler(self, value: Vec3) -> None: ...
+    @property
+    def scale(self) -> Vec3: ...
+    @scale.setter
+    def scale(self, value: Vec3) -> None: ...
+    def copy(self) -> "Transform": ...
+
+class TransformRef:
+    """A live handle to an entity's transform; writes apply after the callback."""
+
+    @property
+    def position(self) -> Vec3: ...
+    @position.setter
+    def position(self, value: Vec3) -> None: ...
+    @property
+    def rotation_euler(self) -> Vec3: ...
+    @rotation_euler.setter
+    def rotation_euler(self, value: Vec3) -> None: ...
+    @property
+    def scale(self) -> Vec3: ...
+    @scale.setter
+    def scale(self, value: Vec3) -> None: ...
+    def set(self, transform: "Transform") -> None: ...
+    def copy(self) -> Transform: ...
+
+class Camera3D:
+    """A perspective 3D camera."""
+
+    def __init__(
+        self,
+        position: Vec3 = (0.0, 0.0, 0.0),
+        target: Vec3 = (0.0, 0.0, -1.0),
+        fov: float = 60.0,
+    ) -> None: ...
+    @property
+    def position(self) -> Vec3: ...
+    @property
+    def target(self) -> Vec3: ...
+    @property
+    def fov(self) -> float: ...
+
+class Camera2D:
+    """An orthographic 2D camera."""
+
+    def __init__(
+        self, center: Vec2 = (0.0, 0.0), half_height: float = 100.0
+    ) -> None: ...
+    @property
+    def center(self) -> Vec2: ...
+    @property
+    def half_height(self) -> float: ...
+
+class MeshRenderer:
+    """A mesh rendered in 3D: a built-in primitive with a flat color, or a
+    model file (``MeshRenderer.model("models/tree.glb")``).
+
+    Plain data — the engine materializes it on the GPU in windowed mode;
+    headless runs ignore it. The entity's Transform scale sizes it.
+    """
+
+    kind: str
+    color: tuple[float, float, float, float]
+    path: str | None
+    bounds: tuple[tuple[float, float, float], tuple[float, float, float]] | None
+    roughness: float | None
+    """0 = mirror-smooth .. 1 = chalky; None = the default (0.6) or the model's own."""
+    metallic: float | None
+    """0 = plastic, wood, stone .. 1 = bare metal; None = default (0) / the model's own."""
+    emissive: tuple[float, float, float]
+    """RGB light the surface gives off (times emissive_strength)."""
+    emissive_strength: float
+    """How much the glow lights nearby surfaces (1 = like a real glowing
+    object of this size, 0 = not at all)."""
+    glow_light: float
+    """Whether objects block the glow's light, casting shadows (HIGH and up)."""
+    glow_shadows: bool
+    draw_distance: float
+    """Beyond this camera distance (metres) it isn't drawn, shadow included;
+    it dithers out over the last tenth. 0 = any distance."""
+    material: str | None
+    """The material file (``"materials/brick.mat.ron"``) it draws with
+    instead of its color and surface, or None. Every constructor takes
+    ``material=``; entities naming the same file share it."""
+    @classmethod
+    def model(
+        cls,
+        path: str,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        *,
+        roughness: float | None = None,
+        metallic: float | None = None,
+        emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        emissive_strength: float = 1.0,
+        glow_light: float = 1.0,
+        glow_shadows: bool = True,
+        draw_distance: float = 0.0,
+        material: str | None = None,
+    ) -> MeshRenderer:
+        """A glTF 2.0 (.glb / .gltf) or .obj model, tinted by `color`.
+
+        Relative paths resolve against the asset root (the scene's folder,
+        else the running script's folder). Unset `roughness` / `metallic`
+        keep the file's materials; `emissive` adds to its glow.
+        `material` replaces every part's material with a .mat.ron file.
+        Raises FileNotFoundError or ValueError.
+        """
+        ...
+    @classmethod
+    def cube(
+        cls,
+        size: float = 1.0,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        *,
+        roughness: float | None = None,
+        metallic: float | None = None,
+        emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        emissive_strength: float = 1.0,
+        glow_light: float = 1.0,
+        glow_shadows: bool = True,
+        draw_distance: float = 0.0,
+        material: str | None = None,
+    ) -> MeshRenderer:
+        """A cube `size` units a side. `roughness`/`metallic` 0..1; `emissive`
+        with `emissive_strength` above 1 glows (and blooms on BEAUTIFUL), and
+        lights its surroundings (scaled by `glow_light`; 0 turns that off),
+        casting shadows from objects in the way on HIGH and up unless
+        `glow_shadows=False`."""
+        ...
+    @classmethod
+    def sphere(
+        cls,
+        size: float = 1.0,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        *,
+        roughness: float | None = None,
+        metallic: float | None = None,
+        emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        emissive_strength: float = 1.0,
+        glow_light: float = 1.0,
+        glow_shadows: bool = True,
+        draw_distance: float = 0.0,
+        material: str | None = None,
+    ) -> MeshRenderer:
+        """A smooth sphere `size` units across."""
+        ...
+    @classmethod
+    def quad(
+        cls,
+        size: float = 1.0,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        *,
+        roughness: float | None = None,
+        metallic: float | None = None,
+        emissive: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        emissive_strength: float = 1.0,
+        glow_light: float = 1.0,
+        glow_shadows: bool = True,
+        draw_distance: float = 0.0,
+        material: str | None = None,
+    ) -> MeshRenderer: ...
+
+class DirectionalLight:
+    """The scene's directional sun: parallel light rays plus ambient fill.
+
+    Attach to any entity; the first entity carrying one lights the frame.
+    Shadows are shadow-mapped and on by default.
+    """
+
+    direction: Vec3
+    color: tuple[float, float, float]
+    ambient: float
+    shadows: bool
+    shadow_distance: float
+    """How far from the camera shadows reach (metres); shorter is sharper."""
+    shadow_softness: float
+    """Shadow edge softness: 0 sharpest, 1 default, up to 8."""
+    def __init__(
+        self,
+        direction: Vec3 = (-0.5, -1.0, -0.35),
+        color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        ambient: float = 0.3,
+        shadows: bool = True,
+        *,
+        shadow_distance: float = 120.0,
+        shadow_softness: float = 1.0,
+    ) -> None: ...
+
+class PointLight:
+    """A placed light shining every way from its entity's position.
+
+    It fades with the square of the distance and ends at `range` (0 picks
+    it from the brightness). `intensity` 1 lights a surface 1 m away as
+    brightly as a white sun overhead. With `shadows` objects block it (the
+    nearest few shadowed lights, on High and up).
+    """
+
+    color: tuple[float, float, float]
+    intensity: float
+    range: float
+    radius: float
+    """The glowing source's size (metres): bigger is softer up close."""
+    shadows: bool
+    def __init__(
+        self,
+        color: tuple[float, float, float] = (1.0, 0.85, 0.65),
+        intensity: float = 3.0,
+        range: float = 0.0,
+        *,
+        radius: float = 0.05,
+        shadows: bool = True,
+    ) -> None: ...
+
+ParticleShape = Literal["point", "sphere", "box", "cone"]
+ParticleSprite = Literal["dot", "spark", "star", "flame", "puff"]
+ParticlePreset = Literal["fire", "smoke", "sparks", "dust", "splash", "magic", "motes"]
+
+class ParticleEmitter:
+    """Makes particles: fire, smoke, sparks, dust, splashes, magic, motes.
+
+    Start from a preset and change what you like
+    (``ParticleEmitter.preset("fire", rate=60)``), or set fields by keyword
+    (the rest default: 20 white dots a second rising in a 25° cone).
+    Particles leave within `cone_angle` of the entity's up (+Y) axis
+    (spheres fly outward), slow by `drag`, fall by `gravity` (negative
+    rises), and over their life go from `size[0]` to `size[1]` and from
+    `color` to `color_end`.
+    """
+
+    emitting: bool
+    rate: float
+    """New particles per second."""
+    burst: int
+    """Particles made all at once when it starts."""
+    duration: float
+    """Seconds it makes particles for; 0 = forever."""
+    one_shot: bool
+    """Despawns the entity once it's done and the last particle is gone."""
+    max_particles: int
+    lifetime: tuple[float, float]
+    shape: ParticleShape
+    shape_size: tuple[float, float, float]
+    """A sphere's or cone's radius (x), a box's half extents (m)."""
+    cone_angle: float
+    """How far from straight up they may leave (degrees; 180 = any way)."""
+    speed: tuple[float, float]
+    gravity: float
+    """Downward acceleration (m/s²; negative rises)."""
+    drag: float
+    size: tuple[float, float]
+    """Size at birth and at death (m)."""
+    size_spread: float
+    color: tuple[float, float, float, float]
+    """Linear RGBA at birth; over 1 glows on Beautiful."""
+    color_end: tuple[float, float, float, float]
+    fade_in: float
+    fade_out: float
+    spin: float
+    stretch: float
+    """Streaks particles back along their motion (seconds of travel)."""
+    blend: Literal["alpha", "additive"]
+    lit: bool
+    soft: float
+    """Fade over this many metres where they meet the scene (0 = hard)."""
+    sprite: ParticleSprite
+    texture: str
+    """An image file instead of the built-in sprite (empty = none)."""
+    sheet: tuple[int, int]
+    """The image's frames, columns by rows; played over each life."""
+    world_space: bool
+    follow_camera: bool
+    """Fills a box of `shape_size` around the camera instead of the entity,
+    wrapping particles to the far side as it moves (dust in the air)."""
+    preset_name: Optional[str]
+    """The preset this is exactly, or None."""
+    def __init__(self, **fields: Any) -> None: ...
+    @staticmethod
+    def preset(name: ParticlePreset, **fields: Any) -> ParticleEmitter: ...
+    @staticmethod
+    def presets() -> list[str]: ...
+    def replace(self, **fields: Any) -> ParticleEmitter:
+        """A copy with `fields` changed."""
+
+class SpotLight:
+    """A placed light shining in a cone along its entity's forward (-Z) axis.
+
+    Full strength inside `inner_angle` (degrees from the axis; three
+    quarters of `outer_angle` unless given), faded out by `outer_angle`
+    (at most 80). Brightness as for `PointLight`, on the axis.
+    """
+
+    color: tuple[float, float, float]
+    intensity: float
+    outer_angle: float
+    inner_angle: float
+    range: float
+    radius: float
+    shadows: bool
+    def __init__(
+        self,
+        color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        intensity: float = 8.0,
+        outer_angle: float = 30.0,
+        inner_angle: float | None = None,
+        range: float = 0.0,
+        *,
+        radius: float = 0.05,
+        shadows: bool = True,
+    ) -> None: ...
+
+class PostShader:
+    """A post effect: your WGSL ``fn post(in: PostInput) -> vec3<f32>`` run
+    on every pixel of the finished frame, under the HUD (the first entity
+    carrying one draws it). ``params`` (up to eight) reach the shader as
+    ``in.p0`` / ``in.p1``."""
+
+    shader: str
+    params: list[float]
+    def __init__(self, shader: str, params: Optional[list[float]] = None) -> None: ...
+
+class Environment:
+    """Scene-wide look: sky and sun, ambient, exposure, tone mapping, fog
+    (optionally height fog lying low), god rays and depth of field
+    (Beautiful), and post effects (bloom, colour grading, vignette, grain,
+    chromatic aberration; Medium graphics and up).
+
+    Attach to any entity; the first entity carrying one sets the frame's look.
+    """
+
+    sky_color: tuple[float, float, float]
+    ground_color: tuple[float, float, float]
+    background: tuple[float, float, float]
+    exposure: float
+    tonemapping: str
+    fog: bool
+    fog_color: tuple[float, float, float]
+    fog_density: float
+    fog_start: float
+    sky: bool
+    """Draw a sky dome with a sun; ``background`` becomes the horizon."""
+    zenith_color: tuple[float, float, float]
+    sun_size: float
+    """The sun disk's apparent diameter in degrees."""
+    sun_glow: float
+    clouds: float
+    """Cloud cover, 0 (clear) to 1 (overcast)."""
+    lens_flare: float
+    """Lens flare strength when looking at the sun (``"beautiful"`` only)."""
+    ambient_occlusion: float
+    """How much creases and the ground under objects darken, 0 (off) to 2
+    (``"beautiful"`` only)."""
+    fog_height: float
+    """Height fog: full density below this height (m) ..."""
+    fog_falloff: float
+    """... thinning by e per 1/falloff metres above it (0 = even fog)."""
+    fog_sun: float
+    """How much the fog glows toward the sun, 0 to 4."""
+    god_rays: float
+    """Sun shafts past geometry, 0 (off) to 2 (``"beautiful"`` only)."""
+    depth_of_field: float
+    """Blur away from the focus, 0 (off) to 4 (``"beautiful"`` only)."""
+    focus_distance: float
+    """Metres from the camera kept sharp; 0 = the camera's target."""
+    focus_range: float
+    """Metres either side of the focus that stay sharp too."""
+    toon_bands: int
+    """Toon shading: the light in this many flat bands (0 = smooth)."""
+    toon_softness: float
+    """Softness of the edges between toon bands, 0 (crisp) to 1."""
+    shadow_tint: tuple[float, float, float]
+    """The colour of shade (white = none)."""
+    rim_light: float
+    """Light along objects' edges, 0 (none) to 2."""
+    painted_sky: bool
+    """Banded sky gradient, flat clouds and a flat sun disk."""
+    outline: float
+    """Outline width in pixels on a 720-pixel-tall screen (0 = none;
+    ``"medium"`` and up)."""
+    outline_color: tuple[float, float, float]
+    pixelate: float
+    """Pixel art: pixel size on a 720-pixel-tall screen (0 or 1 = off;
+    ``"medium"`` and up)."""
+    palette: int
+    """Dithered levels per colour channel (0 = full colour; ``"medium"``
+    and up)."""
+    wind: float
+    """How hard the wind blows, 0 (still) to 1 (a gale): grass sways and
+    spring bones stream with it."""
+    wind_direction: float
+    """Which way the wind blows, degrees around +Y (0 = toward +X)."""
+    style_name: str
+    """The style this environment is exactly, or ``"Custom"``."""
+    bloom: float
+    """Glow around bright things, 0 (off) to 4 (``"high"`` and up)."""
+    contrast: float
+    """Contrast around mid grey (1 = unchanged)."""
+    saturation: float
+    """0 = black and white, 1 = unchanged, up to 3."""
+    temperature: float
+    """White balance, -1 (cool) to 1 (warm)."""
+    tint: float
+    """White balance, -1 (green) to 1 (magenta)."""
+    lift: tuple[float, float, float]
+    """Added to the shadows per channel (0 = none)."""
+    gamma: tuple[float, float, float]
+    """Midtone power per channel (1 = unchanged, above 1 brightens)."""
+    gain: tuple[float, float, float]
+    """Highlight multiplier per channel (1 = unchanged)."""
+    vignette: float
+    """Darkened corners, 0 (none) to 1."""
+    grain: float
+    """Animated film grain, 0 (none) to 1."""
+    chromatic_aberration: float
+    """Colour fringes toward the frame's edges, 0 (none) to 1."""
+    def __init__(
+        self,
+        sky_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        ground_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        background: tuple[float, float, float] = (0.012, 0.012, 0.012),
+        exposure: float = 1.0,
+        tonemapping: str = "none",
+        fog: bool = False,
+        fog_color: tuple[float, float, float] = (0.5, 0.55, 0.6),
+        fog_density: float = 0.02,
+        fog_start: float = 0.0,
+        sky: bool = False,
+        zenith_color: tuple[float, float, float] = (0.16, 0.34, 0.78),
+        sun_size: float = 2.0,
+        sun_glow: float = 1.0,
+        clouds: float = 0.0,
+        lens_flare: float = 1.0,
+        ambient_occlusion: float = 1.0,
+        fog_height: float = 0.0,
+        fog_falloff: float = 0.0,
+        fog_sun: float = 0.0,
+        god_rays: float = 0.0,
+        depth_of_field: float = 0.0,
+        focus_distance: float = 0.0,
+        focus_range: float = 1.0,
+        toon_bands: int = 0,
+        toon_softness: float = 0.15,
+        shadow_tint: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        rim_light: float = 0.0,
+        painted_sky: bool = False,
+        outline: float = 0.0,
+        outline_color: tuple[float, float, float] = (0.05, 0.04, 0.06),
+        pixelate: float = 0.0,
+        palette: int = 0,
+        wind: float = 0.0,
+        wind_direction: float = 0.0,
+        post: str | None = None,
+        bloom: float | None = None,
+        contrast: float | None = None,
+        saturation: float | None = None,
+        temperature: float | None = None,
+        tint: float | None = None,
+        lift: tuple[float, float, float] | None = None,
+        gamma: tuple[float, float, float] | None = None,
+        gain: tuple[float, float, float] | None = None,
+        vignette: float | None = None,
+        grain: float | None = None,
+        chromatic_aberration: float | None = None,
+    ) -> None:
+        """``post`` starts the post effects from a named look (see
+        :meth:`post_presets`); the other post keywords then change single
+        fields."""
+        ...
+    @staticmethod
+    def preset(name: str) -> Environment:
+        """``"neutral"``, ``"daylight"``, ``"dusk"``, or ``"night"``."""
+        ...
+    def with_post(
+        self,
+        post: str | None = None,
+        *,
+        bloom: float | None = None,
+        contrast: float | None = None,
+        saturation: float | None = None,
+        temperature: float | None = None,
+        tint: float | None = None,
+        lift: tuple[float, float, float] | None = None,
+        gamma: tuple[float, float, float] | None = None,
+        gain: tuple[float, float, float] | None = None,
+        vignette: float | None = None,
+        grain: float | None = None,
+        chromatic_aberration: float | None = None,
+    ) -> Environment:
+        """A copy with post effects from the look ``post`` (None keeps the
+        current ones), plus any field changed by keyword."""
+        ...
+    @staticmethod
+    def post_presets() -> list[str]:
+        """``["neutral", "bleached", "vivid", "film", "noir"]``."""
+        ...
+    @staticmethod
+    def style(name: str, base: Environment | None = None) -> Environment:
+        """``base`` (default: a plain environment) in the style ``name``:
+        ``"realistic"``, ``"semi-realistic"``, ``"botw"``, ``"a short
+        hike"`` or ``"nier"``. Keeps the base's colours, fog colour and
+        density, sky and clouds."""
+        ...
+    def with_style(self, name: str) -> Environment:
+        """A copy of this environment in the style ``name``."""
+        ...
+    @staticmethod
+    def styles() -> list[str]:
+        """The style names, in the editor's order."""
+        ...
+
+class Water:
+    """An animated water surface centred on its entity's transform.
+
+    Waves, sky reflections and sun glints on every preset; refraction,
+    depth-based color and shoreline foam on ``"beautiful"`` graphics.
+    """
+
+    size: tuple[float, float]
+    deep_color: tuple[float, float, float]
+    shallow_color: tuple[float, float, float]
+    clarity: float
+    wave_height: float
+    wave_length: float
+    wave_speed: float
+    wave_direction: float
+    foam: float
+    density: float
+    """Buoyancy against colliders' density (2.0; colliders default to 1.0)."""
+    drag: float
+    """How much the water slows what moves and spins in it (1.0)."""
+    endless: bool
+    """The surface carries on to the horizon past ``size`` (oceans)."""
+    caustics: float
+    """Sunlight dancing on what's under the water, 0..2 (1.0)."""
+    wind: float
+    """Wind over the water, 0..1 (0.0); from 0.5 up spray blows off crests.
+    The ``Environment``'s wind blows here too (spray follows the stronger)."""
+    def __init__(
+        self,
+        size: Optional[tuple[float, float]] = None,
+        deep_color: Optional[tuple[float, float, float]] = None,
+        shallow_color: Optional[tuple[float, float, float]] = None,
+        clarity: Optional[float] = None,
+        wave_height: Optional[float] = None,
+        wave_length: Optional[float] = None,
+        wave_speed: Optional[float] = None,
+        wave_direction: Optional[float] = None,
+        foam: Optional[float] = None,
+        density: Optional[float] = None,
+        drag: Optional[float] = None,
+        endless: Optional[bool] = None,
+        caustics: Optional[float] = None,
+        wind: Optional[float] = None,
+    ) -> None: ...
+    @staticmethod
+    def preset(name: str) -> Water:
+        """``"pond"`` or ``"ocean"``."""
+        ...
+
+class Grass:
+    """A field of grass: blades that sway in the ``Environment``'s wind and
+    bend away from characters and moving bodies walking through them.
+
+    Grow it over ``area`` (metres along the entity's X and Z, centred on
+    it), paint more on with ``paint`` and cut it out with ``erase``. Past
+    ``draw_distance`` metres from the camera it's gone, thinning out over
+    the way there.
+    """
+
+    area: tuple[float, float]
+    """The filled rectangle (metres along X and Z; zero for none)."""
+    density: float
+    """Blades per square metre where fully painted (60)."""
+    height: float
+    """The tallest blades, metres (0.6)."""
+    height_variation: float
+    """0..1: how much shorter some blades are (0.45)."""
+    width: float
+    """Blade width at the root, metres (0.07)."""
+    base_color: tuple[float, float, float]
+    """Colour at the root (linear RGB)."""
+    tip_color: tuple[float, float, float]
+    """Colour at the tip (linear RGB)."""
+    color_variation: float
+    """0..1: how much blades' colours differ (0.3)."""
+    draw_distance: float
+    """Metres from the camera it's drawn to (60; 0 = any distance)."""
+    seed: int
+    """Picks which random field grows."""
+    follow_terrain: bool
+    """Whether blades stand on a ``Terrain`` under them (True) instead of
+    on the entity's own plane."""
+    strokes: int
+    """How many brush strokes (paint and erase dabs) it has."""
+    def __init__(
+        self,
+        area: Optional[tuple[float, float]] = None,
+        density: Optional[float] = None,
+        height: Optional[float] = None,
+        height_variation: Optional[float] = None,
+        width: Optional[float] = None,
+        base_color: Optional[tuple[float, float, float]] = None,
+        tip_color: Optional[tuple[float, float, float]] = None,
+        color_variation: Optional[float] = None,
+        draw_distance: Optional[float] = None,
+        seed: Optional[int] = None,
+        follow_terrain: Optional[bool] = None,
+    ) -> None: ...
+    def paint(
+        self,
+        position: tuple[float, float, float],
+        radius: float = 2.0,
+        normal: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        strength: float = 1.0,
+    ) -> Grass:
+        """A copy with grass painted in a soft disc of ``radius`` metres at
+        ``position`` (the entity's space) on a surface facing ``normal``."""
+        ...
+    def erase(
+        self, position: tuple[float, float, float], radius: float = 2.0, strength: float = 1.0
+    ) -> Grass:
+        """A copy with the grass in a soft disc cut away."""
+        ...
+    def blade_count(self) -> int:
+        """How many blades it grows on an entity at the origin."""
+        ...
+
+class Scatter:
+    """Foliage scatter: draws the entity's model (its ``MeshRenderer``) at
+    many spots on the ground instead of once (rocks, flowers, bushes).
+    Copies aren't solid."""
+
+    area: tuple[float, float]
+    """The filled rectangle (metres along X and Z; zero for none)."""
+    density: float
+    """Copies per square metre where fully painted (0.2)."""
+    scale: tuple[float, float]
+    """The smallest and largest scale (0.7, 1.3)."""
+    align: float
+    """0 = upright, 1 = following the ground's slope (0.3)."""
+    seed: int
+    """Picks where the copies go."""
+    follow_terrain: bool
+    """Whether copies stand on a ``Terrain`` under them (True)."""
+    strokes: int
+    """How many brush strokes it has."""
+    def __init__(
+        self,
+        area: Optional[tuple[float, float]] = None,
+        density: Optional[float] = None,
+        scale: Optional[tuple[float, float]] = None,
+        align: Optional[float] = None,
+        seed: Optional[int] = None,
+        follow_terrain: Optional[bool] = None,
+    ) -> None: ...
+    def paint(
+        self,
+        position: tuple[float, float, float],
+        radius: float = 2.0,
+        normal: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        strength: float = 1.0,
+    ) -> Scatter:
+        """A copy with copies painted in a soft disc."""
+        ...
+    def erase(
+        self, position: tuple[float, float, float], radius: float = 2.0, strength: float = 1.0
+    ) -> Scatter:
+        """A copy with the copies in a soft disc cut away."""
+        ...
+    def count(self) -> int:
+        """How many copies it places."""
+        ...
+
+class TerrainLayer:
+    """One of a terrain's four ground materials: a colour, optionally an
+    image tiled across the ground every ``tile`` metres."""
+
+    color: tuple[float, float, float]
+    """Its colour (linear RGB), multiplying the texture."""
+    texture: str
+    """An image path relative to the asset root (empty for a plain colour)."""
+    tile: float
+    """How wide one repeat is (metres)."""
+    def __init__(
+        self,
+        color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        texture: str = "",
+        tile: float = 4.0,
+    ) -> None: ...
+
+class Terrain:
+    """A heightmap ground ``size`` metres a side, centred on the entity,
+    painted with four blended layers (grass, rock, sand, dirt to start).
+    Solid when ``collide`` is on; ``Grass`` and ``Scatter`` over it follow
+    its surface. Every brush returns a changed copy."""
+
+    size: float
+    """The side of the square (metres)."""
+    resolution: int
+    """Height samples a side."""
+    spacing: float
+    """Metres between neighbouring samples."""
+    heights: list[float]
+    """Every height, row by row (rows along Z, from ``-size/2``)."""
+    height_range: tuple[float, float]
+    """The lowest and highest heights."""
+    layers: list[TerrainLayer]
+    """The four layers."""
+    roughness: float
+    """Lighting roughness (0 shiny .. 1 matte)."""
+    collide: bool
+    """Whether it's solid."""
+    def __init__(
+        self,
+        size: float = 64.0,
+        resolution: int = 129,
+        layers: Optional[list[TerrainLayer]] = None,
+        roughness: float = 0.9,
+        collide: bool = True,
+    ) -> None: ...
+    def shape(self, height: Callable[[float, float], float]) -> Terrain:
+        """A copy with every height set by ``height(x, z)``."""
+        ...
+    def sculpt(
+        self,
+        tool: str,
+        center: tuple[float, float],
+        radius: float = 4.0,
+        amount: float = 1.0,
+        height: Optional[float] = None,
+    ) -> Terrain:
+        """A copy with one brush dab: ``"raise"``, ``"lower"``, ``"smooth"``,
+        ``"flatten"`` (towards ``height``) or ``"noise"``."""
+        ...
+    def paint(
+        self,
+        layer: Union[int, str],
+        center: tuple[float, float],
+        radius: float = 4.0,
+        strength: float = 1.0,
+    ) -> Terrain:
+        """A copy with a layer (0..3, or "grass", "rock", "sand", "dirt")
+        painted in a soft disc."""
+        ...
+    def auto_paint(
+        self, water_level: float = 0.0, beach: float = 1.5, cliff: float = 38.0
+    ) -> Terrain:
+        """A copy painted by shape: sand by the water, rock on cliffs."""
+        ...
+    def load_heightmap(self, path: str, low: float = 0.0, high: float = 10.0) -> Terrain:
+        """A copy with heights from a greyscale image (black ``low``, white ``high``)."""
+        ...
+    def with_resolution(self, resolution: int) -> Terrain:
+        """A copy resampled to ``resolution`` samples a side."""
+        ...
+    def height_at(self, x: float, z: float) -> float:
+        """The ground's height at ``(x, z)`` in the entity's space."""
+        ...
+    def normal_at(self, x: float, z: float) -> tuple[float, float, float]:
+        """The ground's normal at ``(x, z)``."""
+        ...
+    def weights_at(self, x: float, z: float) -> tuple[float, float, float, float]:
+        """How much of each layer shows at ``(x, z)``."""
+        ...
+
+class Entity:
+    """A game object builder: attach components, then add it to a Scene."""
+
+    def __init__(self, name: Optional[str] = None) -> None: ...
+    @property
+    def name(self) -> Optional[str]: ...
+    @name.setter
+    def name(self, value: Optional[str]) -> None: ...
+    def add(self, component: object) -> "Entity":
+        """Attaches a component, replacing one of the same kind."""
+        ...
+    def components(self) -> list[Any]:
+        """The staged components as fresh objects."""
+        ...
+    @property
+    def attributes(self) -> "Attributes":
+        """Custom attributes, used like a dict (`e.attributes["hp"] = 3`)."""
+        ...
+    @attributes.setter
+    def attributes(self, values: dict[str, AttributeValue]) -> None: ...
+    @property
+    def script(self) -> Optional[str]:
+        """Path of the attached behaviour script, or None."""
+        ...
+    @script.setter
+    def script(self, path: Optional[str]) -> None: ...
+    @property
+    def prefab(self) -> Optional[str]:
+        """The prefab file this entity is an instance of, or None.
+
+        Instances from `Prefab.load(...)` are linked, so a saved scene keeps
+        following the file (as in Oberon). Set None to unlink.
+        """
+        ...
+    @prefab.setter
+    def prefab(self, path: Optional[str]) -> None: ...
+
+class Attributes:
+    """An entity's custom attributes, used like a dict.
+
+    Values are bool, int, float, str, or 3/4-tuples (vectors and colors).
+    On live entities, writes are buffered and apply after the callback.
+    """
+
+    def __getitem__(self, key: str) -> AttributeValue: ...
+    def __setitem__(self, key: str, value: AttributeValue) -> None: ...
+    def __delitem__(self, key: str) -> None: ...
+    def __contains__(self, key: object) -> bool: ...
+    def __len__(self) -> int: ...
+    def __iter__(self) -> Iterator[str]: ...
+    def get(self, key: str, default: Any = None) -> Any: ...
+    def keys(self) -> list[str]: ...
+    def values(self) -> list[AttributeValue]: ...
+    def items(self) -> list[tuple[str, AttributeValue]]: ...
+    def update(self, values: Union[dict[str, AttributeValue], "Attributes"]) -> None: ...
+    def clear(self) -> None: ...
+    def to_dict(self) -> dict[str, AttributeValue]: ...
+
+class Prefab:
+    """A reusable entity template (Oberon's `.prefab` files)."""
+
+    def __init__(self, entities: Union[Entity, list[Entity], None] = None) -> None: ...
+    @classmethod
+    def load(cls, path: str) -> "Prefab": ...
+    @classmethod
+    def from_ron(cls, text: str) -> "Prefab": ...
+    def to_ron(self) -> str: ...
+    @property
+    def path(self) -> Optional[str]:
+        """The file it was loaded from (instances link to it), or None."""
+        ...
+    def save(self, path: str) -> None: ...
+    def entities(self) -> list[Entity]: ...
+    def __len__(self) -> int: ...
+    def instantiate(
+        self, position: Optional[Vec3] = None, name: Optional[str] = None
+    ) -> Entity:
+        """A staged copy of the root entity, optionally placed and renamed."""
+        ...
+    def instantiate_all(self, position: Optional[Vec3] = None) -> list[Entity]: ...
+
+class Scene:
+    """A collection of entities, ready to load into a game."""
+
+    def __init__(self) -> None: ...
+    def add(self, entity: Union[Entity, Prefab]) -> "Scene": ...
+    def entities(self) -> list[Entity]: ...
+    def find(self, name: str) -> Optional[Entity]: ...
+    @property
+    def entity_count(self) -> int: ...
+    def __len__(self) -> int: ...
+    def to_ron(self) -> str:
+        """Serializes the staged scene to RON text (the scene-file format)."""
+        ...
+    def save(self, path: str) -> None:
+        """Writes the staged scene to `path` as a RON scene file."""
+        ...
+    @classmethod
+    def from_ron(cls, text: str) -> "Scene":
+        """Parses a staged scene from RON text."""
+        ...
+    @classmethod
+    def load(cls, path: str) -> "Scene":
+        """Loads a staged scene from a RON scene file."""
+        ...
+
+class FrameTime:
+    """Frame timing information."""
+
+    delta: float
+    elapsed: float
+    frame: int
+
+class Modifiers:
+    """Modifier key state at the start of the frame."""
+
+    shift: bool
+    ctrl: bool
+    alt: bool
+    super_key: bool
+
+class Touch:
+    """One finger on the screen, from ``Input.touches``. Without a touch
+    screen the held left mouse button is finger 0."""
+
+    finger: int
+    position: tuple[float, float]
+    start: tuple[float, float]
+    just_started: bool
+    just_ended: bool
+    primary: bool
+    @property
+    def moved(self) -> tuple[float, float]: ...
+
+class Input:
+    """Keyboard, mouse, and gamepad state at the start of the frame."""
+
+    cursor: Optional[tuple[float, float]]
+    scroll: tuple[float, float]
+    mouse_delta: tuple[float, float]
+    modifiers: Modifiers
+    gamepads: Gamepads
+    touches: list[Touch]
+    def pressed(self, key: str) -> bool: ...
+    def just_pressed(self, key: str) -> bool: ...
+    def just_released(self, key: str) -> bool: ...
+    def mouse_pressed(self, button: str) -> bool: ...
+    def mouse_just_pressed(self, button: str) -> bool: ...
+    def mouse_just_released(self, button: str) -> bool: ...
+
+class Gamepad:
+    """One connected gamepad's state at the start of the frame."""
+
+    id: int
+    name: str
+    def pressed(self, button: str) -> bool: ...
+    def axis(self, axis: str) -> float: ...
+    def left_stick(self) -> tuple[float, float]: ...
+    def right_stick(self) -> tuple[float, float]: ...
+
+class GamepadEvent:
+    """A gamepad event: connection, disconnection, or a button/axis change.
+
+    `kind` is "connected", "disconnected", "button", or "axis"; only the
+    fields relevant to the kind are set. Like all engine events, gamepad
+    events are readable for two frames.
+    """
+
+    kind: str
+    id: int
+    name: Optional[str]
+    button: Optional[str]
+    pressed: Optional[bool]
+    axis: Optional[str]
+    value: Optional[float]
+
+class Gamepads:
+    """Gamepad state at the start of the frame.
+
+    Buttons and axes are addressed by lowercase snake_case names
+    ("south", "dpad_up", "left_stick_x", ...). The *_any methods query
+    across all connected gamepads.
+    """
+
+    events: list[GamepadEvent]
+    def ids(self) -> list[int]: ...
+    def get(self, id: int) -> Optional[Gamepad]: ...
+    def primary(self) -> Optional[Gamepad]: ...
+    def any_connected(self) -> bool: ...
+    def pressed(self, id: int, button: str) -> bool: ...
+    def pressed_any(self, button: str) -> bool: ...
+    def axis(self, id: int, axis: str) -> float: ...
+    def axis_any(self, axis: str) -> float: ...
+    def __len__(self) -> int: ...
+    def __iter__(self) -> Iterator[Gamepad]: ...
+
+class Binding:
+    """A physical input that can trigger an action."""
+
+    kind: str
+    name: str
+    @classmethod
+    def key(cls, name: str) -> Binding: ...
+    @classmethod
+    def mouse(cls, name: str) -> Binding: ...
+    @classmethod
+    def gamepad_button(cls, name: str) -> Binding: ...
+    @classmethod
+    def gamepad_axis_positive(cls, name: str) -> Binding: ...
+    @classmethod
+    def gamepad_axis_negative(cls, name: str) -> Binding: ...
+
+class AxisBinding:
+    """An analog axis source for ActionMap.axis."""
+
+    kind: str
+    name: Optional[str]
+    scale: Optional[float]
+    negative: Optional[Binding]
+    positive: Optional[Binding]
+    @classmethod
+    def gamepad_axis(cls, name: str, scale: float = 1.0) -> AxisBinding: ...
+    @classmethod
+    def button_pair(cls, negative: Binding, positive: Binding) -> AxisBinding: ...
+    @classmethod
+    def key_pair(cls, negative: str, positive: str) -> AxisBinding: ...
+
+class ActionMap:
+    """Named actions and axes bound to physical controls.
+
+    Game-owned: create it before game.run(), then query it inside the
+    update callback against ctx.input. Bindings are changeable at any
+    time, so control-remapping UIs can live entirely in game code.
+    """
+
+    def __init__(self) -> None: ...
+    def bind(self, action: str, binding: Binding) -> None: ...
+    def bind_axis(self, name: str, axis: AxisBinding) -> None: ...
+    def rebind(self, action: str, bindings: list[Binding]) -> None: ...
+    def unbind(self, action: str) -> None: ...
+    def unbind_axis(self, name: str) -> None: ...
+    def bindings(self, action: str) -> list[Binding]: ...
+    def actions(self) -> list[str]: ...
+    def axis_names(self) -> list[str]: ...
+    def pressed(self, action: str, input: Input) -> bool: ...
+    def just_pressed(self, action: str, input: Input) -> bool: ...
+    def axis(self, name: str, input: Input) -> float: ...
+    def axis_pair(self, x: str, y: str, input: Input) -> tuple[float, float]: ...
+    def __len__(self) -> int: ...
+    def __contains__(self, action: str) -> bool: ...
+
+class EntityView:
+    """A handle to one entity inside a SceneView."""
+
+    @property
+    def id(self) -> int: ...
+    @property
+    def name(self) -> Optional[str]: ...
+    @property
+    def transform(self) -> Optional[TransformRef]: ...
+    @transform.setter
+    def transform(self, value: Transform) -> None: ...
+    @property
+    def character_velocity(self) -> Optional[Vec3]: ...
+    @character_velocity.setter
+    def character_velocity(self, value: Vec3) -> None: ...
+    @property
+    def camera_3d(self) -> Optional[Camera3D]: ...
+    @camera_3d.setter
+    def camera_3d(self, value: Camera3D) -> None: ...
+    @property
+    def attributes(self) -> Attributes: ...
+    @attributes.setter
+    def attributes(self, values: dict[str, AttributeValue]) -> None: ...
+    @property
+    def script(self) -> Optional[str]: ...
+    @property
+    def audio_source(self) -> Optional[AudioSource]: ...
+    @property
+    def animation(self) -> Optional[AnimationRef]: ...
+    @property
+    def joint(self) -> Optional[JointRef]:
+        """The entity's joint (``angle``, ``broken``, ``motor_target``...), or None."""
+    def attach(self, to: str, bone: str = "", offset: Optional[Transform] = None) -> None: ...
+    def detach(self) -> None: ...
+    @property
+    def attached_to(self) -> Optional[tuple[str, str]]: ...
+    @property
+    def nav_state(self) -> Optional[dict[str, Any]]: ...
+    def nav_edit(self, **changes: Any) -> None: ...
+    @property
+    def ragdoll_state(self) -> Optional[dict[str, Any]]: ...
+    def ragdoll_edit(self, **changes: Any) -> None: ...
+    @property
+    def sprite_state(self) -> Optional[dict[str, Any]]: ...
+    def sprite_edit(self, **changes: Any) -> None: ...
+    def despawn(self) -> None: ...
+
+class SceneView:
+    """Read access to the scene during the update callback."""
+
+    @property
+    def entity_count(self) -> int: ...
+    def find(self, name: str) -> Optional[EntityView]: ...
+    def names(self) -> list[str]: ...
+    def spawn(self, entity: Union[Entity, Prefab], position: Optional[Vec3] = None) -> None: ...
+    def despawn(self, id: int) -> None: ...
+    def burst(
+        self,
+        emitter: Union[str, ParticleEmitter],
+        position: Vec3,
+        direction: Optional[Vec3] = None,
+        count: Optional[int] = None,
+    ) -> None:
+        """A one-off particle effect at `position` that cleans up after itself."""
+    def burst_emitter(self, id: int, count: int) -> None:
+        """Extra particles from an entity's own emitter next frame."""
+    def load(self, scene: Scene) -> None: ...
+    def __getitem__(self, name: str) -> EntityView: ...
+    def __iter__(self) -> Iterator[EntityView]: ...
+
+class Events:
+    """Named events with arbitrary payloads, readable for two frames."""
+
+    def send(self, name: str, payload: Any = None) -> None: ...
+    def read(self, name: str) -> list[Any]: ...
+
+class Resources:
+    """Named, game-owned storage for arbitrary Python objects."""
+
+    def set(self, name: str, value: Any) -> None: ...
+    def get(self, name: str) -> Optional[Any]: ...
+    def remove(self, name: str) -> Optional[Any]: ...
+    def clear(self) -> None: ...
+    def names(self) -> list[str]: ...
+    def __contains__(self, name: str) -> bool: ...
+    def __len__(self) -> int: ...
+
+class FrameContext:
+    """The per-frame update context passed to the update callback."""
+
+    time: FrameTime
+    input: Input
+    scene: SceneView
+    events: Events
+    resources: Resources
+    physics: Physics
+    physics2d: Physics2D
+    audio: Audio
+    screen: Screen
+    def quit(self) -> None: ...
+
+class AudioSource:
+    """A sound attached to an entity (Oberon's Audio Source component)."""
+
+    def __init__(
+        self,
+        clip: str,
+        volume: float = 1.0,
+        pitch: float = 1.0,
+        looping: bool = False,
+        play_on_start: bool = False,
+        spatial: bool = False,
+        range: float = 20.0,
+    ) -> None: ...
+    @property
+    def clip(self) -> str: ...
+    @property
+    def volume(self) -> float: ...
+    @property
+    def pitch(self) -> float: ...
+    @property
+    def looping(self) -> bool: ...
+    @property
+    def play_on_start(self) -> bool: ...
+    @property
+    def spatial(self) -> bool: ...
+    @property
+    def range(self) -> float: ...
+
+class Animation:
+    """Which clip an animated model plays (Oberon's Animation component)."""
+
+    def __init__(
+        self,
+        clip: str = "",
+        speed: float = 1.0,
+        looping: bool = True,
+        play_on_start: bool = True,
+        root_motion: bool = False,
+        graph: str = "",
+        foot_ik: bool = False,
+    ) -> None: ...
+    @property
+    def clip(self) -> str: ...
+    @property
+    def foot_ik(self) -> bool:
+        """Whether the feet follow the ground (slopes, stairs)."""
+    @property
+    def graph(self) -> str:
+        """The animation graph (``.anim.ron``) picking the clips; empty
+        plays ``clip``."""
+    @property
+    def speed(self) -> float: ...
+    @property
+    def looping(self) -> bool: ...
+    @property
+    def play_on_start(self) -> bool: ...
+    @property
+    def root_motion(self) -> bool: ...
+
+class Attach:
+    """Follows a bone of another entity's animated model: a sword in a
+    hand, a hat on a head. The entity's ``Transform`` is its offset in the
+    bone's space."""
+
+    def __init__(self, to: str, bone: str = "") -> None: ...
+    @property
+    def to(self) -> str: ...
+    @property
+    def bone(self) -> str: ...
+
+class NavAgent:
+    """Finds its own way around the navigation mesh (Oberon's Nav Agent).
+    Scripts send it somewhere with ``entity.nav.go(target)``."""
+
+    def __init__(
+        self,
+        speed: float = 3.5,
+        acceleration: float = 12.0,
+        radius: float = 0.4,
+        hover: float = 0.0,
+        stop_distance: float = 0.1,
+        avoid: bool = True,
+        turn: bool = True,
+    ) -> None: ...
+    @property
+    def speed(self) -> float: ...
+    @property
+    def acceleration(self) -> float: ...
+    @property
+    def radius(self) -> float: ...
+    @property
+    def hover(self) -> float: ...
+    @property
+    def stop_distance(self) -> float: ...
+    @property
+    def avoid(self) -> bool: ...
+    @property
+    def turn(self) -> bool: ...
+
+class Ragdoll:
+    """An animated model that can go limp (Oberon's Ragdoll). Scripts
+    switch it with ``entity.ragdoll.on()`` / ``off()``."""
+
+    def __init__(
+        self,
+        active: bool = False,
+        mass: float = 70.0,
+        stiffness: float = 0.0,
+        blend_time: float = 0.5,
+    ) -> None: ...
+    @property
+    def active(self) -> bool: ...
+    @property
+    def mass(self) -> float: ...
+    @property
+    def stiffness(self) -> float: ...
+    @property
+    def blend_time(self) -> float: ...
+
+class SpriteClip:
+    """A named run of sprite-sheet frames ``first..=last`` played at
+    ``fps`` (``looping=False`` holds the last frame)."""
+
+    def __init__(
+        self,
+        name: str,
+        first: int = 0,
+        last: Optional[int] = None,
+        fps: float = 10.0,
+        looping: bool = True,
+    ) -> None: ...
+    @property
+    def name(self) -> str: ...
+    @property
+    def first(self) -> int: ...
+    @property
+    def last(self) -> int: ...
+    @property
+    def fps(self) -> float: ...
+    @property
+    def looping(self) -> bool: ...
+
+class Sprite:
+    """A 2D image on the entity (optionally a sprite sheet of
+    ``columns x rows`` frames animated by ``clips``). Scripts play clips
+    with ``entity.sprite.play("run")``."""
+
+    def __init__(
+        self,
+        image: str = "",
+        size: tuple[float, float] = (1.0, 1.0),
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        flip_x: bool = False,
+        flip_y: bool = False,
+        pixelated: bool = True,
+        layer: int = 0,
+        columns: int = 1,
+        rows: int = 1,
+        frame: int = 0,
+        clips: List[SpriteClip] = ...,
+        play: str = "",
+    ) -> None: ...
+    @property
+    def image(self) -> str: ...
+    @property
+    def size(self) -> tuple[float, float]: ...
+    @property
+    def color(self) -> tuple[float, float, float, float]: ...
+    @property
+    def flip_x(self) -> bool: ...
+    @property
+    def flip_y(self) -> bool: ...
+    @property
+    def pixelated(self) -> bool: ...
+    @property
+    def layer(self) -> int: ...
+    @property
+    def columns(self) -> int: ...
+    @property
+    def rows(self) -> int: ...
+    @property
+    def frame(self) -> int: ...
+    @property
+    def clips(self) -> List[SpriteClip]: ...
+    @property
+    def play(self) -> str: ...
+
+class AutoTile:
+    """16 tileset tiles from ``first`` painted as one; each cell picks its
+    tile from its neighbours (mask up 1, right 2, down 4, left 8)."""
+
+    def __init__(self, name: str, first: int = 0) -> None: ...
+    @property
+    def name(self) -> str: ...
+    @property
+    def first(self) -> int: ...
+
+class Tilemap:
+    """A grid of tiles from one tileset image; cell 0 is empty, ``n`` tile
+    ``n - 1``, ``-n`` auto-tile ``n - 1``. Edits return a changed copy."""
+
+    def __init__(
+        self,
+        width: int = 16,
+        height: int = 9,
+        tileset: str = "",
+        columns: int = 1,
+        rows: int = 1,
+        tile_size: float = 1.0,
+        autotiles: List[AutoTile] = ...,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        pixelated: bool = True,
+        layer: int = 0,
+        collide: bool = True,
+    ) -> None: ...
+    @staticmethod
+    def from_rows(
+        rows_text: List[str],
+        legend: Dict[str, int],
+        tileset: str = "",
+        columns: int = 1,
+        rows: int = 1,
+        tile_size: float = 1.0,
+        autotiles: List[AutoTile] = ...,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        pixelated: bool = True,
+        layer: int = 0,
+        collide: bool = True,
+    ) -> "Tilemap": ...
+    def get(self, x: int, y: int) -> int: ...
+    def tile_at(self, x: int, y: int) -> Optional[int]: ...
+    def set(self, x: int, y: int, value: int) -> "Tilemap": ...
+    def fill(self, start: tuple[int, int], end: tuple[int, int], value: int) -> "Tilemap": ...
+    def resize(self, width: int, height: int) -> "Tilemap": ...
+    def cell_at(self, x: float, y: float) -> tuple[int, int]: ...
+    @property
+    def width(self) -> int: ...
+    @property
+    def height(self) -> int: ...
+    @property
+    def tileset(self) -> str: ...
+    @property
+    def columns(self) -> int: ...
+    @property
+    def rows(self) -> int: ...
+    @property
+    def tile_size(self) -> float: ...
+    @property
+    def collide(self) -> bool: ...
+    @property
+    def layer(self) -> int: ...
+    @property
+    def autotiles(self) -> List[AutoTile]: ...
+    @property
+    def filled(self) -> int: ...
+
+class CameraFollow2D:
+    """Moves the entity's Camera2D after the entity named ``target``."""
+
+    def __init__(
+        self,
+        target: str = "Player",
+        offset: tuple[float, float] = (0.0, 1.0),
+        smoothing: float = 0.15,
+        dead_zone: tuple[float, float] = (0.5, 0.5),
+        bounds: Optional[tuple[float, float, float, float]] = None,
+    ) -> None: ...
+    @property
+    def target(self) -> str: ...
+    @property
+    def offset(self) -> tuple[float, float]: ...
+    @property
+    def smoothing(self) -> float: ...
+    @property
+    def dead_zone(self) -> tuple[float, float]: ...
+    @property
+    def bounds(self) -> Optional[tuple[float, float, float, float]]: ...
+
+class Navigation:
+    """The scene's navigation mesh settings and where it's baked to."""
+
+    def __init__(
+        self,
+        file: str = "",
+        agent_radius: float = 0.35,
+        agent_height: float = 1.8,
+        max_climb: float = 0.4,
+        max_slope: float = 45.0,
+        jump_distance: float = 2.5,
+        jump_height: float = 1.2,
+        drop_height: float = 3.0,
+        cell_size: float = 0.2,
+        min_area: float = 0.5,
+    ) -> None: ...
+    @property
+    def file(self) -> str: ...
+    @property
+    def agent_radius(self) -> float: ...
+    @property
+    def agent_height(self) -> float: ...
+    @property
+    def max_climb(self) -> float: ...
+    @property
+    def max_slope(self) -> float: ...
+    @property
+    def jump_distance(self) -> float: ...
+    @property
+    def drop_height(self) -> float: ...
+    @property
+    def cell_size(self) -> float: ...
+
+class NavLink:
+    """A hand-placed shortcut for nav agents to the entity named ``to``."""
+
+    def __init__(self, to: str, two_way: bool = True) -> None: ...
+    @property
+    def to(self) -> str: ...
+    @property
+    def two_way(self) -> bool: ...
+
+class AnimationRef:
+    """A running entity's animation (``view.animation``)."""
+
+    def play(
+        self,
+        clip: str,
+        loop: bool = True,
+        fade: float = 0.0,
+        speed: Optional[float] = None,
+        restart: bool = False,
+    ) -> None: ...
+    def stop(self, fade: float = 0.0) -> None: ...
+    def length(self, clip: Optional[str] = None) -> float: ...
+    @property
+    def clip(self) -> Optional[str]: ...
+    @property
+    def time(self) -> float: ...
+    @time.setter
+    def time(self, value: float) -> None: ...
+    @property
+    def duration(self) -> float: ...
+    @property
+    def playing(self) -> bool: ...
+    @property
+    def speed(self) -> float: ...
+    @speed.setter
+    def speed(self, value: float) -> None: ...
+    @property
+    def looping(self) -> bool: ...
+    @property
+    def clips(self) -> List[str]: ...
+    @property
+    def springs(self) -> bool: ...
+    def reset_springs(self) -> None: ...
+    @property
+    def root_motion(self) -> bool: ...
+    @root_motion.setter
+    def root_motion(self, on: bool) -> None: ...
+    @property
+    def recent_events(self) -> List[tuple[int, str, str]]: ...
+    # Animation graphs (see the Animation graphs manual).
+    @property
+    def graph(self) -> Optional[str]: ...
+    @graph.setter
+    def graph(self, path: Optional[str]) -> None: ...
+    def set(self, name: str, value: float | int | bool) -> None: ...
+    def get(self, name: str) -> float | int | bool: ...
+    def trigger(self, name: str) -> None: ...
+    def reset_trigger(self, name: str) -> None: ...
+    @property
+    def parameters(self) -> Dict[str, float | int | bool]: ...
+    @property
+    def state(self) -> Optional[str]: ...
+    @property
+    def state_time(self) -> float: ...
+    @property
+    def in_transition(self) -> bool: ...
+    @property
+    def layers(self) -> List[str]: ...
+    def layer_state(self, layer: str) -> str: ...
+    def layer_weight(self, layer: str) -> float: ...
+    def set_layer_weight(self, layer: str, weight: float) -> None: ...
+    def play_state(
+        self, state: str, layer: Optional[str] = None, fade: float = 0.0
+    ) -> None: ...
+    # Inverse kinematics (see the Attachments and IK manual).
+    def look_at(
+        self,
+        target: Optional[str | EntityView | tuple[float, float, float]] = None,
+        weight: float = 1.0,
+    ) -> None: ...
+    def reach(
+        self,
+        bone: str,
+        target: Optional[str | EntityView | tuple[float, float, float]] = None,
+        weight: float = 1.0,
+    ) -> None: ...
+    @property
+    def foot_ik(self) -> bool: ...
+    @foot_ik.setter
+    def foot_ik(self, on: bool) -> None: ...
+    @property
+    def looking(self) -> bool: ...
+    @property
+    def reaching(self) -> List[str]: ...
+
+class Audio:
+    """Sound playback for the current frame (ctx.audio)."""
+
+    def play(
+        self,
+        path: str,
+        volume: float = 1.0,
+        loop_: bool = False,
+        playback_rate: float = 1.0,
+        panning: float = 0.0,
+    ) -> int: ...
+    def play_at(
+        self,
+        path: str,
+        volume: float = 1.0,
+        pitch: float = 1.0,
+        position: Optional[tuple[float, float, float]] = None,
+    ) -> None: ...
+    def play_source(self, entity: int | EntityView) -> None: ...
+    def stop_source(self, entity: int | EntityView) -> None: ...
+    def source_playing(self, entity: int | EntityView) -> bool: ...
+    def stop(self, id: int, fade_out: float = 0.0) -> None: ...
+    def stop_all(self, fade_out: float = 0.0) -> None: ...
+    def pause(self, id: int, fade: float = 0.0) -> None: ...
+    def resume(self, id: int, fade: float = 0.0) -> None: ...
+    def is_playing(self, id: int) -> bool: ...
+    def position(self, id: int) -> Optional[float]: ...
+    def seek_to(self, id: int, position: float) -> None: ...
+    def set_volume(self, id: int, volume: float, fade: float = 0.0) -> None: ...
+    def set_playback_rate(self, id: int, rate: float, fade: float = 0.0) -> None: ...
+    def set_panning(self, id: int, panning: float, fade: float = 0.0) -> None: ...
+    def set_master_volume(self, volume: float, fade: float = 0.0) -> None: ...
+    def sound_count(self) -> int: ...
+    def set_low_pass(self, cutoff_hz: Optional[float] = None, fade: float = 0.0) -> None:
+        """Muffles every sound (low-pass at ``cutoff_hz``) or lifts it (None)."""
+        ...
+    @property
+    def low_pass(self) -> Optional[float]:
+        """The low-pass cutoff (Hz) while sound is muffled, else None."""
+        ...
+    @property
+    def underwater(self) -> bool:
+        """True while the camera is under water (sound muffled)."""
+        ...
+
+class Screen:
+    """Window size, HUD drawing and cursor lock (ctx.screen)."""
+
+    @property
+    def size(self) -> tuple[int, int]: ...
+    @property
+    def center(self) -> tuple[float, float]: ...
+    @property
+    def cursor_locked(self) -> bool: ...
+    def lock_cursor(self, locked: bool = True) -> None: ...
+    @property
+    def graphics(self) -> str: ...
+    def set_graphics(self, quality: str) -> None: ...
+    def image(
+        self,
+        path: str,
+        x: float,
+        y: float,
+        size: Optional[tuple[float, float]] = None,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        rotation: float = 0.0,
+    ) -> None: ...
+    def rect(
+        self,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+    ) -> None: ...
+    def text(
+        self,
+        text: str,
+        x: float,
+        y: float,
+        size: float = 24.0,
+        color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        align: str = "left",
+        shadow: Optional[tuple[float, float, float, float]] = None,
+        outline: Optional[tuple[float, float, float, float]] = None,
+        font: Optional[str] = None,
+        fallback: Optional[str] = None,
+    ) -> None: ...
+    def measure_text(
+        self, text: str, size: float = 24.0, font: Optional[str] = None
+    ) -> tuple[float, float]: ...
+
+class Physics:
+    """3D physics queries for the current frame (ctx.physics)."""
+
+    @property
+    def nav_ready(self) -> bool: ...
+    def nav_path(
+        self,
+        start: tuple[float, float, float],
+        end: tuple[float, float, float],
+        partial: bool = False,
+    ) -> Optional[list[tuple[float, float, float, bool]]]: ...
+    def nav_nearest(
+        self, point: tuple[float, float, float], max_distance: float = 5.0
+    ) -> Optional[tuple[float, float, float]]: ...
+
+    def raycast(
+        self,
+        origin: tuple[float, float, float],
+        direction: tuple[float, float, float],
+        max_distance: float = 1000.0,
+        exclude: Optional[int | EntityView] = None,
+    ) -> Optional[tuple[int, tuple[float, float, float], tuple[float, float, float], float]]: ...
+    def cast_ray(
+        self,
+        origin: tuple[float, float, float],
+        direction: tuple[float, float, float],
+        max_distance: float = 1000.0,
+        exclude: Optional[int | EntityView] = None,
+    ) -> int: ...
+    def ray_result(
+        self, key: int
+    ) -> Optional[tuple[int, tuple[float, float, float], tuple[float, float, float], float]]: ...
+    def water_height(self, x: float, z: float) -> Optional[float]:
+        """The water surface height at world (x, z), waves included, or None."""
+        ...
+    def splash(self, position: tuple[float, float, float], strength: float = 1.0) -> None:
+        """A splash in the water at ``position`` (rings and foam), from the
+        next physics step. ``strength`` 1 is about a crate dropped from a
+        couple of metres (0 to 10)."""
+        ...
+    def apply_impulse(
+        self, entity: int | EntityView, impulse: tuple[float, float, float]
+    ) -> None: ...
+    def apply_force(
+        self, entity: int | EntityView, force: tuple[float, float, float]
+    ) -> None: ...
+    def velocity(self, entity: int | EntityView) -> tuple[float, float, float]: ...
+    def set_velocity(
+        self, entity: int | EntityView, velocity: tuple[float, float, float]
+    ) -> None: ...
+    def grounded(self, entity: int | EntityView) -> bool: ...
+    def gravity(self) -> tuple[float, float, float]: ...
+    def set_gravity(self, gravity: tuple[float, float, float]) -> None: ...
+    def body_count(self) -> int: ...
+
+class Physics2D:
+    """2D physics queries for the current frame (ctx.physics2d)."""
+
+    def apply_impulse(self, entity: int | EntityView, impulse: tuple[float, float]) -> None: ...
+    def grounded(self, entity: int | EntityView) -> bool: ...
+    def body_count(self) -> int: ...
+
+class RigidBody:
+    """A physics rigid body component."""
+
+    def __init__(
+        self,
+        body_type: str = "dynamic",
+        *,
+        gravity_scale: float = 1.0,
+        linear_damping: float = 0.0,
+        angular_damping: float = 0.0,
+        enabled: bool = True,
+    ) -> None: ...
+    @classmethod
+    def dynamic(cls) -> RigidBody: ...
+    @classmethod
+    def fixed(cls) -> RigidBody: ...
+    @classmethod
+    def kinematic_velocity(cls) -> RigidBody: ...
+    @classmethod
+    def kinematic_position(cls) -> RigidBody: ...
+    @property
+    def body_type(self) -> str: ...
+
+class Collider3D:
+    """A 3D physics collider component."""
+
+    @classmethod
+    def ball(cls, radius: float) -> Collider3D: ...
+    @classmethod
+    def cuboid(cls, x: float, y: float, z: float) -> Collider3D: ...
+    @classmethod
+    def capsule(cls, half_height: float, radius: float) -> Collider3D: ...
+    @classmethod
+    def mesh(cls, model: Union[str, os.PathLike[str]]) -> Collider3D:
+        """A model's exact triangles, at the entity's scale (static scenery;
+        a dynamic body plays it as its convex hull)."""
+    @classmethod
+    def convex_hull(cls, model: Union[str, os.PathLike[str]]) -> Collider3D:
+        """The convex hull of a model's vertices, at the entity's scale."""
+    def sensor(self, sensor: bool) -> Collider3D: ...
+    def density(self, density: float) -> Collider3D: ...
+    def friction(self, friction: float) -> Collider3D: ...
+    def restitution(self, restitution: float) -> Collider3D: ...
+    def offset(self, x: float, y: float, z: float) -> Collider3D: ...
+
+class Collider2D:
+    """A 2D physics collider component."""
+
+    @classmethod
+    def ball(cls, radius: float) -> Collider2D: ...
+    @classmethod
+    def cuboid(cls, x: float, y: float) -> Collider2D: ...
+    @classmethod
+    def capsule(cls, half_height: float, radius: float) -> Collider2D: ...
+    def sensor(self, sensor: bool) -> Collider2D: ...
+    def density(self, density: float) -> Collider2D: ...
+    def friction(self, friction: float) -> Collider2D: ...
+    def restitution(self, restitution: float) -> Collider2D: ...
+    def offset(self, x: float, y: float) -> Collider2D: ...
+
+class CharacterController:
+    """A kinematic character controller component."""
+
+    def __init__(
+        self,
+        *,
+        mode: str = "normal",
+        max_slope_climb_angle: float = 0.7853982,
+        min_slope_slide_angle: float = 0.5235988,
+        autostep: Optional[float] = None,
+        snap_to_ground: Optional[float] = None,
+        offset: float = 0.05,
+        slide: bool = True,
+    ) -> None: ...
+
+class CharacterVelocity:
+    """Velocity component for a character controller."""
+
+    def __init__(self, velocity: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> None: ...
+    @property
+    def velocity(self) -> tuple[float, float, float]: ...
+    @velocity.setter
+    def velocity(self, value: tuple[float, float, float]) -> None: ...
+
+class JointMotor:
+    """Drives a hinge or slider: ``JointMotor(2.0)`` turns at 2 rad/s,
+    ``JointMotor(target=1.2)`` pulls to 1.2 rad and holds it."""
+
+    def __init__(
+        self,
+        speed: float = 0.0,
+        *,
+        target: Optional[float] = None,
+        stiffness: float = 400.0,
+        damping: float = 80.0,
+        max_force: float = 0.0,
+    ) -> None: ...
+    @property
+    def speed(self) -> float: ...
+    @property
+    def target(self) -> Optional[float]: ...
+    @property
+    def stiffness(self) -> float: ...
+    @property
+    def damping(self) -> float: ...
+    @property
+    def max_force(self) -> float: ...
+
+class Joint:
+    """Holds this entity's body to another entity's (``connected``, by
+    name) or to the world.
+
+    ``Joint.hinge(axis=(0, 1, 0), connected="Frame", anchor=(-0.5, 0, 0),
+    limits=(0, 1.6))`` makes a door; ``Joint.ball(connected="Link 3",
+    anchor=(-0.25, 0, 0))`` a chain link; ``Joint.rope(3.0)`` hangs from
+    the world."""
+
+    def __init__(
+        self,
+        kind: str = "hinge",
+        *,
+        connected: Optional[str] = None,
+        anchor: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        connected_anchor: Optional[tuple[float, float, float]] = None,
+        axis: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        limits: Optional[tuple[float, float]] = None,
+        length: float = 0.0,
+        stiffness: float = 30.0,
+        damping: float = 2.0,
+        motor: Union[JointMotor, float, None] = None,
+        collide_connected: bool = False,
+        break_force: float = 0.0,
+        enabled: bool = True,
+    ) -> None: ...
+    @classmethod
+    def hinge(cls, axis: tuple[float, float, float] = (0.0, 1.0, 0.0), **options: Any) -> Joint:
+        """Turns around ``axis`` like a door or a wheel."""
+    @classmethod
+    def ball(cls, **options: Any) -> Joint:
+        """Swivels freely around a point, like a chain link."""
+    @classmethod
+    def slider(cls, axis: tuple[float, float, float] = (1.0, 0.0, 0.0), **options: Any) -> Joint:
+        """Slides along ``axis`` without turning, like a drawer."""
+    @classmethod
+    def fixed(cls, **options: Any) -> Joint:
+        """Welds the two bodies together where they are."""
+    @classmethod
+    def rope(cls, length: float = 0.0, **options: Any) -> Joint:
+        """At most ``length`` apart (0 = as far as they start); slack closer."""
+    @classmethod
+    def spring(
+        cls, length: float = 0.0, stiffness: float = 30.0, damping: float = 2.0, **options: Any
+    ) -> Joint:
+        """Pulls towards ``length`` apart, bouncing."""
+    def replace(self, **options: Any) -> Joint:
+        """A copy with some options changed."""
+    @property
+    def kind(self) -> str: ...
+    @property
+    def connected(self) -> Optional[str]: ...
+    @property
+    def anchor(self) -> tuple[float, float, float]: ...
+    @property
+    def connected_anchor(self) -> Optional[tuple[float, float, float]]: ...
+    @property
+    def axis(self) -> tuple[float, float, float]: ...
+    @property
+    def limits(self) -> Optional[tuple[float, float]]: ...
+    @property
+    def length(self) -> float: ...
+    @property
+    def stiffness(self) -> float: ...
+    @property
+    def damping(self) -> float: ...
+    @property
+    def motor(self) -> Optional[JointMotor]: ...
+    @property
+    def collide_connected(self) -> bool: ...
+    @property
+    def break_force(self) -> float: ...
+    @property
+    def enabled(self) -> bool: ...
+
+class JointRef:
+    """A running entity's joint (``view.joint``). Setting a field changes
+    the joint after the update returns."""
+
+    @property
+    def kind(self) -> str: ...
+    @property
+    def component(self) -> Joint: ...
+    @property
+    def connected(self) -> Optional[str]: ...
+    @connected.setter
+    def connected(self, name: Optional[str]) -> None: ...
+    @property
+    def value(self) -> float:
+        """Hinge angle (radians), slider position (metres) or anchor distance."""
+    @property
+    def angle(self) -> float: ...
+    @property
+    def attached(self) -> bool: ...
+    @property
+    def broken(self) -> bool: ...
+    @property
+    def force(self) -> float:
+        """The force it held with last step, in newtons."""
+    @property
+    def enabled(self) -> bool: ...
+    @enabled.setter
+    def enabled(self, on: bool) -> None: ...
+    @property
+    def motor_speed(self) -> Optional[float]: ...
+    @motor_speed.setter
+    def motor_speed(self, speed: Optional[float]) -> None: ...
+    @property
+    def motor_target(self) -> Optional[float]: ...
+    @motor_target.setter
+    def motor_target(self, target: Optional[float]) -> None: ...
+    @property
+    def limits(self) -> Optional[tuple[float, float]]: ...
+    @limits.setter
+    def limits(self, limits: Optional[tuple[float, float]]) -> None: ...
+    @property
+    def break_force(self) -> float: ...
+    @break_force.setter
+    def break_force(self, newtons: float) -> None: ...
+
+class Game:
+    """The application: owns the engine, the loaded scene, and the main loop."""
+
+    def __init__(
+        self,
+        title: str = "AUTOMATA",
+        resolution: tuple[int, int] = (1280, 720),
+        headless: bool = False,
+        resizable: bool = True,
+        vsync: bool = True,
+        log_filter: Optional[str] = None,
+        target_fps: Optional[int] = None,
+        clear_color: Optional[tuple[float, float, float, float]] = None,
+        graphics: Optional[str] = None,
+        fixed_delta: Optional[float] = None,
+    ) -> None: ...
+    @property
+    def state(self) -> str: ...
+    def load_scene(self, scene: Scene) -> None: ...
+    def run(
+        self,
+        update: Callable[[FrameContext], None],
+        max_frames: Optional[int] = None,
+    ) -> int: ...
+    def quit(self) -> None: ...
+    def scene_to_ron(self) -> str:
+        """Serializes the live world — as it stands now — to RON text."""
+        ...
+    def save_scene(self, path: str) -> None:
+        """Saves the live world to `path` as a RON scene file."""
+        ...
+
+def set_asset_root(path: str | None) -> None:
+    """Sets the folder relative model paths resolve against."""
+    ...
+
+def check_shader(path: str) -> str | None:
+    """Checks a ``.wgsl`` shader by the engine's rules (no GPU needed):
+    ``None`` when fine, else ``"file:line:col: message"``."""
+    ...
+
+def asset_root() -> str | None:
+    """The folder relative model paths resolve against, or None."""
+    ...

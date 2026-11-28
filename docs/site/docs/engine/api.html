@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Reference · AUTOMATA docs</title>
+<meta name="description" content="The decorator and procedural styles keep working unchanged; constructor keyword arguments override class attributes. See examples/python/oop_platformer.py for a complete game.">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../../dither.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../tutorials/fps.html">A first-person shooter</a></li><li><a href="../tutorials/platformer.html">A 2D platformer</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/command-line.html">The oberon command</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/ui-editor.html">The UI editor</a></li><li><a href="../oberon/materials.html">Materials</a></li><li><a href="../oberon/shaders.html">Custom shaders</a></li><li><a href="../oberon/models.html">Models</a></li><li><a href="../oberon/animation-graphs.html">Animation graphs</a></li><li><a href="../oberon/attachments-and-ik.html">Attachments &amp; IK</a></li><li><a href="../oberon/ragdolls.html">Ragdolls</a></li><li><a href="../oberon/navigation.html">Navigation</a></li><li><a href="../oberon/ai.html">AI</a></li><li><a href="../oberon/2d.html">2D games</a></li><li><a href="../oberon/terrain.html">Terrain</a></li><li><a href="../oberon/foliage.html">Grass &amp; foliage</a></li><li><a href="../oberon/audio.html">Audio</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/editor-workflow.html">Editor workflow</a></li><li><a href="../oberon/exporting.html">Exporting your game</a></li><li><a href="../oberon/steam.html">Steam</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/grass-and-foliage.html">Grass &amp; foliage</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/touch-controls.html">Touch controls</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li><li><a href="../guides/performance.html">Performance</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="architecture.html">Architecture</a></li><li><a href="development.html">Development</a></li><li><a href="api.html" aria-current="page">API design</a></li><li><a href="oberon-design.html">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>API Reference</h1>
+<h2 id="python-api">Python API<a class="anchor" href="#python-api" aria-label="Link to this section">#</a></h2>
+<p>The Python API — AUTOMATA's primary user-facing interface — landed in
+<strong>Phase 5</strong> (PyO3 bindings, crate <code>automata-python</code>). Build and install
+everything with one script:</p>
+<div class="codeblock" data-lang="console"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>python scripts/build.py            # engine + Python wheel + install
+python scripts/build.py --all      # also run the gates and test suites
+python scripts/build.py --help     # all stages and flags</code></pre></div>
+<h3 id="example">Example<a class="anchor" href="#example" aria-label="Link to this section">#</a></h3>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+game = at.Game(title=<span class="tok-s">&quot;Demo&quot;</span>, resolution=(<span class="tok-n">1280</span>, <span class="tok-n">720</span>))
+
+game.load_scene(
+    at.Scene()
+    .add(at.Entity(<span class="tok-s">&quot;cube&quot;</span>).add(at.Transform(position=(<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>))))
+    .add(at.Entity(<span class="tok-s">&quot;camera&quot;</span>).add(at.Camera3D(position=(<span class="tok-n">0</span>, <span class="tok-n">0.5</span>, <span class="tok-n">4</span>), target=(<span class="tok-n">0</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>))))
+)
+
+<span class="tok-d">@game.update</span>
+<span class="tok-k">def</span> <span class="tok-f">tick</span>(ctx):
+    <span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;escape&quot;</span>):
+        ctx.quit()
+    cube = ctx.scene[<span class="tok-s">&quot;cube&quot;</span>]            <span class="tok-c"># like find(), but raises KeyError</span>
+    _, ry, _ = cube.transform.rotation_euler
+    cube.transform.rotation_euler = (<span class="tok-n">0</span>, ry + ctx.time.delta, <span class="tok-n">0</span>)
+
+<span class="tok-d">@game.on_event</span>(<span class="tok-s">&quot;hit&quot;</span>)
+<span class="tok-k">def</span> <span class="tok-f">on_hit</span>(payload):
+    <span class="tok-b">print</span>(<span class="tok-s">&quot;hit!&quot;</span>, payload)              <span class="tok-c"># runs after tick, once per event</span>
+
+game.run()  <span class="tok-c"># uses the @game.update callback; game.run(fn) works too</span></code></pre></div>
+<h3 id="object-oriented-style">Object-oriented style<a class="anchor" href="#object-oriented-style" aria-label="Link to this section">#</a></h3>
+<p><code>Game</code>, <code>Scene</code>, and <code>Entity</code> are subclassable. Engine options are class
+attributes; lifecycle hooks are methods; methods named <code>on_&lt;event&gt;</code> are
+auto-registered as event handlers:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+<span class="tok-k">class</span> <span class="tok-f">Player</span>(at.Entity):
+    <span class="tok-k">def</span> <span class="tok-f">__init__</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">super</span>().__init__(<span class="tok-s">&quot;player&quot;</span>)
+        <span class="tok-b">self</span>.add(at.Transform(position=(<span class="tok-n">0.0</span>, <span class="tok-n">1.15</span>, <span class="tok-n">0.0</span>)))
+        <span class="tok-b">self</span>.add(at.RigidBody.kinematic_velocity())
+        <span class="tok-b">self</span>.add(at.Collider3D.capsule(<span class="tok-n">0.5</span>, <span class="tok-n">0.4</span>))
+        <span class="tok-b">self</span>.add(at.CharacterController(snap_to_ground=<span class="tok-n">0.5</span>))
+        <span class="tok-b">self</span>.add(at.CharacterVelocity())
+
+<span class="tok-k">class</span> <span class="tok-f">Level</span>(at.Scene):
+    <span class="tok-k">def</span> <span class="tok-f">__init__</span>(<span class="tok-b">self</span>):
+        <span class="tok-b">super</span>().__init__()
+        <span class="tok-b">self</span>.add(Player())
+
+<span class="tok-k">class</span> <span class="tok-f">Platformer</span>(at.Game):
+    title = <span class="tok-s">&quot;Platformer&quot;</span>
+    resolution = (<span class="tok-n">1280</span>, <span class="tok-n">720</span>)
+
+    <span class="tok-k">def</span> <span class="tok-f">on_start</span>(<span class="tok-b">self</span>):                <span class="tok-c"># once, before the first frame</span>
+        <span class="tok-b">self</span>.load_scene(Level())
+
+    <span class="tok-k">def</span> <span class="tok-f">on_update</span>(<span class="tok-b">self</span>, ctx):          <span class="tok-c"># every frame</span>
+        player = ctx.scene[<span class="tok-s">&quot;player&quot;</span>]
+        <span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;escape&quot;</span>):
+            ctx.quit()
+
+    <span class="tok-k">def</span> <span class="tok-f">on_hit</span>(<span class="tok-b">self</span>, payload):         <span class="tok-c"># every readable &quot;hit&quot; event</span>
+        <span class="tok-b">print</span>(<span class="tok-s">&quot;hit!&quot;</span>, payload)
+
+Platformer().run()</code></pre></div>
+<p>The decorator and procedural styles keep working unchanged; constructor
+keyword arguments override class attributes. See
+<code>examples/python/oop_platformer.py</code> for a complete game.</p>
+<p>The surface supports OO style (above), procedural style (plain functions
+passed to <code>game.run(update)</code>), and functional style (`game.run(lambda ctx:
+..., max_frames=10)<code>). Builders chain (</code>Scene().add(...).add(...)`),
+components are mutable (<code>t.position = (1, 2, 0)</code>), and scene views support
+<code>scene[&quot;name&quot;]</code> indexing and iteration (<code>for e in ctx.scene</code>).</p>
+<h3 id="loading-scenes-made-in-oberon">Loading scenes made in Oberon<a class="anchor" href="#loading-scenes-made-in-oberon" aria-label="Link to this section">#</a></h3>
+<p>The Oberon editor saves the engine's RON scene-file format (Ctrl+S writes
+<code>scene.ron</code>, then <code>scene-2.ron</code>, … in the directory Oberon was started
+from), so its files load directly:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">import</span> automata <span class="tok-k">as</span> at
+
+game = at.Game(title=<span class="tok-s">&quot;my level&quot;</span>)
+game.load_scene(at.Scene.load(<span class="tok-s">&quot;scene.ron&quot;</span>))   <span class="tok-c"># IOError / ValueError on failure</span>
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(ctx):
+    player = ctx.scene[<span class="tok-s">&quot;Player&quot;</span>]              <span class="tok-c"># entity names from the Hierarchy</span>
+    player.character_velocity = (<span class="tok-n">3.0</span>, -<span class="tok-n">2.0</span>, <span class="tok-n">0.0</span>)
+
+game.run(update)</code></pre></div>
+<p>Physics, meshes, lights and Character Controllers come across as authored;
+gameplay (input → movement, cameras) is your Python code.
+<code>examples/python/play_oberon_scene.py scene.ron</code> reproduces Oberon's Play
+mode (WASD/arrows, Space, Shift, follow camera) as a starting point.</p>
+<h3 id="behaviour-scripts">Behaviour scripts<a class="anchor" href="#behaviour-scripts" aria-label="Link to this section">#</a></h3>
+<p>Attach a script to an entity in Oberon (Inspector → <strong>Script → New…</strong>).
+A script is a plain module with optional <code>start(entity, ctx)</code>,
+<code>update(entity, ctx)</code> and <code>stop(entity, ctx)</code> functions:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-c"># scripts/spinner.py</span>
+<span class="tok-k">def</span> <span class="tok-f">start</span>(entity, ctx):
+    entity.state[<span class="tok-s">&quot;speed&quot;</span>] = entity.attributes.get(<span class="tok-s">&quot;speed&quot;</span>, <span class="tok-n">1.5</span>)
+
+<span class="tok-k">def</span> <span class="tok-f">update</span>(entity, ctx):
+    rx, ry, rz = entity.transform.rotation_euler
+    entity.transform.rotation_euler = (rx, ry + entity.state[<span class="tok-s">&quot;speed&quot;</span>] * ctx.time.delta, rz)
+    <span class="tok-k">if</span> ctx.input.just_pressed(<span class="tok-s">&quot;space&quot;</span>):
+        <span class="tok-b">print</span>(<span class="tok-s">&quot;boing&quot;</span>)                      <span class="tok-c"># → Oberon&#x27;s Console</span></code></pre></div>
+<p>In Oberon's Play mode the scripts run in a separate Python process bridged
+to the editor (any <code>python3</code>; set <code>python</code> in <code>~/.config/oberon/prefs.ron</code>
+to pick one). Saving a script while playing hot-reloads it, and errors show
+in the Console with a clickable <code>File &quot;…&quot;, line N</code>. The same files run in
+the engine with:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>at.run_scene(<span class="tok-s">&quot;level.ron&quot;</span>)                  <span class="tok-c"># Game options as keywords</span></code></pre></div>
+<p><code>entity</code> has <code>name</code>, <code>transform</code>, <code>character_velocity</code>, <code>attributes</code>,
+<code>grounded</code> and a persistent <code>state</code> dict; <code>ctx</code> has <code>input</code>, <code>time</code>,
+<code>physics</code>, <code>scene</code>, <code>log(...)</code> (plus <code>events</code>, <code>resources</code>, <code>quit()</code> in
+the engine). Scripted characters skip Oberon's built-in WASD controller.</p>
+<h3 id="attributes-and-prefabs">Attributes and prefabs<a class="anchor" href="#attributes-and-prefabs" aria-label="Link to this section">#</a></h3>
+<p>Custom <strong>attributes</strong> added in Oberon's inspector (bool, int, float, text,
+vector, color) travel with the scene file and read like a dict — on staged
+entities and live ones alike:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>enemy = ctx.scene[<span class="tok-s">&quot;Enemy&quot;</span>]
+hp = enemy.attributes.get(<span class="tok-s">&quot;health&quot;</span>, <span class="tok-n">100</span>)
+enemy.attributes[<span class="tok-s">&quot;health&quot;</span>] = hp - <span class="tok-n">10</span>      <span class="tok-c"># buffered, like transform writes</span>
+enemy.script                              <span class="tok-c"># &quot;scripts/enemy.py&quot; if attached</span></code></pre></div>
+<p>Values map to <code>bool</code>, <code>int</code>, <code>float</code>, <code>str</code>, <code>(x, y, z)</code> and <code>(r, g, b, a)</code>.</p>
+<p><strong>Prefabs</strong> (<code>.prefab</code> files saved from Oberon's Hierarchy, or
+<code>Prefab(entity).save(path)</code> from code) are reusable entity templates:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>crate = at.Prefab.load(<span class="tok-s">&quot;prefabs/crate.prefab&quot;</span>)
+scene.add(crate.instantiate(position=(<span class="tok-n">2</span>, <span class="tok-n">0</span>, <span class="tok-n">0</span>), name=<span class="tok-s">&quot;crate_1&quot;</span>))   <span class="tok-c"># staged</span>
+ctx.scene.spawn(crate, position=(<span class="tok-n">0</span>, <span class="tok-n">5</span>, <span class="tok-n">0</span>))                         <span class="tok-c"># at runtime</span></code></pre></div>
+<h3 id="reference">Reference<a class="anchor" href="#reference" aria-label="Link to this section">#</a></h3>
+<div class="table"><table><thead><tr><th>Item</th><th>Purpose</th></tr></thead><tbody><tr><td><code>Game(title, resolution, headless, resizable, vsync, log_filter, target_fps, clear_color, graphics)</code></td><td>Owns the engine; <code>run(update=None, max_frames=None)</code> drives the loop, <code>load_scene(scene)</code> replaces the scene, <code>quit()</code> requests shutdown, <code>state</code> reports the lifecycle; <code>@game.update</code> and <code>@game.on_event(name)</code> register callbacks; <code>clear_color=(r, g, b, a)</code> sets the window background (default very dark blue); <code>graphics=GraphicsQuality.HIGH</code> picks a quality preset (<code>LOW</code> disables shadows)</td></tr><tr><td><code>Key</code> / <code>MouseButton</code> / <code>GamepadButton</code> / <code>GamepadAxis</code> / <code>GraphicsQuality</code></td><td>Typed <code>str</code> enums for every bindable input and quality preset — <code>Binding.key(Key.SPACE)</code>, <code>AxisBinding.key_pair(Key.A, Key.D)</code>; plain strings (<code>&quot;space&quot;</code>) keep working everywhere</td></tr><tr><td><code>Scene</code> / <code>Entity(name)</code></td><td>Scene staging: <code>entity.add(component)</code>, <code>scene.add(entity_or_prefab)</code>, <code>scene.find(name)</code>, <code>scene.entities()</code>; <code>entity.attributes</code> (dict-like), <code>entity.script</code></td></tr><tr><td><code>run_scene(path, max_frames=None, update=None, **game_options)</code></td><td>Runs an Oberon scene with its behaviour scripts (<code>start/update/stop(entity, ctx)</code>)</td></tr><tr><td><code>Attributes</code></td><td>Dict-like custom values: <code>[key]</code>, <code>get</code>, <code>in</code>, <code>del</code>, <code>keys/values/items</code>, <code>update</code>, <code>clear</code>, <code>to_dict</code></td></tr><tr><td><code>Prefab(entity_or_list)</code></td><td>Entity template: <code>Prefab.load(path)</code>, <code>save(path)</code>, <code>instantiate(position, name)</code>, <code>instantiate_all(position)</code>, <code>entities()</code></td></tr><tr><td><code>Transform(position, rotation_euler, scale)</code></td><td>Local transform; angles in radians (XYZ order)</td></tr><tr><td><code>Camera3D(position, target, fov)</code> / <code>Camera2D(center, half_height)</code></td><td>Frame cameras (first entity wins)</td></tr><tr><td><code>MeshRenderer</code></td><td><code>MeshRenderer.cube(size=…, color=…)</code> / <code>.quad(…)</code> — plain-data visuals; the windowed loop materializes them on the GPU, headless runs ignore them</td></tr><tr><td><code>DirectionalLight</code></td><td><code>DirectionalLight(direction=…, color=…, ambient=…, shadows=True)</code> — the scene's sun; the first entity carrying one lights the frame with Blinn-Phong shading and shadow-mapped shadows</td></tr><tr><td><code>FrameContext</code> (<code>ctx</code> in the callback)</td><td><code>time</code>, <code>input</code>, <code>scene</code>, <code>events</code>, <code>resources</code>, <code>quit()</code></td></tr><tr><td><code>ctx.time</code></td><td><code>delta</code> / <code>elapsed</code> (seconds), <code>frame</code> (1-based frame number)</td></tr><tr><td><code>ctx.input</code></td><td><code>pressed</code> / <code>just_pressed</code> / <code>just_released(key)</code>, <code>mouse_*</code> variants, <code>cursor</code>, <code>scroll</code>, <code>modifiers</code>, <code>gamepads</code></td></tr><tr><td><code>ctx.input.gamepads</code></td><td>Connected pads: <code>ids()</code>, <code>get(id)</code>, <code>primary()</code>, <code>len()</code>, iteration; state: <code>pressed(id, btn)</code> / <code>pressed_any(btn)</code>, <code>axis(id, ax)</code> / <code>axis_any(ax)</code>; <code>pad.left_stick()</code> / <code>right_stick()</code>; <code>events</code> — this frame's gamepad events</td></tr><tr><td><code>ActionMap</code> / <code>Binding</code> / <code>AxisBinding</code></td><td>Action-based input: <code>map.bind(&quot;jump&quot;, Binding.key(&quot;space&quot;))</code>, <code>map.bind_axis(&quot;move_x&quot;, AxisBinding.key_pair(&quot;a&quot;, &quot;d&quot;))</code>, then <code>map.pressed(&quot;jump&quot;, ctx.input)</code> / <code>map.axis(&quot;move_x&quot;, ctx.input)</code>; repeated <code>bind</code>/<code>bind_axis</code> calls stack (WASD + arrows + stick can share one axis; values sum, clamped to -1..1); <code>rebind</code> / <code>unbind</code> / <code>unbind_axis</code> for remapping</td></tr><tr><td><code>ctx.scene</code></td><td><code>find(name)</code>, <code>[&quot;name&quot;]</code>, <code>spawn(entity_or_prefab, position=None)</code>, <code>despawn(id)</code>, <code>entity_count</code>, <code>names()</code>, iteration; <code>EntityView.transform</code> get/set (attribute writes via <code>TransformRef</code>), <code>EntityView.character_velocity</code> get/set (per-frame drive for character controllers), <code>EntityView.camera_3d</code> get/set (follow cameras: assign a fresh <code>Camera3D</code> each frame), <code>EntityView.attributes</code> (buffered writes), <code>EntityView.script</code></td></tr><tr><td><code>ctx.events</code></td><td><code>send(name, payload)</code> / <code>read(name)</code> — buffered: sent events are readable the next frame, then expire</td></tr><tr><td><code>ctx.resources</code></td><td>Immediate <code>set</code> / <code>get</code> / <code>remove</code> of arbitrary Python objects, keyed by name</td></tr><tr><td><code>ctx.physics</code> (3D)</td><td><code>cast_ray(origin, dir, max_distance, exclude)</code> → result key (read next frame via <code>ray_result(key)</code>), <code>apply_impulse</code> / <code>apply_force</code> / <code>set_velocity(entity, vec)</code>, <code>velocity(entity)</code>, <code>grounded(entity)</code>, <code>gravity()</code> / <code>set_gravity(vec)</code>, <code>body_count()</code></td></tr><tr><td><code>ctx.physics2d</code></td><td><code>apply_impulse(entity, vec2)</code>, <code>grounded(entity)</code>, <code>body_count()</code></td></tr><tr><td><code>RigidBody</code></td><td><code>RigidBody.dynamic() / .fixed() / .kinematic_velocity() / .kinematic_position()</code>, or <code>RigidBody(type, gravity_scale=…, linear_damping=…)</code></td></tr><tr><td><code>Collider3D</code> / <code>Collider2D</code></td><td><code>.ball(r)</code>, <code>.cuboid(x, y[, z])</code>, <code>.capsule(half_height, r)</code>, 3D only: <code>.mesh(model)</code>, <code>.convex_hull(model)</code>, chainable <code>.sensor()/.density()/.friction()/.restitution()</code></td></tr><tr><td><code>CharacterController</code></td><td><code>CharacterController(mode=…, max_slope_climb_angle=…, autostep=…, snap_to_ground=…)</code> — kinematic body mover</td></tr><tr><td><code>CharacterVelocity</code></td><td><code>CharacterVelocity((vx, vy, vz))</code> — set <code>.velocity</code> each frame to drive the controller</td></tr><tr><td><code>automata.Error</code></td><td>Engine failures; exceptions raised by <code>update</code> propagate unchanged</td></tr></tbody></table></div>
+<h3 id="ownership-and-consistency-rules">Ownership and consistency rules<a class="anchor" href="#ownership-and-consistency-rules" aria-label="Link to this section">#</a></h3>
+<ul><li><code>Game</code> owns the engine. <code>run</code> borrows it for the whole loop; a game that
+has shut down cannot run again (raises <code>automata.Error</code>).</li><li><code>Scene</code>/<code>Entity</code> are plain-data builders; <code>load_scene</code> copies them into
+the ECS world. After loading, entities are addressed by id or name.</li><li><code>FrameContext</code> carries <strong>start-of-frame snapshots</strong> for reads and a
+<strong>write buffer</strong> for changes (transforms, spawns, despawns, events).
+Buffered writes apply right after the callback returns and are visible
+from the next frame. Writes through <code>TransformRef</code> attributes compose
+field-by-field within the frame (<code>tref.position = ...; tref.scale = ...</code>
+does not clobber), and reads through them see pending same-frame writes.
+No live engine borrows cross into Python, so a context object that
+escapes its callback is stale but harmless.</li><li>Key names are lowercase <code>snake_case</code> (<code>&quot;w&quot;</code>, <code>&quot;arrow_left&quot;</code>, <code>&quot;f1&quot;</code>,
+<code>&quot;escape&quot;</code>, ...); mouse buttons are <code>&quot;left&quot;</code>, <code>&quot;right&quot;</code>, <code>&quot;middle&quot;</code>,
+<code>&quot;back&quot;</code>, <code>&quot;forward&quot;</code>.</li></ul>
+<p>Type stubs for editors ship in <code>automata/_core.pyi</code>.</p>
+<h2 id="native-api-rust">Native API (Rust)<a class="anchor" href="#native-api-rust" aria-label="Link to this section">#</a></h2>
+<h3 id="phase-12--automata-core-automata-input-automata-renderer">Phase 1–2 — <code>automata-core</code>, <code>automata-input</code>, <code>automata-renderer</code><a class="anchor" href="#phase-12--automata-core-automata-input-automata-renderer" aria-label="Link to this section">#</a></h3>
+<div class="table"><table><thead><tr><th>Item</th><th>Purpose</th></tr></thead><tbody><tr><td><code>Application</code></td><td>Owns the engine lifecycle: <code>Created → Running → Shutdown</code></td></tr><tr><td><code>AppState</code></td><td>Lifecycle state enum</td></tr><tr><td><code>AppContext</code></td><td>Per-frame context: <code>time()</code>, <code>input()</code>, <code>request_quit()</code></td></tr><tr><td><code>EngineConfig</code></td><td>Title, version, log filter, frame pacing, window mode</td></tr><tr><td><code>WindowMode</code> / <code>WindowConfig</code></td><td>Windowed (default) vs headless; size, resizable, vsync</td></tr><tr><td><code>Time</code></td><td>Frame delta, elapsed time, frame count</td></tr><tr><td><code>Error</code> / <code>Result</code></td><td>Core error enum and result alias</td></tr><tr><td><code>InputState</code></td><td>Per-frame keyboard/mouse state: <code>pressed</code>, <code>just_pressed</code>, <code>just_released</code>, buttons, cursor, scroll, modifiers</td></tr><tr><td><code>RenderContext</code></td><td>wgpu device/queue/surface; <code>resize</code>, <code>render_clear</code></td></tr><tr><td><code>logging::init</code></td><td>One-time <code>tracing</code> subscriber installation</td></tr></tbody></table></div>
+<p>Canonical usage:</p>
+<div class="codeblock" data-lang="rust"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-k">use</span> automata_core::{Application, EngineConfig, Result, WindowMode};
+<span class="tok-k">use</span> automata_input::KeyCode;
+
+<span class="tok-k">fn</span> <span class="tok-f">main</span>() -&gt; Result&lt;()&gt; {
+    <span class="tok-k">let</span> config = EngineConfig {
+        <span class="tok-c">// Headless runs without a window/GPU: tests, CI, tooling.</span>
+        window_mode: WindowMode::default(),
+        ..EngineConfig::new(<span class="tok-s">&quot;My Game&quot;</span>)
+    };
+    <span class="tok-k">let</span> <span class="tok-k">mut</span> app = Application::new(config);
+    app.run(|ctx| {
+        <span class="tok-c">// one call per frame</span>
+        <span class="tok-k">if</span> ctx.input().just_pressed(KeyCode::Escape) {
+            ctx.request_quit();
+        }
+    })
+}</code></pre></div>
+<h3 id="phase-3--rendering">Phase 3 — rendering<a class="anchor" href="#phase-3--rendering" aria-label="Link to this section">#</a></h3>
+<div class="table"><table><thead><tr><th>Item</th><th>Purpose</th></tr></thead><tbody><tr><td><code>Renderer</code></td><td>Pipelines, mesh/material/texture creation, frame submission from a <code>DrawList</code></td></tr><tr><td><code>DrawList</code></td><td>Per-frame draw recording: <code>mesh</code>, <code>sprite</code>, <code>set_camera_2d/3d</code>, <code>clear_color</code></td></tr><tr><td><code>Camera2D</code> / <code>Camera3D</code></td><td>Orthographic 2D and perspective 3D cameras</td></tr><tr><td><code>Mesh</code> / <code>MeshData</code> / <code>Material</code> / <code>Texture</code></td><td>GPU resource handles and CPU-side mesh data</td></tr></tbody></table></div>
+<h3 id="phase-4--automata-scene">Phase 4 — <code>automata-scene</code><a class="anchor" href="#phase-4--automata-scene" aria-label="Link to this section">#</a></h3>
+<div class="table"><table><thead><tr><th>Item</th><th>Purpose</th></tr></thead><tbody><tr><td><code>Scene</code></td><td>hecs-backed world: <code>spawn</code>, <code>despawn</code>, <code>despawn_recursive</code>, <code>set_parent</code>, <code>update</code></td></tr><tr><td><code>Transform</code> / <code>GlobalTransform</code> / <code>Parent</code></td><td>Local transform, propagated world transform, hierarchy link</td></tr><tr><td><code>Events</code></td><td>Double-buffered type-indexed event queues (<code>send</code>, <code>read</code>, <code>update</code>)</td></tr><tr><td><code>Resources</code></td><td>One-per-type store for singleton state</td></tr><tr><td><code>Assets&lt;T&gt;</code> / <code>Handle&lt;T&gt;</code></td><td>Generational asset registry; stale handles fail to resolve</td></tr><tr><td><code>MeshRenderer</code> / <code>SpriteRenderer</code> / <code>record_draw_list</code></td><td>Scene-to-renderer bridge</td></tr></tbody></table></div>
+<p>Generated docs: <code>cargo doc --workspace --no-deps --open</code>.</p>
+<h2 id="phase-6--physics-and-input">Phase 6 — Physics and Input<a class="anchor" href="#phase-6--physics-and-input" aria-label="Link to this section">#</a></h2>
+<h3 id="physics-model">Physics model<a class="anchor" href="#physics-model" aria-label="Link to this section">#</a></h3>
+<ul><li>Attach a <code>RigidBody</code> plus a <code>Collider3D</code> (3D) or <code>Collider2D</code> (2D) to an
+entity to make it physical. The engine syncs the physics world from the
+scene, steps it at a fixed timestep (<code>EngineConfig::physics_timestep</code>,
+default 1/60 s), and writes resulting transforms back.</li><li>Entities with a 2D collider live in the 2D world; those with a 3D
+collider (or none) live in the 3D world. A single scene can mix both.</li><li>Collision events (<code>PhysicsEvent::{CollisionStarted, CollisionStopped}</code>)
+and contact-force events arrive on the event bus.</li><li>Kinematic character controllers (<code>CharacterController</code> +
+<code>CharacterVelocity</code>) move with slide/slope/autostep/snap-to-ground logic;
+<code>ctx.physics.grounded(entity)</code> reports ground contact. Drive a character
+per frame with <code>view.character_velocity = (vx, vy, vz)</code> (buffered like
+transform writes); game code composes gravity/jumps into the velocity.</li><li>Scripts never see Rapier: the engine owns the simulation and exposes
+queries/mutations through the frame context only.</li></ul>
+<h3 id="input-model">Input model<a class="anchor" href="#input-model" aria-label="Link to this section">#</a></h3>
+<ul><li>Keyboard/mouse state: <code>ctx.input.pressed(key)</code> / <code>just_pressed</code> /
+<code>just_released</code>, plus mouse buttons, cursor, scroll, modifiers.</li><li>Gamepads (gilrs): <code>ctx.input.gamepads</code> — connected pads by id
+(<code>ids</code>, <code>get</code>, <code>primary</code>), button/axis state (<code>pressed</code>, <code>pressed_any</code>,
+<code>axis</code>, <code>axis_any</code>), sticks (<code>pad.left_stick()</code>), and this frame's
+connection/button/axis events (<code>gamepads.events</code>).</li><li>Action mapping: <code>automata.ActionMap</code> binds named actions and axes to any
+device (<code>Binding.key</code> / <code>mouse</code> / <code>gamepad_button</code> / axis thresholds,
+<code>AxisBinding.gamepad_axis</code> / <code>key_pair</code> / <code>button_pair</code>), evaluates
+against <code>ctx.input</code>, and is remappable at runtime (<code>bind</code>, <code>rebind</code>,
+<code>unbind</code>). Game code never touches raw device ids.</li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="development.html"><small>Previous</small>Development</a><a class="next" href="oberon-design.html"><small>Next</small>Oberon design</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/api.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#python-api">Python API</a></li><li class="l3"><a href="#example">Example</a></li><li class="l3"><a href="#object-oriented-style">Object-oriented style</a></li><li class="l3"><a href="#loading-scenes-made-in-oberon">Loading scenes made in Oberon</a></li><li class="l3"><a href="#behaviour-scripts">Behaviour scripts</a></li><li class="l3"><a href="#attributes-and-prefabs">Attributes and prefabs</a></li><li class="l3"><a href="#reference">Reference</a></li><li class="l3"><a href="#ownership-and-consistency-rules">Ownership and consistency rules</a></li><li class="l2"><a href="#native-api-rust">Native API (Rust)</a></li><li class="l3"><a href="#phase-12--automata-core-automata-input-automata-renderer">Phase 1–2 — automata-core, automata-input, automata-renderer</a></li><li class="l3"><a href="#phase-3--rendering">Phase 3 — rendering</a></li><li class="l3"><a href="#phase-4--automata-scene">Phase 4 — automata-scene</a></li><li class="l2"><a href="#phase-6--physics-and-input">Phase 6 — Physics and Input</a></li><li class="l3"><a href="#physics-model">Physics model</a></li><li class="l3"><a href="#input-model">Input model</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

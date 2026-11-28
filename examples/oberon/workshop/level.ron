@@ -1,0 +1,346 @@
+(
+    version: 1,
+    entities: [
+        (
+            name: Some("Environment"),
+            environment: Some((
+                sky_color: (0.75, 0.85, 1.0),
+                ground_color: (0.45, 0.4, 0.35),
+                background: (0.55, 0.68, 0.85),
+                exposure: 1.1,
+                tonemapping: Aces,
+                fog: true,
+                fog_color: (0.55, 0.68, 0.85),
+                fog_density: 0.012,
+                fog_start: 10.0,
+                sky: true,
+                zenith_color: (0.16, 0.34, 0.78),
+                sun_size: 2.0,
+                sun_glow: 1.0,
+                clouds: 0.35,
+                lens_flare: 1.0,
+                ambient_occlusion: 1.0,
+                fog_height: 2.0,
+                fog_falloff: 0.15,
+                fog_sun: 0.5,
+                god_rays: 0.5,
+                depth_of_field: 0.0,
+                focus_distance: 0.0,
+                focus_range: 1.0,
+                toon_bands: 0,
+                toon_softness: 0.15,
+                shadow_tint: (1.0, 1.0, 1.0),
+                rim_light: 0.0,
+                painted_sky: false,
+                outline: 0.0,
+                outline_color: (0.05, 0.04, 0.06),
+                pixelate: 0.0,
+                palette: 0,
+                post: (
+                    bloom: 1.0,
+                    contrast: 1.0,
+                    saturation: 1.0,
+                    temperature: 0.0,
+                    tint: 0.0,
+                    lift: (0.0, 0.0, 0.0),
+                    gamma: (1.0, 1.0, 1.0),
+                    gain: (1.0, 1.0, 1.0),
+                    vignette: 0.0,
+                    grain: 0.0,
+                    chromatic_aberration: 0.0,
+                ),
+                wind: 0.0,
+                wind_direction: 0.0,
+            )),
+        ),
+        (
+            name: Some("Sun"),
+            directional_light: Some((
+                direction: (0.45, -1.0, -0.55),
+                color: (1.0, 0.95, 0.86),
+                ambient: 0.45,
+                shadows: true,
+            )),
+        ),
+        (
+            name: Some("Floor"),
+            transform: Some((
+                position: (0.0, -0.05, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (12.0, 0.1, 10.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/floor_tiles.mat.ron",
+            )),
+        ),
+        (
+            name: Some("Back Wall"),
+            transform: Some((
+                position: (0.0, 2.0, -5.15),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (12.0, 4.0, 0.3),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/brick.mat.ron",
+            )),
+        ),
+        (
+            name: Some("Side Wall"),
+            transform: Some((
+                position: (-6.15, 2.0, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.3, 4.0, 10.6),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/brick.mat.ron",
+            )),
+        ),
+        (
+            name: Some("Crate"),
+            transform: Some((
+                position: (-3.6, 0.5, -3.6),
+                rotation_euler: (-0.0, 0.099999994, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/crate.mat.ron",
+            )),
+        ),
+        (
+            name: Some("Crate 2"),
+            transform: Some((
+                position: (-2.45, 0.5, -3.9),
+                rotation_euler: (0.0, -0.25, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/crate.mat.ron",
+            )),
+        ),
+        (
+            name: Some("Crate 3"),
+            transform: Some((
+                position: (-3.1, 1.5, -3.7),
+                rotation_euler: (-0.0, 0.35, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/crate.mat.ron",
+            )),
+        ),
+        (
+            name: Some("Crate 4"),
+            transform: Some((
+                position: (-4.6, 0.4, -2.4),
+                rotation_euler: (-0.0, 0.6, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 0.8,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/crate.mat.ron",
+            )),
+        ),
+        (
+            name: Some("Crate 5"),
+            transform: Some((
+                position: (3.9, 0.35, 0.4),
+                rotation_euler: (0.0, -0.4, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 0.7,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/crate.mat.ron",
+            )),
+        ),
+        (
+            name: Some("Steel Ball Plinth"),
+            transform: Some((
+                position: (-1.6, 0.35, -1.4),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.9, 0.7, 0.9),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.32, 0.32, 0.35, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Steel Ball"),
+            transform: Some((
+                position: (-1.6, 1.15, -1.4),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.9,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/brushed_steel.mat.ron",
+            )),
+            attributes: {
+                "speed": Float(0.5),
+            },
+            script: Some((
+                path: "scripts/turntable.py",
+            )),
+        ),
+        (
+            name: Some("Copper Ball Plinth"),
+            transform: Some((
+                position: (0.0, 0.35, -1.4),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.9, 0.7, 0.9),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.32, 0.32, 0.35, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Copper Ball"),
+            transform: Some((
+                position: (0.0, 1.15, -1.4),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.9,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/copper.mat.ron",
+            )),
+            attributes: {
+                "speed": Float(-0.4),
+            },
+            script: Some((
+                path: "scripts/turntable.py",
+            )),
+        ),
+        (
+            name: Some("Paint Ball Plinth"),
+            transform: Some((
+                position: (1.6, 0.35, -1.4),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.9, 0.7, 0.9),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.32, 0.32, 0.35, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Paint Ball"),
+            transform: Some((
+                position: (1.6, 1.15, -1.4),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.9,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/glossy_paint.mat.ron",
+            )),
+            attributes: {
+                "speed": Float(0.3),
+            },
+            script: Some((
+                path: "scripts/turntable.py",
+            )),
+        ),
+        (
+            name: Some("Grass Block"),
+            transform: Some((
+                position: (3.6, 0.5, -3.6),
+                rotation_euler: (0.0, -0.5, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/grass_block.mat.ron",
+            )),
+        ),
+        (
+            name: Some("Neon Sign"),
+            transform: Some((
+                position: (2.2, 2.55, -4.98),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Quad(
+                    size: 1.6,
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+                material: "materials/neon.mat.ron",
+            )),
+        ),
+        (
+            name: Some("Main Camera"),
+            transform: Some((
+                position: (0.6, 2.7, 6.2),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            camera_3d: Some((
+                position: (0.6, 2.7, 6.2),
+                target: (-0.2, 1.1, -2.0),
+                up: (0.0, 1.0, 0.0),
+                fov_y_degrees: 60.0,
+                near: 0.1,
+                far: 1000.0,
+            )),
+        ),
+    ],
+)

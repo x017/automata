@@ -1,0 +1,51 @@
+# The Android build of the engine's Python module: `automata._core` with
+# SDL3's window driver installed. Built only in CI, by python-for-android
+# (see android/README.md): it's outside the main workspace so the
+# workspace never needs the `sdl3` crate, which isn't vendored.
+[package]
+name = "automata-android"
+description = "AUTOMATA on Android: the Python module with an SDL3 window driver"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.86"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "automata_android"
+crate-type = ["cdylib"]
+
+[dependencies]
+automata-core = { path = "../../crates/automata-core" }
+automata-input = { path = "../../crates/automata-input" }
+# Its `module` feature (the desktop entry point) stays off: this crate
+# defines `automata._core` itself.
+automata-python = { path = "../../crates/automata-python", default-features = false }
+pyo3 = "0.30"
+raw-window-handle = "0.6"
+# Links python-for-android's libSDL3.so (its sdl3 recipe), the same
+# library the launcher already loaded.
+sdl3 = "0.22"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints.rust]
+# FFI glue: the few unsafe items are marked and explained where they are.
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+[profile.release]
+# APK size: no debug symbols in the shipped library (exports stay), and
+# whole-program optimization, which drops the parts of wgpu, naga and the
+# rest the engine never calls. Speed stays at opt-level 3, and panics keep
+# unwinding (PyO3 turns them into Python exceptions).
+strip = true
+lto = "fat"
+codegen-units = 1
+
+# Not part of the repository's workspace.
+[workspace]

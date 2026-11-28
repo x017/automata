@@ -1,0 +1,33 @@
+# Rust build artifacts
+/target
+**/*.rs.bk
+
+# Offline development environment (network-restricted sandboxes).
+# See docs/development.md, section "Offline / sandboxed environments".
+/vendor
+/.cargo
+
+# Python (used from Phase 5 onward)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+# The extension module `maturin develop` builds into the package in place.
+crates/automata-python/python/automata/_core*.so
+crates/automata-python/python/automata/_core*.pyd
+
+# Environment
+.env
+
+# Oberon per-project runtime files (autosave, script bridge)
+.oberon/
+
+# Android (android/README.md): APKs, and the Android crate's lockfile,
+# which CI resolves from crates.io (its `sdl3` dependency isn't vendored).
+/dist
+/android/engine/Cargo.lock
+
+# Web (web/README.md): the web crate's lockfile (CI resolves it from
+# crates.io), and the page CI and the exporter put together.
+/web/engine/Cargo.lock
+/web/dist

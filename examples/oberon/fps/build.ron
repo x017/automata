@@ -1,0 +1,18 @@
+// Export settings for automata-cli and Oberon (Build → Build Settings).
+BuildConfig(
+    name: "Blaster Arena",
+    version: "0.1.0",
+    start_scene: Some("level.ron"),
+    main_script: None,
+    resolution: (1280, 720),
+    targets: [
+        Linux,
+        Windows,
+    ],
+    output: "build",
+    archive: true,
+    exclude: [
+        "tests/",
+        "build_level.py",
+    ],
+)

@@ -1,0 +1,38 @@
+[package]
+name = "automata-core"
+description = "AUTOMATA engine core: application lifecycle, timekeeping, logging, error handling."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# Real audio output via cpal (ALSA on Linux). Off by default so headless runs,
+# CI, and machines without audio hardware build with the silent backend.
+# Enabled transitively by `automata-python/audio-cpal`.
+cpal = ["automata-audio/cpal"]
+
+[dependencies]
+automata-assets.workspace = true
+automata-audio = { path = "../automata-audio", default-features = false }
+automata-input.workspace = true
+automata-nav.workspace = true
+automata-physics.workspace = true
+automata-renderer.workspace = true
+automata-scene.workspace = true
+glam.workspace = true
+pollster.workspace = true
+ron.workspace = true
+serde.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+thiserror.workspace = true
+
+# Desktop windows. Android gets its window from SDL (android/engine).
+[target.'cfg(not(any(target_os = "android", target_os = "emscripten")))'.dependencies]
+winit.workspace = true

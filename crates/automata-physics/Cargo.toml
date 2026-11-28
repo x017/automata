@@ -1,0 +1,26 @@
+[package]
+name = "automata-physics"
+description = "Rapier-based 2D/3D physics for AUTOMATA"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+automata-assets = { workspace = true }
+automata-renderer = { workspace = true }
+automata-scene = { workspace = true }
+glam = { workspace = true }
+hecs = { workspace = true }
+rapier2d = { workspace = true }
+rapier3d = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+ron = { workspace = true }
+
+[lints]
+workspace = true
+

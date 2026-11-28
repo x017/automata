@@ -1,0 +1,36 @@
+[package]
+name = "automata-renderer"
+description = "AUTOMATA rendering system: wgpu device, surface, and frame management."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+bytemuck.workspace = true
+glam.workspace = true
+image.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+ab_glyph.workspace = true
+wgpu.workspace = true
+# Custom shaders are checked (parsed, validated, translated for WebGL2)
+# before the GPU sees them. wgpu already builds naga with these.
+naga = { workspace = true, features = ["wgsl-in", "glsl-out"] }
+
+# The browser build (Pyodide, wasm32-unknown-emscripten) is single-threaded:
+# wgpu's types may be Send + Sync there, as the engine's statics need.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { workspace = true, features = ["fragile-send-sync-non-atomic-wasm"] }
+
+[dev-dependencies]
+# `glsl-out`: tests translate the shaders as WebGL2 would get them.
+naga = { workspace = true, features = ["wgsl-in", "glsl-out"] }
+pollster.workspace = true
+ron.workspace = true

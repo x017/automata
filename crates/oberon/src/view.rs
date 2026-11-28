@@ -1,0 +1,1092 @@
+//! Scene-view math: the editor camera, world↔screen projection, mouse
+//! picking, and the transform gizmo (move / rotate / scale).
+//!
+//! Everything here is pure math over the document — no drawing, no GPU — so
+//! it is unit-tested headless. The UI draws the overlays from these results
+//! and turns gizmo drags into transform edits.
+
+#![forbid(unsafe_code)]
+
+use automata_core::{EntityData, TransformData};
+use glam::{EulerRot, Mat4, Quat, Vec3, Vec4};
+
+use crate::doc::Document;
+use crate::ui::Rect;
+
+/// The editor's scene-view camera: an orbit around a pivot point.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViewCamera {
+    /// Orbit yaw in radians.
+    pub yaw: f32,
+    /// Orbit pitch in radians.
+    pub pitch: f32,
+    /// Distance from the pivot.
+    pub distance: f32,
+    /// The pivot the camera orbits and looks at.
+    pub target: [f32; 3],
+    /// 2D: looks straight down -Z without perspective (sprites and
+    /// tilemaps lie in the XY plane); dragging pans instead of orbiting.
+    pub two_d: bool,
+}
+
+impl Default for ViewCamera {
+    fn default() -> Self {
+        Self {
+            yaw: 0.6,
+            pitch: 0.45,
+            distance: 11.0,
+            target: [0.0, 0.5, 0.0],
+            two_d: false,
+        }
+    }
+}
+
+impl ViewCamera {
+    /// The camera's world-space eye position.
+    #[must_use]
+    pub fn eye(&self) -> Vec3 {
+        if self.two_d {
+            return Vec3::from(self.target) + Vec3::Z * self.distance;
+        }
+        let (cy, sy) = (self.yaw.cos(), self.yaw.sin());
+        let (cp, sp) = (self.pitch.cos(), self.pitch.sin());
+        Vec3::from(self.target)
+            + Vec3::new(
+                self.distance * cp * sy,
+                self.distance * sp,
+                self.distance * cp * cy,
+            )
+    }
+
+    /// Builds the engine [`automata_renderer::Camera3D`] for this view.
+    #[must_use]
+    pub fn to_camera3d(&self) -> automata_renderer::Camera3D {
+        let mut cam = automata_renderer::Camera3D::new(self.eye(), Vec3::from(self.target));
+        // Keep near/far proportional to the zoom so close-ups don't clip and
+        // far views keep depth precision.
+        cam.near = (self.distance * 0.01).clamp(0.01, 1.0);
+        cam.far = (self.distance * 200.0).max(500.0);
+        if self.two_d {
+            // As much as the perspective view showed at the pivot. The
+            // eye backs off so what's in front of z = 0 isn't clipped.
+            cam.ortho = self.half_height();
+            cam.position = Vec3::from(self.target) + Vec3::Z * 500.0;
+            cam.near = 0.1;
+            cam.far = 2_000.0;
+        }
+        cam
+    }
+
+    /// 2D: half the height seen, world units (zoom).
+    #[must_use]
+    pub fn half_height(&self) -> f32 {
+        self.distance * (30f32).to_radians().tan()
+    }
+
+    /// Switches between the 3D orbit view and the flat 2D view, keeping
+    /// the pivot and zoom.
+    pub fn set_two_d(&mut self, on: bool) {
+        self.two_d = on;
+        if on {
+            // Sprites live at z = 0.
+            self.target[2] = 0.0;
+        }
+    }
+
+    /// The orbit view that sees what `cam` sees (pivot at its look-at
+    /// point).
+    #[must_use]
+    pub fn from_camera3d(cam: &automata_renderer::Camera3D) -> Self {
+        let offset = cam.position - cam.target;
+        let distance = offset.length().max(0.05);
+        let pitch = (offset.y / distance)
+            .clamp(-1.0, 1.0)
+            .asin()
+            .clamp(-1.54, 1.54);
+        let yaw = if offset.x.abs() + offset.z.abs() < 1e-6 {
+            0.0
+        } else {
+            offset.x.atan2(offset.z)
+        };
+        Self {
+            yaw,
+            pitch,
+            distance,
+            target: cam.target.to_array(),
+            two_d: false,
+        }
+    }
+
+    /// Orbits by a mouse delta in pixels.
+    pub fn orbit(&mut self, dx: f32, dy: f32) {
+        if self.two_d {
+            // Nothing to orbit in 2D: the drag pans.
+            self.pan(dx, dy);
+            return;
+        }
+        self.yaw -= dx * 0.008;
+        self.pitch = (self.pitch + dy * 0.008).clamp(-1.54, 1.54);
+    }
+
+    /// Pans the pivot by a mouse delta in pixels (screen-space drag).
+    pub fn pan(&mut self, dx: f32, dy: f32) {
+        if self.two_d {
+            let k = self.distance * 0.0016;
+            self.target[0] -= dx * k;
+            self.target[1] += dy * k;
+            return;
+        }
+        let eye = self.eye();
+        let forward = (Vec3::from(self.target) - eye).normalize_or_zero();
+        let right = forward.cross(Vec3::Y).normalize_or_zero();
+        let up = right.cross(forward).normalize_or_zero();
+        let k = self.distance * 0.0016;
+        let t = Vec3::from(self.target) + (-dx * right + dy * up) * k;
+        self.target = t.to_array();
+    }
+
+    /// Zooms by scroll-wheel notches (positive = in).
+    pub fn zoom(&mut self, notches: f32) {
+        self.distance = (self.distance * 0.88_f32.powf(notches)).clamp(0.3, 2_000.0);
+    }
+
+    /// Frames a point with a given radius (the "F" focus shortcut).
+    pub fn focus(&mut self, center: Vec3, radius: f32) {
+        self.target = center.to_array();
+        self.distance = (radius * 3.0).clamp(1.5, 500.0);
+    }
+}
+
+/// Maps between world space and a viewport rectangle on screen.
+#[derive(Debug, Clone, Copy)]
+pub struct Projector {
+    view_proj: Mat4,
+    inv_view_proj: Mat4,
+    rect: Rect,
+    eye: Vec3,
+    flat: bool,
+}
+
+impl Projector {
+    /// A projector for `cam` drawing into `rect` (logical pixels).
+    #[must_use]
+    pub fn new(cam: &ViewCamera, rect: Rect) -> Self {
+        let size = (rect.w.max(1.0) as u32, rect.h.max(1.0) as u32);
+        let view_proj = cam.to_camera3d().view_proj(size);
+        Self {
+            view_proj,
+            inv_view_proj: view_proj.inverse(),
+            rect,
+            // (In 2D the camera sits far back; it looks straight down -Z.)
+            eye: cam.to_camera3d().position,
+            flat: cam.two_d,
+        }
+    }
+
+    /// Whether the view is the flat 2D one (looking down -Z).
+    #[must_use]
+    pub fn flat(&self) -> bool {
+        self.flat
+    }
+
+    /// The camera eye position.
+    #[must_use]
+    pub fn eye(&self) -> Vec3 {
+        self.eye
+    }
+
+    /// Projects a world point to screen coordinates, or `None` when it is
+    /// behind the camera.
+    #[must_use]
+    pub fn project(&self, p: Vec3) -> Option<(f32, f32)> {
+        let clip = self.view_proj * Vec4::new(p.x, p.y, p.z, 1.0);
+        if clip.w <= 1e-4 {
+            return None;
+        }
+        let ndc = clip.truncate() / clip.w;
+        Some((
+            self.rect.x + (ndc.x * 0.5 + 0.5) * self.rect.w,
+            self.rect.y + (0.5 - ndc.y * 0.5) * self.rect.h,
+        ))
+    }
+
+    /// A world-space ray `(origin, direction)` through screen point `(sx, sy)`.
+    #[must_use]
+    pub fn ray(&self, sx: f32, sy: f32) -> (Vec3, Vec3) {
+        let nx = (sx - self.rect.x) / self.rect.w.max(1.0) * 2.0 - 1.0;
+        let ny = 1.0 - (sy - self.rect.y) / self.rect.h.max(1.0) * 2.0;
+        let unproject = |z: f32| {
+            let v = self.inv_view_proj * Vec4::new(nx, ny, z, 1.0);
+            v.truncate() / v.w
+        };
+        // Depth range is 0 (near) .. 1 (far).
+        let near = unproject(0.0);
+        let far = unproject(1.0);
+        (near, (far - near).normalize_or_zero())
+    }
+
+    /// Where screen point `(sx, sy)` meets the ground (y = 0): the drop
+    /// point for files dragged into the scene. When the ray misses the
+    /// ground (looking up, or nearly level), a point `fallback` metres along
+    /// it instead.
+    #[must_use]
+    pub fn ground_point(&self, sx: f32, sy: f32, fallback: f32) -> Vec3 {
+        let (origin, dir) = self.ray(sx, sy);
+        if self.flat && dir.z.abs() > 1e-6 {
+            // The 2D view drops onto the sprites' plane, z = 0.
+            return origin + dir * (-origin.z / dir.z);
+        }
+        if dir.y < -1e-3 {
+            let t = -origin.y / dir.y;
+            if t > 0.0 && t < 500.0 {
+                return origin + dir * t;
+            }
+        }
+        origin + dir * fallback
+    }
+
+    /// World units per screen pixel at the depth of `p` (gizmo sizing).
+    #[must_use]
+    pub fn world_per_pixel(&self, p: Vec3) -> f32 {
+        let Some(a) = self.project(p) else {
+            return 0.01;
+        };
+        let right = {
+            let forward = (p - self.eye).normalize_or_zero();
+            forward.cross(Vec3::Y).normalize_or_zero()
+        };
+        let right = if right == Vec3::ZERO { Vec3::X } else { right };
+        match self.project(p + right) {
+            Some(b) => {
+                let px = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+                if px > 1e-3 {
+                    1.0 / px
+                } else {
+                    0.01
+                }
+            }
+            None => 0.01,
+        }
+    }
+}
+
+/// The local-space half extents of an entity's pickable volume (before its
+/// transform scale), or a small marker box for entities without a mesh.
+#[must_use]
+pub fn local_half_extents(data: &EntityData) -> Vec3 {
+    local_bounds(data).1
+}
+
+/// An entity's local bounding box as `(center, half extents)`: the mesh's
+/// box (models aren't always centred on their origin), or a small marker
+/// box for mesh-less entities and models that failed to load.
+#[must_use]
+pub fn local_bounds(data: &EntityData) -> (Vec3, Vec3) {
+    visual_bounds(data).map_or((Vec3::ZERO, Vec3::splat(0.3)), |(c, s)| {
+        (c, (s * 0.5).max(Vec3::splat(0.01)))
+    })
+}
+
+/// What an entity shows, as a local box `(center, size)`: its mesh, else
+/// its sprite (centred on the entity) or tilemap (growing right and up
+/// from it). `None` for entities that show nothing.
+#[must_use]
+pub fn visual_bounds(data: &EntityData) -> Option<(Vec3, Vec3)> {
+    if data.mesh_visual.is_some() {
+        return crate::doc::mesh_bounds(data);
+    }
+    if let Some(s) = &data.sprite {
+        return Some((Vec3::ZERO, Vec3::new(s.size[0], s.size[1], 0.02)));
+    }
+    let [w, h] = data.tilemap.as_ref()?.extent();
+    Some((Vec3::new(w * 0.5, h * 0.5, 0.0), Vec3::new(w, h, 0.02)))
+}
+
+/// Whether an entity shows something with a size (a mesh, sprite or
+/// tilemap): it's picked by that, not by a marker.
+#[must_use]
+pub fn has_visual(data: &EntityData) -> bool {
+    data.mesh_visual.is_some() || data.sprite.is_some() || data.tilemap.is_some()
+}
+
+/// An entity's model matrix from its transform data.
+#[must_use]
+pub fn model_matrix(t: &TransformData) -> Mat4 {
+    Mat4::from_scale_rotation_translation(
+        Vec3::from(t.scale),
+        rotation_of(t),
+        Vec3::from(t.position),
+    )
+}
+
+/// The rotation quaternion of a transform.
+#[must_use]
+pub fn rotation_of(t: &TransformData) -> Quat {
+    Quat::from_euler(
+        EulerRot::XYZ,
+        t.rotation_euler[0],
+        t.rotation_euler[1],
+        t.rotation_euler[2],
+    )
+}
+
+/// The world-space corners of an entity's bounding box (for the selection
+/// outline), its transform taken in `frame` (the bone it follows, or
+/// identity). Index bits: x = bit 0, y = bit 1, z = bit 2.
+#[must_use]
+pub fn box_corners(data: &EntityData, frame: Mat4) -> Option<[Vec3; 8]> {
+    let t = data.transform?;
+    let model = frame * model_matrix(&t);
+    let (c, h) = local_bounds(data);
+    let mut out = [Vec3::ZERO; 8];
+    for (i, corner) in out.iter_mut().enumerate() {
+        let local = c + Vec3::new(
+            if i & 1 == 0 { -h.x } else { h.x },
+            if i & 2 == 0 { -h.y } else { h.y },
+            if i & 4 == 0 { -h.z } else { h.z },
+        );
+        *corner = model.transform_point3(local);
+    }
+    Some(out)
+}
+
+/// Ray vs. oriented box (given by `model` and local `half` extents). Returns
+/// the hit distance along the world ray.
+#[must_use]
+pub fn ray_box(origin: Vec3, dir: Vec3, model: Mat4, half: Vec3) -> Option<f32> {
+    let det = model.determinant();
+    if !det.is_finite() || det.abs() < 1e-12 {
+        return None;
+    }
+    let inv = model.inverse();
+    let o = inv.transform_point3(origin);
+    let d = inv.transform_vector3(dir);
+    let mut t_min = f32::NEG_INFINITY;
+    let mut t_max = f32::INFINITY;
+    for a in 0..3 {
+        let (oa, da, ha) = (o[a], d[a], half[a]);
+        if da.abs() < 1e-9 {
+            if oa < -ha || oa > ha {
+                return None;
+            }
+        } else {
+            let t1 = (-ha - oa) / da;
+            let t2 = (ha - oa) / da;
+            t_min = t_min.max(t1.min(t2));
+            t_max = t_max.min(t1.max(t2));
+            if t_min > t_max {
+                return None;
+            }
+        }
+    }
+    if t_max < 0.0 {
+        return None;
+    }
+    // `d` is the world direction mapped to local space, so the parameter `t`
+    // is shared: the world hit point is origin + t * dir.
+    Some(t_min.max(0.0))
+}
+
+/// Entities whose centre lands inside the screen rectangle spanned by
+/// `a` and `b` (a selection box), in scene order.
+#[must_use]
+pub fn pick_box(doc: &Document, proj: &Projector, a: (f32, f32), b: (f32, f32)) -> Vec<u64> {
+    let (x0, x1) = (a.0.min(b.0), a.0.max(b.0));
+    let (y0, y1) = (a.1.min(b.1), a.1.max(b.1));
+    doc.entities
+        .iter()
+        .filter(|e| {
+            let Some(model) = doc.world_matrix(e) else {
+                return false;
+            };
+            let centre = if has_visual(&e.data) {
+                let (c, _) = local_bounds(&e.data);
+                model.transform_point3(c)
+            } else {
+                model.w_axis.truncate()
+            };
+            proj.project(centre)
+                .is_some_and(|(x, y)| (x0..=x1).contains(&x) && (y0..=y1).contains(&y))
+        })
+        .map(|e| e.id)
+        .collect()
+}
+
+/// Where the world ray `origin` + t·`dir` meets entity `id`'s Tilemap
+/// plane, snapped to the middle of the cell there: the point, the plane's
+/// normal, and a cell's world size. `None` without a tilemap or when the
+/// ray runs along the plane.
+#[must_use]
+pub fn tile_hit(doc: &Document, id: u64, origin: Vec3, dir: Vec3) -> Option<((Vec3, Vec3), f32)> {
+    let e = &doc.entities[doc.index_of(id)?];
+    let map = e.data.tilemap.as_ref()?;
+    let model = doc.world_matrix(e).unwrap_or(Mat4::IDENTITY);
+    let det = model.determinant();
+    if !det.is_finite() || det.abs() < 1e-12 {
+        return None;
+    }
+    let inv = model.inverse();
+    let (o, d) = (inv.transform_point3(origin), inv.transform_vector3(dir));
+    if d.z.abs() < 1e-6 {
+        return None;
+    }
+    let t = -o.z / d.z;
+    if t < 0.0 {
+        return None;
+    }
+    let p = o + d * t;
+    let (cx, cy) = map.cell_at(p.x, p.y);
+    let size = map.tile_size;
+    #[allow(clippy::cast_precision_loss)] // cell indices are small
+    let centre = Vec3::new((cx as f32 + 0.5) * size, (cy as f32 + 0.5) * size, 0.0);
+    let normal = model.transform_vector3(Vec3::Z).normalize_or_zero();
+    let cell = (model.transform_vector3(Vec3::X).length() * size).max(1e-4);
+    Some(((model.transform_point3(centre), normal), cell))
+}
+
+/// Picks the nearest entity under screen point `(sx, sy)`.
+#[must_use]
+pub fn pick(doc: &Document, proj: &Projector, sx: f32, sy: f32) -> Option<u64> {
+    let (origin, dir) = proj.ray(sx, sy);
+    let mut best: Option<(f32, u64)> = None;
+    for entity in &doc.entities {
+        let Some(world) = doc.world_matrix(entity) else {
+            continue;
+        };
+        let (model, half) = if has_visual(&entity.data) {
+            let (center, half) = local_bounds(&entity.data);
+            (world * Mat4::from_translation(center), half)
+        } else {
+            // Mesh-less entities (lights, cameras, empties) get a fixed-size
+            // marker box, unaffected by scale and rotation.
+            (
+                Mat4::from_translation(world.w_axis.truncate()),
+                Vec3::splat(0.3),
+            )
+        };
+        if let Some(dist) = ray_box(origin, dir, model, half) {
+            // Prefer small markers over the big meshes behind/around them.
+            let bias = if entity.data.tilemap.is_some() {
+                // Sprites and markers in front of a tilemap win.
+                1.0
+            } else if has_visual(&entity.data) {
+                0.0
+            } else {
+                -0.5
+            };
+            let score = dist + bias;
+            if best.is_none_or(|(b, _)| score < b) {
+                best = Some((score, entity.id));
+            }
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+/// The transform gizmo's mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GizmoMode {
+    /// Translate along world axes.
+    #[default]
+    Move,
+    /// Rotate about world axes.
+    Rotate,
+    /// Scale along local axes.
+    Scale,
+}
+
+impl GizmoMode {
+    /// Every mode, in toolbar order.
+    pub const ALL: [Self; 3] = [Self::Move, Self::Rotate, Self::Scale];
+
+    /// The display label.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Move => "Move",
+            Self::Rotate => "Rotate",
+            Self::Scale => "Scale",
+        }
+    }
+}
+
+/// Screen-space gizmo geometry for one entity in one frame.
+#[derive(Debug, Clone)]
+pub struct Gizmo {
+    /// The mode it was built for.
+    pub mode: GizmoMode,
+    /// The pivot on screen.
+    pub origin: (f32, f32),
+    /// World-space pivot.
+    pub origin_world: Vec3,
+    /// World-space handle length.
+    pub length: f32,
+    /// World-space axis directions (world axes for move/rotate, local axes
+    /// for scale).
+    pub axes: [Vec3; 3],
+    /// Screen positions of each axis handle's tip (move/scale).
+    pub tips: [Option<(f32, f32)>; 3],
+    /// Screen polylines of each rotation ring (rotate).
+    pub rings: [Vec<(f32, f32)>; 3],
+}
+
+/// Number of samples per rotation ring.
+const RING_SAMPLES: usize = 64;
+/// Pixel distance within which a handle is grabbed.
+pub const GRAB_RADIUS: f32 = 8.0;
+
+impl Gizmo {
+    /// Builds the gizmo for transform `t`, or `None` if the pivot is
+    /// off-screen (behind the camera).
+    #[must_use]
+    pub fn build(mode: GizmoMode, t: &TransformData, proj: &Projector) -> Option<Self> {
+        let origin_world = Vec3::from(t.position);
+        let origin = proj.project(origin_world)?;
+        // ~110 px long regardless of zoom.
+        let length = proj.world_per_pixel(origin_world) * 110.0;
+        let axes = match mode {
+            GizmoMode::Scale => {
+                let q = rotation_of(t);
+                [q * Vec3::X, q * Vec3::Y, q * Vec3::Z]
+            }
+            _ => [Vec3::X, Vec3::Y, Vec3::Z],
+        };
+        let mut tips = [None; 3];
+        let mut rings: [Vec<(f32, f32)>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+        for a in 0..3 {
+            match mode {
+                GizmoMode::Move | GizmoMode::Scale => {
+                    tips[a] = proj.project(origin_world + axes[a] * length);
+                }
+                GizmoMode::Rotate => {
+                    let (u, v) = ring_basis(a);
+                    let r = length * 0.85;
+                    for i in 0..=RING_SAMPLES {
+                        let th = i as f32 / RING_SAMPLES as f32 * std::f32::consts::TAU;
+                        let p = origin_world + (u * th.cos() + v * th.sin()) * r;
+                        if let Some(s) = proj.project(p) {
+                            rings[a].push(s);
+                        }
+                    }
+                }
+            }
+        }
+        // Handles pointing at the camera, and rings seen edge-on, can't be
+        // dragged sensibly (the Z axis in the 2D view): leave them out.
+        for tip in &mut tips {
+            if tip.is_some_and(|(x, y)| (x - origin.0).hypot(y - origin.1) < 4.0) {
+                *tip = None;
+            }
+        }
+        for ring in &mut rings {
+            let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
+            for &(x, y) in ring.iter() {
+                lo = (lo.0.min(x), lo.1.min(y));
+                hi = (hi.0.max(x), hi.1.max(y));
+            }
+            if (hi.0 - lo.0).min(hi.1 - lo.1) < 4.0 {
+                ring.clear();
+            }
+        }
+        Some(Self {
+            mode,
+            origin,
+            origin_world,
+            length,
+            axes,
+            tips,
+            rings,
+        })
+    }
+
+    /// The axis handle under screen point `(x, y)`, if any.
+    #[must_use]
+    pub fn hit(&self, x: f32, y: f32) -> Option<usize> {
+        let mut best: Option<(f32, usize)> = None;
+        for a in 0..3 {
+            let d = match self.mode {
+                GizmoMode::Move | GizmoMode::Scale => match self.tips[a] {
+                    Some(tip) => dist_to_segment((x, y), self.origin, tip),
+                    None => f32::INFINITY,
+                },
+                GizmoMode::Rotate => self.rings[a]
+                    .windows(2)
+                    .map(|w| dist_to_segment((x, y), w[0], w[1]))
+                    .fold(f32::INFINITY, f32::min),
+            };
+            if d < GRAB_RADIUS && best.is_none_or(|(b, _)| d < b) {
+                best = Some((d, a));
+            }
+        }
+        best.map(|(_, a)| a)
+    }
+
+    /// Applies a mouse drag of `(dx, dy)` pixels at `(x, y)` on handle
+    /// `axis` to transform `t`, returning the edited transform.
+    #[must_use]
+    pub fn drag(
+        &self,
+        axis: usize,
+        t: &TransformData,
+        (x, y): (f32, f32),
+        (dx, dy): (f32, f32),
+    ) -> TransformData {
+        let mut out = *t;
+        let axis = axis.min(2);
+        match self.mode {
+            GizmoMode::Move | GizmoMode::Scale => {
+                let Some(tip) = self.tips[axis] else {
+                    return out;
+                };
+                let (sx, sy) = (tip.0 - self.origin.0, tip.1 - self.origin.1);
+                let len = (sx * sx + sy * sy).sqrt();
+                if len < 2.0 {
+                    return out; // axis points at the camera: no stable drag
+                }
+                // Fraction of the handle length dragged along its screen axis.
+                let k = (dx * sx + dy * sy) / (len * len);
+                if self.mode == GizmoMode::Move {
+                    let delta = self.axes[axis] * (k * self.length);
+                    for (i, p) in out.position.iter_mut().enumerate() {
+                        *p += delta[i];
+                    }
+                } else {
+                    let s = &mut out.scale[axis];
+                    *s = (*s * (1.0 + k)).clamp(0.001, 100_000.0);
+                }
+            }
+            GizmoMode::Rotate => {
+                let ring = &self.rings[axis];
+                if ring.len() < 3 {
+                    return out;
+                }
+                // Tangent of the ring at the sample nearest the cursor.
+                let (i, _) = ring
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| (i, (p.0 - x).powi(2) + (p.1 - y).powi(2)))
+                    .fold(
+                        (0, f32::INFINITY),
+                        |acc, it| if it.1 < acc.1 { it } else { acc },
+                    );
+                let prev = ring[i.saturating_sub(1)];
+                let next = ring[(i + 1).min(ring.len() - 1)];
+                let (tx, ty) = (next.0 - prev.0, next.1 - prev.1);
+                let tlen = (tx * tx + ty * ty).sqrt();
+                let steps = ((i + 1).min(ring.len() - 1) - i.saturating_sub(1)) as f32;
+                if tlen < 1e-3 || steps < 1.0 {
+                    return out;
+                }
+                // Screen pixels per radian along the ring at this point.
+                let px_per_rad = tlen / (steps * std::f32::consts::TAU / RING_SAMPLES as f32);
+                let angle = (dx * tx + dy * ty) / tlen / px_per_rad.max(1.0);
+                let q = Quat::from_axis_angle(self.axes[axis], angle) * rotation_of(t);
+                let (ex, ey, ez) = q.to_euler(EulerRot::XYZ);
+                out.rotation_euler = [ex, ey, ez];
+            }
+        }
+        out
+    }
+}
+
+/// Gizmo snapping: moves land on a grid, turns on whole angle steps and
+/// scales on whole steps. Saved with the preferences.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Snap {
+    /// Snap while dragging (holding Ctrl does the opposite).
+    pub enabled: bool,
+    /// Grid size for moves (metres).
+    pub step: f32,
+    /// Angle step for turns (degrees).
+    pub angle: f32,
+    /// Step for scales.
+    pub scale: f32,
+}
+
+impl Default for Snap {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            step: 0.5,
+            angle: 15.0,
+            scale: 0.1,
+        }
+    }
+}
+
+impl Snap {
+    /// Move steps offered in the scene view (metres).
+    pub const STEPS: [f32; 6] = [0.1, 0.25, 0.5, 1.0, 2.0, 5.0];
+    /// Turn steps offered (degrees).
+    pub const ANGLES: [f32; 5] = [5.0, 15.0, 30.0, 45.0, 90.0];
+    /// Scale steps offered.
+    pub const SCALES: [f32; 4] = [0.05, 0.1, 0.25, 0.5];
+
+    /// The step `mode` snaps to, as the scene view shows it.
+    #[must_use]
+    pub fn label(&self, mode: GizmoMode) -> String {
+        match mode {
+            GizmoMode::Move => format!("{} m", crate::fields::format_value(self.step)),
+            GizmoMode::Rotate => format!("{}°", crate::fields::format_value(self.angle)),
+            GizmoMode::Scale => format!("{}×", crate::fields::format_value(self.scale)),
+        }
+    }
+
+    /// The step for `mode`.
+    #[must_use]
+    pub fn step_for(&self, mode: GizmoMode) -> f32 {
+        match mode {
+            GizmoMode::Move => self.step,
+            GizmoMode::Rotate => self.angle,
+            GizmoMode::Scale => self.scale,
+        }
+    }
+
+    /// Sets the step for `mode`.
+    pub fn set_step(&mut self, mode: GizmoMode, value: f32) {
+        let v = value.max(0.001);
+        match mode {
+            GizmoMode::Move => self.step = v,
+            GizmoMode::Rotate => self.angle = v,
+            GizmoMode::Scale => self.scale = v,
+        }
+    }
+
+    /// `free` (where an unsnapped drag on `axis` from `start` has got to)
+    /// snapped for gizmo `mode`: the dragged position coordinate onto the
+    /// grid, the turn since `start` onto whole angle steps, or the dragged
+    /// scale onto whole steps.
+    #[must_use]
+    pub fn apply(
+        &self,
+        mode: GizmoMode,
+        axis: usize,
+        start: &TransformData,
+        free: &TransformData,
+    ) -> TransformData {
+        let axis = axis.min(2);
+        let mut out = *free;
+        let round = |v: f32, step: f32| (v / step).round() * step;
+        match mode {
+            GizmoMode::Move if self.step > 0.0 => {
+                out.position[axis] = round(free.position[axis], self.step);
+            }
+            GizmoMode::Rotate if self.angle > 0.0 => {
+                let world = [Vec3::X, Vec3::Y, Vec3::Z][axis];
+                let turn = rotation_of(free) * rotation_of(start).inverse();
+                let (turn_axis, angle) = turn.to_axis_angle();
+                let signed = if turn_axis.dot(world) < 0.0 {
+                    -angle
+                } else {
+                    angle
+                };
+                let step = self.angle.to_radians();
+                let q = Quat::from_axis_angle(world, round(signed, step)) * rotation_of(start);
+                let (ex, ey, ez) = q.to_euler(EulerRot::XYZ);
+                out.rotation_euler = [ex, ey, ez];
+            }
+            GizmoMode::Scale if self.scale > 0.0 => {
+                out.scale[axis] = round(free.scale[axis], self.scale).max(self.scale);
+            }
+            _ => {}
+        }
+        out
+    }
+}
+
+/// A right-handed basis `(u, v)` spanning the plane perpendicular to world
+/// axis `a`, with `u × v = axis`.
+fn ring_basis(a: usize) -> (Vec3, Vec3) {
+    match a {
+        0 => (Vec3::Y, Vec3::Z),
+        1 => (Vec3::Z, Vec3::X),
+        _ => (Vec3::X, Vec3::Y),
+    }
+}
+
+/// Distance from point `p` to segment `a`–`b` (screen space).
+#[must_use]
+pub fn dist_to_segment(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
+    let (abx, aby) = (b.0 - a.0, b.1 - a.1);
+    let len2 = abx * abx + aby * aby;
+    let t = if len2 < 1e-6 {
+        0.0
+    } else {
+        (((p.0 - a.0) * abx + (p.1 - a.1) * aby) / len2).clamp(0.0, 1.0)
+    };
+    let (cx, cy) = (a.0 + abx * t, a.1 + aby * t);
+    ((p.0 - cx).powi(2) + (p.1 - cy).powi(2)).sqrt()
+}
+
+/// The corners of a camera's view pyramid for drawing: the eye followed
+/// by the four corners of a slice `depth` units ahead (top-left, top-right,
+/// bottom-right, bottom-left), for an `aspect` = width / height view.
+#[must_use]
+pub fn camera_frustum(cam: &automata_renderer::Camera3D, aspect: f32, depth: f32) -> [Vec3; 5] {
+    let forward = (cam.target - cam.position).normalize_or(Vec3::NEG_Z);
+    let right = forward.cross(cam.up).normalize_or(Vec3::X);
+    let up = right.cross(forward);
+    let half_h = (cam.fov_y_degrees.to_radians() * 0.5).tan() * depth;
+    let half_w = half_h * aspect;
+    let center = cam.position + forward * depth;
+    [
+        cam.position,
+        center - right * half_w + up * half_h,
+        center + right * half_w + up * half_h,
+        center + right * half_w - up * half_h,
+        center - right * half_w - up * half_h,
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The flat view looks straight at the XY plane: the centre of the
+    /// screen is the pivot, clicks land on z = 0, dragging pans, and the
+    /// Z handle (pointing at the camera) is left out of the gizmo.
+    #[test]
+    fn the_2d_view_is_flat_and_pans() {
+        let mut cam = ViewCamera {
+            target: [3.0, 2.0, 5.0],
+            ..ViewCamera::default()
+        };
+        cam.set_two_d(true);
+        assert_eq!(
+            cam.target,
+            [3.0, 2.0, 0.0],
+            "the pivot drops onto the sprites' plane"
+        );
+        let rect = Rect::new(0.0, 0.0, 800.0, 600.0);
+        let proj = Projector::new(&cam, rect);
+        assert!(proj.flat());
+        let c = proj.ground_point(400.0, 300.0, 0.0);
+        assert!((c - Vec3::new(3.0, 2.0, 0.0)).length() < 1e-3, "{c}");
+        let right = proj.ground_point(600.0, 300.0, 0.0);
+        let up = proj.ground_point(400.0, 100.0, 0.0);
+        assert!(right.x > c.x && (right.y - c.y).abs() < 1e-3, "{right}");
+        assert!(up.y > c.y && (up.x - c.x).abs() < 1e-3, "{up}");
+        // No perspective: a point near the camera projects where one far
+        // away does.
+        let near = proj.project(Vec3::new(4.0, 2.0, 3.0)).unwrap();
+        let far = proj.project(Vec3::new(4.0, 2.0, -3.0)).unwrap();
+        assert!((near.0 - far.0).abs() < 1e-2 && (near.1 - far.1).abs() < 1e-2);
+        cam.orbit(100.0, 0.0);
+        assert!(cam.target[0] < 3.0, "dragging right pans the view left");
+        assert!(cam.two_d && (cam.target[2]).abs() < 1e-6);
+        let t = TransformData::default();
+        let gizmo = Gizmo::build(GizmoMode::Move, &t, &proj).unwrap();
+        assert!(gizmo.tips[0].is_some() && gizmo.tips[1].is_some());
+        assert!(gizmo.tips[2].is_none(), "Z points at the camera");
+    }
+
+    #[test]
+    fn orbit_view_reproduces_a_scene_camera() {
+        let cam =
+            automata_renderer::Camera3D::new(Vec3::new(3.0, 4.0, 5.0), Vec3::new(0.0, 1.0, 0.0));
+        let view = ViewCamera::from_camera3d(&cam);
+        assert!(
+            (view.eye() - cam.position).length() < 1e-4,
+            "{:?}",
+            view.eye()
+        );
+        let f = camera_frustum(&cam, 16.0 / 9.0, 1.0);
+        assert_eq!(f[0], cam.position);
+        let center = (f[1] + f[3]) * 0.5;
+        assert!(((center - cam.position).length() - 1.0).abs() < 1e-4);
+    }
+
+    fn rect() -> Rect {
+        Rect::new(0.0, 0.0, 800.0, 600.0)
+    }
+
+    #[test]
+    fn target_projects_to_viewport_center() {
+        let cam = ViewCamera::default();
+        let proj = Projector::new(&cam, rect());
+        let (x, y) = proj.project(Vec3::from(cam.target)).unwrap();
+        assert!(
+            (x - 400.0).abs() < 0.5 && (y - 300.0).abs() < 0.5,
+            "{x},{y}"
+        );
+    }
+
+    #[test]
+    fn center_ray_points_at_target() {
+        let cam = ViewCamera::default();
+        let proj = Projector::new(&cam, rect());
+        let (o, d) = proj.ray(400.0, 300.0);
+        let to_target = (Vec3::from(cam.target) - o).normalize();
+        assert!(d.dot(to_target) > 0.9999);
+    }
+
+    #[test]
+    fn orbit_moves_the_eye_but_keeps_distance() {
+        let mut cam = ViewCamera::default();
+        let before = cam.eye();
+        cam.orbit(120.0, 0.0);
+        assert!((cam.eye() - before).length() > 1.0);
+        let d = (cam.eye() - Vec3::from(cam.target)).length();
+        assert!((d - cam.distance).abs() < 1e-3);
+    }
+
+    #[test]
+    fn pan_moves_the_pivot() {
+        let mut cam = ViewCamera::default();
+        let before = cam.target;
+        cam.pan(50.0, 0.0);
+        assert_ne!(before, cam.target);
+    }
+
+    #[test]
+    fn clicking_the_cube_picks_it() {
+        let doc = Document::starter();
+        let cube = doc.entities.iter().find(|e| e.name() == "Cube").unwrap();
+        let cam = ViewCamera::default();
+        let proj = Projector::new(&cam, rect());
+        let (sx, sy) = proj.project(Vec3::new(0.0, 0.5, 0.0)).unwrap();
+        assert_eq!(pick(&doc, &proj, sx, sy), Some(cube.id));
+    }
+
+    #[test]
+    fn a_selection_box_takes_what_it_surrounds() {
+        let doc = Document::starter();
+        let cube = doc.entities.iter().find(|e| e.name() == "Cube").unwrap();
+        let cam = ViewCamera::default();
+        let proj = Projector::new(&cam, rect());
+        let (sx, sy) = proj.project(Vec3::new(0.0, 0.5, 0.0)).unwrap();
+        let picked = pick_box(&doc, &proj, (sx - 20.0, sy - 20.0), (sx + 20.0, sy + 20.0));
+        assert!(picked.contains(&cube.id), "{picked:?}");
+        // Corners in either order; an empty corner of the sky has nothing.
+        assert_eq!(
+            pick_box(&doc, &proj, (sx + 20.0, sy + 20.0), (sx - 20.0, sy - 20.0)),
+            picked
+        );
+        assert_eq!(
+            pick_box(&doc, &proj, (0.0, 0.0), (8.0, 8.0)),
+            Vec::<u64>::new()
+        );
+        // The whole view takes everything with a place in the world.
+        let all = pick_box(&doc, &proj, (-1e4, -1e4), (1e4, 1e4));
+        assert!(all.len() >= picked.len());
+    }
+
+    #[test]
+    fn snapping_rounds_moves_turns_and_scales() {
+        let snap = Snap {
+            enabled: true,
+            step: 0.5,
+            angle: 15.0,
+            scale: 0.25,
+        };
+        let start = TransformData {
+            position: [0.1, 2.0, -0.3],
+            rotation_euler: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        };
+        // Move: only the dragged axis lands on the grid.
+        let mut free = start;
+        free.position = [1.37, 2.0, -0.3];
+        let out = snap.apply(GizmoMode::Move, 0, &start, &free);
+        assert_eq!(out.position, [1.5, 2.0, -0.3]);
+        // Turn: 20° about Y snaps to 15°.
+        let mut free = start;
+        free.rotation_euler = [0.0, 20f32.to_radians(), 0.0];
+        let out = snap.apply(GizmoMode::Rotate, 1, &start, &free);
+        let q = rotation_of(&out);
+        let want = Quat::from_rotation_y(15f32.to_radians());
+        assert!(q.angle_between(want) < 1e-4, "{:?}", out.rotation_euler);
+        // Negative turns too: -40° snaps to -45°.
+        free.rotation_euler = [0.0, (-40f32).to_radians(), 0.0];
+        let out = snap.apply(GizmoMode::Rotate, 1, &start, &free);
+        let want = Quat::from_rotation_y((-45f32).to_radians());
+        assert!(rotation_of(&out).angle_between(want) < 1e-4);
+        // Scale: whole steps, never below one step.
+        let mut free = start;
+        free.scale = [1.0, 1.0, 1.4];
+        assert_eq!(
+            snap.apply(GizmoMode::Scale, 2, &start, &free).scale,
+            [1.0, 1.0, 1.5]
+        );
+        free.scale = [1.0, 1.0, 0.01];
+        assert_eq!(
+            snap.apply(GizmoMode::Scale, 2, &start, &free).scale,
+            [1.0, 1.0, 0.25]
+        );
+        // Labels and steps per tool.
+        let mut s = Snap::default();
+        s.set_step(GizmoMode::Rotate, 45.0);
+        assert_eq!(s.step_for(GizmoMode::Rotate), 45.0);
+        assert_eq!(s.label(GizmoMode::Rotate), "45°");
+        assert_eq!(s.label(GizmoMode::Move), "0.5 m");
+    }
+
+    #[test]
+    fn clicking_empty_sky_picks_nothing() {
+        let doc = Document::starter();
+        let cam = ViewCamera::default();
+        let proj = Projector::new(&cam, rect());
+        // Top-left corner looks up into the sky, away from every entity.
+        assert_eq!(pick(&doc, &proj, 2.0, 2.0), None);
+    }
+
+    #[test]
+    fn ray_box_respects_rotation() {
+        let model = Mat4::from_rotation_y(std::f32::consts::FRAC_PI_4);
+        let hit = ray_box(Vec3::new(0.0, 0.0, 5.0), -Vec3::Z, model, Vec3::splat(0.5));
+        // A 45°-rotated unit cube's corner sits at z = +0.707.
+        assert!((hit.unwrap() - (5.0 - 0.5 * 2f32.sqrt())).abs() < 1e-3);
+    }
+
+    #[test]
+    fn move_gizmo_drag_moves_along_its_axis() {
+        let cam = ViewCamera::default();
+        let proj = Projector::new(&cam, rect());
+        let t = TransformData::default();
+        let g = Gizmo::build(GizmoMode::Move, &t, &proj).unwrap();
+        let tip = g.tips[0].unwrap();
+        let (dx, dy) = (tip.0 - g.origin.0, tip.1 - g.origin.1);
+        // Drag the full length of the X handle → move by one handle length.
+        let out = g.drag(0, &t, tip, (dx, dy));
+        assert!((out.position[0] - g.length).abs() < 1e-3);
+        assert!(out.position[1].abs() < 1e-6 && out.position[2].abs() < 1e-6);
+    }
+
+    #[test]
+    fn gizmo_hit_finds_the_handle() {
+        let cam = ViewCamera::default();
+        let proj = Projector::new(&cam, rect());
+        let t = TransformData::default();
+        let g = Gizmo::build(GizmoMode::Move, &t, &proj).unwrap();
+        let tip = g.tips[1].unwrap();
+        let mid = (
+            f32::midpoint(g.origin.0, tip.0),
+            f32::midpoint(g.origin.1, tip.1),
+        );
+        assert_eq!(g.hit(mid.0, mid.1), Some(1));
+    }
+
+    #[test]
+    fn rotate_gizmo_changes_rotation() {
+        let cam = ViewCamera::default();
+        let proj = Projector::new(&cam, rect());
+        let t = TransformData::default();
+        let g = Gizmo::build(GizmoMode::Rotate, &t, &proj).unwrap();
+        let p = g.rings[1][RING_SAMPLES / 8];
+        let out = g.drag(1, &t, p, (30.0, 0.0));
+        assert_ne!(out.rotation_euler, t.rotation_euler);
+    }
+
+    #[test]
+    fn scale_gizmo_grows_scale() {
+        let cam = ViewCamera::default();
+        let proj = Projector::new(&cam, rect());
+        let t = TransformData::default();
+        let g = Gizmo::build(GizmoMode::Scale, &t, &proj).unwrap();
+        let tip = g.tips[0].unwrap();
+        let (dx, dy) = (tip.0 - g.origin.0, tip.1 - g.origin.1);
+        let out = g.drag(0, &t, tip, (dx * 0.5, dy * 0.5));
+        assert!((out.scale[0] - 1.5).abs() < 1e-3);
+    }
+}

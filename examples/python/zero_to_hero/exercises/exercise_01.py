@@ -1,0 +1,20 @@
+import automata as at
+
+scene = (
+    at.Scene()
+    .add(at.Entity("camera").add(at.Camera3D(position=(1, 2, 6), target=(1, 0, 0))))
+    .add(
+        at.Entity("cube")
+        .add(at.Transform(position=(0, 0, 0)))
+        .add(at.MeshRenderer.cube(size=1.0, color=(0.95, 0.45, 0.15, 1.0)))
+    )
+    .add(
+        at.Entity("second cube")
+        .add(at.Transform(position=(2, 0, 0)))
+        .add(at.MeshRenderer.cube(size=1.0, color=(0.4, 0.7, 0.9, 1.0)))
+    )
+)
+
+game = at.Game(title="module 1")
+game.load_scene(scene)
+game.run(lambda ctx: None)

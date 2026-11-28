@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oberon — Design Document · AUTOMATA docs</title>
+<meta name="description" content="Oberon is the visual editor for AUTOMATA: a standalone desktop application in the style of Unity&#x27;s editor — viewport, hierarchy, inspector, play controls — for building scenes, placing entities,…">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="../_static/docs.css">
+<script>window.DOCS_ROOT = "../";</script>
+<script defer src="../_static/search-index.js"></script>
+<script defer src="../../dither.js"></script>
+<script defer src="../_static/docs.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <a class="wordmark" href="../../index.html">AUTOMATA</a>
+  <a class="section" href="../index.html">Docs</a>
+  <div class="search" role="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M13.2 13.2 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <input id="search" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false" aria-label="Search docs" aria-controls="results" aria-autocomplete="list">
+    <kbd>/</kbd>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <a class="gh" href="https://github.com/x017/automata" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="nav-group"><h2>Start</h2><ul><li><a href="../index.html">Overview</a></li><li><a href="../getting-started.html">Getting started</a></li><li><a href="../tutorials/index.html">All tutorials</a></li></ul></div><div class="nav-group"><h2>Tutorials</h2><ul><li><a href="../tutorials/first-scene.html">Your first scene</a></li><li><a href="../tutorials/coin-collector.html">Coin collector</a></li><li><a href="../tutorials/third-person-camera.html">Third-person camera</a></li><li><a href="../tutorials/camera-rail.html">Camera rail &amp; intro shot</a></li><li><a href="../tutorials/lighting-and-mood.html">Lighting &amp; mood</a></li><li><a href="../tutorials/oberon-to-python.html">From Oberon to Python</a></li><li><a href="../tutorials/fps.html">A first-person shooter</a></li><li><a href="../tutorials/platformer.html">A 2D platformer</a></li><li><a href="../zero-to-hero.html">Zero to hero (Python)</a></li></ul></div><div class="nav-group"><h2>Oberon</h2><ul><li><a href="../oberon/index.html">Introduction</a></li><li><a href="../oberon/interface.html">The interface</a></li><li><a href="../oberon/command-line.html">The oberon command</a></li><li><a href="../oberon/scripting.html">Scripting</a></li><li><a href="../oberon/cameras.html">Cameras</a></li><li><a href="../oberon/graphics.html">Graphics</a></li><li><a href="../oberon/code-editor.html">The code editor</a></li><li><a href="../oberon/ui-editor.html">The UI editor</a></li><li><a href="../oberon/materials.html">Materials</a></li><li><a href="../oberon/shaders.html">Custom shaders</a></li><li><a href="../oberon/models.html">Models</a></li><li><a href="../oberon/animation-graphs.html">Animation graphs</a></li><li><a href="../oberon/attachments-and-ik.html">Attachments &amp; IK</a></li><li><a href="../oberon/ragdolls.html">Ragdolls</a></li><li><a href="../oberon/navigation.html">Navigation</a></li><li><a href="../oberon/ai.html">AI</a></li><li><a href="../oberon/2d.html">2D games</a></li><li><a href="../oberon/terrain.html">Terrain</a></li><li><a href="../oberon/foliage.html">Grass &amp; foliage</a></li><li><a href="../oberon/audio.html">Audio</a></li><li><a href="../oberon/prefabs-and-attributes.html">Prefabs &amp; attributes</a></li><li><a href="../oberon/editor-workflow.html">Editor workflow</a></li><li><a href="../oberon/exporting.html">Exporting your game</a></li><li><a href="../oberon/steam.html">Steam</a></li><li><a href="../oberon/shortcuts.html">Keyboard shortcuts</a></li></ul></div><div class="nav-group"><h2>Python guides</h2><ul><li><a href="../guides/game-loop.html">The game loop</a></li><li><a href="../guides/scenes-and-entities.html">Scenes &amp; entities</a></li><li><a href="../guides/rendering-and-lights.html">Rendering &amp; lights</a></li><li><a href="../guides/grass-and-foliage.html">Grass &amp; foliage</a></li><li><a href="../guides/cameras.html">Cameras</a></li><li><a href="../guides/input.html">Input</a></li><li><a href="../guides/touch-controls.html">Touch controls</a></li><li><a href="../guides/physics.html">Physics</a></li><li><a href="../guides/events-and-resources.html">Events &amp; resources</a></li><li><a href="../guides/oop-style.html">OOP style</a></li><li><a href="../guides/scene-files.html">Scene files</a></li><li><a href="../guides/project-structure.html">Project structure</a></li><li><a href="../guides/testing.html">Testing</a></li><li><a href="../guides/performance.html">Performance</a></li></ul></div><div class="nav-group"><h2>Reference</h2><ul><li><a href="../api-reference.html">API reference</a></li><li><a href="../cookbook.html">Cookbook</a></li></ul></div><div class="nav-group"><h2>Engine</h2><ul><li><a href="architecture.html">Architecture</a></li><li><a href="development.html">Development</a></li><li><a href="api.html">API design</a></li><li><a href="oberon-design.html" aria-current="page">Oberon design</a></li></ul></div></nav>
+  <main id="content" class="article">
+    <article class="prose">
+<h1>Oberon — Design Document</h1>
+<p><strong>Status:</strong> proposal for review · <strong>No code yet</strong></p>
+<p>Oberon is the visual editor for AUTOMATA: a standalone desktop application
+in the style of Unity's editor — viewport, hierarchy, inspector, play
+controls — for building scenes, placing entities, and tweaking component
+values without touching code. It is <strong>not</strong> an in-game overlay; it is a
+separate app that drives the engine.</p>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>┌──────────────────────────────────────────────────────────────┐
+│  File  Edit  Assets                              ▶ ⏸ ⏭      │
+├────────────┬────────────────────────────────┬────────────────┤
+│            │                                │                │
+│  Hierarchy │           Viewport             │   Inspector    │
+│            │   (live engine render)         │                │
+│  ▸ scene   │                                │  Transform     │
+│    ▸ floor │                                │  MeshRenderer  │
+│    ▸ sun   │                                │  RigidBody     │
+│    ▾ player│                                │  Collider3D    │
+│            │                                │                │
+├────────────┴────────────────────────────────┴────────────────┤
+│  Console              (Files sits under the Hierarchy)       │
+└──────────────────────────────────────────────────────────────┘</code></pre></div>
+<h2 id="1-what-oberon-is--and-is-not">1. What Oberon is — and is not<a class="anchor" href="#1-what-oberon-is--and-is-not" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Is</th><th>Is not</th></tr></thead><tbody><tr><td>A Python desktop app built with <strong>nexa-ui</strong></td><td>An in-game debug overlay</td></tr><tr><td>A scene authoring + inspection tool, and a Python IDE (§3.2.1)</td><td>A replacement for a general-purpose editor</td></tr><tr><td>A client of the <strong>public engine API</strong></td><td>A fork or privileged build of the engine</td></tr><tr><td>The place you <em>arrange</em> a game</td><td>The place you <em>program</em> a game</td></tr></tbody></table></div>
+<p>The engine stays code-first. Oberon produces and consumes <strong>scene files</strong>;
+game logic remains Python in the user's editor of choice.</p>
+<h2 id="2-brand">2. Brand<a class="anchor" href="#2-brand" aria-label="Link to this section">#</a></h2>
+<p>Oberon follows AUTOMATA's identity: <strong>dark white sci-fi</strong>.</p>
+<ul><li><strong>AUTOMATA Black</strong> (<code>crates/oberon/src/theme.rs</code>): neutral, untinted
+blacks — background 5, panels 12, raised controls 22, the 3D viewport
+pure black — with the logo's warm paper-white (242, 240, 235) as both
+text and accent. No blue tint anywhere; color is reserved for meaning
+(axis colors, warnings, errors, success, syntax).</li><li>Thin 1 px borders, 5 px radii, generous spacing. Primary actions are
+filled paper-white with black text; everything else is outline or
+ghost.</li><li>UX conveniences: toolbar tooltips (0.45 s), a segmented Move / Rotate /
+Scale control with key hints, a pill play-state badge, a <strong>command
+palette</strong> (Ctrl+Shift+P or the toolbar Search box — fuzzy search over
+every menu command, scene entities, project scripts and settings pages),
+<strong>Settings</strong> (Ctrl+, or the gear: Appearance / Script Editor / Python /
+Files; changes apply instantly and persist to <code>prefs.ron</code>), and
+interface zoom (Ctrl+= / Ctrl+- / Ctrl+0, 60–250 %).</li><li>The logo's gear-in-the-A reads as the inspector's component gear; the
+orbital ring is the play-mode indicator. Brand assets live in
+<code>docs/assets/</code>.</li></ul>
+<h2 id="3-architecture">3. Architecture<a class="anchor" href="#3-architecture" aria-label="Link to this section">#</a></h2>
+<h3 id="31-process-model-in-process-embedding">3.1 Process model: in-process embedding<a class="anchor" href="#31-process-model-in-process-embedding" aria-label="Link to this section">#</a></h3>
+<p>Oberon runs the engine <strong>in the same Python process</strong> as the UI:</p>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>┌─ Oberon (Python process) ─────────────────────────┐
+│  nexa-ui event loop (main thread)                 │
+│    ├─ hierarchy panel  ← reads scene names/tree   │
+│    ├─ inspector panel  ← reads/writes components  │
+│    └─ viewport widget  ← RGBA bytes each frame    │
+│         ▲                                          │
+│  automata engine (Rust core via PyO3)              │
+│    ├─ game.step(dt) — advance one frame           │
+│    └─ game.render_frame(w, h) → bytes (offscreen) │
+└───────────────────────────────────────────────────┘</code></pre></div>
+<p>One tick of the nexa loop in edit mode:</p>
+<ol><li><code>game.step(dt)</code> — physics + buffered writes apply (game logic paused).</li><li><code>rgba = game.render_frame(viewport_size)</code> — offscreen wgpu render,
+read back to CPU bytes.</li><li>A nexa image widget displays <code>rgba</code>.</li></ol>
+<p>Why the viewport is an image feed and not GPU interop: nexa's core is a
+C99 immediate-mode UI with OpenGL 3.3 + a CPU software rasterizer, while
+automata renders through wgpu. Sharing GPU textures between those two
+stacks is not realistic; the RGBA handoff through CPU memory is simple,
+portable, and fast enough at editor scale (§11 has the numbers). The
+zero-readback fallback — the engine opening its own native window beside
+the Oberon window — stays available if the smoke test says otherwise.</p>
+<p>Why in-process, and not an editor/game subprocess pair:</p>
+<ul><li><strong>Frame readback is a memcpy</strong>, not a socket stream — the viewport is
+just a texture handoff.</li><li><strong>The inspector reads live ECS state</strong> through the existing <code>EntityView</code>
+handles; no state-sync protocol to design or debug.</li><li><strong>Edits are ordinary engine calls</strong> through the existing buffered-write
+path — the editor can never desync from the engine's frame model,
+because it <em>is</em> the frame.</li></ul>
+<p>Accepted cost: a hard crash in the engine can take the UI down. The engine
+already isolates Python callback exceptions (they propagate out of
+<code>step()</code> and Oberon shows them in the console panel). A subprocess mode is
+a possible later hardening, not MVP scope.</p>
+<h3 id="32-why-not-an-overlay--why-not-a-code-editor">3.2 Why not an overlay / why not a code editor<a class="anchor" href="#32-why-not-an-overlay--why-not-a-code-editor" aria-label="Link to this section">#</a></h3>
+<p>Recorded decisions (both stand):</p>
+<ul><li>In-game overlay editors fight the game for input, screen space, and the
+render pass. A separate window is the Unity model and the right model.</li><li><del>An in-engine code editor with LSP is not worth building.</del> <strong>Revised
+(2026-11):</strong> Oberon is a full IDE. It gets a native Rust code editor
+(tabs, Python highlighting, find/replace) with an LSP client
+(basedpyright / pylsp / jedi-language-server over hand-written JSON-RPC)
+rather than a webview or a Code-OSS fork.</li></ul>
+<h4 id="321-the-script-editor-shipped">3.2.1 The script editor <em>(shipped)</em><a class="anchor" href="#321-the-script-editor-shipped" aria-label="Link to this section">#</a></h4>
+<p>Scripts open as document tabs next to the <strong>Scene</strong> tab over the center area
+(double-click a <code>.py</code> in Project, <em>Edit Script</em> in the Inspector, or click a
+<code>File &quot;…&quot;, line N</code> traceback in the Console). While a script tab is visible
+the 3D view isn't rendered.</p>
+<ul><li>Model (<code>crates/oberon/src/code/</code>): <code>Buffer</code> (line vector, char columns,
+grouped undo/redo, Python-aware auto-indent / dedent / auto-close),
+an incremental line-state Python highlighter (<code>syntax.rs</code>; triple-quoted
+strings span lines), and the system clipboard (<code>clipboard.rs</code>: X11
+<code>CLIPBOARD</code> via x11rb, <code>wl-copy</code>/<code>wl-paste</code> on Wayland, in-process
+fallback).</li><li>View (<code>ui/code_view.rs</code>): gutter with line numbers and diagnostic marks,
+current-line, selection, word-occurrence and bracket-match highlights,
+diagnostic squiggles with hover tooltips, find/replace and go-to-line
+bars, completion popup, a status line, and a Save / Don't Save / Cancel
+bar when closing a modified tab. Mouse: click, drag, Shift-click,
+double-click word, triple-click / gutter line, Ctrl-click definition.</li><li>Keys: Ctrl+S / Ctrl+Shift+S (save / save all), Ctrl+W, Ctrl+Tab,
+Ctrl+Z/Y, Ctrl+X/C/V (whole line with no selection), Ctrl+D, Ctrl+/,
+Ctrl+Shift+K, Ctrl+L, Ctrl+] / Ctrl+[, Tab / Shift+Tab, Alt+Up/Down,
+Ctrl+Enter, Ctrl+Backspace/Delete, Ctrl+F / Ctrl+H / Ctrl+G, F3 /
+Shift+F3, Ctrl+Space (complete), F12 (definition), Ctrl+Shift+I (hover),
+Esc (back to the scene shortcuts). Keys the editor doesn't use (Ctrl+P,
+Ctrl+Q, F1) stay global.</li><li>Saving is all the running game needs: the bridge's mtime hot reload
+(§8) picks the file up. Files changed on disk reload automatically when
+the tab is clean. Quitting with modified scripts asks first.</li><li>Language features (<code>lsp.rs</code>): the first opened script starts a language
+server — <code>language_server</code> in <code>~/.config/oberon/prefs.ron</code> (a command
+line, <code>&quot;auto&quot;</code> or <code>&quot;off&quot;</code>), else the first installed of
+basedpyright-langserver, pyright-langserver, pylsp, jedi-language-server
+(searched in the project's <code>.venv</code>/<code>venv</code>, the configured Python's
+directory, <code>~/.local/bin</code>, then <code>PATH</code>). JSON-RPC over stdio with
+<code>Content-Length</code> framing, read on a background thread and polled once per
+frame; full-text document sync; char ↔ UTF-16 column conversion.
+Diagnostics (squiggles, gutter marks, tab and status counts), completion
+(on <code>.</code>, after two word chars, or Ctrl+Space), hover (resting the mouse
+on a word for 0.6 s, or Ctrl+Shift+I) and go-to-definition (F12 /
+Ctrl+click, across files). With no server installed, completion falls
+back to words from the open files plus Python keywords and builtins.
+<code>tests/lsp_e2e.rs</code> exercises a real server when one is installed.</li><li>Script API completion (<code>code/api.rs</code>): behaviour scripts never import
+automata, so no language server can type <code>entity</code> / <code>ctx</code>. Oberon models
+the bridge API (<code>Context</code>, <code>Input</code>, <code>Time</code>, <code>Physics</code>, <code>Scene</code>, <code>Entity</code>,
+<code>Transform</code>, <code>Attributes</code>) itself: inside any <code>def f(entity, ctx)</code> hook it
+resolves chains such as <code>ctx.scene[&quot;Player&quot;].transform.</code>, local
+assignments (<code>player = ctx.scene.find(&quot;Player&quot;)</code>) and `for e in
+ctx.scene:` loops, and completes members with signatures; key names in
+<code>ctx.input.pressed(&quot;…&quot;)</code> / <code>axis(&quot;…&quot;, &quot;…&quot;)</code>; entity names in
+<code>ctx.scene[&quot;…&quot;]</code> / <code>find(&quot;…&quot;)</code>; and attribute names in
+<code>entity.attributes[&quot;…&quot;]</code> / <code>.get(&quot;…&quot;)</code>, taken from the open scene. Hover
+documents API members. These answers never go to the server; everything
+else does.</li><li>Settings (Script Editor page): font size, highlight current line,
+indentation guides, show whitespace, auto-close brackets and quotes,
+suggest while typing, trim trailing whitespace on save, save scripts
+before Play.</li></ul>
+<h2 id="4-engine-work-required-the-embedding-hooks">4. Engine work required (the embedding hooks)<a class="anchor" href="#4-engine-work-required-the-embedding-hooks" aria-label="Link to this section">#</a></h2>
+<p>Oberon consumes only public Python API. Four engine additions unlock it,
+in order:</p>
+<aside class="note"><p><strong>Status for implementers:</strong> M0 is shipped; M1–M2 are <strong>contracts, not
+yet code</strong>. Scaffold against them with mocks — <code>render_frame</code> can be a
+generated gradient <code>bytes</code> object, <code>step</code> a no-op — and the real engine
+drops in without Oberon changes.</p>
+<p><strong>Dev setup for the Oberon repo:</strong> <code>pip install nexa-ui</code> (tested:
+1.4.0), and the automata wheel built from this repo —
+<code>python scripts/build.py</code> then <code>pip install target/wheels/*.whl</code>. Pin
+both in <code>pyproject.toml</code>.</p></aside>
+<h3 id="41-scene-serialization--ron-decided-shipped">4.1 Scene serialization — RON <em>(decided, shipped)</em><a class="anchor" href="#41-scene-serialization--ron-decided-shipped" aria-label="Link to this section">#</a></h3>
+<p>Scenes persist as <strong>RON</strong> (Rust Object Notation): text, comments, trailing
+commas, struct-like syntax, clean git diffs. Same choice Bevy made.</p>
+<div class="codeblock" data-lang="ron"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code><span class="tok-t">Scene</span>(
+  entities: [
+    ( name: <span class="tok-k">Some</span>(<span class="tok-s">&quot;sun&quot;</span>), components: [
+        <span class="tok-t">DirectionalLight</span>(direction: (-<span class="tok-n">0.45</span>, -<span class="tok-n">1.0</span>, -<span class="tok-n">0.3</span>),
+                         color: (<span class="tok-n">1.0</span>, <span class="tok-n">0.96</span>, <span class="tok-n">0.88</span>),
+                         ambient: <span class="tok-n">0.35</span>, shadows: <span class="tok-k">true</span>),
+    ]),
+    <span class="tok-c">// ...</span>
+  ],
+)</code></pre></div>
+<ul><li><code>serde</code> derives on every component type; a <code>version</code> field at the root
+for forward compatibility.</li><li>Python API: <code>at.Scene.save(path)</code> / <code>at.Scene.load(path)</code>, plus
+<code>scene.to_ron()</code> / <code>at.Scene.from_ron(text)</code> for in-memory snapshots
+(play-mode restore, §6).</li><li>CBOR remains the future <strong>shipping/packing</strong> format (binary, compact,
+fast) — free to add later since serde separates data model from format.
+Authoring stays text; git never sees binary scenes.</li></ul>
+<h3 id="42-manual-stepping">4.2 Manual stepping<a class="anchor" href="#42-manual-stepping" aria-label="Link to this section">#</a></h3>
+<p>Today <code>game.run()</code> owns the loop. The editor needs to drive it:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>game = at.Game(headless=<span class="tok-b">True</span>, graphics=at.GraphicsQuality.HIGH)
+game.load_scene(scene)
+game.step(dt)          <span class="tok-c"># advance exactly one frame: physics, scripts, writes</span></code></pre></div>
+<p><code>step</code> is the same machinery as <code>run(max_frames=1)</code>, minus loop ownership:
+no <code>target_fps</code> sleeping, no quit checks — Oberon owns pacing. Edit mode
+steps <em>without</em> the game's update callback (simulation paused, writes
+apply); play mode steps <em>with</em> it.</p>
+<h3 id="43-offscreen-frame-readback">4.3 Offscreen frame readback<a class="anchor" href="#43-offscreen-frame-readback" aria-label="Link to this section">#</a></h3>
+<p>The renderer already renders offscreen (used by the GPU test suite,
+including readback to CPU). Expose it:</p>
+<div class="codeblock" data-lang="python"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>rgba: bytes = game.render_frame((width, height))  <span class="tok-c"># RGBA8, row-major</span></code></pre></div>
+<p>Oberon feeds these bytes to a nexa image widget. 1280×720×4 bytes ≈
+3.5 MB/frame — trivial locally; the risk item is nexa's image-widget
+update cost (§11).</p>
+<h3 id="44-full-component-read-model--writable-visuals">4.4 Full component read-model + writable visuals<a class="anchor" href="#44-full-component-read-model--writable-visuals" aria-label="Link to this section">#</a></h3>
+<p>The inspector must read <em>and</em> write everything it shows. Today readable:
+name, transform, camera_3d, character_velocity. Missing:</p>
+<ul><li><strong>Reads:</strong> <code>MeshRenderer</code> (kind, size, color), <code>DirectionalLight</code>
+(direction, color, ambient, shadows), <code>RigidBody</code> (type, damping),
+<code>Collider*</code> (shape, friction, restitution, sensor).</li><li><strong>Writes:</strong> mesh color, light properties, collider modifiers. (The wiki
+currently says "material swaps are a spawn-a-new-entity job (for now)" —
+this milestone is what retires that caveat.)</li></ul>
+<p>Same buffered-write semantics as transforms: edits apply after the current
+frame, exactly like gameplay writes.</p>
+<h2 id="5-panels">5. Panels<a class="anchor" href="#5-panels" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Panel</th><th>Contents</th><th>nexa building block</th></tr></thead><tbody><tr><td><strong>Hierarchy</strong></td><td>entity tree (name, visibility glyph), add/remove/rename</td><td><code>tree_table</code></td></tr><tr><td><strong>Viewport</strong></td><td>live offscreen render; editor camera; click-to-select; drag-to-move</td><td>image widget + canvas overlay</td></tr><tr><td><strong>Inspector</strong></td><td>selected entity's components as typed editors (vec3 fields, color swatch, enum dropdowns, checkboxes)</td><td>property-inspector component</td></tr><tr><td><strong>Console</strong></td><td>engine logs + Python stdout/stderr from play mode</td><td><code>LogBuffer</code></td></tr><tr><td><strong>Files</strong></td><td>project folder as a tree under the Hierarchy (shipped; native, not nexa)</td><td><code>file_browser</code></td></tr></tbody></table></div>
+<p>Layout is a nexa <code>dockspace</code> — dockable, rearrangeable panels come free
+with the toolkit. Data flows from the engine side: hierarchy from
+<code>ctx.scene.names()</code> / <code>EntityView</code> walks, inspector from the component
+read-model (§4.4), selection rays from <code>physics.cast_ray</code>.</p>
+<p>Editor camera: a viewport-only fly/orbit camera (middle-drag orbit,
+scroll zoom, F-focus on selection). It overrides the render camera in edit
+mode; the game's own <code>Camera3D</code> entity takes over in play mode.</p>
+<h3 id="51-as-shipped-native-rust-ui">5.1 As shipped (native Rust UI)<a class="anchor" href="#51-as-shipped-native-rust-ui" aria-label="Link to this section">#</a></h3>
+<p>The panels above were the nexa-era plan. The shipped editor draws its own
+UI (tiny-skia), and the right dock has two tabs:</p>
+<ul><li><p><strong>Inspector</strong>: components, attributes, Add Component.</p></li><li><p><strong>Graphics</strong>: a test bench for the frame look. It has:</p>
+<ul><li><strong>Renderer</strong>: quality preset (an editor preference) and live
+ms / fps / mesh / shadow-map stats.</li><li><strong>Sun</strong>: edits the first Directional Light via azimuth/elevation.</li><li><strong>Environment</strong>: presets, hemisphere ambient, background, exposure,
+tone mapping, fog.</li><li><strong>Camera</strong>: FOV, Look Through, Align to View, preview toggle.</li><li><strong>Test Scenes</strong>: color chart, shadows, fog depth, 400-cube stress.
+Entities are named <code>Test …</code>, and adding or removing them is one undo
+step.</li></ul>
+<p>Each group names the entity it edits and has a Select shortcut. Nothing
+is hidden editor state.</p></li></ul>
+<p><strong>Scene cameras.</strong></p>
+<ul><li>Every <code>Camera3D</code> draws a frustum in the viewport.</li><li>The selected camera gets a live preview inset (an offscreen render
+through the scene camera, bottom-right, 16:9).</li><li>New cameras spawn at the current editor view.</li><li>Moving a camera entity moves its eye and target together.</li><li><strong>Play renders through the first scene camera.</strong> Player input becomes
+relative to it, and scripts drive it with <code>entity.camera</code> /
+<code>ctx.camera</code> (<code>follow</code>, <code>look_at</code>). Without a camera, Play falls back
+to the editor view following the player.</li></ul>
+<p>User docs: <code>docs/wiki/oberon/</code>.</p>
+<h2 id="6-play-mode-semantics-unitys-rules">6. Play mode semantics (Unity's rules)<a class="anchor" href="#6-play-mode-semantics-unitys-rules" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Edit mode:</strong> simulation paused. Edits write through the buffered path
+and are <em>persistent</em> — they're authoring.</li><li><strong>Press ▶:</strong> Oberon serializes the scene to an in-memory RON snapshot,
+then steps <em>with</em> the game's update callback. Viewport switches to the
+game camera. Console starts streaming.</li><li><strong>Press ■:</strong> the in-memory snapshot is restored. <strong>Play-mode changes are
+discarded</strong> — this is Unity's single most important editor rule and we
+adopt it verbatim.</li><li><strong>⏸ / ⏭:</strong> pause keeps the world frozen but rendered; step advances one
+frame of game logic.</li></ul>
+<h2 id="7-editing-interactions">7. Editing interactions<a class="anchor" href="#7-editing-interactions" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Select:</strong> click in viewport → ray from editor camera through the
+clicked pixel → <code>physics.cast_ray</code> → entity id → hierarchy + inspector
+focus. (Ray picking already exists in the physics API.)</li><li><strong>Move:</strong> drag on the viewport → ray-cast onto a drag plane → buffered
+transform write. Rotation/scale via inspector fields first; viewport
+gizmos (translate/rotate/scale handles) come after MVP.</li><li><strong>Spawn:</strong> add menu → entity archetype (empty, cube, light, camera) →
+appears at the drag-plane point in front of the camera.</li><li><strong>Delete:</strong> <code>EntityView.despawn()</code> (already buffered and safe).</li><li><strong>Undo/redo:</strong> command stack over inspector edits + spawn/delete
+(post-MVP; the buffered-write model makes commands trivially
+representable).</li></ul>
+<h2 id="8-code-changes-during-play">8. Code changes during play<a class="anchor" href="#8-code-changes-during-play" aria-label="Link to this section">#</a></h2>
+<p><strong>Revised (2026-11): scripts hot-reload through the Python bridge.</strong></p>
+<p>Behaviour scripts (<code>start/update/stop(entity, ctx)</code> modules attached in
+the Inspector) never run inside the editor process. On Play, Oberon starts
+the configured interpreter (<code>prefs.ron</code> → <code>python</code>, default <code>python3</code>) on
+<code>bridge.py</code>, a pure-stdlib runner compiled into the editor and written to
+<code>&lt;project&gt;/.oberon/</code> together with <code>_automata_script_api.py</code>. That second
+file is <code>automata/script_api.py</code>, the one implementation of <code>entity</code>/<code>ctx</code>,
+which <code>run_scene</code> also uses. <code>bridge.py</code> is only the driver: the protocol,
+the Console redirect and ray casts against the sent collider shapes.
+<code>tests/script_conformance/</code> runs the same scenes through both runners. The
+two sides exchange JSON lines:</p>
+<div class="table"><table><thead><tr><th>Direction</th><th>Message</th><th>Contents</th></tr></thead><tbody><tr><td>→ runner</td><td><code>frame</code></td><td>dt, time, held keys, every entity's transform / character velocity / grounded / attributes / script</td></tr><tr><td>→ runner</td><td><code>stop</code></td><td>call <code>stop</code> hooks and exit</td></tr><tr><td>← runner</td><td><code>ready</code></td><td>Python version</td></tr><tr><td>← runner</td><td><code>log</code></td><td><code>print</code> output (Console)</td></tr><tr><td>← runner</td><td><code>error</code></td><td>summary, script file + line, user-frame traceback</td></tr><tr><td>← runner</td><td><code>reloaded</code></td><td>a script file changed and was re-imported</td></tr><tr><td>← runner</td><td><code>frame</code></td><td>per-entity writes: transform, velocity, attributes</td></tr></tbody></table></div>
+<p>Frames are pipelined, not awaited: the next frame is sent only after the
+previous reply, so a slow script lowers the script tick rate instead of
+freezing the editor (a 2 s stall is reported). The runner checks script
+mtimes every ~0.4 s and re-imports changed files, keeping each entity's
+<code>state</code>; a failing script reports once and pauses until its file changes.
+Stop still restores the pre-play snapshot (§6). <code>automata.run_scene()</code>
+runs the same scripts in the engine.</p>
+<h2 id="9-project--repo-model">9. Project &amp; repo model<a class="anchor" href="#9-project--repo-model" aria-label="Link to this section">#</a></h2>
+<p>A game project is a plain folder:</p>
+<div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>mygame/
+├── main.py            # the Game subclass — entry point
+├── scenes/
+│   └── level1.ron     # authored in Oberon, diffed in git
+└── assets/            # meshes/textures/audio (when those land)</code></pre></div>
+<p>Oberon opens a folder, lists its scenes, and knows how to run <code>main.py</code>
+in play mode. No project file format beyond the folder — consistent with
+the code-first philosophy.</p>
+<p><strong>Repo home:</strong> recommendation — separate repository (<code>x017/oberon</code>), same
+relationship nexa has: Oberon depends on the published <code>automata_engine</code>
+wheel. The engine repo gains only the §4 hooks, all of which are also
+game-useful API. <em>(User's call — a <code>tools/oberon/</code> directory in this repo
+is the alternative.)</em></p>
+<h2 id="10-milestones">10. Milestones<a class="anchor" href="#10-milestones" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>#</th><th>Deliverable</th><th>Where</th></tr></thead><tbody><tr><td>M0 ✅</td><td>RON scene save/load: serde on components, <code>Scene.save/load/to_ron/from_ron</code>, <code>Game.save_scene/scene_to_ron</code> (live world), version field, tests, <a href="../guides/scene-files.html">wiki chapter</a></td><td>engine</td></tr><tr><td>M1</td><td><code>game.step(dt)</code> + <code>game.render_frame(size)</code> (offscreen RGBA readback to Python)</td><td>engine</td></tr><tr><td>M2</td><td>Component read-model + writable mesh color / light / collider params</td><td>engine</td></tr><tr><td>M3</td><td>Oberon skeleton: nexa window, dark-white theme, live viewport, hierarchy, transform inspector. (Viewport path already proven: ~970 fps headless at 720p.) Bonus: <code>render_to_png</code> gives Oberon deterministic CI tests from day one.</td><td>oberon</td></tr><tr><td>M4</td><td>Click-select via ray, drag-move, spawn/delete</td><td>oberon</td></tr><tr><td>M5</td><td>Play/pause/step with snapshot-restore, console panel</td><td>oberon</td></tr><tr><td>M6</td><td>Save/load scenes from the UI; project folder model</td><td>oberon</td></tr><tr><td>later</td><td>Gizmos, undo/redo, multi-select, asset browser, prefabs from <code>Entity</code> subclasses, subprocess hardening</td><td>oberon</td></tr></tbody></table></div>
+<p>M0–M2 are engine work on this repo (games benefit independently — save
+files, photo mode, debug cameras). M3+ live in the Oberon app.</p>
+<h2 id="11-risks--open-questions">11. Risks &amp; open questions<a class="anchor" href="#11-risks--open-questions" aria-label="Link to this section">#</a></h2>
+<ul><li><del>nexa image-widget throughput</del> — <strong>measured and resolved
+(2026-11-19).</strong> <code>image_create(w, h, rgba_bytes)</code> takes automata's exact
+readback format; <code>SoftwareRenderer(threads=4)</code> + manual <code>ctx.frame()</code>
+ran <strong>~970 fps</strong> at 1280×720 with the worst-case path (destroy+create
+the full texture every frame), pixel-verified via <code>render_to_png</code>.
+Gotcha recorded for M3: <code>ui.run(headless=True)</code> <em>paces</em> frames (idle
+semantics) — throughput benchmarks must drive <code>ctx.frame()</code> manually.
+Escape hatch, if ever needed: nexa's <code>CustomRenderer</code>/<code>DrawData</code> lets an
+external wgpu renderer composite the UI (zero-copy direction). The
+separate-window fallback remains available but is not needed.</li><li><strong>GIL contention</strong> between nexa's loop and a stepped frame. MVP runs
+everything on the UI thread (a small scene steps in well under a frame
+budget); a worker-thread mode is the upgrade path.</li><li><strong>Editor camera vs game camera</strong> confusion. Rule: edit mode always uses
+the editor camera; play mode always starts from the game's camera
+entity. The viewport header shows which is active.</li><li><strong>RON hand-editing errors.</strong> Parse errors must report file/line
+precisely (ron does this); Oberon surfaces them in the console panel
+instead of failing to open the scene.</li></ul>
+<h2 id="12-what-oberon-deliberately-wont-do">12. What Oberon deliberately won't do<a class="anchor" href="#12-what-oberon-deliberately-wont-do" aria-label="Link to this section">#</a></h2>
+<ul><li>No code editing (VS Code exists).</li><li>No in-game overlay mode.</li><li>No visual scripting / node graphs (far future, separate decision).</li><li>No asset <em>creation</em> (meshes/textures come from Blender etc.; Oberon
+arranges, it doesn't model).</li></ul>
+<h2 id="13-nexa-integration-notes-verified-against-nexa-ui-140">13. nexa integration notes (verified against nexa-ui 1.4.0)<a class="anchor" href="#13-nexa-integration-notes-verified-against-nexa-ui-140" aria-label="Link to this section">#</a></h2>
+<p>Hard-won facts from the feasibility pass — read before writing M3:</p>
+<ul><li><strong>Drive frames manually.</strong> <code>ui.run(headless=True)</code> paces frames for idle
+CPU savings; a live viewport needs the manual loop:
+<code>ui.UI(width, height, renderer=...)</code>, <code>with ctx.frame(): ...</code> per tick.
+The Oberon tick order is: pump nexa input → <code>game.step(dt)</code> (edit mode:
+paused) → <code>game.render_frame(size)</code> → <code>ctx.image_destroy/create/image</code>.</li><li><strong>Image path:</strong> <code>ctx.image_create(w, h, rgba_bytes)</code> →
+<code>ctx.image(tex, width=, height=)</code>; destroy the old texture after
+creating the new one. ~970 fps at 720p headless — not a bottleneck.</li><li><strong>Widget map:</strong> layout = <code>dockspace</code>; hierarchy = <code>tree_table</code>;
+inspector = <code>inspector</code> + <code>inspector_group</code>; console = <code>LogBuffer</code>;
+project panel = <code>file_browser</code>; gizmo/overlay hit areas = <code>ctx.canvas</code>
+with its <code>paint(ui, rect)</code> callback.</li><li><strong>Theming (dark white sci-fi):</strong> <code>ThemeMode.DARK</code>, near-black surfaces,
+off-white foreground (logo palette: paper white on true black), one
+<code>Accent</code> used sparingly; OKLCH token overrides for the exact grays.</li><li><strong>Testing:</strong> headless <code>SoftwareRenderer</code> + <code>ctx.render_to_png(path)</code>
+gives deterministic PNG snapshot tests in CI from day one.</li><li><strong>Idle cost:</strong> <code>ctx.request_redraw()</code> only when dirty — the editor
+sleeps at 0% CPU when nothing moves.</li></ul>
+    </article>
+    <footer class="pager"><a class="prev" href="api.html"><small>Previous</small>API design</a></footer>
+    <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/design/oberon.md" rel="noopener">Edit this page on GitHub</a></p>
+  </main>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#1-what-oberon-is--and-is-not">1. What Oberon is — and is not</a></li><li class="l2"><a href="#2-brand">2. Brand</a></li><li class="l2"><a href="#3-architecture">3. Architecture</a></li><li class="l3"><a href="#31-process-model-in-process-embedding">3.1 Process model: in-process embedding</a></li><li class="l3"><a href="#32-why-not-an-overlay--why-not-a-code-editor">3.2 Why not an overlay / why not a code editor</a></li><li class="l2"><a href="#4-engine-work-required-the-embedding-hooks">4. Engine work required (the embedding hooks)</a></li><li class="l3"><a href="#41-scene-serialization--ron-decided-shipped">4.1 Scene serialization — RON (decided, shipped)</a></li><li class="l3"><a href="#42-manual-stepping">4.2 Manual stepping</a></li><li class="l3"><a href="#43-offscreen-frame-readback">4.3 Offscreen frame readback</a></li><li class="l3"><a href="#44-full-component-read-model--writable-visuals">4.4 Full component read-model + writable visuals</a></li><li class="l2"><a href="#5-panels">5. Panels</a></li><li class="l3"><a href="#51-as-shipped-native-rust-ui">5.1 As shipped (native Rust UI)</a></li><li class="l2"><a href="#6-play-mode-semantics-unitys-rules">6. Play mode semantics (Unity's rules)</a></li><li class="l2"><a href="#7-editing-interactions">7. Editing interactions</a></li><li class="l2"><a href="#8-code-changes-during-play">8. Code changes during play</a></li><li class="l2"><a href="#9-project--repo-model">9. Project &amp; repo model</a></li><li class="l2"><a href="#10-milestones">10. Milestones</a></li><li class="l2"><a href="#11-risks--open-questions">11. Risks &amp; open questions</a></li><li class="l2"><a href="#12-what-oberon-deliberately-wont-do">12. What Oberon deliberately won't do</a></li><li class="l2"><a href="#13-nexa-integration-notes-verified-against-nexa-ui-140">13. nexa integration notes (verified against nexa-ui 1.4.0)</a></li></ul></nav></aside>
+</div>
+</body>
+</html>

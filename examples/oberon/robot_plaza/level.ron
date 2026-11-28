@@ -1,0 +1,1203 @@
+(
+    version: 1,
+    entities: [
+        (
+            name: Some("Sun"),
+            directional_light: Some((
+                direction: (-0.45, -0.75, -0.5),
+                color: (1.0, 0.95, 0.86),
+                ambient: 0.35,
+                shadows: true,
+            )),
+        ),
+        (
+            name: Some("Environment"),
+            environment: Some((
+                sky_color: (0.75, 0.85, 1.0),
+                ground_color: (0.45, 0.4, 0.35),
+                background: (0.55, 0.68, 0.85),
+                exposure: 1.1,
+                tonemapping: Aces,
+                fog: true,
+                fog_color: (0.55, 0.68, 0.85),
+                fog_density: 0.012,
+                fog_start: 18.0,
+                sky: true,
+                zenith_color: (0.16, 0.34, 0.78),
+                sun_size: 2.0,
+                sun_glow: 1.0,
+                clouds: 0.35,
+                lens_flare: 1.0,
+                ambient_occlusion: 1.0,
+                fog_height: 0.0,
+                fog_falloff: 0.0,
+                fog_sun: 0.0,
+                god_rays: 0.0,
+                depth_of_field: 0.0,
+                focus_distance: 0.0,
+                focus_range: 1.0,
+                toon_bands: 0,
+                toon_softness: 0.15,
+                shadow_tint: (1.0, 1.0, 1.0),
+                rim_light: 0.0,
+                painted_sky: false,
+                outline: 0.0,
+                outline_color: (0.05, 0.04, 0.06),
+                pixelate: 0.0,
+                palette: 0,
+                post: (
+                    bloom: 1.0,
+                    contrast: 1.0,
+                    saturation: 1.0,
+                    temperature: 0.0,
+                    tint: 0.0,
+                    lift: (0.0, 0.0, 0.0),
+                    gamma: (1.0, 1.0, 1.0),
+                    gain: (1.0, 1.0, 1.0),
+                    vignette: 0.0,
+                    grain: 0.0,
+                    chromatic_aberration: 0.0,
+                ),
+                wind: 0.0,
+                wind_direction: 0.0,
+            )),
+        ),
+        (
+            name: Some("Grass"),
+            transform: Some((
+                position: (0.0, -0.15, -2.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (40.0, 0.3, 40.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.17, 0.32, 0.12, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (40.0, 0.3, 40.0),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Plaza"),
+            transform: Some((
+                position: (0.0, -0.04, -2.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (16.0, 0.1, 16.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.42, 0.38, 0.34, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+        ),
+        (
+            name: Some("Fountain Basin"),
+            transform: Some((
+                position: (0.0, 0.3, -2.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (3.2, 0.6, 3.2),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.26, 0.24, 0.23, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (3.2, 0.6, 3.2),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Fountain Water"),
+            transform: Some((
+                position: (0.0, 0.62, -2.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (2.8, 0.06, 2.8),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.35, 0.6, 0.85, 1.0),
+                surface: (
+                    roughness: Some(0.1),
+                ),
+            )),
+        ),
+        (
+            name: Some("Fountain Pillar"),
+            transform: Some((
+                position: (0.0, 1.1, -2.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.5, 1.4, 0.5),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.42, 0.38, 0.34, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (0.5, 1.4, 0.5),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Bench 1"),
+            transform: Some((
+                position: (5.5, 0.22, -6.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (2.2, 0.45, 0.6),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.36, 0.2, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (2.2, 0.45, 0.6),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Bench 2"),
+            transform: Some((
+                position: (-5.5, 0.22, 2.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.6, 0.45, 2.2),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.36, 0.2, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (0.6, 0.45, 2.2),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Bench 3"),
+            transform: Some((
+                position: (-5.5, 0.22, -6.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.6, 0.45, 2.2),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.36, 0.2, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (0.6, 0.45, 2.2),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Planter 1"),
+            transform: Some((
+                position: (7.0, 0.35, 5.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.4, 0.7, 1.4),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.26, 0.24, 0.23, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (1.4, 0.7, 1.4),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Shrub 1"),
+            transform: Some((
+                position: (7.0, 1.4, 5.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.8, 1.5, 1.8),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.5,
+                ),
+                color: (0.12, 0.3, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Planter 2"),
+            transform: Some((
+                position: (-7.0, 0.35, 5.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.4, 0.7, 1.4),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.26, 0.24, 0.23, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (1.4, 0.7, 1.4),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Shrub 2"),
+            transform: Some((
+                position: (-7.0, 1.4, 5.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.8, 1.5, 1.8),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.5,
+                ),
+                color: (0.12, 0.3, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Planter 3"),
+            transform: Some((
+                position: (7.0, 0.35, -9.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.4, 0.7, 1.4),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.26, 0.24, 0.23, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (1.4, 0.7, 1.4),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Shrub 3"),
+            transform: Some((
+                position: (7.0, 1.4, -9.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.8, 1.5, 1.8),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.5,
+                ),
+                color: (0.12, 0.3, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Planter 4"),
+            transform: Some((
+                position: (-7.0, 0.35, -9.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.4, 0.7, 1.4),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.26, 0.24, 0.23, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (1.4, 0.7, 1.4),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Shrub 4"),
+            transform: Some((
+                position: (-7.0, 1.4, -9.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.8, 1.5, 1.8),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.5,
+                ),
+                color: (0.12, 0.3, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Trunk 1"),
+            transform: Some((
+                position: (-11.0, 1.2, -4.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.4, 2.4, 0.4),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.36, 0.2, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (0.4, 2.4, 0.4),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Canopy 1"),
+            transform: Some((
+                position: (-11.0, 3.3, -4.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (2.8, 2.4, 2.8),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.5,
+                ),
+                color: (0.12, 0.3, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Trunk 2"),
+            transform: Some((
+                position: (11.0, 1.2, -1.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.4, 2.4, 0.4),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.36, 0.2, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (0.4, 2.4, 0.4),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Canopy 2"),
+            transform: Some((
+                position: (11.0, 3.3, -1.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (2.8, 2.4, 2.8),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.5,
+                ),
+                color: (0.12, 0.3, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Trunk 3"),
+            transform: Some((
+                position: (-9.0, 1.2, -13.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.4, 2.4, 0.4),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.36, 0.2, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (0.4, 2.4, 0.4),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Canopy 3"),
+            transform: Some((
+                position: (-9.0, 3.3, -13.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (2.8, 2.4, 2.8),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.5,
+                ),
+                color: (0.12, 0.3, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Trunk 4"),
+            transform: Some((
+                position: (10.0, 1.2, -13.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.4, 2.4, 0.4),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.36, 0.2, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (0.4, 2.4, 0.4),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Canopy 4"),
+            transform: Some((
+                position: (10.0, 3.3, -13.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (2.8, 2.4, 2.8),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.5,
+                ),
+                color: (0.12, 0.3, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Trunk 5"),
+            transform: Some((
+                position: (-12.0, 1.2, 6.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.4, 2.4, 0.4),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.36, 0.2, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (0.4, 2.4, 0.4),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Canopy 5"),
+            transform: Some((
+                position: (-12.0, 3.3, 6.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (2.8, 2.4, 2.8),
+            )),
+            mesh_visual: Some((
+                primitive: Sphere(
+                    size: 0.5,
+                ),
+                color: (0.12, 0.3, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.9),
+                ),
+            )),
+        ),
+        (
+            name: Some("Step 1"),
+            transform: Some((
+                position: (5.25, 0.09, 2.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (2.0, 0.18, 2.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.42, 0.38, 0.34, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (2.0, 0.18, 2.0),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Step 2"),
+            transform: Some((
+                position: (5.65, 0.18, 2.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.2, 0.36, 2.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.42, 0.38, 0.34, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (1.2, 0.36, 2.0),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Step 3"),
+            transform: Some((
+                position: (6.05, 0.27, 2.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.4, 0.54, 2.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.42, 0.38, 0.34, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (0.4, 0.54, 2.0),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Stage"),
+            transform: Some((
+                position: (7.0, 0.27, 2.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.6, 0.54, 2.0),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.26, 0.24, 0.23, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (1.6, 0.54, 2.0),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Ramp"),
+            transform: Some((
+                position: (7.0, 0.19167155, 4.883732),
+                rotation_euler: (0.20478095, 0.0, 0.0),
+                scale: (1.6, 0.16, 2.6954849),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.42, 0.38, 0.34, 1.0),
+                surface: (
+                    roughness: Some(0.85),
+                ),
+            )),
+            rigid_body: Some((
+                body_type: Static,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Cuboid(
+                    extents: (1.6, 0.16, 2.6954849),
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+        ),
+        (
+            name: Some("Robot"),
+            transform: Some((
+                position: (0.0, 0.89, 3.0),
+                rotation_euler: (-3.1415927, -0.00000008742278, -3.1415927),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/robot.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            animation: Some((
+                clip: "Idle",
+                speed: 1.0,
+                looping: true,
+                play_on_start: true,
+                graph: "anims/robot.anim.ron",
+                foot_ik: true,
+            )),
+            rigid_body: Some((
+                body_type: KinematicPosition,
+                gravity_scale: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                enabled: true,
+            )),
+            collider_3d: Some((
+                shape: Capsule(
+                    half_height: 0.55,
+                    radius: 0.32,
+                ),
+                density: 1.0,
+                friction: 0.5,
+                restitution: 0.0,
+                sensor: false,
+                enabled: true,
+            )),
+            character_controller: Some((
+                mode: Normal,
+                max_slope_climb_angle: 0.7853982,
+                min_slope_slide_angle: 0.5235988,
+                autostep_height: None,
+                snap_to_ground: Some(0.3),
+                offset: 0.05,
+                slide: true,
+            )),
+            character_velocity: Some((
+                velocity: (0.0, 0.0, 0.0),
+            )),
+            script: Some((
+                path: "scripts/player.py",
+            )),
+        ),
+        (
+            name: Some("Hat Brim"),
+            transform: Some((
+                position: (0.0, 0.56, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.66, 0.035, 0.66),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.13, 0.12, 0.16, 1.0),
+                surface: (
+                    roughness: Some(0.7),
+                ),
+            )),
+            attach: Some((
+                to: "Robot",
+                bone: "Head",
+            )),
+        ),
+        (
+            name: Some("Hat Crown"),
+            transform: Some((
+                position: (0.0, 0.73, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.42, 0.32, 0.42),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.13, 0.12, 0.16, 1.0),
+                surface: (
+                    roughness: Some(0.7),
+                ),
+            )),
+            attach: Some((
+                to: "Robot",
+                bone: "Head",
+            )),
+        ),
+        (
+            name: Some("Hat Band"),
+            transform: Some((
+                position: (0.0, 0.62, 0.0),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (0.43, 0.07, 0.43),
+            )),
+            mesh_visual: Some((
+                primitive: Cube(
+                    size: 1.0,
+                ),
+                color: (0.75, 0.12, 0.1, 1.0),
+                surface: (
+                    roughness: Some(0.7),
+                ),
+            )),
+            attach: Some((
+                to: "Robot",
+                bone: "Head",
+            )),
+        ),
+        (
+            name: Some("Greeter"),
+            transform: Some((
+                position: (3.0, 0.89, -2.0),
+                rotation_euler: (0.0, -1.0471976, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/robot.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            animation: Some((
+                clip: "Idle",
+                speed: 1.0,
+                looping: true,
+                play_on_start: true,
+            )),
+            script: Some((
+                path: "scripts/greeter.py",
+            )),
+        ),
+        (
+            name: Some("Dancer"),
+            transform: Some((
+                position: (-4.5, 0.89, -5.0),
+                rotation_euler: (-0.0, 0.5235988, -0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/robot.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            animation: Some((
+                clip: "Dance",
+                speed: 1.0,
+                looping: true,
+                play_on_start: true,
+            )),
+        ),
+        (
+            name: Some("Sitter"),
+            transform: Some((
+                position: (5.2, 0.89, -6.8),
+                rotation_euler: (0.0, -0.5235988, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/robot.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            animation: Some((
+                clip: "Sitting",
+                speed: 1.0,
+                looping: false,
+                play_on_start: true,
+            )),
+        ),
+        (
+            name: Some("Slowpoke"),
+            transform: Some((
+                position: (-3.5, 0.89, 1.5),
+                rotation_euler: (-3.1415927, 1.2217305, -3.1415927),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/robot.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            animation: Some((
+                clip: "Walking",
+                speed: 0.35,
+                looping: true,
+                play_on_start: true,
+            )),
+        ),
+        (
+            name: Some("Stepper"),
+            transform: Some((
+                position: (4.2, 0.89, 2.6),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/robot.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            animation: Some((
+                clip: "Idle",
+                speed: 1.0,
+                looping: true,
+                play_on_start: true,
+                foot_ik: true,
+            )),
+        ),
+        (
+            name: Some("Wobbly"),
+            transform: Some((
+                position: (2.4, 0.89, 0.6),
+                rotation_euler: (3.1415927, -1.0471975, 3.1415927),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            mesh_visual: Some((
+                primitive: Model(
+                    path: "models/robot.glb",
+                ),
+                color: (1.0, 1.0, 1.0, 1.0),
+            )),
+            animation: Some((
+                clip: "Idle",
+                speed: 1.0,
+                looping: true,
+                play_on_start: true,
+            )),
+            ragdoll: Some((
+                active: false,
+                mass: 70.0,
+                stiffness: 0.0,
+                blend_time: 0.6,
+            )),
+            script: Some((
+                path: "scripts/wobbly.py",
+            )),
+        ),
+        (
+            name: Some("Main Camera"),
+            transform: Some((
+                position: (0.0, 3.5, 9.5),
+                rotation_euler: (0.0, 0.0, 0.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            camera_3d: Some((
+                position: (0.0, 3.5, 9.5),
+                target: (0.0, 1.0, 0.0),
+                up: (0.0, 1.0, 0.0),
+                fov_y_degrees: 60.0,
+                near: 0.1,
+                far: 1000.0,
+            )),
+            script: Some((
+                path: "scripts/follow_camera.py",
+            )),
+        ),
+    ],
+)

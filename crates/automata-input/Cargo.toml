@@ -1,0 +1,15 @@
+[package]
+name = "automata-input"
+description = "AUTOMATA input system: input event collection and keyboard/mouse state."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
+gilrs.workspace = true
