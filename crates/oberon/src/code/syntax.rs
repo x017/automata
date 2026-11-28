@@ -1,5 +1,6 @@
-//! Python syntax highlighting: a small line tokenizer with the cross-line
-//! state needed for triple-quoted strings.
+//! Syntax highlighting: small line tokenizers for Python (with the
+//! cross-line state needed for triple-quoted strings) and WGSL shaders
+//! (block comments).
 
 /// A token's highlight class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +41,8 @@ pub enum LineState {
     TripleDouble,
     /// Inside a `'''` string.
     TripleSingle,
+    /// Inside a WGSL `/* … */` comment.
+    BlockComment,
 }
 
 /// Python keywords.
@@ -278,6 +281,261 @@ fn find_unescaped(line: &str, from: usize, quote: &str) -> Option<usize> {
     None
 }
 
+/// WGSL keywords.
+pub const WGSL_KEYWORDS: &[&str] = &[
+    "fn",
+    "let",
+    "var",
+    "const",
+    "struct",
+    "return",
+    "if",
+    "else",
+    "for",
+    "while",
+    "loop",
+    "break",
+    "continue",
+    "continuing",
+    "switch",
+    "case",
+    "default",
+    "discard",
+    "alias",
+    "override",
+    "enable",
+    "requires",
+    "diagnostic",
+    "const_assert",
+];
+
+/// WGSL types.
+pub const WGSL_TYPES: &[&str] = &[
+    "bool",
+    "f32",
+    "f16",
+    "i32",
+    "u32",
+    "vec2",
+    "vec3",
+    "vec4",
+    "vec2f",
+    "vec3f",
+    "vec4f",
+    "vec2i",
+    "vec3i",
+    "vec4i",
+    "vec2u",
+    "vec3u",
+    "vec4u",
+    "mat2x2",
+    "mat3x3",
+    "mat4x4",
+    "mat2x2f",
+    "mat3x3f",
+    "mat4x4f",
+    "array",
+    "ptr",
+    "atomic",
+    "sampler",
+    "texture_2d",
+    "MaterialInput",
+    "MaterialOutput",
+    "PostInput",
+];
+
+/// WGSL builtin functions, plus the helpers Automata gives shaders.
+pub const WGSL_BUILTINS: &[&str] = &[
+    "abs",
+    "acos",
+    "asin",
+    "atan",
+    "atan2",
+    "ceil",
+    "clamp",
+    "cos",
+    "cross",
+    "degrees",
+    "distance",
+    "dot",
+    "dpdx",
+    "dpdy",
+    "exp",
+    "exp2",
+    "faceForward",
+    "floor",
+    "fma",
+    "fract",
+    "fwidth",
+    "inverseSqrt",
+    "length",
+    "log",
+    "log2",
+    "max",
+    "min",
+    "mix",
+    "normalize",
+    "pow",
+    "radians",
+    "reflect",
+    "refract",
+    "round",
+    "saturate",
+    "select",
+    "sign",
+    "sin",
+    "smoothstep",
+    "sqrt",
+    "step",
+    "tan",
+    "tanh",
+    "trunc",
+    "any",
+    "all",
+    "textureSample",
+    "material_defaults",
+    "image",
+    "image_pixel",
+    "noise3",
+    "hash1",
+    "base_map",
+    "srgb_to_linear",
+    "linear_to_srgb",
+];
+
+/// Whether `path` is a WGSL shader (highlighted as one).
+#[must_use]
+pub fn is_wgsl(path: &std::path::Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("wgsl"))
+}
+
+/// Highlights one line of the file at `path` (WGSL or Python).
+#[must_use]
+pub fn highlight_for(
+    path: &std::path::Path,
+    line: &str,
+    state: LineState,
+) -> (Vec<(std::ops::Range<usize>, Tok)>, LineState) {
+    if is_wgsl(path) {
+        highlight_wgsl(line, state)
+    } else {
+        highlight(line, state)
+    }
+}
+
+/// Highlights one line of WGSL, like [`highlight`].
+#[must_use]
+pub fn highlight_wgsl(
+    line: &str,
+    state: LineState,
+) -> (Vec<(std::ops::Range<usize>, Tok)>, LineState) {
+    let b = line.as_bytes();
+    let mut spans = Vec::new();
+    let mut i = 0;
+    if state == LineState::BlockComment {
+        match line.find("*/") {
+            Some(end) => {
+                spans.push((0..end + 2, Tok::Comment));
+                i = end + 2;
+            }
+            None => {
+                spans.push((0..line.len(), Tok::Comment));
+                return (spans, LineState::BlockComment);
+            }
+        }
+    }
+    let mut after: Option<Tok> = None;
+    while i < b.len() {
+        let c = b[i];
+        let start = i;
+        if line[i..].starts_with("//") {
+            spans.push((i..b.len(), Tok::Comment));
+            break;
+        }
+        if line[i..].starts_with("/*") {
+            match line[i + 2..].find("*/") {
+                Some(end) => {
+                    i += 2 + end + 2;
+                    spans.push((start..i, Tok::Comment));
+                    continue;
+                }
+                None => {
+                    spans.push((start..b.len(), Tok::Comment));
+                    return (spans, LineState::BlockComment);
+                }
+            }
+        }
+        if c.is_ascii_whitespace() {
+            while i < b.len() && b[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            spans.push((start..i, Tok::Text));
+            continue;
+        }
+        if c == b'@' {
+            i += 1;
+            while i < b.len() && is_ident_byte(b[i]) {
+                i += 1;
+            }
+            spans.push((start..i, Tok::Decorator));
+            continue;
+        }
+        if c.is_ascii_digit() || (c == b'.' && b.get(i + 1).is_some_and(u8::is_ascii_digit)) {
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'.') {
+                if (b[i] == b'e' || b[i] == b'E') && matches!(b.get(i + 1), Some(b'+' | b'-')) {
+                    i += 1;
+                }
+                i += 1;
+            }
+            spans.push((start..i, Tok::Number));
+            after = None;
+            continue;
+        }
+        if is_ident_byte(c) {
+            while i < b.len() && is_ident_byte(b[i]) {
+                i += 1;
+            }
+            let word = &line[start..i];
+            let member = line[..start].trim_end().ends_with('.');
+            let tok = if let Some(t) = after.take() {
+                t
+            } else if member {
+                Tok::Text
+            } else if WGSL_KEYWORDS.contains(&word) {
+                if word == "fn" {
+                    after = Some(Tok::Function);
+                } else if word == "struct" {
+                    after = Some(Tok::Class);
+                }
+                Tok::Keyword
+            } else if matches!(word, "true" | "false") {
+                Tok::Constant
+            } else if word == "in" {
+                Tok::SelfKw
+            } else if WGSL_TYPES.contains(&word) {
+                Tok::Class
+            } else if WGSL_BUILTINS.contains(&word) {
+                Tok::Builtin
+            } else {
+                Tok::Text
+            };
+            spans.push((start..i, tok));
+            continue;
+        }
+        let len = line[i..].chars().next().map_or(1, char::len_utf8);
+        i += len;
+        let tok = if c.is_ascii_punctuation() {
+            Tok::Op
+        } else {
+            Tok::Text
+        };
+        spans.push((start..i, tok));
+        after = None;
+    }
+    (spans, LineState::Code)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,5 +608,37 @@ mod tests {
         assert!(spans.iter().any(|(_, t)| *t == Tok::Number));
         let (_, state) = highlight("'''one line'''", LineState::Code);
         assert_eq!(state, LineState::Code);
+    }
+
+    #[test]
+    fn classifies_wgsl_tokens_and_block_comments() {
+        let line =
+            "fn post(in: PostInput) -> vec3<f32> { return mix(in.color, vec3(0.2), 0.5); } // x";
+        let got: Vec<(String, Tok)> = highlight_wgsl(line, LineState::Code)
+            .0
+            .into_iter()
+            .map(|(r, t)| (line[r].to_string(), t))
+            .filter(|(s, _)| !s.trim().is_empty())
+            .collect();
+        assert_eq!(got[0], ("fn".into(), Tok::Keyword));
+        assert_eq!(got[1], ("post".into(), Tok::Function));
+        assert!(got.contains(&("PostInput".into(), Tok::Class)));
+        assert!(got.contains(&("mix".into(), Tok::Builtin)));
+        assert!(got.contains(&("0.5".into(), Tok::Number)));
+        assert!(
+            got.contains(&("color".into(), Tok::Text)),
+            "members aren't types"
+        );
+        assert_eq!(got.last().unwrap(), &("// x".into(), Tok::Comment));
+        let (spans, state) = highlight_wgsl("let a = 1; /* start", LineState::Code);
+        assert_eq!(state, LineState::BlockComment);
+        assert_eq!(spans.last().unwrap().1, Tok::Comment);
+        let (spans, state) = highlight_wgsl("still */ let b", LineState::BlockComment);
+        assert_eq!(state, LineState::Code);
+        assert_eq!(spans[0], (0..8, Tok::Comment));
+        assert!(is_wgsl(std::path::Path::new("a/crt.WGSL")));
+        // Python files keep the Python tokenizer.
+        let py = highlight_for(std::path::Path::new("a.py"), "# hi", LineState::Code).0;
+        assert_eq!(py[0].1, Tok::Comment);
     }
 }

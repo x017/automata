@@ -40,6 +40,18 @@ impl Material {
     pub fn shares_with(&self, other: &Material) -> bool {
         Arc::ptr_eq(&self.inner, &other.inner)
     }
+
+    /// The custom material shader it's drawn with, if any.
+    #[must_use]
+    pub fn shader(&self) -> Option<&crate::Shader> {
+        self.inner.shader.as_ref()
+    }
+
+    /// Its custom shader's parameters (`p0`, `p1`).
+    #[must_use]
+    pub fn shader_params(&self) -> [f32; crate::SHADER_PARAMS] {
+        self.inner.shader_params
+    }
 }
 
 /// The surface parameters of a [`Material`], in glTF's metallic-roughness
@@ -135,6 +147,8 @@ pub(crate) struct MaterialUniform {
     pub params: [f32; 4],
     /// The texture coordinates' scale (xy) and offset (zw).
     pub uv: [f32; 4],
+    /// A custom material shader's `shader_params` (`p0`, `p1`).
+    pub custom: [[f32; 4]; 2],
 }
 
 /// `MaterialUniform::params.w` bits (mesh.wgsl's `MAP_*`).
@@ -185,6 +199,7 @@ impl MaterialUniform {
                 },
             ],
             uv: [p.uv_scale[0], p.uv_scale[1], p.uv_offset[0], p.uv_offset[1]],
+            custom: [[0.0; 4]; 2],
         }
     }
 }
@@ -201,13 +216,22 @@ pub(crate) struct MaterialInner {
     /// A hash of the uniform and the textures: materials with equal keys
     /// shade identically, so their draws batch (see `batch.rs`).
     pub key: u64,
+    /// The custom material shader it's drawn with, if any.
+    pub shader: Option<crate::Shader>,
+    /// Its `shader_params`.
+    pub shader_params: [f32; crate::SHADER_PARAMS],
 }
 
 /// [`MaterialInner::key`]: the uniform's bytes and the textures' identities.
-pub(crate) fn content_key(uniform: &MaterialUniform, textures: [&Texture; 4]) -> u64 {
+pub(crate) fn content_key(
+    uniform: &MaterialUniform,
+    textures: [&Texture; 4],
+    shader: Option<&crate::Shader>,
+) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     bytemuck::bytes_of(uniform).hash(&mut h);
+    shader.map(crate::Shader::id).hash(&mut h);
     for t in textures {
         std::ptr::hash(std::sync::Arc::as_ptr(&t.inner), &mut h);
     }
@@ -220,7 +244,7 @@ mod tests {
 
     #[test]
     fn the_uniform_matches_the_shader_layout_and_clamps() {
-        assert_eq!(std::mem::size_of::<MaterialUniform>(), 64);
+        assert_eq!(std::mem::size_of::<MaterialUniform>(), 96);
         let u = MaterialUniform::new(
             &MaterialParams {
                 roughness: 0.0,

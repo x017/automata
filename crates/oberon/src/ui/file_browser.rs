@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::dialogs::Dialog;
-use super::material_editor::MATERIALS_DIR;
-use super::menus::DialogKind;
+use super::material_editor::{MATERIALS_DIR, SHADERS_DIR};
+use super::menus::{DialogKind, ShaderTarget};
 use super::project_panel::{asset_kind, draw_tree_icon, unique_child, AssetKind};
 use super::settings::{SettingText, SettingsPage};
 use super::{ButtonStyle, CursorHint, EditTarget, Intent, Rect, TextEdit, Ui};
@@ -141,6 +141,9 @@ impl FileDialog {
             DialogKind::NewUiScreen => "New UI Screen",
             DialogKind::NewMaterial => "New Material",
             DialogKind::ChooseMaterial(_) => "Choose Material",
+            DialogKind::NewShader(automata_renderer::ShaderKind::Material) => "New Material Shader",
+            DialogKind::NewShader(automata_renderer::ShaderKind::Post) => "New Post Shader",
+            DialogKind::ChooseShader(_) => "Shader — pick one or name a new one",
             DialogKind::ChooseAnimGraph(_) => "Animation Graph — pick one or name a new one",
             DialogKind::ChooseMaterialMap(_) => "Choose Texture",
             DialogKind::AttachScript(_) => "Attach Script — pick one or name a new .py",
@@ -170,6 +173,7 @@ impl FileDialog {
             DialogKind::NewUiScreen => "ui.ron",
             DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => "mat.ron",
             DialogKind::ChooseAnimGraph(_) => "anim.ron",
+            DialogKind::NewShader(_) | DialogKind::ChooseShader(_) => "wgsl",
             DialogKind::ChooseMaterialMap(_) | DialogKind::ImportHeightmap(_) => "png",
             DialogKind::BuildOutput | DialogKind::BuildSteamSdk | DialogKind::PythonInterpreter => {
                 ""
@@ -188,6 +192,7 @@ impl FileDialog {
             DialogKind::NewUiScreen => ".ui.ron",
             DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => ".mat.ron",
             DialogKind::ChooseAnimGraph(_) => ".anim.ron",
+            DialogKind::NewShader(_) | DialogKind::ChooseShader(_) => ".wgsl",
             DialogKind::ChooseMaterialMap(_) | DialogKind::ImportHeightmap(_) => ".png .jpg",
             DialogKind::SavePrefab(_) | DialogKind::InstantiatePrefab => ".prefab",
             DialogKind::OpenScript | DialogKind::NewScript | DialogKind::AttachScript(_) => ".py",
@@ -221,6 +226,9 @@ impl FileDialog {
             DialogKind::ChooseAnimGraph(_) => {
                 automata_assets::anim_graph::is_anim_graph_path(Path::new(name))
             }
+            DialogKind::NewShader(_) | DialogKind::ChooseShader(_) => {
+                automata_assets::shader::is_shader_path(Path::new(name))
+            }
             _ => {
                 let lower = name.to_ascii_lowercase();
                 Path::new(name)
@@ -243,6 +251,7 @@ impl FileDialog {
                 | DialogKind::NewScript
                 | DialogKind::NewUiScreen
                 | DialogKind::NewMaterial
+                | DialogKind::NewShader(_)
         )
     }
 
@@ -281,8 +290,12 @@ impl FileDialog {
         match self.kind {
             DialogKind::OpenScene | DialogKind::OpenScript => "Open",
             DialogKind::InstantiatePrefab => "Instantiate",
-            DialogKind::NewScript | DialogKind::NewUiScreen | DialogKind::NewMaterial => "Create",
-            DialogKind::ChooseMaterial(_)
+            DialogKind::NewScript
+            | DialogKind::NewUiScreen
+            | DialogKind::NewMaterial
+            | DialogKind::NewShader(_) => "Create",
+            DialogKind::ChooseShader(_)
+            | DialogKind::ChooseMaterial(_)
             | DialogKind::ChooseMaterialMap(_)
             | DialogKind::ChooseAnimGraph(_) => "Use",
             DialogKind::AttachScript(_) => "Attach",
@@ -664,6 +677,24 @@ impl Ui {
                 Some(MATERIALS_DIR)
             }
             DialogKind::ChooseAnimGraph(_) => Some(automata_assets::anim_graph::ANIMS_DIR),
+            DialogKind::NewShader(_) | DialogKind::ChooseShader(ShaderTarget::Post(_)) => {
+                if matches!(kind, DialogKind::NewShader(_)) {
+                    let _ = std::fs::create_dir_all(root.join(SHADERS_DIR));
+                }
+                Some(SHADERS_DIR)
+            }
+            DialogKind::ChooseShader(ShaderTarget::Material) => {
+                // A `shaders/` folder beside the material, or its own.
+                if let Some(dir) = self.material_editor_path().and_then(|p| {
+                    let folder = p.parent()?.to_path_buf();
+                    [folder.join("../shaders"), folder.join("shaders"), folder]
+                        .into_iter()
+                        .find(|d| d.is_dir())
+                }) {
+                    return dir;
+                }
+                Some(SHADERS_DIR)
+            }
             DialogKind::ChooseMaterialMap(_) => {
                 // Next to the material, or a `textures/` folder beside it.
                 if let Some(dir) = self.material_editor_path().and_then(|p| {
@@ -748,6 +779,44 @@ impl Ui {
             DialogKind::NewMaterial => {
                 let dir = self.start_dir_for(kind);
                 (unique_child(&dir, "material.mat.ron"), None)
+            }
+            DialogKind::NewShader(shader) => {
+                let dir = self.start_dir_for(kind);
+                let base = match shader {
+                    automata_renderer::ShaderKind::Material => "material.wgsl",
+                    automata_renderer::ShaderKind::Post => "post.wgsl",
+                };
+                (unique_child(&dir, base), None)
+            }
+            DialogKind::ChooseShader(ShaderTarget::Post(id)) => {
+                let current = entity(id)
+                    .and_then(|e| e.data.post_shader.as_ref())
+                    .filter(|p| !p.shader.trim().is_empty())
+                    .map(|p| base.join(p.shader.trim()));
+                let name = if current.is_some() {
+                    String::new()
+                } else {
+                    unique_child(&self.start_dir_for(kind), "post.wgsl")
+                };
+                (name, current)
+            }
+            DialogKind::ChooseShader(ShaderTarget::Material) => {
+                let mat = self.material_editor_path();
+                let current = mat.as_ref().and_then(|mat| {
+                    let rel = self.material_editor_file()?.shader.trim().to_string();
+                    (!rel.is_empty()).then(|| automata_assets::material::map_path(mat, &rel))
+                });
+                let name = if current.is_some() {
+                    String::new()
+                } else {
+                    let stem = mat.as_ref().and_then(|p| p.file_name()).map_or_else(
+                        || "material".to_string(),
+                        |n| n.to_string_lossy().into_owned(),
+                    );
+                    let stem = stem.split('.').next().unwrap_or("material").to_string();
+                    unique_child(&self.start_dir_for(kind), &format!("{stem}.wgsl"))
+                };
+                (name, current)
             }
             DialogKind::ChooseAnimGraph(id) => {
                 let current = entity(id)
@@ -1267,6 +1336,7 @@ impl Ui {
             && fd.kind != DialogKind::NewScript
             && fd.kind != DialogKind::NewUiScreen
             && fd.kind != DialogKind::NewMaterial
+            && !matches!(fd.kind, DialogKind::NewShader(_))
         {
             let msg = format!(
                 "{} already exists. Press {} again to replace it.",
@@ -1340,6 +1410,16 @@ impl Ui {
             DialogKind::NewScript => Intent::NewScript(path),
             DialogKind::NewUiScreen => Intent::NewUiScreen(path),
             DialogKind::NewMaterial => Intent::NewMaterial(path),
+            DialogKind::NewShader(kind) => Intent::NewShader { path, kind },
+            DialogKind::ChooseShader(ShaderTarget::Post(id)) => Intent::SetPostShader {
+                id,
+                path: Some(path),
+            },
+            DialogKind::ChooseShader(ShaderTarget::Material) => {
+                self.close_file_dialog();
+                self.set_material_shader(Some(&path));
+                return None;
+            }
             DialogKind::ChooseMaterial(id) => Intent::SetMaterial {
                 id,
                 path: Some(path),

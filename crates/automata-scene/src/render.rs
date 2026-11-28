@@ -6,7 +6,8 @@
 //! draw commands using each entity's [`GlobalTransform`]. The first entity
 //! carrying a [`Camera3D`] or [`Camera2D`](automata_renderer::Camera2D) component becomes the frame's
 //! camera, the first [`DirectionalLight`] becomes the frame's sun, and the
-//! first [`Environment`] sets the frame's look (ambient, fog, tone mapping).
+//! first [`Environment`] sets the frame's look (ambient, fog, tone mapping)
+//! and the first [`PostShader`](crate::PostShader) its post effect.
 //! Every [`PointLight`] and [`SpotLight`] lights the frame too (the nearest
 //! and brightest, up to the quality preset's cap).
 
@@ -373,6 +374,8 @@ pub fn record_draw_list(world: &SceneWorld, draw: &mut DrawList) {
         draw.set_environment(*env);
         draw.set_clear_color(env.clear_color());
     }
+    // Post effect: the first entity with a working post shader.
+    crate::post_shader::record_post_shader(world, draw);
 
     let ground = crate::terrain::TerrainGround::of(world);
     for (renderer, global, scatter) in
@@ -798,6 +801,7 @@ pub fn materialize_visuals(
     // Terrains keep their own GPU chunks up to date (cheap when unchanged).
     crate::terrain::prepare_terrains(world, renderer);
     crate::sprite2d::prepare_sprites(world, renderer);
+    crate::post_shader::prepare_post_shaders(world, renderer);
     let mut materialized = 0;
     for entity in pending_visuals(world) {
         // Scope the hecs Ref borrow: it has a Drop impl, so without the

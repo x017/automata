@@ -26,6 +26,7 @@ pub mod import;
 pub mod json;
 pub mod material;
 mod obj;
+pub mod shader;
 pub mod springs;
 
 use std::collections::BTreeMap;

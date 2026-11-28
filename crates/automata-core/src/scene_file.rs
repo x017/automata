@@ -14,7 +14,7 @@
 
 use automata_renderer::{Camera2D, Camera3D, Environment, MeshData, Water};
 /// A mesh's roughness / metalness / glow overrides (saved with its visual).
-pub use automata_scene::{Animation, Surface};
+pub use automata_scene::{Animation, PostShader, Surface};
 use automata_scene::{
     DirectionalLight, Entity, MeshVisual, MeshVisualKind, Name, ParticleEmitter, PointLight,
     SceneWorld, SpotLight, Transform,
@@ -85,6 +85,9 @@ pub struct EntityData {
     /// Scene look: ambient, fog, exposure, tone mapping, background.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<Environment>,
+    /// A user WGSL effect drawn over the frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_shader: Option<automata_scene::PostShader>,
     /// Animated water surface (waves, reflections; refraction and foam on
     /// the Beautiful preset).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -422,6 +425,9 @@ impl SceneFile {
             if let Some(env) = eref.get::<&Environment>() {
                 data.environment = Some(*env);
             }
+            data.post_shader = eref
+                .get::<&automata_scene::PostShader>()
+                .map(|p| (*p).clone());
             if let Some(water) = eref.get::<&Water>() {
                 data.water = Some(*water);
             }
@@ -526,6 +532,9 @@ impl SceneFile {
             }
             if let Some(env) = &data.environment {
                 let _ = world.insert_one(entity, *env);
+            }
+            if let Some(post) = &data.post_shader {
+                let _ = world.insert_one(entity, post.clone());
             }
             if let Some(water) = &data.water {
                 let _ = world.insert_one(entity, *water);
@@ -961,6 +970,22 @@ mod tests {
         assert!((env.exposure - 2.0).abs() < f32::EPSILON);
         assert_eq!(env.tonemapping, automata_renderer::Tonemapping::Aces);
         assert!(!env.fog);
+    }
+
+    #[test]
+    fn post_shaders_round_trip_and_respawn() {
+        let mut world = SceneWorld::new();
+        let post = automata_scene::PostShader::new("shaders/crt.wgsl").with_params(&[0.3, 2.0]);
+        world.spawn((post.clone(),));
+        let file = SceneFile::from_world(&world);
+        let text = file.to_ron().unwrap();
+        assert!(text.contains("shader: \"shaders/crt.wgsl\""), "{text}");
+        let back = SceneFile::from_ron(&text).unwrap();
+        assert_eq!(back, file);
+        let mut again = SceneWorld::new();
+        back.apply_to_world(&mut again);
+        let mut query = again.query::<&automata_scene::PostShader>();
+        assert_eq!((&mut query).into_iter().next(), Some(&post));
     }
 
     #[test]

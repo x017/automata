@@ -24,6 +24,25 @@ use crate::code::{Key, Mods};
 /// Where new materials go, under the project folder.
 pub const MATERIALS_DIR: &str = "materials";
 
+/// Where new shaders go, under the project folder.
+pub const SHADERS_DIR: &str = "shaders";
+
+/// Writes a new shader file from the template of its kind (folders made as
+/// needed).
+///
+/// # Errors
+/// The I/O error, as text.
+pub fn create_shader(path: &Path, kind: automata_renderer::ShaderKind) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let template = match kind {
+        automata_renderer::ShaderKind::Material => automata_renderer::MATERIAL_TEMPLATE,
+        automata_renderer::ShaderKind::Post => automata_renderer::POST_TEMPLATE,
+    };
+    std::fs::write(path, template).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// The shape the material preview shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MaterialShape {
@@ -76,6 +95,8 @@ pub enum MatProp {
     OffsetX,
     /// Texture shift down.
     OffsetY,
+    /// One of the custom shader's numbers (`0..8`: `p0.x` … `p1.w`).
+    ShaderParam(u8),
 }
 
 impl MatProp {
@@ -95,6 +116,7 @@ impl MatProp {
             Self::TilingY => f.tiling[1],
             Self::OffsetX => f.offset[0],
             Self::OffsetY => f.offset[1],
+            Self::ShaderParam(i) => f.shader_params.get(usize::from(i)).copied().unwrap_or(0.0),
             Self::Color | Self::Emissive => 0.0,
         }
     }
@@ -114,6 +136,15 @@ impl MatProp {
             Self::TilingY => f.tiling[1] = v.clamp(-1000.0, 1000.0),
             Self::OffsetX => f.offset[0] = v,
             Self::OffsetY => f.offset[1] = v,
+            Self::ShaderParam(i) => {
+                let i = usize::from(i);
+                if i < automata_renderer::SHADER_PARAMS {
+                    if f.shader_params.len() <= i {
+                        f.shader_params.resize(i + 1, 0.0);
+                    }
+                    f.shader_params[i] = v;
+                }
+            }
             Self::Color | Self::Emissive => {}
         }
     }
@@ -363,6 +394,61 @@ impl Ui {
         }
         let rel = image.map(|img| relative_map_path(&material, img));
         self.edit_material(|f| *f.map_mut(which) = rel.unwrap_or_default());
+    }
+
+    /// Makes `shader` the visible material's custom shader (its path
+    /// stored relative to the material file; a file that doesn't exist yet
+    /// is made from the template and opened), or goes back to the standard
+    /// surface.
+    pub fn set_material_shader(&mut self, shader: Option<&Path>) {
+        let Some(material) = self.material_editor_path() else {
+            return;
+        };
+        let Some(file) = shader else {
+            self.edit_material(|f| {
+                f.shader.clear();
+                f.shader_params.clear();
+            });
+            return;
+        };
+        if !automata_assets::shader::is_shader_path(file) {
+            self.log(
+                LogLevel::Warn,
+                format!("{} isn't a .wgsl shader", crate::files::display_name(file)),
+            );
+            return;
+        }
+        let created = !file.exists();
+        if created {
+            if let Err(e) = create_shader(file, automata_renderer::ShaderKind::Material) {
+                self.log(LogLevel::Error, format!("Couldn't create the shader: {e}"));
+                return;
+            }
+            self.files_changed(None);
+        } else if std::fs::read_to_string(file).is_ok_and(|text| {
+            automata_assets::shader::kind_of_source(&text) == automata_renderer::ShaderKind::Post
+        }) {
+            self.log(
+                LogLevel::Warn,
+                format!(
+                    "{} is a post shader (fn post): materials need fn material",
+                    crate::files::display_name(file)
+                ),
+            );
+            return;
+        }
+        let rel = relative_map_path(&material, file);
+        self.edit_material(|f| f.shader = rel);
+        if created {
+            self.log(
+                LogLevel::Info,
+                format!(
+                    "Created {} from the material template · save it to see it change",
+                    crate::files::display_name(file)
+                ),
+            );
+            self.open_code(file, None);
+        }
     }
 
     /// Commits a typed property value.
@@ -655,7 +741,28 @@ impl Ui {
             self.edit_material(|f| f.glow_shadows = !f.glow_shadows);
         }
 
-        // Problems loading maps, under everything.
+        y = self.section_head(canvas, x, y, "Shader");
+        y = self.mat_shader_row(canvas, x, y, w, path, file);
+        if !file.shader.trim().is_empty() {
+            for (i, label) in ["p0.x  y", "p0.z  w", "p1.x  y", "p1.z  w"]
+                .into_iter()
+                .enumerate()
+            {
+                #[allow(clippy::cast_possible_truncation)]
+                let first = (i * 2) as u8;
+                y = self.mat_number(
+                    canvas,
+                    x,
+                    y,
+                    w,
+                    label,
+                    [MatProp::ShaderParam(first), MatProp::ShaderParam(first + 1)],
+                    file,
+                );
+            }
+        }
+
+        // Problems loading maps and the shader, under everything.
         if let Some(a) = asset.as_ref().filter(|a| !a.problems.is_empty()) {
             y += 8.0;
             for p in a.problems.iter().take(4) {
@@ -873,6 +980,94 @@ impl Ui {
             self.tip(Rect::new(tx, y + 18.0, text_w, 18.0), rel);
         }
         y + h + 4.0
+    }
+
+    /// The custom shader: the file, Choose…, Edit and ×. A `.wgsl` dragged
+    /// from the Files panel drops here too.
+    fn mat_shader_row(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        y: f32,
+        w: f32,
+        path: &Path,
+        file: &MaterialFile,
+    ) -> f32 {
+        let rel = file.shader.trim();
+        let row = Rect::new(x - 4.0, y - 2.0, w + 8.0, ROW_H);
+        let dragged = self
+            .file_drag
+            .as_ref()
+            .filter(|d| d.active && automata_assets::shader::is_shader_path(&d.path))
+            .map(|d| d.path.clone());
+        if dragged.is_some() && row.contains(self.raw.x, self.raw.y) {
+            canvas.fill_rounded(row.x, row.y, row.w, row.h, 4.0, color::accent_soft());
+            if !self.raw.down {
+                self.file_drag = None;
+                self.set_material_shader(dragged.as_deref());
+            }
+        }
+        let full = (!rel.is_empty()).then(|| automata_assets::material::map_path(path, rel));
+        // A shader that breaks the engine's rules draws the standard
+        // surface; say so here as well as in the Console. (Cached: the
+        // file is read again only once it changes.)
+        let problem = full.as_ref().filter(|f| f.exists()).and_then(|f| {
+            automata_assets::shader::load_shader_file(
+                f,
+                rel,
+                automata_assets::shader::ShaderKind::Material,
+            )
+            .map_or_else(Some, |a| a.error.as_ref().map(ToString::to_string))
+        });
+        let (shown, c) = match &full {
+            None => (
+                "None · the standard surface".to_string(),
+                color::text_faint(),
+            ),
+            Some(_) if problem.is_some() => (format!("{rel} (has errors)"), color::danger()),
+            Some(f) if f.exists() => (rel.to_string(), color::accent_soft()),
+            Some(_) => (format!("{rel} (missing)"), color::danger()),
+        };
+        let bw = 64.0;
+        let extra = if rel.is_empty() { 0.0 } else { 40.0 + 24.0 };
+        let text_w = w - bw - extra - 8.0;
+        canvas.text_clipped(x, y + 5.0, layout::FONT_SIZE, &shown, c, text_w);
+        if let Some(problem) = &problem {
+            self.tip(
+                Rect::new(x, y, text_w, ROW_H - 4.0),
+                &format!("{problem} · the standard surface is drawn until it's fixed"),
+            );
+        } else if !rel.is_empty() {
+            self.tip(
+                Rect::new(x, y, text_w, ROW_H - 4.0),
+                "Your WGSL fn material(in: MaterialInput) -> MaterialOutput · \
+                 saved changes show at once",
+            );
+        }
+        let choose = Rect::new(x + w - bw - extra, y, bw, ROW_H - 4.0);
+        if self.button(canvas, choose, "Choose…", ButtonStyle::Normal) {
+            self.open_file_dialog(
+                super::menus::DialogKind::ChooseShader(super::menus::ShaderTarget::Material),
+                None,
+            );
+        }
+        self.tip(
+            choose,
+            "Pick a .wgsl shader, or name a new one to start from the template",
+        );
+        if let Some(f) = full.filter(|_| !rel.is_empty()) {
+            let edit = Rect::new(choose.x + bw + 2.0, y, 38.0, ROW_H - 4.0);
+            if self.button(canvas, edit, "Edit", ButtonStyle::Ghost) && f.exists() {
+                self.out.push(Intent::OpenScript(f.clone()));
+            }
+            self.tip(edit, "Open the shader in the code editor");
+            let clear = Rect::new(edit.x + 40.0, y, 22.0, ROW_H - 4.0);
+            if self.button(canvas, clear, "×", ButtonStyle::Ghost) {
+                self.set_material_shader(None);
+            }
+            self.tip(clear, "Use the standard surface again");
+        }
+        y + ROW_H
     }
 
     fn material_status(&mut self, canvas: &mut Canvas, r: Rect, path: &Path, idx: usize) {
@@ -1198,5 +1393,54 @@ mod tests {
         );
         assert!((ui.material_editor_file().unwrap().metallic - 1.0).abs() < 1e-6);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_material_gets_a_shader_made_from_the_template_and_its_numbers() {
+        let dir = temp("shader");
+        let path = dir.join("materials/glow.mat.ron");
+        MaterialFile::default().save(&path).unwrap();
+        let mut ui = Ui::new();
+        let doc = Document::new();
+        let mut canvas = Canvas::new(1400, 900);
+        ui.open_code(&path, None);
+        frame(&mut ui, &mut canvas, &doc, Pointer::default());
+        assert!(ui.material_editor_shown());
+
+        // A post shader isn't a material shader: refused.
+        let post = dir.join("shaders/crt.wgsl");
+        create_shader(&post, automata_renderer::ShaderKind::Post).unwrap();
+        ui.set_material_shader(Some(&post));
+        assert_eq!(ui.material_editor_file().unwrap().shader, "");
+
+        // A new name is made from the template, stored relative to the
+        // material, and opened.
+        let shader = dir.join("shaders/glow.wgsl");
+        ui.set_material_shader(Some(&shader));
+        let text = std::fs::read_to_string(&shader).unwrap();
+        assert_eq!(text, automata_renderer::MATERIAL_TEMPLATE);
+        assert!(
+            ui.code.tabs.iter().any(|t| t.path == shader),
+            "opened to edit"
+        );
+        // Back on the material's tab, its numbers edit.
+        let mat_tab = ui.code.tabs.iter().position(|t| t.path == path).unwrap();
+        ui.code.active = Some(mat_tab);
+        frame(&mut ui, &mut canvas, &doc, Pointer::default());
+        ui.commit_material_prop(MatProp::ShaderParam(2), "0.5");
+        ui.commit_material_prop(MatProp::ShaderParam(9), "1");
+        let f = ui.material_editor_file().unwrap();
+        assert_eq!(f.shader, "../shaders/glow.wgsl");
+        assert_eq!(f.shader_params, vec![0.0, 0.0, 0.5]);
+        let tab_text = ui.code.tabs[mat_tab].buf.text();
+        assert!(
+            tab_text.contains("shader: \"../shaders/glow.wgsl\""),
+            "{tab_text}"
+        );
+
+        // × goes back to the standard surface.
+        ui.set_material_shader(None);
+        let f = ui.material_editor_file().unwrap();
+        assert!(f.shader.is_empty() && f.shader_params.is_empty());
     }
 }

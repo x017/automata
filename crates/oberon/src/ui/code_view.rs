@@ -739,6 +739,7 @@ impl Ui {
             .map(|f| (f.query.clone(), f.case, f.word));
         let tab = &mut self.code.tabs[idx];
         let states: Vec<syntax::LineState> = tab.line_states()[first..last].to_vec();
+        let wgsl = syntax::is_wgsl(&tab.path);
         let buf = &tab.buf;
         let cursor = buf.cursor;
         let selection = buf.selection();
@@ -881,7 +882,11 @@ impl Ui {
                     }
                 }
             }
-            let (spans, _) = syntax::highlight(line, states[k]);
+            let (spans, _) = if wgsl {
+                syntax::highlight_wgsl(line, states[k])
+            } else {
+                syntax::highlight(line, states[k])
+            };
             let mut vcol = 0usize;
             for (range, tok) in spans {
                 let piece = &line[range];

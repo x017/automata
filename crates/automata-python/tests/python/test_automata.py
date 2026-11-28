@@ -1146,6 +1146,42 @@ def test_water_component_and_presets():
         assert game.run(lambda ctx: None, max_frames=2) == 2
 
 
+def test_post_shader_component(tmp_path):
+    post = at.PostShader("shaders/crt.wgsl", params=[0.3, 2.0])
+    assert post.shader == "shaders/crt.wgsl"
+    assert post.params == pytest.approx([0.3, 2.0])
+    with pytest.raises(ValueError):
+        at.PostShader("shaders/crt.wgsl", params=[0.0] * 9)
+    with pytest.raises(ValueError):
+        at.PostShader("shaders/crt.glsl")
+    text = at.Scene().add(at.Entity("look").add(post)).to_ron()
+    assert 'shader: "shaders/crt.wgsl"' in text
+    assert at.Scene.from_ron(text).to_ron() == text
+
+    # Working and broken shaders both run: a broken one keeps the standard look.
+    (tmp_path / "shaders").mkdir()
+    (tmp_path / "shaders" / "tint.wgsl").write_text(
+        "fn post(in: PostInput) -> vec3<f32> { return in.color * in.p0.rgb; }\n"
+    )
+    (tmp_path / "shaders" / "broken.wgsl").write_text(
+        "fn post(in: PostInput) -> vec3<f32> { return in.colr; }\n"
+    )
+    old = at.asset_root()
+    at.set_asset_root(str(tmp_path))
+    try:
+        assert at.check_shader("shaders/tint.wgsl") is None
+        problem = at.check_shader("shaders/broken.wgsl")
+        assert problem.startswith("shaders/broken.wgsl:1:") and "colr" in problem
+        assert at.check_shader("shaders/gone.wgsl").startswith("shaders/gone.wgsl: ")
+        for name in ("tint", "broken"):
+            game = at.Game(headless=True, fixed_delta=1 / 60)
+            game.load_scene(at.Scene().add(at.Entity("look").add(
+                at.PostShader(f"shaders/{name}.wgsl", params=[1.0, 0.5, 0.5]))))
+            assert game.run(lambda ctx: None, max_frames=2) == 2
+    finally:
+        at.set_asset_root(old)
+
+
 def test_environment_post_effects():
     env = at.Environment()
     assert env.bloom == pytest.approx(1.0)

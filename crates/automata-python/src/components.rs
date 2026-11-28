@@ -1373,6 +1373,79 @@ impl PyWater {
     }
 }
 
+/// A post effect: your WGSL ``fn post(in: PostInput) -> vec3<f32>`` run on
+/// every pixel of the finished frame, under the HUD. The first entity
+/// carrying one draws it. ``params`` (up to eight numbers) reach the shader
+/// as ``in.p0`` (first four) and ``in.p1``. A shader that doesn't pass the
+/// checks logs why and the frame keeps its standard look; saving the file
+/// shows the change at once.
+///
+/// ```python
+/// scene.add(at.Entity("look").add(at.PostShader("shaders/crt.wgsl", params=[0.3, 2.0])))
+/// ```
+#[pyclass(name = "PostShader", module = "automata._core", frozen)]
+#[derive(Debug, Clone)]
+pub struct PyPostShader {
+    inner: automata_scene::PostShader,
+}
+
+#[pymethods]
+impl PyPostShader {
+    /// A post effect from a ``.wgsl`` file (relative to the scene folder).
+    #[new]
+    #[pyo3(signature = (shader, params=None))]
+    fn new(shader: &str, params: Option<Vec<f32>>) -> PyResult<Self> {
+        let params = params.unwrap_or_default();
+        if params.len() > automata_renderer::SHADER_PARAMS {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "a post shader takes up to {} params, got {}",
+                automata_renderer::SHADER_PARAMS,
+                params.len()
+            )));
+        }
+        if !shader.trim().to_ascii_lowercase().ends_with(".wgsl") {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "post shaders are .wgsl files, got {shader:?}"
+            )));
+        }
+        Ok(Self {
+            inner: automata_scene::PostShader::new(shader.trim()).with_params(&params),
+        })
+    }
+
+    /// The ``.wgsl`` file.
+    #[getter]
+    fn shader(&self) -> String {
+        self.inner.shader.clone()
+    }
+
+    /// The numbers the shader reads as ``in.p0`` / ``in.p1`` (missing ones
+    /// are zero).
+    #[getter]
+    fn params(&self) -> Vec<f32> {
+        self.inner.params.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PostShader({:?}, params={:?})",
+            self.inner.shader, self.inner.params
+        )
+    }
+}
+
+impl PyPostShader {
+    /// The engine component value.
+    pub fn inner(&self) -> automata_scene::PostShader {
+        self.inner.clone()
+    }
+
+    /// Wraps an engine post shader for Python.
+    pub fn from_inner(inner: automata_scene::PostShader) -> Self {
+        Self { inner }
+    }
+}
+
 /// An orthographic 2D camera. The first entity carrying one becomes the
 /// frame's 2D camera.
 #[pyclass(name = "Camera2D", module = "automata._core", frozen)]
@@ -1841,6 +1914,24 @@ pub fn asset_root() -> Option<String> {
     automata_assets::root().map(|p| p.to_string_lossy().into_owned())
 }
 
+/// Checks a ``.wgsl`` shader file by the engine's rules (no GPU needed):
+/// ``None`` when it's fine, else what's wrong as ``"file:line:col: message"``.
+/// The kind comes from the file: a post effect when it defines
+/// ``fn post(``, otherwise a material shader. Relative paths resolve like
+/// model paths.
+#[pyfunction]
+pub fn check_shader(path: &str) -> Option<String> {
+    let file = automata_assets::resolve(path);
+    let source = match std::fs::read_to_string(&file) {
+        Ok(s) => s,
+        Err(e) => return Some(format!("{path}: {e}")),
+    };
+    let kind = automata_assets::shader::kind_of_source(&source);
+    automata_renderer::check_shader(kind, path, &source)
+        .err()
+        .map(|e| e.to_string())
+}
+
 /// A component staged on a Python-side entity, ready to be inserted into
 /// the ECS world.
 #[derive(Debug, Clone)]
@@ -1873,6 +1964,8 @@ pub enum StagedComponent {
     Environment(Environment),
     /// Animated water surface.
     Water(Water),
+    /// A user WGSL effect drawn over the frame.
+    PostShader(automata_scene::PostShader),
     /// A sound the entity plays.
     AudioSource(automata_core::AudioSource),
     /// Makes particles.
@@ -1950,6 +2043,9 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     if let Ok(w) = obj.cast::<PyWater>() {
         return Ok(StagedComponent::Water(w.get().inner()));
     }
+    if let Ok(p) = obj.cast::<PyPostShader>() {
+        return Ok(StagedComponent::PostShader(p.get().inner()));
+    }
     if let Ok(a) = obj.cast::<PyAudioSource>() {
         return Ok(StagedComponent::AudioSource(a.get().inner.clone()));
     }
@@ -1999,7 +2095,7 @@ pub fn extract_component(obj: &Bound<'_, PyAny>) -> PyResult<StagedComponent> {
     Err(PyTypeError::new_err(format!(
         "unsupported component type {typename}; expected Transform, Camera3D, Camera2D, \
          RigidBody, Collider3D, Collider2D, CharacterController, CharacterVelocity, \
-         MeshRenderer, DirectionalLight, PointLight, SpotLight, Environment, Water, \
+         MeshRenderer, DirectionalLight, PointLight, SpotLight, Environment, PostShader, Water, \
          AudioSource, ParticleEmitter, Animation, Grass, Scatter, Terrain, Joint, \
          Attach, NavAgent, Navigation, NavLink, Ragdoll, Sprite, Tilemap, or CameraFollow2D"
     )))

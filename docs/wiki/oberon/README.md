@@ -41,6 +41,7 @@ this and `oberon run`, `test`, `export` and `doctor`.
 | [The code editor](code-editor.md) | Writing scripts inside Oberon: completion, language servers, find/replace |
 | [The UI editor](ui-editor.md) | Game menus and HUDs as `ui/*.ui.ron` documents: canvas, widget tree, themes |
 | [Materials](materials.md) | Shared `.mat.ron` looks with textures: the material editor, its live preview, dragging materials onto objects |
+| [Custom shaders](shaders.md) | Your own WGSL: material shaders (`fn material`) and post effects (`fn post`), hot reload, the rules and errors, the Shader Lab |
 | [Models](models.md) | Importing glTF and OBJ models, the Assets tab, import settings (scale, rotation, pivot), fitted colliders |
 | [Animation graphs](animation-graphs.md) | `.anim.ron` state machines: parameters, blend spaces, transitions, layers with bone masks |
 | [Attachments & IK](attachments-and-ik.md) | Attach To Bone (swords, hats), Feet On Ground on slopes and stairs, reaching and looking at from scripts |

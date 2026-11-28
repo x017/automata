@@ -63,6 +63,7 @@ hours.
 | Use the built-in code editor and language servers | [The code editor](oberon/code-editor.md) |
 | Lay out game menus and HUDs in Oberon | [The UI editor](oberon/ui-editor.md) |
 | Share textured looks between objects | [Materials](oberon/materials.md) |
+| Write your own WGSL for surfaces and whole-screen effects | [Custom shaders](oberon/shaders.md) |
 | Let a graph pick a character's clips (blend spaces, transitions, layers) | [Animation graphs](oberon/animation-graphs.md) |
 | Put a sword in a hand, keep feet on stairs, turn heads | [Attachments & IK](oberon/attachments-and-ik.md) |
 | Knock characters over and stand them back up | [Ragdolls](oberon/ragdolls.md) |

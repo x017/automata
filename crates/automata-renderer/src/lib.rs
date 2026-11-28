@@ -24,8 +24,10 @@ mod mesh;
 mod particles;
 mod pipeline;
 mod post;
+mod post_shader;
 mod quality;
 mod renderer;
+mod shader;
 mod shadow;
 mod ssao;
 mod style;
@@ -55,6 +57,10 @@ pub use particles::{
 };
 pub use quality::GraphicsQuality;
 pub use renderer::{Renderer, BUILTIN_IMAGE_PREFIX};
+pub use shader::{
+    check_shader, CheckedShader, Shader, ShaderError, ShaderKind, MATERIAL_TEMPLATE,
+    MAX_SHADER_SOURCE, POST_TEMPLATE, SHADER_PARAMS,
+};
 pub use text::{Faces, FontId, TextAlign, TextAtlas, TextStyle};
 pub use texture::Texture;
 pub use water::{RippleMap, Water, WaterSurface, RIPPLE_FIELD_SIZE};

@@ -1285,9 +1285,37 @@ logged. See [Steam](docs/wiki/oberon/steam.md).
 - Cutscenes and intro videos (a VP9/AV1 decoder) shown full screen or on
   a mesh.
 
-### F3. Custom shaders ⬜ M
-- User WGSL for materials and post effects, with hot reload, behind a
-  safe interface (fixed inputs, validated on load).
+### F3. Custom shaders ✅ M
+User WGSL for materials and post effects, with hot reload, behind a
+safe interface (fixed inputs, validated on load). You write one function.
+The engine owns the bindings, entry points, lighting and the web
+translation. See [Custom shaders](docs/wiki/oberon/shaders.md).
+- ✅ Material shaders: `fn material(in: MaterialInput) -> MaterialOutput`
+  runs after the standard material is read and before lighting. It gets
+  position, normal, view, uv, the standard surface, time and 8 numbers
+  (`p0`, `p1`), and may `discard`. A `.mat.ron` names it with `shader:`
+  and `shader_params:`.
+- ✅ Post shaders: `fn post(in: PostInput) -> vec3<f32>` runs over the
+  finished frame, before the HUD. It can read the image with `image(uv)`
+  and `image_pixel(px)`. A `PostShader` component carries it.
+- ✅ Safety: no bindings, entry points, attributes or globals, a 64 KB
+  cap, then naga's validator and the WebGL2 translation. A broken shader
+  keeps the standard look and reports `file:line:col: message` to the log
+  and Oberon's Console. `shader reloaded` is reported when it's fixed.
+- ✅ Hot reload: shader files are part of the material stamps, and post
+  shaders are re-read when changed.
+- ✅ Oberon:
+  - WGSL highlighting and live diagnostics in the code editor.
+  - **New Material/Post Shader…** from templates.
+  - The material editor's Shader section (choose, edit, p0–p7), which
+    shows errors.
+  - The Post Shader inspector, and dropping a `.wgsl` onto an entity.
+- ✅ Python: `at.PostShader`, and `at.check_shader(path)`, which checks a
+  shader without a GPU.
+- ✅ `automata check` and exports check material and post shaders.
+- ✅ Example: the Shader Lab (`examples/oberon/shader_lab`), with
+  hologram, dissolve and lava materials and CRT, ink and underwater post
+  effects.
 
 Consoles aren't planned: they need platform-holder dev kits and NDAs.
 
@@ -1344,7 +1372,7 @@ per effort. Reorder any time by telling me.
 | 40 | E2 macOS export | M | ✅ |
 | 41 | E3 Web export | L | ✅ |
 | 42 | E4 Steam integration | M | ✅ |
-| 43 | F3 Custom shaders | M | ⬜ |
+| 43 | F3 Custom shaders | M | ✅ |
 | 44 | F2 Video playback | M | ⬜ |
 | 45 | F1 Multiplayer | L | ⬜ |
 

@@ -45,10 +45,13 @@ struct MaterialData {
     params: vec4<f32>,
     // Texture coordinate scale (xy) and offset (zw): tiling.
     uv: vec4<f32>,
+    // A custom material shader's `shader_params` (`p0`, `p1`).
+    custom0: vec4<f32>,
+    custom1: vec4<f32>,
 };
 @group(2) @binding(0) var material_texture: texture_2d<f32>;
 @group(2) @binding(1) var material_sampler: sampler;
-@group(2) @binding(2) var<uniform> material: MaterialData;
+@group(2) @binding(2) var<uniform> material_data: MaterialData;
 @group(2) @binding(3) var normal_map: texture_2d<f32>;
 @group(2) @binding(4) var metal_rough_map: texture_2d<f32>;
 @group(2) @binding(5) var emissive_map: texture_2d<f32>;
@@ -61,8 +64,8 @@ const MAP_METAL_ROUGH: u32 = 2u;
 const MAP_EMISSIVE: u32 = 4u;
 // A terrain (automata-scene's terrain.rs): `material_texture` is a 2 x 2
 // atlas of ground layers, `emissive_map` the splat map saying how much of
-// each shows, `material.emissive` each layer's repeat (metres) and
-// `material.uv` the terrain's size (xy) and half a splat texel (zw).
+// each shows, `material_data.emissive` each layer's repeat (metres) and
+// `material_data.uv` the terrain's size (xy) and half a splat texel (zw).
 const MAP_TERRAIN: u32 = 8u;
 
 struct VertexInput {
@@ -264,12 +267,12 @@ fn terrain_layer(k: u32, t: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec3<f32
 // mixed by the splat map.
 fn terrain_surface(in: VertexOutput) -> Surface {
     var out: Surface;
-    let local = in.uv * material.uv.xy;
+    let local = in.uv * material_data.uv.xy;
     let dx = dpdx(local);
     let dy = dpdy(local);
-    let st = clamp(in.uv, material.uv.zw, vec2<f32>(1.0) - material.uv.zw);
+    let st = clamp(in.uv, material_data.uv.zw, vec2<f32>(1.0) - material_data.uv.zw);
     let w = textureSample(emissive_map, map_sampler, st);
-    let tiles = max(material.emissive, vec4<f32>(0.05));
+    let tiles = max(material_data.emissive, vec4<f32>(0.05));
     var base = vec3<f32>(0.0);
     if w.x > 0.004 {
         base += terrain_layer(0u, local / tiles.x, dx / tiles.x, dy / tiles.x) * w.x;
@@ -288,15 +291,15 @@ fn terrain_surface(in: VertexOutput) -> Surface {
     out.n = normalize(in.normal);
     out.l = normalize(-light.direction.xyz);
     out.v = normalize(camera.view_pos.xyz - in.world_position);
-    out.base = vec4<f32>(base / total, 1.0) * material.color;
-    out.roughness = material.params.x;
+    out.base = vec4<f32>(base / total, 1.0) * material_data.color;
+    out.roughness = material_data.params.x;
     out.metallic = 0.0;
     out.emissive = vec3<f32>(0.0);
     return out;
 }
 
 fn surface(in: VertexOutput) -> Surface {
-    if (u32(material.params.w) & MAP_TERRAIN) != 0u {
+    if (u32(material_data.params.w) & MAP_TERRAIN) != 0u {
         return terrain_surface(in);
     }
     if FADING {
@@ -309,33 +312,34 @@ fn surface(in: VertexOutput) -> Surface {
         }
     }
     var out: Surface;
-    let maps = u32(material.params.w);
+    let maps = u32(material_data.params.w);
     // Tiled texture coordinates (the identity unless the material repeats).
-    let uv = in.uv * material.uv.xy + material.uv.zw;
+    let uv = in.uv * material_data.uv.xy + material_data.uv.zw;
     var n = normalize(in.normal);
     if (maps & MAP_NORMAL) != 0u {
         var ts = textureSample(normal_map, map_sampler, uv).xyz * 2.0 - 1.0;
         // glTF normal maps are +Y up in a V-down UV space: flip green.
-        ts = vec3<f32>(ts.xy * vec2<f32>(material.params.z, -material.params.z), ts.z);
+        ts = vec3<f32>(ts.xy * vec2<f32>(material_data.params.z, -material_data.params.z), ts.z);
         n = perturb_normal(n, in.world_position, uv, ts);
     }
     out.p = in.world_position;
     out.n = n;
     out.l = normalize(-light.direction.xyz);
     out.v = normalize(camera.view_pos.xyz - in.world_position);
-    out.base = textureSample(material_texture, material_sampler, uv) * material.color;
-    out.roughness = material.params.x;
-    out.metallic = material.params.y;
+    out.base = textureSample(material_texture, material_sampler, uv) * material_data.color;
+    out.roughness = material_data.params.x;
+    out.metallic = material_data.params.y;
     if (maps & MAP_METAL_ROUGH) != 0u {
         let mr = textureSample(metal_rough_map, map_sampler, uv);
         out.roughness = clamp(out.roughness * mr.g, 0.04, 1.0);
         out.metallic = out.metallic * mr.b;
     }
-    out.emissive = material.emissive.rgb;
+    out.emissive = material_data.emissive.rgb;
     if (maps & MAP_EMISSIVE) != 0u {
         out.emissive = out.emissive * textureSample(emissive_map, map_sampler, uv).rgb;
     }
-    return out;
+    // A custom material shader shapes it further (material_api.wgsl).
+    return apply_material(in, uv, out);
 }
 
 // The forward path's surface response: Blinn-Phong whose highlight

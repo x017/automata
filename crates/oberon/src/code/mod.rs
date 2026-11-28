@@ -177,6 +177,8 @@ pub struct CodeTab {
     pub disk_mtime: Option<SystemTime>,
     states: Vec<LineState>,
     states_version: Option<u64>,
+    /// The buffer version shader checks last ran on (WGSL tabs).
+    shader_checked: Option<u64>,
 }
 
 impl CodeTab {
@@ -192,6 +194,7 @@ impl CodeTab {
             disk_mtime: mtime(path),
             states: Vec::new(),
             states_version: None,
+            shader_checked: None,
         })
     }
 
@@ -204,6 +207,42 @@ impl CodeTab {
         )
     }
 
+    /// Checks a WGSL tab's text with the engine's shader rules (once per
+    /// edit), showing what's wrong as diagnostics. Python tabs are left to
+    /// the language server.
+    pub fn check_shader(&mut self) {
+        if !syntax::is_wgsl(&self.path) || self.shader_checked == Some(self.buf.version()) {
+            return;
+        }
+        self.shader_checked = Some(self.buf.version());
+        let text = self.buf.text();
+        let kind = automata_assets::shader::kind_of_source(&text);
+        let name = self.title();
+        self.diagnostics = match automata_renderer::check_shader(kind, &name, &text) {
+            Ok(_) => Vec::new(),
+            Err(e) => {
+                let at = |n: Option<u32>| usize::try_from(n.unwrap_or(1)).unwrap_or(1);
+                let line = at(e.line).saturating_sub(1);
+                let line = line.min(self.buf.line_count().saturating_sub(1));
+                let col = at(e.column).saturating_sub(1);
+                let len = self
+                    .buf
+                    .line(line)
+                    .chars()
+                    .skip(col)
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .count()
+                    .max(1);
+                vec![Diagnostic {
+                    start: Pos::new(line, col),
+                    end: Pos::new(line, col + len),
+                    severity: Severity::Error,
+                    message: e.message.clone(),
+                }]
+            }
+        };
+    }
+
     /// The tokenizer state at the start of every line (cached per version).
     pub fn line_states(&mut self) -> &[LineState] {
         if self.states_version != Some(self.buf.version()) {
@@ -211,7 +250,7 @@ impl CodeTab {
             let mut state = LineState::Code;
             for line in self.buf.lines() {
                 self.states.push(state);
-                state = syntax::highlight(line, state).1;
+                state = syntax::highlight_for(&self.path, line, state).1;
             }
             self.states_version = Some(self.buf.version());
         }
@@ -1979,5 +2018,39 @@ mod tests {
         ed.current_mut().unwrap().buf.type_text("  ");
         assert!(ed.save(0));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "ab(x = 1  \n");
+    }
+
+    #[test]
+    fn shader_tabs_show_the_engine_checks_as_diagnostics() {
+        let (_, paths) = editor_files("wgsl", &["glow.wgsl", "notes.py"]);
+        let glow = &paths[0];
+        std::fs::write(
+            glow,
+            "fn post(in: PostInput) -> vec3<f32> {\n    return in.colr;\n}\n",
+        )
+        .unwrap();
+        let mut tab = CodeTab::load(glow).unwrap();
+        let tab = &mut tab;
+        tab.check_shader();
+        assert_eq!(tab.diagnostics.len(), 1, "{:?}", tab.diagnostics);
+        let d = &tab.diagnostics[0];
+        assert_eq!(d.start.line, 1);
+        assert!(d.message.contains("colr"), "{}", d.message);
+        assert!(d.end.col > d.start.col);
+        // Fixing it clears the mark (checked once per edit).
+        tab.buf
+            .set_text("fn post(in: PostInput) -> vec3<f32> { return in.color; }\n");
+        tab.check_shader();
+        assert!(tab.diagnostics.is_empty(), "{:?}", tab.diagnostics);
+        // Python tabs are the language server's.
+        let mut py = CodeTab::load(&paths[1]).unwrap();
+        py.diagnostics.push(Diagnostic {
+            start: Pos::new(0, 0),
+            end: Pos::new(0, 1),
+            severity: Severity::Warning,
+            message: "from the server".into(),
+        });
+        py.check_shader();
+        assert_eq!(py.diagnostics.len(), 1);
     }
 }

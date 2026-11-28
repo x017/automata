@@ -961,6 +961,8 @@ impl EditorApp {
             }
             Intent::SetMaterial { id, path } => self.set_material(id, path.as_deref()),
             Intent::SetAnimGraph { id, path } => self.set_anim_graph(id, path),
+            Intent::NewShader { path, kind } => self.new_shader(path, kind),
+            Intent::SetPostShader { id, path } => self.set_post_shader(id, path),
             Intent::NewMaterial(path) => {
                 if let Some(path) = self.ensure_material(path) {
                     self.ui.files_changed(Some(&path));
@@ -1180,6 +1182,14 @@ impl EditorApp {
         }
         for note in std::mem::take(&mut self.doc.notes) {
             self.ui.log(LogLevel::Warn, note);
+        }
+        // Shaders that failed to load (the scene keeps the standard look)
+        // or came back after a fix.
+        for report in automata_assets::shader::take_shader_reports() {
+            match report.result {
+                Ok(m) => self.ui.log(LogLevel::Info, m),
+                Err(e) => self.ui.log(LogLevel::Error, format!("Shader error: {e}")),
+            }
         }
     }
 
@@ -1591,6 +1601,114 @@ impl EditorApp {
         if changed {
             self.ui
                 .log(LogLevel::Info, format!("{who} is animated by {rel}"));
+        }
+    }
+
+    /// Any name with the `.wgsl` ending.
+    fn wgsl_path(path: std::path::PathBuf) -> std::path::PathBuf {
+        if automata_assets::shader::is_shader_path(&path) {
+            path
+        } else {
+            path.with_extension("wgsl")
+        }
+    }
+
+    /// Creates a shader file from the template unless it exists, and opens
+    /// it.
+    fn new_shader(&mut self, path: std::path::PathBuf, kind: automata_renderer::ShaderKind) {
+        let path = Self::wgsl_path(path);
+        if !path.exists() {
+            if let Err(e) = crate::ui::material_editor::create_shader(&path, kind) {
+                self.ui
+                    .log(LogLevel::Error, format!("Couldn't create the shader: {e}"));
+                return;
+            }
+            let how = match kind {
+                automata_renderer::ShaderKind::Material => {
+                    "set it as a material's Shader to use it"
+                }
+                automata_renderer::ShaderKind::Post => {
+                    "drag it onto an object to make it the post effect"
+                }
+            };
+            self.ui.log(
+                LogLevel::Info,
+                format!("Created {} · {how}", path.display()),
+            );
+        }
+        self.ui.files_changed(Some(&path));
+        self.open_script(&path, None);
+    }
+
+    /// Gives an entity a post effect: adds its Post Shader if missing and
+    /// points it at `path` (made from the post template when new).
+    fn set_post_shader(&mut self, id: u64, path: Option<std::path::PathBuf>) {
+        let Some(index) = self.doc.index_of(id) else {
+            return;
+        };
+        let who = self.doc.entities[index].name().to_string();
+        let Some(path) = path else {
+            self.doc.modify(id, false, |d| {
+                if let Some(p) = &mut d.post_shader {
+                    p.shader.clear();
+                }
+            });
+            return;
+        };
+        let path = Self::wgsl_path(path);
+        if path.exists() {
+            let kind = std::fs::read_to_string(&path)
+                .map_or(automata_renderer::ShaderKind::Post, |t| {
+                    automata_assets::shader::kind_of_source(&t)
+                });
+            if kind == automata_renderer::ShaderKind::Material {
+                self.ui.log(
+                    LogLevel::Warn,
+                    format!(
+                        "{} is a material shader (fn material): choose it in a \
+                         material's Shader slot instead",
+                        path.display()
+                    ),
+                );
+                return;
+            }
+        }
+        let rel = self.doc.relative(&path);
+        if std::path::Path::new(&rel).is_absolute() {
+            self.ui.log(
+                LogLevel::Warn,
+                format!(
+                    "{} is outside the scene's folder and won't ship with the game: \
+                     move it into the project",
+                    path.display()
+                ),
+            );
+            return;
+        }
+        let created = !path.exists();
+        if created {
+            if let Err(e) = crate::ui::material_editor::create_shader(
+                &path,
+                automata_renderer::ShaderKind::Post,
+            ) {
+                self.ui
+                    .log(LogLevel::Error, format!("Couldn't create the shader: {e}"));
+                return;
+            }
+            self.ui.files_changed(Some(&path));
+        }
+        let changed = self.doc.modify(id, false, |d| {
+            d.post_shader
+                .get_or_insert_with(automata_scene::PostShader::default)
+                .shader
+                .clone_from(&rel);
+        });
+        if changed {
+            self.ui
+                .log(LogLevel::Info, format!("{who} draws the post effect {rel}"));
+        }
+        if created {
+            self.open_script(&path, None);
         }
     }
 
@@ -2625,6 +2743,10 @@ impl EditorApp {
     /// game through the bridge's hot reload; language features are served by
     /// the language server once one is running.
     fn handle_code_requests(&mut self) {
+        // Shader tabs are checked by the engine's own rules as they're typed.
+        for tab in &mut self.ui.code.tabs {
+            tab.check_shader();
+        }
         let requests = self.ui.take_code_requests();
         // The language server starts with the first open script.
         if self.lsp.is_none() && !self.lsp_failed && !self.ui.code.tabs.is_empty() {

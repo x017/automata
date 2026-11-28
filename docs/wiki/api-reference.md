@@ -141,6 +141,7 @@ m.bounds                    # ((min x, y, z), (max x, y, z)) or None
 
 at.set_asset_root(path)     # where relative model paths resolve (None resets)
 at.asset_root()             # the current root, or None
+at.check_shader(path)       # a .wgsl by the engine's rules: None, or "file:line:col: message"
 ```
 
 Plain data; materialized on the GPU by the windowed driver, inert headless.
@@ -212,6 +213,21 @@ the light (High and up, nearest first). Getters have the same names.
 Negative values, a zero radius, or angles out of range raise `ValueError`.
 Saved as `point_light` / `spot_light` in scene files. Guide:
 [Rendering & Lights](guides/rendering-and-lights.md#point-lights-and-spotlights).
+
+### PostShader
+
+```python
+at.PostShader("shaders/crt.wgsl", params=[0.08, 0.35, 1.5, 0.6])
+```
+
+A whole-screen effect from your own WGSL (`fn post(in: PostInput) ->
+vec3<f32>`), run after the Environment's grading and before the HUD. The
+first entity with one draws it. `params` (up to 8 numbers) reach the
+shader as `p0` and `p1`. A path that isn't `.wgsl`, or more than 8 numbers,
+raises `ValueError`. A shader that breaks the rules leaves the frame
+unchanged, and its error goes to the log. Getters: `shader`, `params`.
+Saved as `post_shader` in scene files. Guide: [Custom
+shaders](oberon/shaders.md).
 
 ### Environment
 

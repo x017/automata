@@ -116,6 +116,7 @@ pub fn init_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<particles::PyParticleEmitter>()?;
     m.add_class::<components::PyEnvironment>()?;
     m.add_class::<components::PyWater>()?;
+    m.add_class::<components::PyPostShader>()?;
     m.add_class::<foliage::PyGrass>()?;
     m.add_class::<foliage::PyScatter>()?;
     m.add_class::<terrain::PyTerrain>()?;
@@ -135,6 +136,7 @@ pub fn init_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<animation::PyAnimationRef>()?;
     m.add_function(wrap_pyfunction!(components::set_asset_root, m)?)?;
     m.add_function(wrap_pyfunction!(components::asset_root, m)?)?;
+    m.add_function(wrap_pyfunction!(components::check_shader, m)?)?;
     m.add_function(wrap_pyfunction!(stepped::step_running_game, m)?)?;
     m.add_function(wrap_pyfunction!(stepped::use_stepped_runs, m)?)?;
     Ok(())

@@ -341,6 +341,16 @@ class SpotLight:
         shadows: bool = True,
     ) -> None: ...
 
+class PostShader:
+    """A post effect: your WGSL ``fn post(in: PostInput) -> vec3<f32>`` run
+    on every pixel of the finished frame, under the HUD (the first entity
+    carrying one draws it). ``params`` (up to eight) reach the shader as
+    ``in.p0`` / ``in.p1``."""
+
+    shader: str
+    params: list[float]
+    def __init__(self, shader: str, params: Optional[list[float]] = None) -> None: ...
+
 class Environment:
     """Scene-wide look: sky and sun, ambient, exposure, tone mapping, fog
     (optionally height fog lying low), god rays and depth of field
@@ -1959,6 +1969,11 @@ class Game:
 
 def set_asset_root(path: str | None) -> None:
     """Sets the folder relative model paths resolve against."""
+    ...
+
+def check_shader(path: str) -> str | None:
+    """Checks a ``.wgsl`` shader by the engine's rules (no GPU needed):
+    ``None`` when fine, else ``"file:line:col: message"``."""
     ...
 
 def asset_root() -> str | None:

@@ -800,6 +800,15 @@ fn check_entity(
         let who = entity.name.as_deref().unwrap_or("an entity");
         check_material(project, base, who, material, out);
     }
+    if let Some(post) = entity
+        .post_shader
+        .as_ref()
+        .map(|p| p.shader.trim())
+        .filter(|p| !p.is_empty())
+    {
+        let who = entity.name.as_deref().unwrap_or("an entity");
+        check_post_shader(project, base, who, post, out);
+    }
     if let Some(source) = &entity.audio_source {
         let who = entity.name.as_deref().unwrap_or("an entity");
         check_sound(project, base, who, &source.clip, out);
@@ -1218,7 +1227,55 @@ fn check_material(project: &Path, base: &Path, who: &str, rel: &str, out: &mut V
             out.push(Message::warn(format!(
                 "{who}: material {rel} uses {shown}, outside the project; it won't ship"
             )));
+        } else if automata_assets::shader::is_shader_path(&dep) {
+            if let Some(e) =
+                shader_problem(&dep, &shown, automata_assets::shader::ShaderKind::Material)
+            {
+                out.push(Message::error(format!(
+                    "{who}: material {rel}: shader {e} (it draws with the standard surface)"
+                )));
+            }
         }
+    }
+}
+
+/// What's wrong with a shader file by the engine's rules, if anything.
+fn shader_problem(
+    file: &Path,
+    name: &str,
+    kind: automata_assets::shader::ShaderKind,
+) -> Option<String> {
+    match automata_assets::shader::load_shader_file(file, name, kind) {
+        Ok(asset) => asset.error.as_ref().map(ToString::to_string),
+        Err(e) => Some(e),
+    }
+}
+
+/// Checks a Post Shader: the `.wgsl` exists inside the project and passes
+/// the engine's checks.
+fn check_post_shader(project: &Path, base: &Path, who: &str, rel: &str, out: &mut Vec<Message>) {
+    let file = if Path::new(rel).is_absolute() {
+        PathBuf::from(rel)
+    } else {
+        automata_assets::join_relative(base, rel)
+    };
+    if !file.is_file() {
+        out.push(Message::error(format!(
+            "{who}: post shader {rel} not found"
+        )));
+        return;
+    }
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if !canon(&file).starts_with(canon(project)) {
+        out.push(Message::error(format!(
+            "{who}: post shader {rel} is outside the project folder and won't ship"
+        )));
+        return;
+    }
+    if let Some(e) = shader_problem(&file, rel, automata_assets::shader::ShaderKind::Post) {
+        out.push(Message::error(format!(
+            "{who}: post shader {e} (the frame keeps its standard look)"
+        )));
     }
 }
 
@@ -2756,6 +2813,79 @@ mod tests {
         );
         assert!(
             has("Error Ghost: material materials/ghost.mat.ron not found"),
+            "{texts:#?}"
+        );
+    }
+
+    #[test]
+    fn validation_checks_material_and_post_shaders() {
+        use automata_core::scene_file::{EntityData, MeshVisualData, PrimitiveData, SceneFile};
+        let dir = project("shaders");
+        std::fs::create_dir_all(dir.join("materials")).unwrap();
+        std::fs::create_dir_all(dir.join("shaders")).unwrap();
+        std::fs::write(
+            dir.join("shaders/glow.wgsl"),
+            "fn material(in: MaterialInput) -> MaterialOutput {\n    return nope;\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("shaders/tint.wgsl"),
+            "fn post(in: PostInput) -> vec3<f32> { return in.color; }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("materials/glow.mat.ron"),
+            "(shader: \"../shaders/glow.wgsl\")",
+        )
+        .unwrap();
+        let scene = SceneFile {
+            version: 1,
+            entities: vec![
+                EntityData {
+                    name: Some("Lamp".into()),
+                    mesh_visual: Some(MeshVisualData {
+                        primitive: PrimitiveData::Cube { size: 1.0 },
+                        color: [1.0; 4],
+                        surface: automata_core::scene_file::Surface::default(),
+                        draw_distance: 0.0,
+                        material: "materials/glow.mat.ron".into(),
+                    }),
+                    ..Default::default()
+                },
+                EntityData {
+                    name: Some("Look".into()),
+                    post_shader: Some(automata_core::scene_file::PostShader::new(
+                        "shaders/tint.wgsl",
+                    )),
+                    ..Default::default()
+                },
+                EntityData {
+                    name: Some("Gone".into()),
+                    post_shader: Some(automata_core::scene_file::PostShader::new(
+                        "shaders/gone.wgsl",
+                    )),
+                    ..Default::default()
+                },
+            ],
+        };
+        std::fs::write(dir.join("fx.ron"), scene.to_ron().unwrap()).unwrap();
+        let cfg = BuildConfig {
+            name: "Fx".into(),
+            start_scene: Some("fx.ron".into()),
+            ..BuildConfig::default()
+        };
+        let texts: Vec<String> = validate(&dir, &cfg)
+            .iter()
+            .map(|m| format!("{:?} {}", m.level, m.text))
+            .collect();
+        let has = |s: &str| texts.iter().any(|t| t.contains(s));
+        assert!(
+            has("Error Lamp: material materials/glow.mat.ron: shader shaders/glow.wgsl:2:"),
+            "{texts:#?}"
+        );
+        assert!(!has("Look"), "a working post shader is fine: {texts:#?}");
+        assert!(
+            has("Error Gone: post shader shaders/gone.wgsl not found"),
             "{texts:#?}"
         );
         assert!(!has("Plain"), "{texts:#?}");

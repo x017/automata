@@ -95,6 +95,8 @@ pub enum Field {
     EnvGrain,
     /// Post: chromatic aberration.
     EnvChromatic,
+    /// Post shader number 0..8 (`p0.x` … `p1.w` in the shader).
+    PostParam(u8),
     /// Water surface width (X) and length (Z): index 0..2.
     WaterSize(u8),
     /// Water deep color channel 0..3.
@@ -618,6 +620,13 @@ pub fn get(data: &EntityData, field: Field) -> Option<f32> {
         F::EnvOutline => data.environment?.outline,
         F::EnvOutlineColor(i) => data.environment?.outline_color[axis(i)],
         F::EnvPixelate => data.environment?.pixelate,
+        F::PostParam(i) => data
+            .post_shader
+            .as_ref()?
+            .params
+            .get(usize::from(i))
+            .copied()
+            .unwrap_or(0.0),
         F::WaterSize(i) => data.water?.size[usize::from(i.min(1))],
         F::WaterDeep(i) => data.water?.deep_color[axis(i)],
         F::WaterShallow(i) => data.water?.shallow_color[axis(i)],
@@ -1333,6 +1342,19 @@ pub fn set(data: &mut EntityData, field: Field, value: f32) -> bool {
                 }
             }
         }
+        F::PostParam(i) => match &mut data.post_shader {
+            Some(post) => {
+                let i = usize::from(i);
+                if i >= automata_renderer::SHADER_PARAMS {
+                    return false;
+                }
+                if post.params.len() <= i {
+                    post.params.resize(i + 1, 0.0);
+                }
+                post.params[i] = v;
+            }
+            None => return false,
+        },
         F::WaterSize(_)
         | F::WaterDeep(_)
         | F::WaterShallow(_)
@@ -2693,5 +2715,20 @@ mod tests {
         let j: &Joint = d.joint.as_ref().unwrap();
         assert!(j.collide_connected && !j.enabled);
         assert!((j.break_force - 250.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn post_shader_params_edit_the_component() {
+        let mut d = EntityData::default();
+        assert_eq!(get(&d, Field::PostParam(0)), None);
+        crate::doc::ComponentKind::PostShader.add_to(&mut d);
+        assert_eq!(get(&d, Field::PostParam(5)), Some(0.0));
+        assert!(set(&mut d, Field::PostParam(5), 0.75));
+        assert!(!set(&mut d, Field::PostParam(8), 1.0), "eight numbers only");
+        let post = d.post_shader.clone().unwrap();
+        assert_eq!(post.params, vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.75]);
+        assert_eq!(post.values()[5], 0.75);
+        crate::doc::ComponentKind::PostShader.remove_from(&mut d);
+        assert!(d.post_shader.is_none());
     }
 }

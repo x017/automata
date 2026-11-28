@@ -127,8 +127,10 @@ from ._core import (
     Transform,
     TransformRef,
     Water,
+    PostShader,
     __version__,
     asset_root,
+    check_shader,
     set_asset_root,
 )
 
@@ -151,6 +153,7 @@ Component = Union[
     AudioSource,
     ParticleEmitter,
     Water,
+    PostShader,
     Animation,
     Grass,
     Scatter,
@@ -309,8 +312,10 @@ __all__ = [
     "Transform",
     "TransformRef",
     "Water",
+    "PostShader",
     "__version__",
     "asset_root",
+    "check_shader",
     "set_asset_root",
 ]
 

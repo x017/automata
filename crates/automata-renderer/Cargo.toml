@@ -20,6 +20,9 @@ thiserror.workspace = true
 tracing.workspace = true
 ab_glyph.workspace = true
 wgpu.workspace = true
+# Custom shaders are checked (parsed, validated, translated for WebGL2)
+# before the GPU sees them. wgpu already builds naga with these.
+naga = { workspace = true, features = ["wgsl-in", "glsl-out"] }
 
 # The browser build (Pyodide, wasm32-unknown-emscripten) is single-threaded:
 # wgpu's types may be Send + Sync there, as the engine's statics need.

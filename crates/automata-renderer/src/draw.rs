@@ -41,6 +41,8 @@ pub struct DrawList {
     pub(crate) particles: Vec<crate::ParticleBatch>,
     pub(crate) grass: Vec<crate::GrassField>,
     pub(crate) grass_pushers: Vec<crate::GrassPusher>,
+    /// A custom post effect over the frame, and its parameters.
+    pub(crate) post_shader: Option<(crate::Shader, [f32; crate::SHADER_PARAMS])>,
 }
 
 impl DrawList {
@@ -280,6 +282,21 @@ impl DrawList {
         self.environment
     }
 
+    /// Runs a custom post shader ([`crate::ShaderKind::Post`]) over the
+    /// finished frame, before the HUD, with `params` as its `p0` and `p1`.
+    /// Material shaders are ignored here.
+    pub fn set_post_shader(&mut self, shader: &crate::Shader, params: [f32; crate::SHADER_PARAMS]) {
+        if shader.kind() == crate::ShaderKind::Post {
+            self.post_shader = Some((shader.clone(), params));
+        }
+    }
+
+    /// The frame's custom post shader and its parameters, if one was set.
+    #[must_use]
+    pub fn post_shader(&self) -> Option<&(crate::Shader, [f32; crate::SHADER_PARAMS])> {
+        self.post_shader.as_ref()
+    }
+
     /// Resets the list for the next frame, keeping allocations. Called by
     /// the engine after each presented frame.
     pub fn clear(&mut self) {
@@ -298,6 +315,7 @@ impl DrawList {
         self.particles.clear();
         self.grass.clear();
         self.grass_pushers.clear();
+        self.post_shader = None;
         // The clear color intentionally persists across frames.
     }
 }
@@ -326,6 +344,7 @@ impl Default for DrawList {
             particles: Vec::new(),
             grass: Vec::new(),
             grass_pushers: Vec::new(),
+            post_shader: None,
         }
     }
 }

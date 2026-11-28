@@ -209,6 +209,22 @@ pub struct Renderer {
     grass_frame: u64,
     /// Grass materials (their colour palettes) by [`crate::GrassLook::key`].
     grass_materials: HashMap<u64, Material>,
+    /// Compiled custom shaders, shared while used.
+    shader_cache: crate::shader::ShaderCache,
+    /// Custom material shaders' mesh pipelines.
+    custom_pipelines: Vec<CustomPipelines>,
+    /// The custom post effect pass.
+    post_shader: crate::post_shader::PostShaderPass,
+}
+
+/// A custom material shader's mesh pipelines for one target format and
+/// shadow mix (Beautiful's: the HDR format, all shadows).
+struct CustomPipelines {
+    id: u64,
+    shader: std::sync::Weak<crate::shader::ShaderInner>,
+    format: wgpu::TextureFormat,
+    shadows: pipeline::ForwardShadows,
+    pair: pipeline::PipelinePair,
 }
 
 impl Renderer {
@@ -370,6 +386,9 @@ impl Renderer {
             grass_chunks: HashMap::new(),
             grass_frame: 0,
             grass_materials: HashMap::new(),
+            shader_cache: crate::shader::ShaderCache::default(),
+            custom_pipelines: Vec::new(),
+            post_shader: crate::post_shader::PostShaderPass::new(ctx.device()),
             ctx,
         }
     }
@@ -661,19 +680,78 @@ impl Renderer {
         params: &crate::MaterialParams,
         textures: crate::MaterialTextures,
     ) -> Material {
-        let maps = [
-            (textures.normal.is_some(), crate::material::MAP_NORMAL),
-            (
-                textures.metallic_roughness.is_some(),
-                crate::material::MAP_METAL_ROUGH,
-            ),
-            (textures.emissive.is_some(), crate::material::MAP_EMISSIVE),
-        ]
-        .iter()
-        .filter(|(on, _)| *on)
-        .fold(0, |bits, (_, bit)| bits | bit);
-        let uniform = MaterialUniform::new(params, maps);
-        self.build_material(params, &uniform, textures)
+        let uniform = MaterialUniform::new(params, map_bits(&textures));
+        self.build_material(params, &uniform, textures, None)
+    }
+
+    /// A material drawn with a custom material shader (see
+    /// [`Renderer::create_shader`]): like [`Renderer::create_pbr_material`],
+    /// with `shader` shaping the surface and `shader_params` its `p0` and
+    /// `p1`. A post shader, or none, gives the standard material.
+    #[must_use]
+    pub fn create_shaded_material(
+        &self,
+        params: &crate::MaterialParams,
+        textures: crate::MaterialTextures,
+        shader: Option<&crate::Shader>,
+        shader_params: [f32; crate::SHADER_PARAMS],
+    ) -> Material {
+        let Some(shader) = shader.filter(|s| s.kind() == crate::ShaderKind::Material) else {
+            return self.create_pbr_material(params, textures);
+        };
+        let values = if shader_params.iter().all(|v| v.is_finite()) {
+            shader_params
+        } else {
+            [0.0; crate::SHADER_PARAMS]
+        };
+        let mut uniform = MaterialUniform::new(params, map_bits(&textures));
+        uniform.custom = [
+            [values[0], values[1], values[2], values[3]],
+            [values[4], values[5], values[6], values[7]],
+        ];
+        self.build_material(params, &uniform, textures, Some((shader.clone(), values)))
+    }
+
+    /// Compiles a custom shader from WGSL `source` (see [`crate::check_shader`]
+    /// for the rules), named `file` in errors. The same source compiles
+    /// once while anything uses the result.
+    ///
+    /// # Errors
+    /// The shader breaks a rule, doesn't compile, or the GPU refuses it:
+    /// where and why.
+    pub fn create_shader(
+        &self,
+        kind: crate::ShaderKind,
+        file: &str,
+        source: &str,
+    ) -> std::result::Result<crate::Shader, crate::ShaderError> {
+        self.shader_cache.get_or_make(kind, source, || {
+            let checked = crate::check_shader(kind, file, source)?;
+            let device = self.ctx.device();
+            let (module, error) = crate::shader::catching(device, || {
+                device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some(file),
+                    source: wgpu::ShaderSource::Wgsl(checked.source.as_str().into()),
+                })
+            });
+            if let Some(message) = error {
+                return Err(crate::ShaderError {
+                    file: file.to_string(),
+                    line: None,
+                    column: None,
+                    message,
+                });
+            }
+            Ok(crate::Shader {
+                inner: Arc::new(crate::shader::ShaderInner {
+                    id: crate::shader::next_id(),
+                    kind,
+                    file: file.to_string(),
+                    module,
+                    failure: std::sync::Mutex::new(None),
+                }),
+            })
+        })
     }
 
     /// Creates a terrain's ground material: four layers from an atlas,
@@ -697,6 +775,7 @@ impl Renderer {
                 emissive: Some(terrain.splat.clone()),
                 ..crate::MaterialTextures::default()
             },
+            None,
         )
     }
 
@@ -706,6 +785,7 @@ impl Renderer {
         params: &crate::MaterialParams,
         uniform: &MaterialUniform,
         textures: crate::MaterialTextures,
+        shader: Option<(crate::Shader, [f32; crate::SHADER_PARAMS])>,
     ) -> Material {
         let device = self.ctx.device();
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -745,8 +825,15 @@ impl Renderer {
                 },
             ],
         });
-        let key =
-            crate::material::content_key(uniform, [&base, &normal, &metallic_roughness, &emissive]);
+        let key = crate::material::content_key(
+            uniform,
+            [&base, &normal, &metallic_roughness, &emissive],
+            shader.as_ref().map(|(s, _)| s),
+        );
+        let (shader, shader_params) = match shader {
+            Some((s, values)) => (Some(s), values),
+            None => (None, [0.0; crate::SHADER_PARAMS]),
+        };
         Material {
             inner: Arc::new(MaterialInner {
                 bind_group,
@@ -754,6 +841,8 @@ impl Renderer {
                 texture: base,
                 _maps: [normal, metallic_roughness, emissive],
                 key,
+                shader,
+                shader_params,
             }),
         }
     }
@@ -1144,6 +1233,17 @@ impl Renderer {
                     label: Some("frame"),
                 });
         let prepared = self.prepare_frame(draw, viewport, beautiful);
+        let meshes_into = if beautiful {
+            (
+                pipeline::HDR_FORMAT,
+                pipeline::HDR_DEPTH_FORMAT,
+                pipeline::ForwardShadows::ALL,
+            )
+        } else {
+            (format, DEPTH_FORMAT, prepared.forward_shadows())
+        };
+        self.ensure_custom_pipelines(draw, meshes_into);
+        let post_shader = self.prepare_post_shader(draw, format, viewport);
 
         // --- Shadow passes: depth from the sun's view, one per cascade ---
         if prepared.render_shadows {
@@ -1169,6 +1269,8 @@ impl Renderer {
             };
             let depth_view =
                 depth_texture.map(|t| t.create_view(&wgpu::TextureViewDescriptor::default()));
+            // The post effect's last pass needs a depth buffer for the HUD.
+            let post_shader = post_shader.filter(|_| depth_view.is_some());
             if beautiful {
                 self.record_beautiful(
                     &mut encoder,
@@ -1177,6 +1279,7 @@ impl Renderer {
                     &view,
                     depth_view.as_ref(),
                     format,
+                    post_shader.as_ref(),
                 );
             } else {
                 self.record_forward(
@@ -1188,6 +1291,7 @@ impl Renderer {
                     format,
                     offscreen,
                     chain,
+                    post_shader.as_ref(),
                 );
             }
         }
@@ -1304,6 +1408,154 @@ impl Renderer {
         }
     }
 
+    /// Builds the mesh pipelines of the custom material shaders this
+    /// frame's meshes use, for the target they draw into (`format`, depth
+    /// format, shadow mix), and drops those of shaders nothing uses any
+    /// more. A shader the GPU refuses is marked broken (and draws with the
+    /// standard look).
+    fn ensure_custom_pipelines(
+        &mut self,
+        draw: &DrawList,
+        (format, depth_format, shadows): (
+            wgpu::TextureFormat,
+            wgpu::TextureFormat,
+            pipeline::ForwardShadows,
+        ),
+    ) {
+        self.custom_pipelines
+            .retain(|c| c.shader.strong_count() > 0);
+        let mut seen: Vec<u64> = Vec::new();
+        for m in &draw.meshes {
+            let Some(shader) = &m.material.inner.shader else {
+                continue;
+            };
+            let id = shader.id();
+            if seen.contains(&id) {
+                continue;
+            }
+            seen.push(id);
+            let exists = self
+                .custom_pipelines
+                .iter()
+                .any(|c| c.id == id && c.format == format && c.shadows == shadows);
+            if exists || shader.broken() {
+                continue;
+            }
+            let device = self.ctx.device();
+            let (pair, error) = crate::shader::catching(device, || {
+                pipeline::create_custom_mesh_pipelines(
+                    device,
+                    &self.shared,
+                    &shader.inner.module,
+                    format,
+                    depth_format,
+                    shadows,
+                )
+            });
+            match error {
+                Some(why) => shader.fail(why),
+                None => self.custom_pipelines.push(CustomPipelines {
+                    id,
+                    shader: Arc::downgrade(&shader.inner),
+                    format,
+                    shadows,
+                    pair,
+                }),
+            }
+        }
+    }
+
+    /// The custom material pipelines for meshes drawn into `format` with
+    /// `shadows`.
+    fn custom_pipelines_for(
+        &self,
+        format: wgpu::TextureFormat,
+        shadows: pipeline::ForwardShadows,
+    ) -> Vec<&CustomPipelines> {
+        self.custom_pipelines
+            .iter()
+            .filter(|c| c.format == format && c.shadows == shadows)
+            .collect()
+    }
+
+    /// Gets the frame's custom post effect ready to run, if it has one the
+    /// GPU accepts.
+    fn prepare_post_shader(
+        &mut self,
+        draw: &DrawList,
+        format: wgpu::TextureFormat,
+        viewport: (u32, u32),
+    ) -> Option<crate::Shader> {
+        let (shader, params) = draw.post_shader.as_ref()?;
+        self.post_shader
+            .prepare(
+                self.ctx.device(),
+                self.ctx.queue(),
+                shader,
+                *params,
+                format,
+                DEPTH_FORMAT,
+                viewport,
+                draw.time.unwrap_or(0.0),
+            )
+            .then(|| shader.clone())
+    }
+
+    /// The frame's last passes, over `view`: `image` (the finished scene:
+    /// graded, anti-aliased) and the sprites. With a post effect, the
+    /// image and the world's sprites go into its input first, and the
+    /// effect then draws into `view` under the HUD.
+    #[allow(clippy::too_many_arguments)]
+    fn record_final(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        draw: &DrawList,
+        prepared: &PreparedFrame,
+        view: &wgpu::TextureView,
+        depth_view: Option<&wgpu::TextureView>,
+        sprite_pipeline: &wgpu::RenderPipeline,
+        post_shader: Option<&crate::Shader>,
+        image: impl FnOnce(&mut wgpu::RenderPass<'_>),
+    ) {
+        let input = post_shader.and_then(|_| self.post_shader.input());
+        let mut pass = final_pass(encoder, input.unwrap_or(view), depth_view);
+        image(&mut pass);
+        if input.is_some() {
+            self.record_sprites(&mut pass, draw, prepared, sprite_pipeline, Some(false));
+            drop(pass);
+            self.record_post_and_hud(
+                encoder,
+                draw,
+                prepared,
+                view,
+                depth_view,
+                sprite_pipeline,
+                post_shader,
+            );
+        } else {
+            self.record_sprites(&mut pass, draw, prepared, sprite_pipeline, None);
+        }
+    }
+
+    /// The custom post effect over `view` (reading its input), then the
+    /// HUD sprites on top.
+    #[allow(clippy::too_many_arguments)]
+    fn record_post_and_hud(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        draw: &DrawList,
+        prepared: &PreparedFrame,
+        view: &wgpu::TextureView,
+        depth_view: Option<&wgpu::TextureView>,
+        sprite_pipeline: &wgpu::RenderPipeline,
+        post_shader: Option<&crate::Shader>,
+    ) {
+        let Some(shader) = post_shader else { return };
+        let mut pass = final_pass(encoder, view, depth_view);
+        self.post_shader.draw(&mut pass, shader);
+        self.record_sprites(&mut pass, draw, prepared, sprite_pipeline, Some(true));
+    }
+
     /// Draws the sky dome behind what's already in the pass, if the frame
     /// has one.
     fn record_sky(
@@ -1371,11 +1623,16 @@ impl Renderer {
         format: wgpu::TextureFormat,
         offscreen: bool,
         chain: Option<crate::post::LdrChain>,
+        post_shader: Option<&crate::Shader>,
     ) {
         // Offscreen targets use pipelines built for their color format, and
         // only the shadow lookups this frame needs.
         let shadows = prepared.forward_shadows();
         let mesh_pipeline = self.forward_pipeline(format, shadows);
+        let custom = self.custom_pipelines_for(format, shadows);
+        // With a post effect (and no grading pass to feed it), the scene
+        // and the world's sprites go into its input.
+        let post_input = post_shader.and_then(|_| self.post_shader.input());
         let sprite_pipeline = match &self.offscreen_sprite_pipeline {
             Some(sprite) if offscreen => sprite,
             _ => &self.sprite_pipeline,
@@ -1389,7 +1646,11 @@ impl Renderer {
             _ => None,
         };
         let chain = chain.filter(|_| post_view.is_some());
-        let scene_view = post_view.as_ref().unwrap_or(view);
+        let target = match post_input {
+            Some(input) if chain.is_none() => input,
+            _ => view,
+        };
+        let scene_view = post_view.as_ref().unwrap_or(target);
         // Particles get a pass of their own after the scene's, reading its
         // depth (kept for them).
         let particle_depth = depth_view.filter(|_| !prepared.particle_runs.is_empty());
@@ -1425,6 +1686,7 @@ impl Renderer {
                 draw,
                 prepared,
                 mesh_pipeline,
+                &custom,
                 &prepared.light_bind,
                 &self.instance_buffer,
             );
@@ -1437,13 +1699,27 @@ impl Renderer {
             self.record_waters(&mut pass, prepared, water, &self.scene_placeholder);
         }
         let (Some(chain), Some(depth_view)) = (chain, depth_view) else {
+            // The world's sprites only, when the HUD goes after the effect.
+            let layer = post_input.map(|_| false);
             if let Some(depth) = particle_depth {
                 drop(pass);
-                let mut pass = self.particle_pass(encoder, view, depth);
+                let mut pass = self.particle_pass(encoder, target, depth);
                 self.record_particles(&mut pass, prepared, format, depth);
-                self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
+                self.record_sprites(&mut pass, draw, prepared, sprite_pipeline, layer);
             } else {
-                self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
+                self.record_sprites(&mut pass, draw, prepared, sprite_pipeline, layer);
+                drop(pass);
+            }
+            if post_input.is_some() {
+                self.record_post_and_hud(
+                    encoder,
+                    draw,
+                    prepared,
+                    view,
+                    depth_view,
+                    sprite_pipeline,
+                    post_shader,
+                );
             }
             return;
         };
@@ -1473,29 +1749,16 @@ impl Renderer {
         }
         self.post.record_ldr_bloom(device, encoder, &chain);
         // Final: the graded image into the target, then sprites on top.
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("graded"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Discard,
-                }),
-                stencil_ops: None,
-            }),
-            ..wgpu::RenderPassDescriptor::default()
-        });
-        self.post.draw_grade(device, &mut pass, format, &chain);
-        self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
+        self.record_final(
+            encoder,
+            draw,
+            prepared,
+            view,
+            Some(depth_view),
+            sprite_pipeline,
+            post_shader,
+            |pass| self.post.draw_grade(device, pass, format, &chain),
+        );
     }
 
     /// A pass drawing over `view` with `depth` attached read-only, so the
@@ -1549,8 +1812,9 @@ impl Renderer {
 
     /// The Beautiful path: the scene in HDR, water refracting through a copy
     /// of it, bloom and tone mapping, then FXAA into the target with HUD
-    /// sprites drawn last (untouched by post effects).
-    #[allow(clippy::too_many_lines)] // one pass sequence, read top to bottom
+    /// sprites drawn last (untouched by post effects), and a custom post
+    /// effect before them if the frame has one.
+    #[allow(clippy::too_many_lines, clippy::too_many_arguments)] // one pass sequence
     fn record_beautiful(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1559,6 +1823,7 @@ impl Renderer {
         view: &wgpu::TextureView,
         depth_view: Option<&wgpu::TextureView>,
         format: wgpu::TextureFormat,
+        post_shader: Option<&crate::Shader>,
     ) {
         let (Some(targets), Some(mesh_pipeline), Some(light_bind)) = (
             &self.post.targets,
@@ -1625,6 +1890,7 @@ impl Renderer {
                 draw,
                 prepared,
                 mesh_pipeline,
+                &self.custom_pipelines_for(pipeline::HDR_FORMAT, pipeline::ForwardShadows::ALL),
                 light_bind,
                 &self.instance_buffer,
             );
@@ -1742,29 +2008,16 @@ impl Renderer {
             Some(sprite) if format == OFFSCREEN_FORMAT && format != self.ctx.format() => sprite,
             _ => &self.sprite_pipeline,
         };
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("final"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: depth_view.map(|dv| wgpu::RenderPassDepthStencilAttachment {
-                view: dv,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Discard,
-                }),
-                stencil_ops: None,
-            }),
-            ..wgpu::RenderPassDescriptor::default()
-        });
-        self.post.draw_fxaa(device, &mut pass, format, &style);
-        self.record_sprites(&mut pass, draw, prepared, sprite_pipeline);
+        self.record_final(
+            encoder,
+            draw,
+            prepared,
+            view,
+            depth_view,
+            sprite_pipeline,
+            post_shader,
+            |pass| self.post.draw_fxaa(device, pass, format, &style),
+        );
     }
 
     /// Beautiful's screen-space occlusion: the opaque meshes' depth from
@@ -1839,6 +2092,7 @@ impl Renderer {
         draw: &DrawList,
         prepared: &PreparedFrame,
         pipelines: &pipeline::PipelinePair,
+        custom: &[&CustomPipelines],
         light_bind: &wgpu::BindGroup,
         instances: &wgpu::Buffer,
     ) {
@@ -1846,15 +2100,23 @@ impl Renderer {
         pass.set_bind_group(3, light_bind, &[]);
         let mut current = None;
         for batch in &prepared.main_batches {
-            if current != Some(batch.kind) {
-                pass.set_pipeline(pipelines.get(batch.kind));
-                current = Some(batch.kind);
-            }
             let material = if batch.kind == crate::batch::BatchKind::Grass {
                 &prepared.grass_materials[batch.draw]
             } else {
                 &draw.meshes[batch.draw].material
             };
+            // A custom material shader's pipelines, when they built.
+            let shaded = material
+                .inner
+                .shader
+                .as_ref()
+                .and_then(|s| custom.iter().find(|c| c.id == s.id()));
+            let key = (batch.kind, shaded.map_or(0, |c| c.id));
+            if current != Some(key) {
+                let pair = shaded.map_or(pipelines, |c| &c.pair);
+                pass.set_pipeline(pair.get(batch.kind));
+                current = Some(key);
+            }
             pass.set_bind_group(2, &material.inner.bind_group, &[]);
             Self::record_batch(pass, draw, prepared, batch, instances);
         }
@@ -1960,8 +2222,12 @@ impl Renderer {
         draw: &DrawList,
         prepared: &PreparedFrame,
         pipeline: &wgpu::RenderPipeline,
+        layer: Option<bool>,
     ) {
-        if draw.sprites.is_empty() && draw.screen_sprites.is_empty() {
+        let wanted = |screen: bool| layer.is_none_or(|l| l == screen);
+        let world = !draw.sprites.is_empty() && wanted(false);
+        let screen = !draw.screen_sprites.is_empty() && wanted(true);
+        if !world && !screen {
             return;
         }
         pass.set_pipeline(pipeline);
@@ -1971,7 +2237,7 @@ impl Renderer {
             wgpu::IndexFormat::Uint16,
         );
         let mut bound_screen = None;
-        for run in &prepared.sprite_runs {
+        for run in prepared.sprite_runs.iter().filter(|r| wanted(r.screen)) {
             if bound_screen != Some(run.screen) {
                 let bind = if run.screen {
                     &prepared.screen_bind
@@ -3018,6 +3284,51 @@ type ForwardPipelines = (
     pipeline::ForwardShadows,
     pipeline::PipelinePair,
 );
+
+/// A frame's last pass over `view`: cleared to black, with a fresh depth
+/// buffer for the sprites drawn in it.
+fn final_pass<'e>(
+    encoder: &'e mut wgpu::CommandEncoder,
+    view: &wgpu::TextureView,
+    depth_view: Option<&wgpu::TextureView>,
+) -> wgpu::RenderPass<'e> {
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("final"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: depth_view.map(|dv| wgpu::RenderPassDepthStencilAttachment {
+            view: dv,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(1.0),
+                store: wgpu::StoreOp::Discard,
+            }),
+            stencil_ops: None,
+        }),
+        ..wgpu::RenderPassDescriptor::default()
+    })
+}
+
+/// The material uniform's map flags for the maps `textures` has.
+fn map_bits(textures: &crate::MaterialTextures) -> u32 {
+    [
+        (textures.normal.is_some(), crate::material::MAP_NORMAL),
+        (
+            textures.metallic_roughness.is_some(),
+            crate::material::MAP_METAL_ROUGH,
+        ),
+        (textures.emissive.is_some(), crate::material::MAP_EMISSIVE),
+    ]
+    .iter()
+    .filter(|(on, _)| *on)
+    .fold(0, |bits, (_, bit)| bits | bit)
+}
 
 /// The forward-path mesh pipelines for `format` that `quality`'s frames can
 /// use and `existing` lacks.
@@ -4714,6 +5025,238 @@ mod tests {
                 "{quality:?}: normal-mapped {bent:?} vs flat {flat:?}"
             );
         }
+    }
+
+    /// Two dark cubes side by side, the left wearing `shader` (with
+    /// `values`), the right plain, both through one frame: the left and
+    /// right pixels on the middle row.
+    fn shaded_pair(
+        renderer: &mut Renderer,
+        shader: &crate::Shader,
+        values: [f32; crate::SHADER_PARAMS],
+    ) -> ([u8; 4], [u8; 4]) {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let dark = crate::MaterialParams::with_color([0.02, 0.02, 0.02, 1.0]);
+        let shaded = renderer.create_shaded_material(
+            &dark,
+            crate::MaterialTextures::default(),
+            Some(shader),
+            values,
+        );
+        let plain = renderer.create_pbr_material(&dark, crate::MaterialTextures::default());
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_time(1.0);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 0.0, 3.0),
+            glam::Vec3::ZERO,
+        ));
+        draw.set_sun(crate::Sun::new(glam::Vec3::new(0.0, 0.0, -1.0)));
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_translation(glam::Vec3::new(-0.7, 0.0, 0.0)),
+            &shaded,
+        );
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_translation(glam::Vec3::new(0.7, 0.0, 0.0)),
+            &plain,
+        );
+        renderer.render_offscreen(&draw, &target);
+        let pixels = read_pixels(renderer, &target, size);
+        let at = |x: u32| {
+            let i = ((size.1 / 2 * size.0 + x) * 4) as usize;
+            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+        };
+        (at(size.0 * 3 / 10), at(size.0 * 7 / 10))
+    }
+
+    #[test]
+    fn offscreen_custom_materials_shape_the_surface_on_every_preset() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping custom material test");
+            return;
+        };
+        let glow = renderer
+            .create_shader(
+                crate::ShaderKind::Material,
+                "glow.wgsl",
+                "fn material(in: MaterialInput) -> MaterialOutput {
+                    var out = material_defaults(in);
+                    out.emissive = in.p0.rgb * in.p0.a;
+                    return out;
+                }",
+            )
+            .unwrap();
+        let cut = renderer
+            .create_shader(
+                crate::ShaderKind::Material,
+                "cut.wgsl",
+                "fn material(in: MaterialInput) -> MaterialOutput {
+                    if in.p1.x > 0.5 { discard; }
+                    return material_defaults(in);
+                }",
+            )
+            .unwrap();
+        // The same source compiles once.
+        let again = renderer
+            .create_shader(crate::ShaderKind::Material, "cut.wgsl", &{
+                "fn material(in: MaterialInput) -> MaterialOutput {
+                    if in.p1.x > 0.5 { discard; }
+                    return material_defaults(in);
+                }"
+                .to_string()
+            })
+            .unwrap();
+        assert_eq!(cut, again);
+        let green = [0.0, 1.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0];
+        for quality in [
+            GraphicsQuality::Low,
+            GraphicsQuality::Medium,
+            GraphicsQuality::High,
+            GraphicsQuality::Beautiful,
+        ] {
+            renderer.set_quality(quality);
+            let (left, right) = shaded_pair(&mut renderer, &glow, green);
+            assert!(
+                left[1] > 150 && left[1] > left[0] + 100,
+                "{quality:?}: the shaded cube glows green: {left:?}"
+            );
+            assert!(
+                right[1] < 80,
+                "{quality:?}: the plain one doesn't: {right:?}"
+            );
+            // Its parameters are its own: none, no glow.
+            let (off, _) = shaded_pair(&mut renderer, &glow, [0.0; 8]);
+            assert!(off[1] < 80, "{quality:?}: no glow without params: {off:?}");
+            // Cut-outs show the background through.
+            let (kept, _) = shaded_pair(&mut renderer, &cut, [0.0; 8]);
+            let (gone, _) = shaded_pair(
+                &mut renderer,
+                &cut,
+                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            );
+            assert!(
+                u32::from(gone[0]) + u32::from(gone[1]) + u32::from(gone[2]) <= 6,
+                "{quality:?}: discarded pixels stay clear: {gone:?} (kept {kept:?})"
+            );
+            assert!(cut.failure().is_none() && glow.failure().is_none());
+        }
+    }
+
+    /// An orange wall with a white HUD square in the top-left corner,
+    /// through `post` if given.
+    fn post_frame(
+        renderer: &mut Renderer,
+        post: Option<(&crate::Shader, [f32; crate::SHADER_PARAMS])>,
+    ) -> Vec<u8> {
+        let size = renderer.size();
+        let target = target(renderer.context().device(), size);
+        let cube = renderer.create_mesh(&MeshData::cube(1.0));
+        let wall = renderer.create_pbr_material(
+            &crate::MaterialParams {
+                emissive: [0.8, 0.3, 0.05],
+                ..crate::MaterialParams::with_color([0.0, 0.0, 0.0, 1.0])
+            },
+            crate::MaterialTextures::default(),
+        );
+        let mut draw = DrawList::new();
+        draw.set_clear_color(Color::BLACK);
+        draw.set_time(1.0);
+        draw.set_camera_3d(Camera3D::new(
+            glam::Vec3::new(0.0, 0.0, 4.0),
+            glam::Vec3::ZERO,
+        ));
+        draw.mesh(
+            &cube,
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::new(30.0, 30.0, 0.2),
+                glam::Quat::IDENTITY,
+                glam::Vec3::new(0.0, 0.0, -1.0),
+            ),
+            &wall,
+        );
+        draw.screen_sprite(
+            Sprite::new(renderer.white_texture())
+                .position(glam::Vec2::new(8.0, 8.0))
+                .size(glam::Vec2::new(16.0, 16.0)),
+        );
+        if let Some((shader, params)) = post {
+            draw.set_post_shader(shader, params);
+        }
+        renderer.render_offscreen(&draw, &target);
+        read_pixels(renderer, &target, size)
+    }
+
+    #[test]
+    fn offscreen_post_shaders_draw_over_the_frame_but_under_the_hud_on_every_preset() {
+        let Some(mut renderer) = pollster::block_on(offscreen()) else {
+            eprintln!("no GPU adapter; skipping post shader test");
+            return;
+        };
+        let flat = renderer
+            .create_shader(
+                crate::ShaderKind::Post,
+                "flat.wgsl",
+                "fn post(in: PostInput) -> vec3<f32> { return in.p0.rgb; }",
+            )
+            .unwrap();
+        let swap = renderer
+            .create_shader(
+                crate::ShaderKind::Post,
+                "swap.wgsl",
+                "fn post(in: PostInput) -> vec3<f32> { return image(in.uv).bgr; }",
+            )
+            .unwrap();
+        let size = renderer.size();
+        let px = |p: &[u8], x: u32, y: u32| pixel_at(p, size, x, y);
+        for quality in [
+            GraphicsQuality::Low,
+            GraphicsQuality::Medium,
+            GraphicsQuality::High,
+            GraphicsQuality::Beautiful,
+        ] {
+            renderer.set_quality(quality);
+            let plain = post_frame(&mut renderer, None);
+            let mid = px(&plain, 40, 40);
+            assert!(mid[0] > mid[2] + 60, "{quality:?}: an orange wall: {mid:?}");
+            // A flat colour covers the frame, but not the HUD.
+            let green = post_frame(
+                &mut renderer,
+                Some((&flat, [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])),
+            );
+            let g = px(&green, 40, 40);
+            assert!(
+                g[1] > 240 && g[0] < 10 && g[2] < 10,
+                "{quality:?}: flat green {g:?}"
+            );
+            let hud = px(&green, 4, 4);
+            assert!(
+                hud.iter().all(|&c| c > 240),
+                "{quality:?}: the HUD stays white {hud:?}"
+            );
+            // It reads the finished image: red and blue swap.
+            let swapped = post_frame(&mut renderer, Some((&swap, [0.0; 8])));
+            let s = px(&swapped, 40, 40);
+            assert!(
+                s[2] > s[0] + 60 && s[2].abs_diff(mid[0]) < 12,
+                "{quality:?}: swapped {s:?} from {mid:?}"
+            );
+            assert!(flat.failure().is_none() && swap.failure().is_none());
+        }
+        // A material shader isn't a post effect.
+        let material = renderer
+            .create_shader(
+                crate::ShaderKind::Material,
+                "m.wgsl",
+                "fn material(in: MaterialInput) -> MaterialOutput { return material_defaults(in); }",
+            )
+            .unwrap();
+        let mut draw = DrawList::new();
+        draw.set_post_shader(&material, [0.0; 8]);
+        assert!(draw.post_shader().is_none());
     }
 
     /// A sunlit orange wall filling the view with a small white-hot cube in

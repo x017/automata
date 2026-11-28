@@ -553,6 +553,23 @@ pub enum Intent {
     /// Create a material file (if missing) and open it in the material
     /// editor.
     NewMaterial(PathBuf),
+    /// Create a shader file from the template of its kind (if missing) and
+    /// open it in the code editor.
+    NewShader {
+        /// The `.wgsl` file.
+        path: PathBuf,
+        /// Material or post effect.
+        kind: automata_renderer::ShaderKind,
+    },
+    /// Give an entity a post effect shader (`None` removes the file from
+    /// its Post Shader). A file that doesn't exist yet is made from the
+    /// post template.
+    SetPostShader {
+        /// Entity id.
+        id: u64,
+        /// The `.wgsl` file.
+        path: Option<PathBuf>,
+    },
     /// Refit an entity's box collider to its mesh.
     FitCollider(u64),
     /// Save a model file's import settings (scale, rotation, pivot) to its
@@ -681,6 +698,7 @@ impl Intent {
             | Self::RenameAttribute { id, .. }
             | Self::SetModel { id, .. }
             | Self::SetMaterial { id, .. }
+            | Self::SetPostShader { id, .. }
             | Self::SetAudioClip { id, .. }
             | Self::AttachScript { id, .. }
             | Self::RevertPrefab { id, paths: None } => Some(*id),
@@ -718,6 +736,7 @@ impl Intent {
             | Self::RenameAttribute { id, .. }
             | Self::SetModel { id, .. }
             | Self::SetMaterial { id, .. }
+            | Self::SetPostShader { id, .. }
             | Self::SetAudioClip { id, .. }
             | Self::AttachScript { id, .. }
             | Self::RevertPrefab { id, paths: None } => *id = to,
@@ -745,6 +764,7 @@ impl Intent {
                 | Self::NewScript(_)
                 | Self::NewUiScreen(_)
                 | Self::NewMaterial(_)
+                | Self::NewShader { .. }
                 | Self::NewFolder(_)
                 | Self::DuplicateFile(_)
                 | Self::DeleteFile(_)
@@ -1788,7 +1808,7 @@ impl Ui {
             )
             | (
                 t @ FileDrop::Entity(..),
-                AssetKind::Material | AssetKind::Script | AssetKind::AnimGraph,
+                AssetKind::Material | AssetKind::Script | AssetKind::AnimGraph | AssetKind::Shader,
             )
             | (t @ FileDrop::Scene(_), AssetKind::Prefab) => t,
             _ => FileDrop::Nothing,
@@ -1829,6 +1849,10 @@ impl Ui {
                     path: Some(path),
                 }),
                 (FileDrop::Entity(id, _), AssetKind::AnimGraph) => Some(Intent::SetAnimGraph {
+                    id,
+                    path: Some(path),
+                }),
+                (FileDrop::Entity(id, _), AssetKind::Shader) => Some(Intent::SetPostShader {
                     id,
                     path: Some(path),
                 }),
@@ -2884,6 +2908,15 @@ impl Ui {
                 y += 6.0;
             }
         }
+        if d.post_shader.is_some() {
+            let kind = ComponentKind::PostShader;
+            let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
+            y = ny;
+            if open {
+                y = self.post_shader_rows(canvas, x, y, w, e);
+                y += 6.0;
+            }
+        }
         if d.water.is_some() {
             let kind = ComponentKind::Water;
             let (ny, open) = self.section(canvas, x, y, w, kind.label(), id, Some(kind), false);
@@ -3305,6 +3338,184 @@ impl Ui {
             }
         }
         y + layout::ROW_STEP
+    }
+
+    /// Four numbers side by side (a post shader's `p0` / `p1`).
+    #[allow(clippy::too_many_arguments)]
+    fn vec4_row(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        y: f32,
+        w: f32,
+        e: &EntityEntry,
+        label: &str,
+        fields: [Field; 4],
+    ) -> f32 {
+        if fields::get(&e.data, fields[0]).is_none() {
+            return y;
+        }
+        let r = Rect::new(x, y, w, layout::FIELD_H);
+        if self.row_visible(r) {
+            self.row_label(canvas, x, y, label);
+            let gap = 4.0;
+            let fw = (w - layout::LABEL_W - 3.0 * gap) / 4.0;
+            for (i, f) in fields.into_iter().enumerate() {
+                if let Some(v) = fields::get(&e.data, f) {
+                    #[allow(clippy::cast_precision_loss)]
+                    let fx = x + layout::LABEL_W + i as f32 * (fw + gap);
+                    self.float_field(
+                        canvas,
+                        Rect::new(fx, y, fw, layout::FIELD_H),
+                        e.id,
+                        f,
+                        v,
+                        None,
+                    );
+                }
+            }
+        }
+        y + layout::ROW_STEP
+    }
+
+    /// A Post Shader's file (click to choose or name a new one, double-click
+    /// or Edit to open it), what's wrong with it, and its eight numbers.
+    fn post_shader_rows(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        mut y: f32,
+        w: f32,
+        e: &EntityEntry,
+    ) -> f32 {
+        let Some(post) = e.data.post_shader.as_ref() else {
+            return y;
+        };
+        let editing = self.play == PlayState::Editing;
+        let rel = post.shader.trim().to_string();
+        let loaded = (!rel.is_empty()).then(|| {
+            automata_assets::shader::load_shader(&rel, automata_renderer::ShaderKind::Post)
+        });
+        let problem = match &loaded {
+            None => None,
+            Some(Err(e)) => Some(e.clone()),
+            Some(Ok(asset)) => asset.error.as_ref().map(ToString::to_string),
+        };
+        if self.row_visible(Rect::new(x, y, w, layout::FIELD_H)) {
+            self.row_label(canvas, x, y, "Shader");
+            let extra = if rel.is_empty() { 0.0 } else { 40.0 + 26.0 };
+            let r = Rect::new(
+                x + layout::LABEL_W,
+                y,
+                w - layout::LABEL_W - extra,
+                layout::FIELD_H,
+            );
+            let hot = editing && self.hot(r);
+            canvas.fill_rounded(
+                r.x,
+                r.y,
+                r.w,
+                r.h,
+                3.0,
+                if hot { color::hover() } else { color::field() },
+            );
+            canvas.stroke_rounded(r.x, r.y, r.w, r.h, 3.0, color::border(), 1.0);
+            let (text, c) = if rel.is_empty() {
+                (
+                    "None · choose or name a .wgsl".to_string(),
+                    color::text_faint(),
+                )
+            } else if problem.is_none() {
+                (rel.clone(), color::accent_soft())
+            } else {
+                (rel.clone(), color::danger())
+            };
+            canvas.text_clipped(
+                r.x + 6.0,
+                r.y + 3.0,
+                layout::FONT_SIZE,
+                &text,
+                c,
+                r.w - 12.0,
+            );
+            self.tip(
+                r,
+                "Your WGSL fn post(in: PostInput) -> vec3<f32>, run on every pixel · \
+                 click to choose (a new name starts from the template) · double-click to edit",
+            );
+            let file = (!rel.is_empty())
+                .then(|| automata_assets::resolve(&rel))
+                .filter(|f| f.exists());
+            if hot {
+                self.cursor = CursorHint::Pointer;
+                if self.p.double_click {
+                    if let Some(f) = &file {
+                        self.out.push(Intent::OpenScript(f.clone()));
+                    }
+                } else if self.p.pressed {
+                    self.open_file_dialog(
+                        menus::DialogKind::ChooseShader(menus::ShaderTarget::Post(e.id)),
+                        None,
+                    );
+                }
+            }
+            if !rel.is_empty() {
+                let style = if editing {
+                    ButtonStyle::Ghost
+                } else {
+                    ButtonStyle::Disabled
+                };
+                let edit = Rect::new(r.x + r.w + 2.0, y, 38.0, layout::FIELD_H);
+                if self.button(canvas, edit, "Edit", ButtonStyle::Ghost) {
+                    if let Some(f) = &file {
+                        self.out.push(Intent::OpenScript(f.clone()));
+                    }
+                }
+                self.tip(
+                    edit,
+                    "Open the shader in the code editor (saving shows it at once)",
+                );
+                let clear = Rect::new(edit.x + 40.0, y, 24.0, layout::FIELD_H);
+                if self.button(canvas, clear, "×", style) {
+                    self.out.push(Intent::SetPostShader {
+                        id: e.id,
+                        path: None,
+                    });
+                }
+                self.tip(clear, "No post effect");
+            }
+        }
+        y += layout::ROW_STEP;
+        if let Some(problem) = problem {
+            let label_w = w - layout::LABEL_W;
+            let lines = wrap_words(canvas, &problem, label_w);
+            for chunk in lines.into_iter().take(4) {
+                if self.row_visible(Rect::new(x, y, w, 16.0)) {
+                    canvas.text(
+                        x + layout::LABEL_W,
+                        y,
+                        layout::SMALL_SIZE,
+                        &chunk,
+                        color::danger(),
+                    );
+                }
+                y += 16.0;
+            }
+            if self.row_visible(Rect::new(x, y, w, 16.0)) {
+                canvas.text(
+                    x + layout::LABEL_W,
+                    y,
+                    layout::SMALL_SIZE,
+                    "The frame keeps its standard look until it's fixed",
+                    color::text_faint(),
+                );
+            }
+            y += 20.0;
+        }
+        let p = |i: u8| Field::PostParam(i);
+        y = self.vec4_row(canvas, x, y, w, e, "p0", [p(0), p(1), p(2), p(3)]);
+        y = self.vec4_row(canvas, x, y, w, e, "p1", [p(4), p(5), p(6), p(7)]);
+        y
     }
 
     fn float_row(

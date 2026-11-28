@@ -30,6 +30,7 @@ pub fn staged_to_entity_data(entity: &StagedEntity) -> EntityData {
             StagedComponent::SpotLight(l) => data.spot_light = Some(*l),
             StagedComponent::Environment(e) => data.environment = Some(*e),
             StagedComponent::Water(w) => data.water = Some(*w),
+            StagedComponent::PostShader(p) => data.post_shader = Some(p.clone()),
             StagedComponent::AudioSource(a) => data.audio_source = Some(a.clone()),
             StagedComponent::ParticleEmitter(e) => data.particle_emitter = Some(e.clone()),
             StagedComponent::Animation(a) => data.animation = Some(a.clone()),
@@ -66,92 +67,57 @@ pub fn entity_data_to_staged(data: &EntityData) -> StagedEntity {
             *t,
         )));
     }
-    if let Some(c) = &data.camera_3d {
-        components.push(StagedComponent::Camera3D(*c));
-    }
-    if let Some(c) = &data.camera_2d {
-        components.push(StagedComponent::Camera2D(*c));
-    }
-    if let Some(l) = &data.directional_light {
-        components.push(StagedComponent::DirectionalLight(*l));
-    }
-    if let Some(l) = &data.point_light {
-        components.push(StagedComponent::PointLight(*l));
-    }
-    if let Some(l) = &data.spot_light {
-        components.push(StagedComponent::SpotLight(*l));
-    }
-    if let Some(e) = &data.particle_emitter {
-        components.push(StagedComponent::ParticleEmitter(e.clone()));
-    }
-    if let Some(e) = &data.environment {
-        components.push(StagedComponent::Environment(*e));
-    }
-    if let Some(w) = &data.water {
-        components.push(StagedComponent::Water(*w));
-    }
-    if let Some(g) = &data.grass {
-        components.push(StagedComponent::Grass(g.clone()));
-    }
-    if let Some(s) = &data.scatter {
-        components.push(StagedComponent::Scatter(s.clone()));
-    }
-    if let Some(t) = &data.terrain {
-        components.push(StagedComponent::Terrain(t.clone()));
-    }
-    if let Some(j) = &data.joint {
-        components.push(StagedComponent::Joint(j.clone()));
-    }
-    if let Some(a) = &data.attach {
-        components.push(StagedComponent::Attach(a.clone()));
-    }
-    if let Some(a) = &data.nav_agent {
-        components.push(StagedComponent::NavAgent(a.clone()));
-    }
-    if let Some(n) = &data.navigation {
-        components.push(StagedComponent::Navigation(n.clone()));
-    }
-    if let Some(r) = &data.ragdoll {
-        components.push(StagedComponent::Ragdoll(r.clone()));
-    }
-    if let Some(s) = &data.sprite {
-        components.push(StagedComponent::Sprite(s.clone()));
-    }
-    if let Some(t) = &data.tilemap {
-        components.push(StagedComponent::Tilemap(t.clone()));
-    }
-    if let Some(f) = &data.camera_follow_2d {
-        components.push(StagedComponent::CameraFollow2D(f.clone()));
-    }
-    if let Some(l) = &data.nav_link {
-        components.push(StagedComponent::NavLink(l.clone()));
-    }
+    components.extend(data.camera_3d.map(StagedComponent::Camera3D));
+    components.extend(data.camera_2d.map(StagedComponent::Camera2D));
+    components.extend(
+        data.directional_light
+            .map(StagedComponent::DirectionalLight),
+    );
+    components.extend(data.point_light.map(StagedComponent::PointLight));
+    components.extend(data.spot_light.map(StagedComponent::SpotLight));
+    components.extend(
+        data.particle_emitter
+            .clone()
+            .map(StagedComponent::ParticleEmitter),
+    );
+    components.extend(data.environment.map(StagedComponent::Environment));
+    components.extend(data.water.map(StagedComponent::Water));
+    components.extend(data.post_shader.clone().map(StagedComponent::PostShader));
+    components.extend(data.grass.clone().map(StagedComponent::Grass));
+    components.extend(data.scatter.clone().map(StagedComponent::Scatter));
+    components.extend(data.terrain.clone().map(StagedComponent::Terrain));
+    components.extend(data.joint.clone().map(StagedComponent::Joint));
+    components.extend(data.attach.clone().map(StagedComponent::Attach));
+    components.extend(data.nav_agent.clone().map(StagedComponent::NavAgent));
+    components.extend(data.navigation.clone().map(StagedComponent::Navigation));
+    components.extend(data.ragdoll.clone().map(StagedComponent::Ragdoll));
+    components.extend(data.sprite.clone().map(StagedComponent::Sprite));
+    components.extend(data.tilemap.clone().map(StagedComponent::Tilemap));
+    components.extend(
+        data.camera_follow_2d
+            .clone()
+            .map(StagedComponent::CameraFollow2D),
+    );
+    components.extend(data.nav_link.clone().map(StagedComponent::NavLink));
     if let Some(v) = &data.mesh_visual {
         components.push(StagedComponent::MeshVisual(
             automata_scene::MeshVisual::from(v),
         ));
     }
-    if let Some(b) = &data.rigid_body {
-        components.push(StagedComponent::RigidBody(b.clone()));
-    }
-    if let Some(c) = &data.collider_3d {
-        components.push(StagedComponent::Collider3D(c.clone()));
-    }
-    if let Some(c) = &data.collider_2d {
-        components.push(StagedComponent::Collider2D(c.clone()));
-    }
-    if let Some(c) = &data.character_controller {
-        components.push(StagedComponent::CharacterController(c.clone()));
-    }
-    if let Some(v) = &data.character_velocity {
-        components.push(StagedComponent::CharacterVelocity(*v));
-    }
-    if let Some(a) = &data.audio_source {
-        components.push(StagedComponent::AudioSource(a.clone()));
-    }
-    if let Some(a) = &data.animation {
-        components.push(StagedComponent::Animation(a.clone()));
-    }
+    components.extend(data.rigid_body.clone().map(StagedComponent::RigidBody));
+    components.extend(data.collider_3d.clone().map(StagedComponent::Collider3D));
+    components.extend(data.collider_2d.clone().map(StagedComponent::Collider2D));
+    components.extend(
+        data.character_controller
+            .clone()
+            .map(StagedComponent::CharacterController),
+    );
+    components.extend(
+        data.character_velocity
+            .map(StagedComponent::CharacterVelocity),
+    );
+    components.extend(data.audio_source.clone().map(StagedComponent::AudioSource));
+    components.extend(data.animation.clone().map(StagedComponent::Animation));
     StagedEntity {
         name: data.name.clone(),
         components,

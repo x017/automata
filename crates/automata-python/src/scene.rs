@@ -212,6 +212,10 @@ impl PyEntity {
                     StagedComponent::Water(v) => {
                         Py::new(py, crate::components::PyWater::from_inner(*v))?.into_any()
                     }
+                    StagedComponent::PostShader(v) => {
+                        Py::new(py, crate::components::PyPostShader::from_inner(v.clone()))?
+                            .into_any()
+                    }
                     StagedComponent::AudioSource(v) => {
                         Py::new(py, crate::components::PyAudioSource::from_inner(v.clone()))?
                             .into_any()
@@ -504,6 +508,7 @@ fn spawn_staged(scene: &mut Scene, staged: &StagedEntity) -> EntityId {
             }
             StagedComponent::Environment(c) => drop(scene.world_mut().insert_one(id, *c)),
             StagedComponent::Water(c) => drop(scene.world_mut().insert_one(id, *c)),
+            StagedComponent::PostShader(c) => drop(scene.world_mut().insert_one(id, c.clone())),
             StagedComponent::AudioSource(c) => {
                 let _ = scene.world_mut().insert_one(id, c.clone());
             }

@@ -670,7 +670,13 @@ the web export (real games from `game.zip`, the `web` template and
 ✅: `ctx.steam` achievements, stats and the overlay through a ctypes
 binding (safe offline), the Steamworks SDK's library shipped by desktop
 builds, Auto-Cloud for `saves/`, and `ctx.input.prompt` button labels for
-Xbox, PlayStation, Switch and Steam Deck controllers.
+Xbox, PlayStation, Switch and Steam Deck controllers. F3 custom shaders ✅
+came next: your own WGSL for surfaces (`fn material`, named by a
+`.mat.ron`) and the whole frame (`fn post`, a Post Shader component). They
+sit behind a fixed, validated interface, reload while you type, and a
+broken one falls back to the standard look with a `file:line:col` error.
+The Shader Lab shows hologram, dissolve and lava materials and CRT, ink and
+underwater effects (`examples/oberon/shader_lab`).
 
 ## Process note
 

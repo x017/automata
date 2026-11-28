@@ -161,6 +161,14 @@ pub struct MaterialFile {
     /// Sample the colour maps without smoothing (crisp pixel art).
     #[serde(skip_serializing_if = "is_false")]
     pub pixelated: bool,
+    /// A custom material shader (`.wgsl`, relative to the material file's
+    /// folder) that shapes the surface further; empty for none.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub shader: String,
+    /// The shader's numbers (`p0` = the first four, `p1` = the next four;
+    /// at most eight).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shader_params: Vec<f32>,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref, clippy::float_cmp)] // serde's signature
@@ -214,6 +222,8 @@ impl Default for MaterialFile {
             tiling: [1.0; 2],
             offset: [0.0; 2],
             pixelated: false,
+            shader: String::new(),
+            shader_params: Vec::new(),
         }
     }
 }
@@ -237,7 +247,8 @@ impl MaterialFile {
     pub fn to_ron(&self, name: &str) -> String {
         let config = ron::ser::PrettyConfig::new()
             .indentor("    ".into())
-            .separate_tuple_members(false);
+            .separate_tuple_members(false)
+            .compact_arrays(true);
         let body = ron::ser::to_string_pretty(self, config).unwrap_or_default();
         format!("{}{body}\n", HEADER.replace("PATH", name))
     }
@@ -312,6 +323,17 @@ impl MaterialFile {
         }
     }
 
+    /// The shader's numbers as the renderer takes them: eight, missing
+    /// ones 0, non-finite ones 0.
+    #[must_use]
+    pub fn shader_values(&self) -> [f32; automata_renderer::SHADER_PARAMS] {
+        let mut out = [0.0; automata_renderer::SHADER_PARAMS];
+        for (o, v) in out.iter_mut().zip(&self.shader_params) {
+            *o = if v.is_finite() { *v } else { 0.0 };
+        }
+        out
+    }
+
     /// The material a primitive with this colour and surface draws with:
     /// the starting point of "New Material from this surface".
     #[must_use]
@@ -354,9 +376,13 @@ pub struct MaterialAsset {
     pub file: MaterialFile,
     /// The decoded maps, in [`MapSlot::ALL`] order.
     pub maps: [Option<Arc<Image>>; 4],
-    /// Maps that couldn't be read, with why ("textures/x.png: not found").
-    /// The material still draws, without them.
+    /// Maps that couldn't be read, with why ("textures/x.png: not found"),
+    /// and a shader that didn't load. The material still draws, without
+    /// them.
     pub problems: Vec<String>,
+    /// Its custom shader, when it names one that reads (it may still have
+    /// failed the checks: see [`crate::shader::ShaderAsset::error`]).
+    pub shader: Option<Arc<crate::shader::ShaderAsset>>,
     gpu: OnceLock<automata_renderer::Material>,
 }
 
@@ -380,11 +406,35 @@ impl MaterialAsset {
                 }
             }
         });
+        let shader = file.shader.trim();
+        let shader = (!shader.is_empty())
+            .then(|| {
+                let shader_path = map_path(&path, shader);
+                let name = project_name(&shader_path, shader);
+                match crate::shader::load_shader_file(
+                    &shader_path,
+                    &name,
+                    automata_renderer::ShaderKind::Material,
+                ) {
+                    Ok(asset) => {
+                        if let Some(e) = &asset.error {
+                            problems.push(format!("shader {e}"));
+                        }
+                        Some(asset)
+                    }
+                    Err(e) => {
+                        problems.push(e);
+                        None
+                    }
+                }
+            })
+            .flatten();
         Self {
             path,
             file,
             maps,
             problems,
+            shader,
             gpu: OnceLock::new(),
         }
     }
@@ -416,7 +466,8 @@ impl MaterialAsset {
                     let pixelated = self.file.pixelated && slot.is_color();
                     Some(gpu_texture(renderer, img, slot, pixelated))
                 };
-                renderer.create_pbr_material(
+                let shader = self.shader.as_ref().and_then(|s| s.gpu(renderer));
+                renderer.create_shaded_material(
                     &self.params(),
                     automata_renderer::MaterialTextures {
                         base: tex(MapSlot::Base),
@@ -424,6 +475,8 @@ impl MaterialAsset {
                         metallic_roughness: tex(MapSlot::RoughnessMetal),
                         emissive: tex(MapSlot::Emissive),
                     },
+                    shader.as_ref(),
+                    self.file.shader_values(),
                 )
             })
             .clone()
@@ -456,6 +509,21 @@ pub fn map_path(material: &Path, rel: &str) -> PathBuf {
     out
 }
 
+/// How to name `file` (named `rel` in a material) in messages: relative to
+/// the project (the asset root) when it's inside it.
+#[must_use]
+pub fn project_name(file: &Path, rel: &str) -> String {
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    crate::root()
+        .and_then(|root| {
+            canon(file)
+                .strip_prefix(canon(&root))
+                .ok()
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+        })
+        .unwrap_or_else(|| rel.replace('\\', "/"))
+}
+
 /// The path to write in a material at `material` for the image at `image`:
 /// relative to the material's folder, `/`-separated (`../textures/a.png`
 /// when it's elsewhere in the project).
@@ -479,7 +547,7 @@ pub fn relative_map_path(material: &Path, image: &Path) -> String {
     parts.join("/")
 }
 
-/// The image files a material uses (missing ones included), for exports
+/// The image and shader files a material uses (missing ones included), for exports
 /// to check. Empty when the file doesn't read.
 #[must_use]
 pub fn material_dependencies(path: &Path) -> Vec<PathBuf> {
@@ -492,6 +560,7 @@ pub fn material_dependencies(path: &Path) -> Vec<PathBuf> {
     MapSlot::ALL
         .iter()
         .map(|&s| file.map(s).trim())
+        .chain(std::iter::once(file.shader.trim()))
         .filter(|rel| !rel.is_empty())
         .map(|rel| map_path(path, rel))
         .collect()
@@ -651,8 +720,11 @@ pub fn load_material(path: &str) -> Result<Arc<MaterialAsset>, MaterialError> {
     };
     let mut stamps = vec![(key.clone(), crate::modified(&key))];
     let result = MaterialFile::parse(&text).map(|parsed| {
-        for slot in MapSlot::ALL {
-            let rel = parsed.map(slot).trim();
+        let maps = MapSlot::ALL.map(|slot| parsed.map(slot).trim());
+        for rel in maps
+            .into_iter()
+            .chain(std::iter::once(parsed.shader.trim()))
+        {
             if !rel.is_empty() {
                 let p = canonical(&map_path(&key, rel));
                 let t = crate::modified(&p);
@@ -743,7 +815,7 @@ pub(crate) fn refresh_materials() -> bool {
                         .map(|(t, _)| *t);
                     cached != Some(crate::modified(&p))
                 }
-            });
+            }) || asset.shader.as_ref().is_some_and(|s| s.stale());
             if stale {
                 *asset = Arc::new(MaterialAsset::new(asset.path.clone(), asset.file.clone()));
                 previews_changed = true;
@@ -960,5 +1032,88 @@ mod tests {
             load_material(&bad),
             Err(MaterialError::Invalid { .. })
         ));
+    }
+
+    #[test]
+    fn material_shaders_load_report_and_reload_with_the_material() {
+        let _serial = crate::REFRESH_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = temp_dir("shader");
+        let shader = dir.join("shaders/glow.wgsl");
+        std::fs::create_dir_all(shader.parent().unwrap()).unwrap();
+        std::fs::write(
+            &shader,
+            "fn material(in: MaterialInput) -> MaterialOutput {\n\
+             var out = material_defaults(in);\n\
+             out.emissive = in.p0.rgb;\n\
+             return out;\n}",
+        )
+        .unwrap();
+        let path = dir.join("materials/glow.mat.ron");
+        let file = MaterialFile {
+            shader: "../shaders/glow.wgsl".into(),
+            shader_params: vec![0.0, 1.0, 0.0],
+            ..MaterialFile::default()
+        };
+        file.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("shader: \"../shaders/glow.wgsl\""), "{text}");
+        assert!(text.contains("shader_params: [0.0, 1.0, 0.0]"), "{text}");
+        assert_eq!(MaterialFile::parse(&text).unwrap(), file);
+        assert_eq!(
+            file.shader_values(),
+            [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            material_dependencies(&path),
+            vec![dir.join("shaders/glow.wgsl")]
+        );
+
+        let rel = path.to_string_lossy().into_owned();
+        let a = load_material(&rel).unwrap();
+        assert!(a.problems.is_empty(), "{:?}", a.problems);
+        let loaded = a.shader.as_ref().expect("the shader loads");
+        assert!(loaded.error.is_none());
+
+        // Saving the shader alone reloads the material (hot reload), and a
+        // mistake becomes one of its problems, with the line.
+        std::fs::write(
+            &shader,
+            "fn material(in: MaterialInput) -> MaterialOutput {\n\
+             return nonsense;\n}",
+        )
+        .unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(3);
+        std::fs::File::options()
+            .write(true)
+            .open(&shader)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        assert!(crate::refresh());
+        let b = load_material(&rel).unwrap();
+        assert!(!Arc::ptr_eq(&a, &b));
+        assert_eq!(b.problems.len(), 1, "{:?}", b.problems);
+        assert!(b.problems[0].contains(":2:"), "{:?}", b.problems);
+
+        // A missing shader is a problem too, not an error.
+        MaterialFile {
+            shader: "../shaders/none.wgsl".into(),
+            ..MaterialFile::default()
+        }
+        .save(&path)
+        .unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(6);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        crate::refresh();
+        let c = load_material(&rel).unwrap();
+        assert!(c.shader.is_none());
+        assert!(c.problems[0].contains("none.wgsl"), "{:?}", c.problems);
     }
 }

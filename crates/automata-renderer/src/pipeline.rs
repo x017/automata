@@ -10,10 +10,14 @@ use crate::SPRITE_VERTEX_CAPACITY;
 /// WGSL source of the 2D sprite shader.
 pub(crate) const SPRITE_SHADER: &str = include_str!("shaders/sprite.wgsl");
 /// WGSL source of the 3D mesh shader (with the shared lighting code).
+/// Custom material shaders replace the last part (`shader.rs`).
 pub(crate) const MESH_SHADER: &str = concat!(
     include_str!("shaders/tonemap.wgsl"),
     include_str!("shaders/common.wgsl"),
-    include_str!("shaders/mesh.wgsl")
+    include_str!("shaders/mesh.wgsl"),
+    include_str!("shaders/material_api.wgsl"),
+    include_str!("shaders/shader_helpers.wgsl"),
+    include_str!("shaders/material_default.wgsl")
 );
 /// WGSL source of the water shader (with the shared lighting code).
 pub(crate) const WATER_SHADER: &str = concat!(
@@ -551,13 +555,107 @@ pub(crate) fn create_mesh_pipelines(
     depth_format: wgpu::TextureFormat,
     shadows: ForwardShadows,
 ) -> PipelinePair {
-    let variant = |kind| create_mesh_pipeline(device, shared, format, depth_format, kind, shadows);
+    let module = &shared.mesh_shader;
+    let variant =
+        |kind| create_mesh_pipeline(device, shared, module, format, depth_format, kind, shadows);
     PipelinePair {
         plain: variant(crate::batch::BatchKind::Plain),
         skinned: variant(crate::batch::BatchKind::Skinned),
         faded: Some(variant(crate::batch::BatchKind::Faded)),
         grass: Some(variant(crate::batch::BatchKind::Grass)),
     }
+}
+
+/// A custom material shader's mesh pipelines (`module`, built from the
+/// mesh shader with the user's code in; see `shader.rs`): plain, skinned
+/// and fading meshes, never grass.
+pub(crate) fn create_custom_mesh_pipelines(
+    device: &wgpu::Device,
+    shared: &PipelineShared,
+    module: &wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
+    shadows: ForwardShadows,
+) -> PipelinePair {
+    let variant =
+        |kind| create_mesh_pipeline(device, shared, module, format, depth_format, kind, shadows);
+    PipelinePair {
+        plain: variant(crate::batch::BatchKind::Plain),
+        skinned: variant(crate::batch::BatchKind::Skinned),
+        faded: Some(variant(crate::batch::BatchKind::Faded)),
+        grass: None,
+    }
+}
+
+/// The pipeline layout of a custom post effect: its image, sampler and
+/// uniform (`post_api.wgsl`).
+pub(crate) fn post_shader_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("post shader"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            uniform_entry(2, wgpu::ShaderStages::FRAGMENT),
+        ],
+    })
+}
+
+/// A custom post effect's pipeline: a full-screen triangle into `format`,
+/// with a depth attachment for the HUD sprites drawn after it in the same
+/// pass (never tested or written).
+pub(crate) fn create_post_shader_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    module: &wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("post shader"),
+        bind_group_layouts: &[Some(layout)],
+        immediate_size: 0,
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("post shader"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: depth_format,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Always),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &opaque_target(format),
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 /// The water pipeline. `refract` (the Beautiful path) writes opaquely —
@@ -692,9 +790,11 @@ pub(crate) fn create_shadow_pipelines(
 
 /// Creates the 3D mesh pipeline for the given surface format. The skinned
 /// variant blends each vertex by its joints (`vs_skinned`).
+#[allow(clippy::too_many_arguments)]
 fn create_mesh_pipeline(
     device: &wgpu::Device,
     shared: &PipelineShared,
+    module: &wgpu::ShaderModule,
     format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
     kind: crate::batch::BatchKind,
@@ -735,7 +835,7 @@ fn create_mesh_pipeline(
         }),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
-            module: &shared.mesh_shader,
+            module,
             entry_point: Some(vertex_entry(kind)),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             buffers: &mesh_buffers_for(kind),
@@ -750,7 +850,7 @@ fn create_mesh_pipeline(
         }),
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
-            module: &shared.mesh_shader,
+            module,
             // Pipelines targeting the HDR scene are Beautiful's.
             entry_point: Some(if format == HDR_FORMAT {
                 "fs_beautiful"

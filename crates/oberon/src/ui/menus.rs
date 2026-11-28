@@ -38,6 +38,15 @@ pub enum Panel {
     Bottom,
 }
 
+/// What a shader picked in [`DialogKind::ChooseShader`] is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShaderTarget {
+    /// The material being edited in the material editor.
+    Material,
+    /// An entity's Post Shader.
+    Post(u64),
+}
+
 /// Modal dialogs the UI can open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogKind {
@@ -59,6 +68,11 @@ pub enum DialogKind {
     NewMaterial,
     /// Pick the material file for an entity's Mesh Renderer.
     ChooseMaterial(u64),
+    /// Create a new shader file (`shaders/<name>.wgsl`) from the
+    /// template of its kind.
+    NewShader(automata_renderer::ShaderKind),
+    /// Pick (or name a new) shader file.
+    ChooseShader(ShaderTarget),
     /// Pick (or name a new) animation graph for an entity's Animation.
     ChooseAnimGraph(u64),
     /// Pick the image for a texture slot of the material being edited
@@ -372,6 +386,22 @@ impl Ui {
                         "New Material…",
                         "",
                         UiAction::Dialog(DialogKind::NewMaterial),
+                        true,
+                    ),
+                    MenuItem::ui(
+                        "New Material Shader…",
+                        "",
+                        UiAction::Dialog(DialogKind::NewShader(
+                            automata_renderer::ShaderKind::Material,
+                        )),
+                        true,
+                    ),
+                    MenuItem::ui(
+                        "New Post Shader…",
+                        "",
+                        UiAction::Dialog(DialogKind::NewShader(
+                            automata_renderer::ShaderKind::Post,
+                        )),
                         true,
                     ),
                     MenuItem::ui(

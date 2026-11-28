@@ -124,6 +124,8 @@ default:
 | `tiling` | `(1, 1)` | Texture repeats in U and V |
 | `offset` | `(0, 0)` | Texture shift, in texture widths |
 | `pixelated` | `false` | Crisp (unsmoothed) colour textures |
+| `shader` | none | A [custom shader](shaders.md) (`.wgsl`, relative to the material file) that reshapes the surface |
+| `shader_params` | `[]` | Up to 8 numbers handed to the shader as `p0` and `p1` |
 
 Edited by hand, a saved file reloads in the editor and the running scene
 within half a second, and so does a texture changed in a paint program.

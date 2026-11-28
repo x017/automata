@@ -33,6 +33,7 @@ mod foliage;
 mod handle;
 pub mod ik;
 mod particles;
+mod post_shader;
 pub mod ragdoll;
 mod render;
 mod resources;
@@ -62,6 +63,7 @@ pub use particles::{
     splash_emitter, spray_emitter, EmitterShape, FieldValue as ParticleField, ParticleEmitter,
     ParticleState, ParticleTexture, PRESETS as PARTICLE_PRESETS,
 };
+pub use post_shader::PostShader;
 pub use ragdoll::{
     push_ragdoll, ragdoll_status, set_ragdoll, Ragdoll, RagdollEdit, RagdollLayout, RagdollPose,
     RagdollPush, RagdollStatus,

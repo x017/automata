@@ -135,6 +135,9 @@ pub enum AssetKind {
     Image,
     /// An animation graph (`.anim.ron`), dragged onto animated models.
     AnimGraph,
+    /// A WGSL shader (`.wgsl`): edited in the code editor, used by
+    /// materials, or dragged onto an object as its post effect.
+    Shader,
     /// Anything else.
     Other,
 }
@@ -165,6 +168,9 @@ pub fn asset_kind(path: &Path, dir: bool) -> AssetKind {
     if automata_assets::material::is_image_path(path) {
         return AssetKind::Image;
     }
+    if automata_assets::shader::is_shader_path(path) {
+        return AssetKind::Shader;
+    }
     match path
         .extension()
         .and_then(|e| e.to_str())
@@ -187,9 +193,11 @@ pub fn open_intent(path: &Path, dir: bool) -> Option<Intent> {
     match asset_kind(path, dir) {
         AssetKind::Scene => Some(Intent::Open(path.to_path_buf())),
         AssetKind::Prefab => Some(Intent::InstantiatePrefab(path.to_path_buf())),
-        AssetKind::Script | AssetKind::UiScreen | AssetKind::Material | AssetKind::AnimGraph => {
-            Some(Intent::OpenScript(path.to_path_buf()))
-        }
+        AssetKind::Script
+        | AssetKind::UiScreen
+        | AssetKind::Material
+        | AssetKind::AnimGraph
+        | AssetKind::Shader => Some(Intent::OpenScript(path.to_path_buf())),
         AssetKind::Model => Some(Intent::AddModel {
             path: path.to_path_buf(),
             at: None,
@@ -652,6 +660,25 @@ impl Ui {
                     });
                 }
             }
+            AssetKind::Shader => {
+                menu.push(item_menu("Edit Shader", open_intent(&item.path, false)));
+                let post = std::fs::read_to_string(&item.path).is_ok_and(|text| {
+                    automata_assets::shader::kind_of_source(&text)
+                        == automata_renderer::ShaderKind::Post
+                });
+                if let Some(i) = doc.selected_index().filter(|_| post) {
+                    let e = &doc.entities[i];
+                    menu.push(MenuItem {
+                        label: format!("Use as {}'s Post Effect", e.name()),
+                        shortcut: "",
+                        action: Some(Action::Intent(Intent::SetPostShader {
+                            id: e.id,
+                            path: Some(item.path.clone()),
+                        })),
+                        enabled: editing,
+                    });
+                }
+            }
             AssetKind::Script => {
                 menu.push(item_menu("Edit Script", open_intent(&item.path, false)));
                 if let Some(i) = doc.selected_index() {
@@ -950,6 +977,22 @@ impl Ui {
                 enabled: true,
             },
             MenuItem {
+                label: "New Material Shader…".into(),
+                shortcut: "",
+                action: Some(Action::Ui(UiAction::Dialog(DialogKind::NewShader(
+                    automata_renderer::ShaderKind::Material,
+                )))),
+                enabled: true,
+            },
+            MenuItem {
+                label: "New Post Shader…".into(),
+                shortcut: "",
+                action: Some(Action::Ui(UiAction::Dialog(DialogKind::NewShader(
+                    automata_renderer::ShaderKind::Post,
+                )))),
+                enabled: true,
+            },
+            MenuItem {
                 label: "New Folder".into(),
                 shortcut: "",
                 action: Some(Action::Intent(Intent::NewFolder(
@@ -1082,6 +1125,7 @@ pub fn draw_tree_icon(canvas: &mut Canvas, kind: AssetKind, cx: f32, cy: f32) {
         AssetKind::Audio => draw_sound_icon(canvas, cx, cy, color::accent_soft()),
         AssetKind::Font => draw_font_icon(canvas, cx, cy, color::accent_soft()),
         AssetKind::Material => draw_material_icon(canvas, cx, cy),
+        AssetKind::Shader => draw_shader_icon(canvas, cx, cy, color::accent_soft()),
         AssetKind::AnimGraph => draw_anim_graph_icon(canvas, cx, cy, color::accent_soft()),
         AssetKind::Image => {
             let c = color::accent_soft();
@@ -1117,6 +1161,21 @@ pub fn draw_material_icon(canvas: &mut Canvas, cx: f32, cy: f32) {
     canvas.fill_circle(cx, cy, 6.0, color::accent_soft());
     canvas.fill_circle(cx + 1.2, cy + 1.2, 4.6, color::text_dim());
     canvas.fill_circle(cx - 2.0, cy - 2.0, 1.8, color::text());
+}
+
+/// A prism splitting a ray: the shader file icon.
+pub fn draw_shader_icon(canvas: &mut Canvas, cx: f32, cy: f32, c: tiny_skia::Color) {
+    canvas.polyline(
+        &[
+            (cx - 5.5, cy + 5.0),
+            (cx, cy - 5.5),
+            (cx + 5.5, cy + 5.0),
+            (cx - 5.5, cy + 5.0),
+        ],
+        c,
+        1.3,
+    );
+    canvas.fill_rect(cx - 1.0, cy - 0.5, 2.0, 2.4, c);
 }
 
 /// A serif "A": the font file icon.

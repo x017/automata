@@ -295,6 +295,8 @@ pub enum ComponentKind {
     Camera,
     /// Scene look: ambient, fog, exposure, tone mapping.
     Environment,
+    /// A user WGSL effect drawn over the frame.
+    PostShader,
     /// Animated water surface.
     Water,
     /// A field of grass blades.
@@ -339,7 +341,7 @@ pub enum ComponentKind {
 
 impl ComponentKind {
     /// Every addable component, in menu order.
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 28] = [
         Self::Mesh,
         Self::Animation,
         Self::Light,
@@ -347,6 +349,7 @@ impl ComponentKind {
         Self::SpotLight,
         Self::Camera,
         Self::Environment,
+        Self::PostShader,
         Self::Water,
         Self::Grass,
         Self::Scatter,
@@ -380,6 +383,7 @@ impl ComponentKind {
             Self::SpotLight => "Spot Light",
             Self::Camera => "Camera",
             Self::Environment => "Environment",
+            Self::PostShader => "Post Shader",
             Self::Water => "Water",
             Self::Grass => "Grass",
             Self::Scatter => "Scatter",
@@ -414,6 +418,7 @@ impl ComponentKind {
             Self::SpotLight => data.spot_light.is_some(),
             Self::Camera => data.camera_3d.is_some(),
             Self::Environment => data.environment.is_some(),
+            Self::PostShader => data.post_shader.is_some(),
             Self::Water => data.water.is_some(),
             Self::Grass => data.grass.is_some(),
             Self::Scatter => data.scatter.is_some(),
@@ -477,6 +482,10 @@ impl ComponentKind {
             Self::Environment => {
                 data.environment
                     .get_or_insert_with(automata_renderer::Environment::daylight);
+            }
+            Self::PostShader => {
+                data.post_shader
+                    .get_or_insert_with(automata_scene::PostShader::default);
             }
             Self::Water => {
                 data.water
@@ -603,6 +612,7 @@ impl ComponentKind {
             Self::SpotLight => dst.spot_light = src.spot_light,
             Self::Camera => dst.camera_3d = src.camera_3d,
             Self::Environment => dst.environment = src.environment,
+            Self::PostShader => dst.post_shader.clone_from(&src.post_shader),
             Self::Water => dst.water = src.water,
             Self::Grass => dst.grass.clone_from(&src.grass),
             Self::Scatter => dst.scatter.clone_from(&src.scatter),
@@ -640,6 +650,7 @@ impl ComponentKind {
             Self::SpotLight => data.spot_light = None,
             Self::Camera => data.camera_3d = None,
             Self::Environment => data.environment = None,
+            Self::PostShader => data.post_shader = None,
             Self::Water => data.water = None,
             Self::Grass => data.grass = None,
             Self::Scatter => data.scatter = None,
