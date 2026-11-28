@@ -52,6 +52,7 @@ this and `oberon run`, `test`, `export` and `doctor`.
 | [Prefabs & attributes](prefabs-and-attributes.md) | Reusable objects that stay linked: overrides, Apply / Revert, variants; custom per-entity data |
 | [Editor workflow](editor-workflow.md) | Editing many objects at once, snapping, Duplicate Along a Line, the Profiler |
 | [Exporting your game](exporting.md) | Building standalone Windows, Linux, macOS, Android and web games (Ctrl+Shift+B) |
+| [Steam](steam.md) | Achievements, stats, the overlay, Steam Cloud saves, Steam Deck and controller button labels (`ctx.steam`) |
 
 New to Oberon? Do the [first scene tutorial](../tutorials/first-scene.md)
 first. It takes about ten minutes and covers the main ideas.

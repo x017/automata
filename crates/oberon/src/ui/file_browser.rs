@@ -153,6 +153,7 @@ impl FileDialog {
             DialogKind::BuildScene => "Choose Start Scene",
             DialogKind::BuildOutput => "Choose Output Folder",
             DialogKind::BuildKey => "Choose Android Release Key",
+            DialogKind::BuildSteamSdk => "Choose the Steamworks SDK Folder",
             DialogKind::PythonInterpreter => "Choose Python Interpreter",
             DialogKind::Shortcuts | DialogKind::About => "",
         }
@@ -170,7 +171,9 @@ impl FileDialog {
             DialogKind::NewMaterial | DialogKind::ChooseMaterial(_) => "mat.ron",
             DialogKind::ChooseAnimGraph(_) => "anim.ron",
             DialogKind::ChooseMaterialMap(_) | DialogKind::ImportHeightmap(_) => "png",
-            DialogKind::BuildOutput | DialogKind::PythonInterpreter => "",
+            DialogKind::BuildOutput | DialogKind::BuildSteamSdk | DialogKind::PythonInterpreter => {
+                ""
+            }
             DialogKind::BuildKey => "pem",
             _ => "ron",
         }
@@ -188,7 +191,7 @@ impl FileDialog {
             DialogKind::ChooseMaterialMap(_) | DialogKind::ImportHeightmap(_) => ".png .jpg",
             DialogKind::SavePrefab(_) | DialogKind::InstantiatePrefab => ".prefab",
             DialogKind::OpenScript | DialogKind::NewScript | DialogKind::AttachScript(_) => ".py",
-            DialogKind::BuildOutput => "folders",
+            DialogKind::BuildOutput | DialogKind::BuildSteamSdk => "folders",
             DialogKind::BuildKey => ".pem .key",
             DialogKind::PythonInterpreter => "all files",
             _ => ".ron",
@@ -203,7 +206,7 @@ impl FileDialog {
                 automata_core::audio_source::is_audio_path(Path::new(name))
             }
             DialogKind::ImportFont => crate::fonts::is_font_path(Path::new(name)),
-            DialogKind::BuildOutput => false,
+            DialogKind::BuildOutput | DialogKind::BuildSteamSdk => false,
             DialogKind::PythonInterpreter => true,
             DialogKind::BuildKey => Path::new(name)
                 .extension()
@@ -244,7 +247,10 @@ impl FileDialog {
     }
 
     fn picks_folder(&self) -> bool {
-        self.kind == DialogKind::BuildOutput
+        matches!(
+            self.kind,
+            DialogKind::BuildOutput | DialogKind::BuildSteamSdk
+        )
     }
 
     fn needs_existing(&self) -> bool {
@@ -289,7 +295,7 @@ impl FileDialog {
             | DialogKind::BuildScene
             | DialogKind::BuildKey
             | DialogKind::PythonInterpreter => "Choose",
-            DialogKind::BuildOutput => "Use This Folder",
+            DialogKind::BuildOutput | DialogKind::BuildSteamSdk => "Use This Folder",
             _ => "Save",
         }
     }
@@ -300,6 +306,7 @@ impl FileDialog {
             DialogKind::BuildOutput => "folder",
             DialogKind::PythonInterpreter => "python",
             DialogKind::BuildKey => "key",
+            DialogKind::BuildSteamSdk => "steamworks",
             DialogKind::ImportModel(_) => "model",
             DialogKind::ImportSound(_) => "sound",
             DialogKind::ImportFont => "font",
@@ -573,9 +580,10 @@ impl Ui {
     /// file to start on.
     pub(super) fn open_file_dialog(&mut self, kind: DialogKind, doc: Option<&Document>) {
         let return_to = match kind {
-            DialogKind::BuildScene | DialogKind::BuildOutput | DialogKind::BuildKey => {
-                Some(SettingsPage::Build)
-            }
+            DialogKind::BuildScene
+            | DialogKind::BuildOutput
+            | DialogKind::BuildKey
+            | DialogKind::BuildSteamSdk => Some(SettingsPage::Build),
             DialogKind::PythonInterpreter => Some(SettingsPage::Python),
             _ => None,
         };
@@ -609,14 +617,14 @@ impl Ui {
                 if parent.is_dir() {
                     fd.dir = parent.to_path_buf();
                     let file = file.to_string_lossy().into_owned();
-                    if kind != DialogKind::BuildOutput {
+                    if !matches!(kind, DialogKind::BuildOutput | DialogKind::BuildSteamSdk) {
                         name.clone_from(&file);
                     }
                     fd.selected = Some(file);
                 }
             }
         }
-        if kind == DialogKind::BuildOutput {
+        if matches!(kind, DialogKind::BuildOutput | DialogKind::BuildSteamSdk) {
             name.clear();
         }
         fd.dir = absolute(&fd.dir);
@@ -830,6 +838,16 @@ impl Ui {
                 let set = self.build_settings().android.key.clone();
                 let root = self.project_root.clone();
                 (String::new(), crate::build::release_key_path(&root, &set))
+            }
+            DialogKind::BuildSteamSdk => {
+                let steam = self.build_settings().steam.clone();
+                let root = self.project_root.clone();
+                // Start on the SDK folder itself (it's what gets picked).
+                let current = steam
+                    .redistributables(&root)
+                    .ok()
+                    .and_then(|bin| bin.parent().map(Path::to_path_buf));
+                (String::new(), current)
             }
             _ => (String::new(), None),
         }
@@ -1360,6 +1378,11 @@ impl Ui {
             DialogKind::BuildKey => {
                 self.close_file_dialog();
                 return self.commit_setting(SettingText::BuildKey, &path.display().to_string());
+            }
+            DialogKind::BuildSteamSdk => {
+                let value = self.project_relative(&path);
+                self.close_file_dialog();
+                return self.commit_setting(SettingText::BuildSteamSdk, &value);
             }
             DialogKind::Shortcuts | DialogKind::About => return None,
         };
@@ -2284,6 +2307,45 @@ mod tests {
             ui.dialog,
             Some(Dialog::Settings(SettingsPage::Build))
         ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn steam_settings_take_an_app_id_and_the_sdk_folder() {
+        let root = project("steam");
+        let sdk = root.join("steamworks_sdk/redistributable_bin/linux64");
+        std::fs::create_dir_all(&sdk).unwrap();
+        std::fs::write(sdk.join("libsteam_api.so"), "").unwrap();
+        let mut ui = ui_in(&root);
+        assert_eq!(
+            ui.commit_setting(SettingText::BuildSteamAppId, " 480 "),
+            None
+        );
+        assert_eq!(ui.build_settings().steam.app_id, 480);
+        // Not a number: refused, the old value stays.
+        ui.commit_setting(SettingText::BuildSteamAppId, "spacewar");
+        ui.commit_setting(SettingText::BuildSteamAppId, "0");
+        assert_eq!(ui.build_settings().steam.app_id, 480);
+        // The SDK folder comes from the folder browser, relative to the project.
+        ui.open_file_dialog(DialogKind::BuildSteamSdk, None);
+        assert!(shown(&ui).contains(&"steamworks_sdk".to_string()));
+        ui.dialog_go(root.join("steamworks_sdk"));
+        assert_eq!(ui.submit_dialog(""), None);
+        assert!(matches!(
+            ui.dialog,
+            Some(Dialog::Settings(SettingsPage::Build))
+        ));
+        assert_eq!(ui.build_settings().steam.sdk, "steamworks_sdk");
+        // It's saved in build.ron, and the browser reopens on it.
+        let saved = std::fs::read_to_string(root.join("build.ron")).unwrap();
+        assert!(saved.contains("app_id: 480"), "{saved}");
+        assert!(saved.contains("sdk: \"steamworks_sdk\""), "{saved}");
+        ui.open_file_dialog(DialogKind::BuildSteamSdk, None);
+        assert_eq!(ui.file_dialog_selection(), Some("steamworks_sdk"));
+        ui.close_dialog();
+        // Clearing the app ID turns Steam off.
+        ui.commit_setting(SettingText::BuildSteamAppId, "");
+        assert_eq!(ui.build_settings().steam.app_id, 0);
         let _ = std::fs::remove_dir_all(root);
     }
 

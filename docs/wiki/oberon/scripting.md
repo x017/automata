@@ -146,6 +146,8 @@ for `entity` and `ctx`.
 | `ctx.input.mouse_locked` | Whether the cursor is captured |
 | `ctx.input.mouse_position` | `(x, y)` cursor position in screen pixels from the top-left (like `ctx.hud`), or `None` when the cursor is outside the game view or captured |
 | `ctx.input.mouse_over_ui` | Whether the cursor is over [`ctx.ui`](#game-ui) |
+| `ctx.input.prompt("jump")` | The label to show for an action or key on the device in use: `"Space"`, `"A"`, `"×"`… ([Button prompts](#button-prompts)) |
+| `ctx.input.device`, `ctx.input.controller` | What the player used last (`"keyboard"`, `"gamepad"` or `"touch"`), and the gamepad's family (`"xbox"`, `"playstation"`, `"switch"`, `"steam_deck"`, `"generic"` or `None`) |
 | `ctx.input.touches` | The fingers on a touch screen, in the order they landed, as `Touch`es with `finger` (0 for the first, and it keeps its number while it's down), `position` and `start` in screen pixels, `moved`, `just_started`, `just_ended` (its last frame in the list) and `primary` (the finger that also works as the left mouse button). On a computer the held left mouse button is finger 0, so touch controls can be tried with a mouse. A finger that lands on `ctx.ui` belongs to the UI and isn't listed |
 | `ctx.physics.grounded(entity)` | Same as `entity.grounded` |
 | `ctx.physics.raycast(origin, direction, max_distance=100, ignore=None)` | The first collider along a ray, or `None`. Returns a `Hit` with `.entity`, `.point`, `.normal` and `.distance`. `ignore` skips one entity, usually the caster. Sensors are skipped |
@@ -174,6 +176,7 @@ for `entity` and `ctx`.
 | `ctx.save["coins"] = 12` | Values that last between runs, in save slots ([Save games](#save-games)) |
 | `ctx.settings.volume`, `.graphics`, `.bind("jump", "space")` | The player's settings, remembered automatically ([Settings](#player-settings)) |
 | `ctx.tr("menu.play")`, `ctx.tr("hud.coins", count=3)` | Text in the player's language from `lang/*.csv` ([Languages](#languages)) |
+| `ctx.steam.unlock("ACH_WIN")`, `.add_stat("coins")`, `.open_overlay()` | Steam achievements, stats, the overlay and Cloud saves. Safe offline and in Play ([Steam](steam.md)) |
 | `ctx.log(...)`, `ctx.warn(...)` | Write to the Console. `print()` works too |
 
 HUD shapes last one frame, so draw them in `update` every frame you want
@@ -743,6 +746,8 @@ def update(entity, ctx):
 
   Setting the `AUTOMATA_SAVE_DIR` environment variable overrides all of
   them. `.oberon/` is never exported, so your test saves don't ship.
+- **Steam Cloud** can sync the `saves/` folder between a player's
+  computers with no code ([Steam Cloud](steam.md#steam-cloud)).
 
 ## Player settings
 
@@ -801,6 +806,50 @@ def update(entity, ctx):
 A misspelt key (`"spce"`) raises an error that suggests the right one. An
 action name that was never bound is treated as a key name, so
 `ctx.input.pressed("space")` keeps working.
+
+### Button prompts
+
+Tell players which button to press in terms of the controller in their
+hands. `ctx.input.prompt(action)` gives the label of the action's key on
+the device they used last, and it follows their rebinding:
+
+```python
+def start(entity, ctx):
+    ctx.settings.bind("jump", "space", "pad_south")
+    ctx.settings.bind("interact", "e", "pad_west")
+
+def update(entity, ctx):
+    ctx.hud.text(f"{ctx.input.prompt('jump')} to jump", 24, 24, size=22)
+```
+
+This shows "Space to jump" until the player touches a gamepad. Then it
+shows "A to jump" on an Xbox pad or a Steam Deck, "× to jump" on a
+PlayStation pad, and "B to jump" on a Switch pad. It switches back as
+soon as they type or click.
+
+- **`ctx.input.device`** is what the player used last: `"keyboard"` (with
+  the mouse), `"gamepad"` or `"touch"`. Before any input, it's
+  `"gamepad"` if one is connected or the game runs on a Steam Deck,
+  `"touch"` on a touch screen, else `"keyboard"`.
+- **`ctx.input.controller`** is the gamepad's family, from its name:
+  `"xbox"`, `"playstation"`, `"switch"`, `"steam_deck"` or `"generic"`
+  (which gets Xbox labels). It's `None` without a gamepad.
+- **`prompt(name, device="gamepad")`** asks for one device, for example
+  to show both labels. `name` can also be a key (`prompt("f5")` is `"F5"`).
+  The action's first key for the device is used, and an action with no
+  keys gives `""`.
+
+| Key | Xbox, generic | PlayStation | Switch | Steam Deck |
+|---|---|---|---|---|
+| `pad_south` / `east` / `west` / `north` | A B X Y | × ○ □ △ | B A Y X | A B X Y |
+| `pad_lb` / `rb` / `lt` / `rt` | LB RB LT RT | L1 R1 L2 R2 | L R ZL ZR | L1 R1 L2 R2 |
+| `pad_start` / `select` | ☰ ⧉ | Options Create | + − | ☰ ⧉ |
+| `pad_l3` / `r3` | LS RS | L3 R3 | LS RS | L3 R3 |
+| `pad_up` / `down` / `left` / `right` | ↑ ↓ ← → | ↑ ↓ ← → | ↑ ↓ ← → | ↑ ↓ ← → |
+
+Labels go by **position**. `pad_south` is the bottom face button, so on a
+Switch pad it's labelled B. Keys get short names: `Space`, `W`, `↑`,
+`Left click`, `Num 7`. The built-in font has every symbol here.
 
 ## Languages
 

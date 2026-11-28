@@ -1240,9 +1240,37 @@ bundled in every export, and it targets desktop and phone browsers.
   over 18.5 MB, 11 MB gzipped, or a first frame later than 3 s, and posts
   `web: size and start-up`.
 
-### E4. Steam integration ⬜ M
-- Achievements, stats, Cloud saves (on top of C3), the overlay, and
-  Steam Deck input glyphs.
+### E4. Steam integration ✅ M
+`ctx.steam` (and `automata.steam` for code-first games): a ctypes binding
+to the flat API of Valve's `steam_api` library, so nothing is compiled
+against the SDK. Every call is safe without Steam (Play, the web, Android,
+Steam not running): achievements and stats then last the session and are
+logged. See [Steam](docs/wiki/oberon/steam.md).
+- ✅ Achievements and stats: `unlock`, `progress`, `stat`, `set_stat`,
+  `add_stat`, `reset`. An unlock is stored at the end of its frame, while
+  stats go at most once a minute and at exit. Older libraries that need
+  `RequestCurrentStats` wait for `UserStatsReceived`. Manual callback
+  dispatch is used, so no C++ is needed.
+- ✅ The overlay: `open_overlay`, `open_store`, `open_url`, plus
+  `overlay_open` and `on_overlay` from `GameOverlayActivated`. Exported
+  games connect before their window opens.
+- ✅ Export: **Steam app ID** and **Steamworks SDK** in Build Settings
+  (`build.ron`'s `steam`). Windows, Linux and macOS builds ship the SDK's
+  `steam_api` library and put the app ID in `game.json`. `restart` hands
+  a copy started outside Steam to Steam.
+- ✅ Cloud saves: Steam Auto-Cloud on `saves/` in the user-data folder,
+  with root overrides so saves follow players across Windows, macOS and
+  the Deck. Settings stay on each computer. `ctx.steam.cloud` says whether
+  syncing is on.
+- ✅ Steam Deck and controller glyphs: `ctx.input.prompt(action)` gives the
+  key's label on the device used last (`device`), in the connected pad's
+  family (`controller`: Xbox, PlayStation, Switch, Steam Deck, generic,
+  from gilrs or browser `Gamepad.id` names). The built-in font gained
+  □ ☰ ⧉ for them.
+- Tests: a fake `steam_api` (C, built by the test) checks init, restart,
+  batching, the overlay callback, an older SDK, failure and offline use,
+  and exported games. The exporter's tests copy the library from a fake
+  SDK.
 
 ---
 
@@ -1315,7 +1343,7 @@ per effort. Reorder any time by telling me.
 | 39 | E1 Android export | L | ✅ |
 | 40 | E2 macOS export | M | ✅ |
 | 41 | E3 Web export | L | ✅ |
-| 42 | E4 Steam integration | M | ⬜ |
+| 42 | E4 Steam integration | M | ✅ |
 | 43 | F3 Custom shaders | M | ⬜ |
 | 44 | F2 Video playback | M | ⬜ |
 | 45 | F1 Multiplayer | L | ⬜ |

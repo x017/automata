@@ -11,6 +11,11 @@ behaviour scripts through ``automata.run_scene``).
 ``touch_controls`` (from ``build.ron``) sets up the on-screen thumbsticks
 and buttons of a scene game (``ctx.input.touch_controls``).
 
+``steam`` (``{"app_id": 480, "restart": false}``, from ``build.ron``)
+connects to Steam before the window opens, so the overlay can draw over
+it (see ``automata.steam``). With ``restart`` a copy started outside
+Steam asks Steam to start it and ends.
+
 Saves and settings (``ctx.save``, ``ctx.settings``) go to a folder named
 after the game in the player's user-data folder (see
 ``automata.script_api.user_data_dir``; ``$AUTOMATA_SAVE_DIR`` overrides it).
@@ -67,6 +72,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     os.chdir(folder)
     if folder not in sys.path:
         sys.path.insert(0, folder)
+    if _start_steam(manifest.get("steam"), folder) == "restarting":
+        return 0
 
     main_script = manifest.get("main")
     if main_script:
@@ -96,6 +103,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     if opts["headless"]:
         print(f"ran {frames} frames of {manifest['start_scene']}")
     return 0
+
+
+def _start_steam(config: Any, folder: str) -> Optional[str]:
+    """Connects to Steam when ``game.json`` asks for it (before any window
+    opens). Returns ``"restarting"`` when Steam will start the game instead."""
+    if not isinstance(config, dict) or not config.get("app_id"):
+        return None
+    from . import steam
+
+    client = steam.init(int(config["app_id"]), folders=[folder, os.path.dirname(folder)],
+                        restart=bool(config.get("restart")))
+    if client.status == "restarting through Steam":
+        print("steam: starting the game through Steam")
+        return "restarting"
+    if not client.available:
+        print(f"steam: {client.status}; playing without Steam")
+    return None
 
 
 def _limit_frames(frames: int) -> None:

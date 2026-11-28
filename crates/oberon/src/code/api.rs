@@ -46,6 +46,8 @@ pub enum Ty {
     UiScreen,
     /// `ctx.tr`: text from the string tables (`lang/*.csv`).
     Strings,
+    /// `ctx.steam`: achievements, stats and the overlay.
+    Steam,
 }
 
 /// What a string argument names.
@@ -161,6 +163,12 @@ const CONTEXT: &[Member] = &[
         ),
         ArgKind::StringKey,
     ),
+    prop(
+        "steam",
+        "Steam",
+        "Achievements, stats and the overlay; works offline (and in Play) too.",
+        Some(Ty::Steam),
+    ),
     meth(
         "log",
         "(*parts) -> None",
@@ -264,6 +272,132 @@ const INPUT: &[Member] = &[
         "mouse_locked",
         "bool",
         "Whether the cursor is captured.",
+        None,
+    ),
+    with_arg(
+        meth(
+            "prompt",
+            "(name: str, device: str | None = None) -> str",
+            "The label to show for an action or key on the device in use: \"Space\", \"A\", \"×\"…",
+            None,
+        ),
+        ArgKind::Key,
+    ),
+    prop(
+        "device",
+        "str",
+        "What the player used last: \"keyboard\", \"gamepad\" or \"touch\".",
+        None,
+    ),
+    prop(
+        "controller",
+        "str | None",
+        "The gamepad's family: \"xbox\", \"playstation\", \"switch\", \"steam_deck\" or \"generic\".",
+        None,
+    ),
+];
+
+const STEAM: &[Member] = &[
+    prop(
+        "available",
+        "bool",
+        "Whether Steam is running and the game is connected to it.",
+        None,
+    ),
+    prop(
+        "status",
+        "str",
+        "Why Steam is or isn't available, in words.",
+        None,
+    ),
+    meth(
+        "unlock",
+        "(name: str) -> bool",
+        "Unlocks an achievement (its API name in Steamworks): steam.unlock(\"ACH_WIN\").",
+        None,
+    ),
+    meth(
+        "unlocked",
+        "(name: str) -> bool",
+        "Whether an achievement is unlocked.",
+        None,
+    ),
+    meth(
+        "progress",
+        "(name: str, current: int, maximum: int) -> bool",
+        "Shows progress towards an achievement (Steam's pop-up).",
+        None,
+    ),
+    meth(
+        "stat",
+        "(name: str, default=0) -> int | float",
+        "A stat's value.",
+        None,
+    ),
+    meth(
+        "set_stat",
+        "(name: str, value: int | float) -> bool",
+        "Sets a stat (stored within a minute, and when the game quits).",
+        None,
+    ),
+    meth(
+        "add_stat",
+        "(name: str, amount=1) -> int | float",
+        "Adds to a stat and returns the new value.",
+        None,
+    ),
+    meth(
+        "open_overlay",
+        "(dialog: str = \"achievements\") -> bool",
+        "Opens the Steam overlay: \"achievements\", \"friends\", \"stats\", \"community\"…",
+        None,
+    ),
+    meth(
+        "open_store",
+        "(app_id: int | None = None, add_to_cart: bool = False) -> bool",
+        "Opens the game's (or another app's) store page in the overlay.",
+        None,
+    ),
+    meth(
+        "open_url",
+        "(url: str, modal: bool = False) -> bool",
+        "Opens a web page in the overlay.",
+        None,
+    ),
+    prop(
+        "overlay_open",
+        "bool",
+        "Whether the overlay is showing (pause the game while it is).",
+        None,
+    ),
+    meth(
+        "on_overlay",
+        "(fn) -> None",
+        "Calls fn(open) whenever the overlay opens or closes.",
+        None,
+    ),
+    prop(
+        "steam_deck",
+        "bool",
+        "Whether the game runs on a Steam Deck.",
+        None,
+    ),
+    prop(
+        "cloud",
+        "bool",
+        "Whether Steam Cloud keeps this player's saves (Auto-Cloud on, and on in Steam).",
+        None,
+    ),
+    prop(
+        "user_name",
+        "str | None",
+        "The player's Steam name (None offline).",
+        None,
+    ),
+    prop(
+        "language",
+        "str | None",
+        "The game language chosen in Steam, e.g. \"english\" (None offline).",
         None,
     ),
 ];
@@ -907,6 +1041,7 @@ impl Ty {
             Self::Screens => SCREENS,
             Self::UiScreen => UI_SCREEN,
             Self::Strings => STRINGS,
+            Self::Steam => STEAM,
         }
     }
 
@@ -930,6 +1065,7 @@ impl Ty {
             Self::Screens => "Screens",
             Self::UiScreen => "UiScreen",
             Self::Strings => "Strings",
+            Self::Steam => "Steam",
         }
     }
 
@@ -953,6 +1089,7 @@ impl Ty {
             Self::Screens => "Which game UI screens are shown, newest on top.",
             Self::UiScreen => "A game UI screen and the widgets of its UI document, by name.",
             Self::Strings => "Text in the player's language from the string tables (lang/*.csv).",
+            Self::Steam => "Steam achievements, stats and overlay (offline-safe).",
         }
     }
 
@@ -1366,6 +1503,10 @@ mod tests {
             ("ctx.ui.screens.", "show"),
             ("ctx.input.", "mouse_over_ui"),
             ("entity.", "joint"),
+            ("ctx.steam.", "unlock"),
+            ("ctx.steam.", "open_overlay"),
+            ("ctx.input.", "prompt"),
+            ("ctx.input.", "controller"),
         ] {
             let (b, p) = at(SCRIPT, 7, &format!("; {expr}"));
             let items = complete(&b, p, &names).unwrap_or_else(|| panic!("{expr}: no items"));

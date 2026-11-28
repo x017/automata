@@ -62,6 +62,8 @@ the result in your file manager.
 | Android processors | Which processor types the APK holds code for: `arm64-v8a` (phones and tablets) and `x86_64` (emulators on PCs). Empty: both. `arm64-v8a` alone makes a smaller APK for phones |
 | macOS bundle ID | The app's unique ID on macOS, like `com.yourname.coinrun`. macOS keeps the game's permissions and preferences under it. Empty: `com.example.<name>`, fine for testing |
 | macOS icon | A square PNG in the project (1024×1024 looks sharpest; 16 to 1024 pixels, a power of two) or an `.icns` file. Empty: the standard app icon |
+| Steam app ID | The game's app ID from Steamworks (480 to test). Empty: no Steam ([Steam](steam.md)) |
+| Steamworks SDK | The Steamworks SDK folder, whose `steam_api` library desktop builds ship. Keep it outside the project |
 | Platforms | What **Build** / Ctrl+Shift+B exports. **Build ▸ Build for Linux / Windows / macOS / Android / Web** exports just one. |
 | Archive | Also write a `.zip` / `.tar.gz` of each build (for the web, the zip itch.io takes) |
 | Touch controls | An on-screen stick and buttons that hold the game's keys on touch screens. Turning it on writes a stick for WASD and a Jump button for Space; change them in `build.ron` ([Touch controls](../guides/touch-controls.md)) |
@@ -90,6 +92,11 @@ BuildConfig(
     macos: (
         bundle_id: "com.yourname.coinrun",
         icon: "art/icon.png",               // optional
+    ),
+    steam: (                                // optional: see Steam
+        app_id: 480,
+        sdk: "~/sdk/steamworks",
+        restart: false,
     ),
 )
 ```
@@ -414,6 +421,16 @@ console.
 **What doesn't work yet.** Python packages beyond the standard library
 and the engine (`pip install`ed ones) aren't included, and native
 extension modules can't load in a browser.
+
+## Steam
+
+With a **Steam app ID** and the **Steamworks SDK** set, Windows, Linux and
+macOS builds ship Valve's `steam_api` library next to the game's files,
+and `game.json` holds the app ID. The game connects to Steam as it starts,
+before its window opens, so the overlay can draw over it. `restart: true`
+makes a copy started outside Steam restart through Steam. On macOS,
+`sign_macos.sh` signs the library along with the rest of the app. Setting
+up achievements, stats and Cloud saves: [Steam](steam.md).
 
 ## Running an exported game
 

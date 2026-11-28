@@ -27,6 +27,7 @@ pub mod archive;
 pub mod cli;
 pub mod macos;
 pub mod serve;
+pub mod steam;
 pub mod web;
 
 use std::fmt;
@@ -228,6 +229,8 @@ pub struct BuildConfig {
     pub android: AndroidConfig,
     /// macOS app settings.
     pub macos: MacOsConfig,
+    /// Steam: the app id and the Steamworks SDK (desktop builds).
+    pub steam: steam::SteamConfig,
 }
 
 /// macOS app settings (`build.ron`'s `macos`).
@@ -533,6 +536,7 @@ impl Default for BuildConfig {
             touch_controls: None,
             android: AndroidConfig::default(),
             macos: MacOsConfig::default(),
+            steam: steam::SteamConfig::default(),
         }
     }
 }
@@ -751,6 +755,7 @@ pub fn validate(project: &Path, cfg: &BuildConfig) -> Vec<Message> {
                 .map(Message::error),
         );
     }
+    cfg.steam.check(project, &cfg.targets, &mut out);
     if let Some(touch) = &cfg.touch_controls {
         out.extend(touch.problems().into_iter().map(Message::error));
         if cfg.main_script.is_some() {
@@ -1682,6 +1687,7 @@ pub fn export(
         "{}: game ({n} files)",
         target.label()
     )));
+    steam::ship(&cfg.steam, project, target, &folder.join("game"), progress)?;
 
     let archive_path = if cfg.archive {
         let file = format!(
@@ -1828,14 +1834,19 @@ struct Skip {
 impl Skip {
     fn new(project: &Path, cfg: &BuildConfig) -> Self {
         let output = archive::slash_path(Path::new(&cfg.output));
+        let mut extra: Vec<String> = cfg
+            .exclude
+            .iter()
+            .map(|e| e.trim().trim_start_matches("./").to_string())
+            .collect();
+        // A Steamworks SDK kept in the project isn't part of the game.
+        if let Some(sdk) = steam::sdk_in_project(&cfg.steam) {
+            extra.push(format!("{sdk}/"));
+        }
         Self {
             project: project.to_path_buf(),
             output,
-            extra: cfg
-                .exclude
-                .iter()
-                .map(|e| e.trim().trim_start_matches("./").to_string())
-                .collect(),
+            extra,
         }
     }
 
@@ -1954,8 +1965,13 @@ fn write_manifest(path: &Path, cfg: &BuildConfig) -> std::io::Result<()> {
         .touch_controls
         .as_ref()
         .map_or_else(|| "null".to_string(), TouchControls::to_json);
+    // Only games with Steam say so (the same game.json bytes otherwise).
+    let steam = cfg
+        .steam
+        .to_json()
+        .map_or_else(String::new, |s| format!("  \"steam\": {s},\n"));
     let text = format!(
-        "{{\n  \"name\": {},\n  \"version\": {},\n  \"start_scene\": {},\n  \"main\": {},\n  \"resolution\": [{}, {}],\n  \"touch_controls\": {},\n  \"engine\": {}\n}}\n",
+        "{{\n  \"name\": {},\n  \"version\": {},\n  \"start_scene\": {},\n  \"main\": {},\n  \"resolution\": [{}, {}],\n  \"touch_controls\": {},\n{steam}  \"engine\": {}\n}}\n",
         json_string(&cfg.name),
         json_string(&cfg.version),
         opt(&cfg.start_scene),
@@ -2589,6 +2605,67 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o111, 0o111, "the launcher stays executable");
         }
+    }
+
+    #[test]
+    fn steam_builds_ship_the_library_and_the_app_id() {
+        let dir = project("steam");
+        let bin = dir.join("third_party/steamworks/redistributable_bin/linux64");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("libsteam_api.so"), b"steam").unwrap();
+        let cfg: BuildConfig = ron::from_str(
+            r#"(name: "Run", start_scene: Some("level.ron"),
+                steam: (app_id: 480, sdk: "third_party/steamworks"))"#,
+        )
+        .unwrap();
+        assert!(!cfg.steam.restart);
+        let text = ron::ser::to_string(&cfg).unwrap();
+        assert_eq!(ron::from_str::<BuildConfig>(&text).unwrap(), cfg);
+        let tpl = template("steam", Target::Linux, true);
+        let mut log = Vec::new();
+        let out = export(&dir, &cfg, Target::Linux, &tpl, &mut |m| log.push(m.text)).unwrap();
+        let game = out.folder.join("game");
+        assert_eq!(
+            std::fs::read(game.join("libsteam_api.so")).unwrap(),
+            b"steam"
+        );
+        let manifest = std::fs::read_to_string(game.join("game.json")).unwrap();
+        assert!(
+            manifest.contains(r#""steam": {"app_id": 480, "restart": false},"#),
+            "{manifest}"
+        );
+        // The SDK itself stays behind.
+        assert!(!game.join("third_party").exists());
+        assert!(
+            log.iter()
+                .any(|l| l == "Linux: Steam (app 480, libsteam_api.so)"),
+            "{log:?}"
+        );
+
+        // Without Steam: no library, no "steam" in game.json.
+        let plain = BuildConfig {
+            steam: steam::SteamConfig::default(),
+            ..cfg.clone()
+        };
+        let out = export(&dir, &plain, Target::Linux, &tpl, &mut |_| {}).unwrap();
+        let game = out.folder.join("game");
+        assert!(!game.join("libsteam_api.so").exists());
+        let manifest = std::fs::read_to_string(game.join("game.json")).unwrap();
+        assert!(!manifest.contains("steam"), "{manifest}");
+
+        // A missing SDK stops the build (unless the environment names one).
+        if std::env::var_os(steam::SDK_ENV).is_none() {
+            let mut gone = cfg;
+            gone.steam.sdk = "nowhere".into();
+            let mut log = Vec::new();
+            assert!(export(&dir, &gone, Target::Linux, &tpl, &mut |m| log.push(m.text)).is_err());
+            assert!(
+                log.iter().any(|l| l.contains("isn't the Steamworks SDK")),
+                "{log:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&tpl);
     }
 
     #[test]

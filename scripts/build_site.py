@@ -78,6 +78,7 @@ NAV: list[tuple[str, list[tuple[str, str]]]] = [
         ("wiki/oberon/prefabs-and-attributes.md", "Prefabs & attributes"),
         ("wiki/oberon/editor-workflow.md", "Editor workflow"),
         ("wiki/oberon/exporting.md", "Exporting your game"),
+        ("wiki/oberon/steam.md", "Steam"),
         ("wiki/oberon/shortcuts.md", "Keyboard shortcuts"),
     ]),
     ("Python guides", [

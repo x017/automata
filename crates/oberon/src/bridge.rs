@@ -42,6 +42,13 @@ pub const SCRIPT_API: &str = include_str!("../../automata-python/python/automata
 /// The file name [`SCRIPT_API`] is written under, next to the runner.
 pub const SCRIPT_API_FILE: &str = "_automata_script_api.py";
 
+/// `ctx.steam` (`automata/steam.py`). In Play there's no Steam: it works
+/// offline, logging unlocked achievements to the Console.
+pub const STEAM_API: &str = include_str!("../../automata-python/python/automata/steam.py");
+
+/// The file name [`STEAM_API`] is written under, next to the runner.
+pub const STEAM_API_FILE: &str = "_automata_steam.py";
+
 /// The environment variable that hands Play the project's touch controls
 /// (`build.ron`'s `touch_controls` as JSON; empty for none).
 pub const TOUCH_CONTROLS_ENV: &str = "OBERON_TOUCH_CONTROLS";
@@ -187,6 +194,9 @@ pub struct FrameInput {
     /// The scene's navigation mesh, for `ctx.nav`. The bridge sends it
     /// when it changes.
     pub nav: Option<Arc<automata_nav::NavMesh>>,
+    /// The connected gamepads' names, for `ctx.input.controller` and
+    /// `ctx.input.prompt`.
+    pub pads: Vec<String>,
 }
 
 /// What a script asked of an entity's Audio Source.
@@ -466,6 +476,7 @@ impl ScriptBridge {
         for (path, text) in [
             (runner.clone(), RUNNER),
             (runtime_dir.join(SCRIPT_API_FILE), SCRIPT_API),
+            (runtime_dir.join(STEAM_API_FILE), STEAM_API),
         ] {
             if std::fs::read_to_string(&path).ok().as_deref() != Some(text) {
                 std::fs::write(&path, text)?;
@@ -847,6 +858,12 @@ fn frame_input_json(msg: &mut Json, input: &FrameInput) {
         mouse.set("pos", Json::floats(&pos));
     }
     msg.set("mouse", mouse);
+    if !input.pads.is_empty() {
+        msg.set(
+            "pads",
+            Json::Arr(input.pads.iter().map(|p| Json::from(p.as_str())).collect()),
+        );
+    }
     msg.set(
         "screen",
         Json::Arr(

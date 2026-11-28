@@ -1190,8 +1190,15 @@ class KeySource:
         self.pos = None
         self.raw = None
         self._finger = None  # the left button as finger 0: [x, y, start_x, start_y]
+        self.pads: list[str] = []  # connected gamepads' names
 
-    def update(self, keys, buttons=(), delta=(0.0, 0.0), locked=False, pos=None):
+    #: Its touches are the mouse's left button (``ctx.input.device`` stays
+    #: ``"keyboard"`` for them).
+    touch_from_mouse = True
+
+    def update(self, keys, buttons=(), delta=(0.0, 0.0), locked=False, pos=None, pads=None):
+        if pads is not None:
+            self.pads = [str(p) for p in pads]
         self.prev, self.down = self.down, set(keys)
         self.prev_buttons, self.buttons = self.buttons, set(buttons)
         self.delta = (float(delta[0]), float(delta[1]))
@@ -1202,6 +1209,9 @@ class KeySource:
             self._finger = [x, y, x, y]
         elif self._finger is not None and self.pos is not None:
             self._finger[0:2] = self.pos
+
+    def gamepad_names(self):
+        return self.pads
 
     def touches(self):
         """The left mouse button as finger 0 (there's no touch screen)."""
@@ -1662,6 +1672,9 @@ class Input:
         self._ui: Ui | None = None  # ctx.ui, which keeps clicks on widgets
         #: On-screen thumbsticks and buttons (see :class:`TouchControls`).
         self.touch_controls = TouchControls(self)
+        self._device: str | None = None  # the last one used, once watched
+        self._watch_device = False
+        self._raw_touches: list = []
 
     def _game(self, on_button):
         """``on_button`` minus the buttons ``ctx.ui`` took (pressed on a
@@ -1680,6 +1693,7 @@ class Input:
         ``ctx.ui`` has taken its own)."""
         fn = getattr(self._src, "touches", None)
         raw = list(fn()) if fn is not None else []
+        self._raw_touches = raw
         ui = self._ui
         self.touch_controls._update(raw, ui._hud.size if ui is not None else (1280, 720),
                                     ui is not None and "left" in ui._captured)
@@ -1726,6 +1740,80 @@ class Input:
                     return True
             return False
         return any(on_key(k) for k in keys_for(key))
+
+    # --- which device, and what to call its buttons -----------------------
+
+    def _begin_device(self):
+        """Notes the device used this frame (once a script asked)."""
+        if not self._watch_device:
+            return
+        src = self._src
+        used = None
+        if not getattr(src, "touch_from_mouse", False) and any(t[5] for t in self._raw_touches):
+            used = "touch"
+        elif any(src.key_pressed(k) for k in PAD_KEYS):
+            used = "gamepad"
+        elif (any(src.key_pressed(k) for k in _KEYBOARD)
+              or any(src.button_pressed(b) for b in MOUSE_BINDINGS.values())):
+            used = "keyboard"
+        else:
+            dx, dy = src.mouse_delta() if callable(getattr(src, "mouse_delta", None)) else (0, 0)
+            if abs(dx) + abs(dy) > 2 and not src.mouse_locked():
+                used = "keyboard"
+        if used is not None:
+            self._device = used
+
+    def _gamepad_names(self) -> list[str]:
+        fn = getattr(self._src, "gamepad_names", None)
+        return list(fn()) if fn is not None else []
+
+    @property
+    def device(self) -> str:
+        """What the player used last: ``"keyboard"`` (with the mouse),
+        ``"gamepad"`` or ``"touch"``. Before any input: a gamepad if one is
+        connected (or on a Steam Deck), touch on a touch screen, else the
+        keyboard. Switch button prompts on it (see :meth:`prompt`)."""
+        self._watch_device = True
+        if self._device is not None:
+            return self._device
+        if self._gamepad_names() or os.environ.get("SteamDeck") == "1":
+            return "gamepad"
+        return "touch" if _on_touch_screen() else "keyboard"
+
+    @property
+    def controller(self) -> str | None:
+        """The connected gamepad's family, for its button labels:
+        ``"xbox"``, ``"playstation"``, ``"switch"``, ``"steam_deck"`` or
+        ``"generic"``; None without one (``"steam_deck"`` on a Deck)."""
+        names = self._gamepad_names()
+        return controller_family(names[0] if names else None, os.environ.get("SteamDeck") == "1")
+
+    def prompt(self, name: str, device: str | None = None) -> str:
+        """What to show for a key or action on the device the player uses
+        (:attr:`device`, or ``device``): ``ctx.input.prompt("jump")`` is
+        ``"Space"`` at the keyboard, ``"A"`` on an Xbox pad or a Steam
+        Deck, ``"×"`` on a PlayStation pad, ``"B"`` on a Switch pad (by
+        position). It follows the player's rebinding. The action's first
+        binding for that device wins, else its first binding; an action with
+        no keys gives ``""``::
+
+            ctx.hud.text(f"{ctx.input.prompt('jump')} to jump", 20, 20)
+        """
+        device = device or self.device
+        settings = self._settings
+        if settings is not None and isinstance(name, str) and settings.is_action(name):
+            keys = list(settings.keys(name))
+        else:
+            keys = [str(getattr(name, "value", name)).strip().lower()]
+        if not keys:
+            return ""
+        pads = [k for k in keys if k.startswith("pad_")]
+        others = [k for k in keys if not k.startswith("pad_")]
+        if device == "gamepad" and pads:
+            return pad_label(pads[0], self.controller)
+        if others:
+            return key_label(others[0])
+        return pad_label(pads[0], self.controller)
 
     def pressed(self, key: str) -> bool:
         """The key is held down. Takes a key name (``"space"``) or an
@@ -6391,6 +6479,111 @@ PAD_KEYS = ("pad_south", "pad_east", "pad_west", "pad_north", "pad_up", "pad_dow
 #: The key names both runners know, in the order
 #: ``ctx.input.any_just_pressed()`` checks them.
 KEY_NAMES = _KEYBOARD + PAD_KEYS
+
+#: The controller families ``ctx.input.controller`` tells apart.
+CONTROLLERS = ("xbox", "playstation", "switch", "steam_deck", "generic")
+
+_DPAD = {"pad_up": "↑", "pad_down": "↓", "pad_left": "←", "pad_right": "→"}
+_XBOX = {"pad_south": "A", "pad_east": "B", "pad_west": "X", "pad_north": "Y",
+         "pad_lb": "LB", "pad_rb": "RB", "pad_lt": "LT", "pad_rt": "RT",
+         "pad_start": "☰", "pad_select": "⧉", "pad_l3": "LS", "pad_r3": "RS", **_DPAD}
+#: What each ``pad_*`` key is labelled on each controller family, by the
+#: button's position (``pad_south`` is the bottom face button: A on an Xbox
+#: pad, × on a PlayStation one, B on a Switch one). The built-in font has
+#: every symbol.
+PAD_LABELS = {
+    "xbox": _XBOX,
+    "generic": _XBOX,
+    "playstation": {"pad_south": "×", "pad_east": "○", "pad_west": "□", "pad_north": "△",
+                    "pad_lb": "L1", "pad_rb": "R1", "pad_lt": "L2", "pad_rt": "R2",
+                    "pad_start": "Options", "pad_select": "Create", "pad_l3": "L3",
+                    "pad_r3": "R3", **_DPAD},
+    "switch": {"pad_south": "B", "pad_east": "A", "pad_west": "Y", "pad_north": "X",
+               "pad_lb": "L", "pad_rb": "R", "pad_lt": "ZL", "pad_rt": "ZR",
+               "pad_start": "+", "pad_select": "−", "pad_l3": "LS", "pad_r3": "RS", **_DPAD},
+    "steam_deck": {**_XBOX, "pad_lb": "L1", "pad_rb": "R1", "pad_lt": "L2", "pad_rt": "R2",
+                   "pad_l3": "L3", "pad_r3": "R3"},
+}
+
+_KEY_LABELS = {
+    "space": "Space", "enter": "Enter", "escape": "Esc", "tab": "Tab", "backspace": "Backspace",
+    "arrow_left": "←", "arrow_right": "→", "arrow_up": "↑", "arrow_down": "↓",
+    "left": "←", "right": "→", "up": "↑", "down": "↓",
+    "shift": "Shift", "shift_left": "Shift", "shift_right": "Right Shift",
+    "ctrl": "Ctrl", "ctrl_left": "Ctrl", "ctrl_right": "Right Ctrl",
+    "alt": "Alt", "alt_left": "Alt", "alt_right": "Right Alt",
+    "super_left": "Super", "super_right": "Right Super", "page_up": "Page Up",
+    "page_down": "Page Down", "caps_lock": "Caps Lock", "num_lock": "Num Lock",
+    "scroll_lock": "Scroll Lock", "minus": "-", "equal": "=", "comma": ",", "period": ".",
+    "slash": "/", "backslash": "\\", "semicolon": ";", "quote": "'", "backquote": "`",
+    "bracket_left": "[", "bracket_right": "]", "numpad_add": "Num +",
+    "numpad_subtract": "Num -", "numpad_multiply": "Num *", "numpad_divide": "Num /",
+    "numpad_decimal": "Num .", "numpad_enter": "Num Enter", "print_screen": "Print Screen",
+    "context_menu": "Menu", "back_button": "Back",
+    "mouse_left": "Left click", "mouse_right": "Right click", "mouse_middle": "Middle click",
+}
+
+
+def key_label(key: str) -> str:
+    """How a keyboard key or mouse binding is written on screen:
+    ``"space"`` → ``"Space"``, ``"w"`` → ``"W"``, ``"arrow_up"`` → ``"↑"``,
+    ``"mouse_left"`` → ``"Left click"``."""
+    k = str(getattr(key, "value", key)).strip().lower()
+    if k in _KEY_LABELS:
+        return _KEY_LABELS[k]
+    if len(k) == 1:
+        return k.upper()
+    if k.startswith("numpad_") and k[7:].isdigit():
+        return "Num " + k[7:]
+    if k[:1] == "f" and k[1:].isdigit():
+        return k.upper()
+    return k.replace("_", " ").title()
+
+
+def pad_label(key: str, controller: str | None = "xbox") -> str:
+    """How a ``pad_*`` key is written for a controller family
+    (:data:`PAD_LABELS`): ``pad_label("pad_south", "playstation")`` is
+    ``"×"``."""
+    labels = PAD_LABELS.get(controller or "xbox", _XBOX)
+    k = str(getattr(key, "value", key)).strip().lower()
+    return labels.get(k) or key_label(k.removeprefix("pad_"))
+
+
+# Vendor ids in browser gamepad names ("054c-0ce6-Wireless Controller").
+_VENDORS = {"045e": "xbox", "054c": "playstation", "057e": "switch", "28de": "steam_deck"}
+
+
+def controller_family(name: str | None, steam_deck: bool = False) -> str | None:
+    """The family (:data:`CONTROLLERS`) of a gamepad named ``name``, or
+    None without one. On a Steam Deck, its own controls and Steam's
+    virtual gamepads count as ``"steam_deck"``."""
+    if not name:
+        return "steam_deck" if steam_deck else None
+    n = name.lower()
+    family = "generic"
+    for vendor, fam in _VENDORS.items():
+        if vendor in n:
+            family = fam
+    # Most telling words first: "Xbox Wireless Controller" is an Xbox pad,
+    # a bare "Wireless Controller" a PlayStation one.
+    if "steam deck" in n or "valve" in n:
+        family = "steam_deck"
+    elif any(w in n for w in ("xbox", "x-box", "xinput", "microsoft")):
+        family = "xbox"
+    elif any(w in n for w in ("dualsense", "dualshock", "playstation", "ps3", "ps4", "ps5",
+                              "sony")):
+        family = "playstation"
+    elif any(w in n for w in ("nintendo", "switch", "pro controller", "joy-con", "joycon")):
+        family = "switch"
+    elif family == "generic" and "wireless controller" in n:
+        family = "playstation"
+    if steam_deck and (family in ("generic", "xbox", "steam_deck") or "steam" in n):
+        return "steam_deck"
+    if family == "generic" and "steam" in n:
+        return "xbox"  # Steam's virtual gamepad has an Xbox layout
+    return family
+
+
 #: Mouse buttons as bindings: ``"mouse_left"``, ``"mouse_right"``,
 #: ``"mouse_middle"``.
 MOUSE_BINDINGS = {"mouse_left": "left", "mouse_right": "right", "mouse_middle": "middle"}
@@ -6398,6 +6591,24 @@ MOUSE_BINDINGS = {"mouse_left": "left", "mouse_right": "right", "mouse_middle": 
 GRAPHICS_PRESETS = ("low", "medium", "high", "ultra", "beautiful")
 
 _SAVE_FORMAT = 1
+
+
+def _steam_client(log):
+    """``ctx.steam``: the process's :class:`automata.steam.Steam`, logging
+    through ``log``. In Oberon's Play this module runs on its own, next to
+    ``_automata_steam.py``."""
+    try:
+        from . import steam
+    except ImportError:
+        try:
+            import _automata_steam as steam  # type: ignore[import-not-found, no-redef]
+        except ImportError:
+            return None
+    client = steam.client()
+    # Into the game's log, unless the game passed its own to steam.init().
+    if getattr(client, "_log", None) is getattr(steam, "_print_log", None):
+        client._log = log
+    return client
 
 
 def user_data_dir(game: str) -> str:
@@ -7376,6 +7587,8 @@ class Context:
         self.settings = Settings(store, host.backend.graphics)
         #: Text in the player's language from ``lang/*.csv`` (see :class:`Strings`).
         self.tr = Strings(host, self.settings)
+        #: Achievements, stats and the overlay (see :class:`automata.steam.Steam`).
+        self.steam = _steam_client(host.backend.log)
         self.settings._strings = self.tr
         self.hud._strings = self.tr
         self.input._settings = self.settings
@@ -7750,6 +7963,7 @@ class ScriptHost:
             self.ctx.hud.size = (int(screen[0]), int(screen[1]))
         self.ctx.ui._begin()
         self.ctx.input._begin_touch()
+        self.ctx.input._begin_device()
         self._sync(records)
         if self.hot_reload and (elapsed - self._last_check > 0.4 or elapsed < self._last_check):
             self._last_check = elapsed

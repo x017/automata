@@ -1,3 +1,9 @@
+Geist-Medium.ttf here is modified: AUTOMATA added three glyphs for
+controller button prompts (U+25A1 white square, U+2630 trigram for heaven,
+U+29C9 two joined squares), drawn by scripts/add_prompt_glyphs.py. The
+font is otherwise Vercel's Geist Medium, under the licence below
+unchanged. Geist declares no Reserved Font Name.
+
 Copyright (c) 2023 Vercel, in collaboration with basement.studio
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.

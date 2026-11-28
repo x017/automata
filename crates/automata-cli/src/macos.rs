@@ -273,6 +273,13 @@ pub(crate) fn export(
     // The game files.
     let n = crate::copy_game(project, cfg, &resources.join("game"))?;
     progress(Message::info(format!("macOS: game ({n} files)")));
+    crate::steam::ship(
+        &cfg.steam,
+        project,
+        Target::MacOS,
+        &resources.join("game"),
+        progress,
+    )?;
 
     if let Some(icns) = &icon {
         std::fs::write(resources.join("AppIcon.icns"), icns).map_err(|e| e.to_string())?;

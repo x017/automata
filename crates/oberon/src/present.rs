@@ -2205,13 +2205,19 @@ impl EditorApp {
             self.gamepads = automata_input::Gamepads::try_new()
                 .map_or(Pads::Unavailable, |p| Pads::Open(Box::new(p)));
         }
+        let mut pad_names = Vec::new();
         if let Pads::Open(pads) = &mut self.gamepads {
             pads.update();
             let _ = pads.drain_events();
             keys.extend(bridge::held_pad_keys(pads));
+            pad_names = pads
+                .connected_ids()
+                .filter_map(|id| pads.name(id))
+                .collect();
         }
         keys.sort_unstable();
         let mut frame = play.frame_input();
+        frame.pads = pad_names;
         let mut buttons: Vec<&'static str> = self.input.game_buttons.iter().copied().collect();
         buttons.sort_unstable();
         frame.mouse_buttons = buttons;

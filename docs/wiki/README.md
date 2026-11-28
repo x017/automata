@@ -71,6 +71,7 @@ hours.
 | Reuse objects and add custom data | [Prefabs & attributes](oberon/prefabs-and-attributes.md) |
 | Edit many objects at once, snap to a grid, see frame timings | [Editor workflow](oberon/editor-workflow.md) |
 | Ship your game for Windows, Linux, macOS, Android and the web | [Exporting your game](oberon/exporting.md) |
+| Add Steam achievements, stats, the overlay and Cloud saves | [Steam](oberon/steam.md) |
 | Look up a shortcut | [Keyboard shortcuts](oberon/shortcuts.md) |
 
 ### Python

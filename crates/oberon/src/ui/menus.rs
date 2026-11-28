@@ -82,6 +82,8 @@ pub enum DialogKind {
     BuildOutput,
     /// Settings ▸ Build: pick the Android release key.
     BuildKey,
+    /// Settings ▸ Build: pick the Steamworks SDK folder.
+    BuildSteamSdk,
     /// Settings ▸ Python: pick the interpreter.
     PythonInterpreter,
     /// Keyboard shortcut reference.

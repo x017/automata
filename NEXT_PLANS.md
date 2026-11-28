@@ -664,7 +664,13 @@ next: sprites with clips, painted tilemaps with auto-tiles and colliders, a
 and Oberon, signed and notarized when a Developer ID is set up. Then E3
 web export phase 2 ✅ (#7): keys, mouse and pointer lock, touch, gamepads,
 resizing, hidden tabs and full screen in the browser, and sound through an
-AudioWorklet, all driven with fake input in CI.
+AudioWorklet, all driven with fake input in CI. E3 phases 3–5 ✅ finished
+the web export (real games from `game.zip`, the `web` template and
+**Play in Browser**, and a size and start-up budget). Then came E4 Steam
+✅: `ctx.steam` achievements, stats and the overlay through a ctypes
+binding (safe offline), the Steamworks SDK's library shipped by desktop
+builds, Auto-Cloud for `saves/`, and `ctx.input.prompt` button labels for
+Xbox, PlayStation, Switch and Steam Deck controllers.
 
 ## Process note
 

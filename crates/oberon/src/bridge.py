@@ -564,6 +564,7 @@ class Runner:
             mouse.get("delta", (0.0, 0.0)),
             mouse.get("locked", False),
             mouse.get("pos"),
+            msg.get("pads", []),
         )
         # Mesh geometry arrives once per session, keyed for "mesh" shapes.
         for key, verts, indices, *grid in msg.get("meshes", []):

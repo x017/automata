@@ -180,6 +180,13 @@ class _EngineKeys:
         return [(t.finger, *t.position, *t.start, t.just_started, t.just_ended, t.primary)
                 for t in self.raw.touches]
 
+    def gamepad_names(self) -> list[str]:
+        pads = getattr(self.raw, "gamepads", None)
+        if pads is None:
+            return []
+        found = (pads.get(i) for i in pads.ids())
+        return [p.name for p in found if p is not None]
+
 
 class _ViewRecord:
     """One entity's start-of-frame values, read lazily from its view."""

@@ -488,6 +488,13 @@ class Game(_core.Game):
 
         def tick(ctx: FrameContext) -> None:
             self._frame_scene = ctx.scene
+            # Steam's events before the frame, its batched sends after
+            # (only once `automata.steam.init` connected).
+            steam = _steam._CLIENT
+            if steam is not None and steam._lib is None:
+                steam = None
+            if steam is not None:
+                steam._frame()
             try:
                 fn(ctx)
                 for name, callbacks in handlers.items():
@@ -496,9 +503,13 @@ class Game(_core.Game):
                             callback(payload)
             finally:
                 self._frame_scene = None
+                if steam is not None:
+                    steam._flush()
 
         return super().run(tick, max_frames)
 
+
+from . import steam as _steam  # noqa: E402
 
 # Behaviour scripts (Oberon's Inspector → Script) in the real runtime.
 from .scripting import ScriptContext, ScriptEntity, run_scene  # noqa: E402

@@ -47,7 +47,7 @@ impl SettingsPage {
             Self::Editor => "Typing, display and saving in the built-in script editor.",
             Self::Python => "The interpreter that runs Play mode scripts and the language server behind completions.",
             Self::Files => "Autosave and recently opened scenes.",
-            Self::Build => "Export this project as a game for Windows, Linux, macOS and Android. Saved to build.ron in the project folder.",
+            Self::Build => "Export this project as a game for Windows, Linux, macOS, Android and the web. Saved to build.ron in the project folder.",
         }
     }
 }
@@ -79,6 +79,10 @@ pub enum SettingText {
     BuildBundleId,
     /// Build: the macOS app icon.
     BuildIcon,
+    /// Build: the Steam app ID.
+    BuildSteamAppId,
+    /// Build: the Steamworks SDK folder.
+    BuildSteamSdk,
 }
 
 const ROW: f32 = 52.0;
@@ -127,7 +131,9 @@ impl Ui {
             | SettingText::BuildKey
             | SettingText::BuildAbis
             | SettingText::BuildBundleId
-            | SettingText::BuildIcon => {
+            | SettingText::BuildIcon
+            | SettingText::BuildSteamAppId
+            | SettingText::BuildSteamSdk => {
                 self.commit_build_text(which, value);
                 return None;
             }
@@ -577,6 +583,12 @@ impl Ui {
             },
             (SettingText::BuildAbis, Some(v)) => crate::build::parse_android_abis(v).err(),
             (SettingText::BuildBundleId, Some(v)) => crate::build::check_bundle_id(v).err(),
+            (SettingText::BuildSteamAppId, Some(v)) => match v.parse::<u32>() {
+                Ok(n) if n >= 1 => None,
+                _ => Some(format!(
+                    "the Steam app ID is the number on the game's Steamworks page, not `{v}`"
+                )),
+            },
             (SettingText::BuildKey, Some(v)) => {
                 let root = self.project_root.clone();
                 crate::build::release_key_path(&root, v)
@@ -617,6 +629,10 @@ impl Ui {
             SettingText::BuildIcon => {
                 cfg.macos.icon = value.map(|v| v.replace('\\', "/")).unwrap_or_default();
             }
+            SettingText::BuildSteamAppId => {
+                cfg.steam.app_id = value.and_then(|v| v.parse().ok()).unwrap_or(0);
+            }
+            SettingText::BuildSteamSdk => cfg.steam.sdk = value.unwrap_or_default(),
             SettingText::Python | SettingText::LanguageServer => return,
         }
         self.save_build_settings();
@@ -708,6 +724,20 @@ impl Ui {
                 cfg.macos.icon.clone(),
                 "A square PNG, e.g. icon.png",
             ),
+            (
+                "Steam app ID",
+                SettingText::BuildSteamAppId,
+                if cfg.steam.app_id == 0 {
+                    String::new()
+                } else {
+                    cfg.steam.app_id.to_string()
+                },
+                "None — no Steam",
+                "Steamworks SDK",
+                SettingText::BuildSteamSdk,
+                cfg.steam.sdk.clone(),
+                "The SDK folder (from Steamworks)",
+            ),
         ];
         for (l1, w1, v1, p1, l2, w2, v2, p2) in pairs {
             canvas.text(body.x, *y, layout::FONT_SIZE, l1, color::text());
@@ -717,6 +747,7 @@ impl Ui {
                     SettingText::BuildScene => Some(super::DialogKind::BuildScene),
                     SettingText::BuildOutput => Some(super::DialogKind::BuildOutput),
                     SettingText::BuildKey => Some(super::DialogKind::BuildKey),
+                    SettingText::BuildSteamSdk => Some(super::DialogKind::BuildSteamSdk),
                     _ => None,
                 };
                 // The key field also has a New button, when no key is set.
@@ -745,7 +776,7 @@ impl Ui {
                     }
                 }
             }
-            *y += 60.0;
+            *y += 54.0;
         }
 
         // Platforms, right to left.
@@ -844,36 +875,50 @@ impl Ui {
         );
         *y += 42.0;
         let idle = self.build_status.is_none();
-        for t in Target::ALL {
-            let (state, c, action) = match crate::build::template_state(t) {
+        // Two columns: a dot, the platform, its state and a button.
+        let cell = (body.w - 16.0) / 2.0;
+        for (i, t) in Target::ALL.into_iter().enumerate() {
+            let x = body.x + if i % 2 == 0 { 0.0 } else { cell + 16.0 };
+            let ty = *y + (i / 2) as f32 * 30.0;
+            let (state, tip, c, action) = match crate::build::template_state(t) {
                 TemplateState::Ready => (
-                    "Ready — the game ships its own Python",
+                    "Ready",
+                    "Installed: the game ships its own Python.",
                     color::success(),
                     "Update",
                 ),
                 TemplateState::Development => (
-                    "Development — uses the Python on PATH",
+                    "Development",
+                    "A development template: the game uses the Python on PATH. Download the release one to ship.",
                     color::warn(),
                     "Download",
                 ),
-                TemplateState::Missing => ("Not installed", color::text_faint(), "Download"),
+                TemplateState::Missing => (
+                    "Not installed",
+                    "Download it to build for this platform.",
+                    color::text_faint(),
+                    "Download",
+                ),
             };
-            canvas.fill_circle(body.x + 4.0, *y + 8.0, 3.5, c);
+            canvas.fill_circle(x + 4.0, ty + 8.0, 3.5, c);
             canvas.text(
-                body.x + 16.0,
-                *y + 1.0,
+                x + 16.0,
+                ty + 1.0,
                 layout::FONT_SIZE,
                 t.label(),
                 color::text(),
             );
+            let state_x = x + 90.0;
+            let button_w = 86.0;
             canvas.text_clipped(
-                body.x + 96.0,
-                *y + 1.0,
+                state_x,
+                ty + 1.0,
                 layout::FONT_SIZE,
                 state,
                 color::text_dim(),
-                body.w - 96.0 - 110.0,
+                cell - 90.0 - button_w - 8.0,
             );
+            self.tip(Rect::new(x, ty - 4.0, cell - button_w - 8.0, 24.0), tip);
             let style = if idle {
                 ButtonStyle::Normal
             } else {
@@ -881,16 +926,15 @@ impl Ui {
             };
             if self.button(
                 canvas,
-                Rect::new(body.x + body.w - 100.0, *y - 4.0, 100.0, 24.0),
+                Rect::new(x + cell - button_w, ty - 4.0, button_w, 24.0),
                 action,
                 style,
             ) && idle
             {
                 self.out.push(Intent::DownloadTemplates(Some(t)));
             }
-            *y += 30.0;
         }
-        *y += 10.0;
+        *y += Target::ALL.len().div_ceil(2) as f32 * 30.0 + 4.0;
 
         // Actions.
         let style = if idle {
@@ -1182,6 +1226,32 @@ mod tests {
                 ..Pointer::default()
             },
             None,
+        );
+    }
+
+    #[test]
+    fn the_build_page_fits_above_the_footer() {
+        let mut c = Canvas::new(1600, 950);
+        let doc = Document::starter();
+        let mut ui = Ui::new();
+        ui.open_settings_page(SettingsPage::Build);
+        ui.frame(&mut c, &doc, Pointer::default(), None);
+        let r = ui.dialog_rect(1600.0, 950.0).unwrap();
+        let body = Rect::new(
+            r.x + 190.0 + 24.0,
+            r.y + 54.0 + 18.0,
+            r.w - 190.0 - 48.0,
+            0.0,
+        );
+        let mut y = body.y + 54.0;
+        ui.page_build(&mut c, body, &mut y);
+        // `y` is the top of the Build now row; its buttons are 28 tall and
+        // the footer's divider is 10 above the footer.
+        let bottom = y + 28.0;
+        let divider = r.y + r.h - 46.0 - 10.0;
+        assert!(
+            bottom + 8.0 <= divider,
+            "the Build page ends at {bottom}, too close to the footer at {divider}"
         );
     }
 
