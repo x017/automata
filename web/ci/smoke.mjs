@@ -34,6 +34,13 @@ const page = await context.newPage();
 const consoleLines = [];
 page.on("console", (m) => consoleLines.push(`[${m.type()}] ${m.text()}`));
 page.on("pageerror", (e) => consoleLines.push(`[pageerror] ${e.message}`));
+// Every file the page fetches, to catch a preload hint that doesn't match
+// the request it's for (the file would download twice).
+const fetched = new Map();
+page.on("requestfinished", (r) => {
+  const name = new URL(r.url()).pathname;
+  fetched.set(name, (fetched.get(name) ?? 0) + 1);
+});
 
 const started = Date.now();
 await page.goto(url);
@@ -105,13 +112,16 @@ const report = [
   `pointer: ${JSON.stringify(stats?.pointer ?? {})}   input: ${JSON.stringify(stats?.input ?? {})}`,
   "",
   `download: ${mb(total)} MB (${mb(totalGz)} MB gzipped), ${sizes.length} files`,
+  `requests: ${[...fetched.values()].reduce((a, b) => a + b, 0)}; fetched more than once: ${
+    [...fetched].filter(([, n]) => n > 1).map(([f, n]) => `${f} ×${n}`).join(", ") || "none"
+  }`,
   ...sizes.slice(0, 12).map((f) => `  ${f.name.padEnd(48)} ${mb(f.bytes).padStart(7)} MB  gz ${mb(f.gzip).padStart(7)} MB`),
   "",
   "console:",
   ...consoleLines.slice(-150),
 ].join("\n");
 fs.writeFileSync(path.join(out, "console.txt"), consoleLines.join("\n"));
-fs.writeFileSync(path.join(out, "stats.json"), JSON.stringify({ ok, stats, fps, checks, webgl, sizes, total, totalGz }, null, 2));
+fs.writeFileSync(path.join(out, "stats.json"), JSON.stringify({ ok, stats, fps, checks, webgl, sizes, total, totalGz, fetched: Object.fromEntries(fetched) }, null, 2));
 fs.writeFileSync(path.join(out, "report.txt"), report);
 console.log(report);
 process.exit(ok ? 0 : 1);

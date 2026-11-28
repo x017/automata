@@ -433,9 +433,19 @@ function touchScreen() {
 
 // --- Start ------------------------------------------------------------
 
+/** Fetches a file beside the page: its bytes, or its text. */
+async function download(url, as = "bytes") {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`couldn't load ${url}: ${response.status}`);
+  return as === "text" ? response.text() : response.arrayBuffer();
+}
+
 async function start() {
   const config = await (await fetch("player.json")).json();
   if (config.name) document.title = config.name;
+  // The game downloads while Python starts.
+  const game = config.game ? download(config.game) : download(config.main, "text");
+  game.catch(() => {}); // handled where it's awaited, not reported twice
   const pyodide = await loadPyodide({
     indexURL: new URL("pyodide/", location.href).href,
     stdout: (line) => console.log(line),
@@ -460,9 +470,7 @@ async function start() {
   status.textContent = "Starting the game…";
   // Games run as on desktop; `game.run()` returns at once here.
   if (config.game) {
-    const response = await fetch(config.game);
-    if (!response.ok) throw new Error(`couldn't load ${config.game}: ${response.status}`);
-    pyodide.unpackArchive(await response.arrayBuffer(), "zip", { extractDir: "/game" });
+    pyodide.unpackArchive(await game, "zip", { extractDir: "/game" });
     mark("unpacked");
     try {
       const manifest = JSON.parse(pyodide.FS.readFile("/game/game.json", { encoding: "utf8" }));
@@ -472,8 +480,7 @@ async function start() {
     }
     pyodide.runPython("import automata.player\nautomata.player.main(['/game'])");
   } else {
-    const source = await (await fetch(config.main)).text();
-    pyodide.FS.writeFile(config.main, source);
+    pyodide.FS.writeFile(config.main, await game);
     pyodide.runPython(`import runpy\nrunpy.run_path(${JSON.stringify(config.main)}, run_name="__main__")`);
   }
   mark("game");

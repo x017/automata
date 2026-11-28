@@ -1,0 +1,42 @@
+# Standard-library modules a web game imports when it starts; stdlib.mjs
+# compiles them, and everything they import, to bytecode (see stdlib.mjs).
+# Pyodide's own start-up modules (asyncio, typing, inspect, json, …) are
+# included by themselves.
+
+# The page and automata's player (automata/*.py, player.js)
+pyodide
+_pyodide
+runpy
+traceback
+locale
+importlib.util
+importlib.metadata
+heapq
+fnmatch
+enum
+difflib
+csv
+ctypes
+types
+typing
+__future__
+zipfile
+tempfile
+
+# What game scripts import most
+math
+random
+dataclasses
+collections
+itertools
+functools
+abc
+copy
+re
+string
+time
+datetime
+pathlib
+statistics
+bisect
+operator

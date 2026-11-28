@@ -4,6 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>AUTOMATA</title>
+  <!-- Start every download at once rather than one after another (Pyodide
+       fetches these with plain fetch(), which these hints match). -->
+  <link rel="modulepreload" href="pyodide/pyodide.mjs">
+  <link rel="modulepreload" href="pyodide/pyodide.asm.mjs">
+  <link rel="preload" href="pyodide/pyodide.asm.wasm" as="fetch" crossorigin>
+  <link rel="preload" href="pyodide/python_stdlib.zip" as="fetch" crossorigin>
+  <link rel="preload" href="player.json" as="fetch" crossorigin>
   <style>
     html, body { margin: 0; height: 100%; background: #0b0d14; overflow: hidden; }
     canvas { display: block; width: 100vw; height: 100vh; touch-action: none; outline: none; }

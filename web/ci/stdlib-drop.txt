@@ -1,0 +1,83 @@
+# Standard-library modules web builds leave out (see stdlib.mjs). A module,
+# a package (with everything in it) or a glob; `!name` keeps one an earlier
+# line dropped. stdlib.mjs fails if a module a game imports at start would
+# go. Python games run unchanged unless they import one of these.
+
+# Can't work in a browser: no processes, terminals or mail servers.
+multiprocessing
+concurrent.futures.process
+curses
+pty
+tty
+getpass
+imaplib
+smtplib
+poplib
+ftplib
+mailbox
+xmlrpc
+wsgiref
+http.server
+webbrowser
+venv
+ensurepip
+
+# Developer tools: debuggers, profilers' reports, test runners, the REPL,
+# documentation browsers, bytecode utilities.
+pdb
+bdb
+_pyrepl
+pydoc
+pydoc_data
+doctest
+unittest
+idlelib
+turtledemo
+tkinter
+turtle
+lib2to3
+pickletools
+tabnanny
+pstats
+cProfile
+profile
+trace
+timeit
+py_compile
+compileall
+zipapp
+_pydatetime_test
+
+# Text codecs: Unicode, Latin-1 / Western European, ASCII and the
+# byte/escape codecs stay; the other code pages (and the East Asian
+# codecs, whose C parts Pyodide doesn't have) go.
+encodings.*
+!encodings.aliases
+!encodings.utf_8
+!encodings.utf_8_sig
+!encodings.utf_16
+!encodings.utf_16_be
+!encodings.utf_16_le
+!encodings.utf_32
+!encodings.utf_32_be
+!encodings.utf_32_le
+!encodings.utf_7
+!encodings.ascii
+!encodings.latin_1
+!encodings.iso8859_1
+!encodings.iso8859_15
+!encodings.cp1252
+!encodings.cp437
+!encodings.charmap
+!encodings.idna
+!encodings.punycode
+!encodings.raw_unicode_escape
+!encodings.unicode_escape
+!encodings.base64_codec
+!encodings.hex_codec
+!encodings.zlib_codec
+!encodings.bz2_codec
+!encodings.uu_codec
+!encodings.quopri_codec
+!encodings.rot_13
+!encodings.undefined

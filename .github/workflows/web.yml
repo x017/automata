@@ -178,6 +178,8 @@ jobs:
             echo "the web build's game.zip differs from game.zip at the top of the repo" | tee -a template.log
             s=1
           fi
+          python3 android/ci/report.py "web: template" --log template.log --lines 300 \
+            --conclusion $([ $s = 0 ] && echo neutral || echo failure)
           if [ $s != 0 ]; then
             python3 android/ci/report.py "web: coin run" --log template.log --lines 300 --conclusion failure
           fi
@@ -203,6 +205,27 @@ jobs:
           fi
           exit $s
 
+      - name: Size and start-up budget
+        # What the download is made of, next to the published template, and
+        # whether Coin Run's build and the smoke test's start fit the budget.
+        if: steps.template.outcome == 'success' && (success() || failure())
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          gh release download export-templates --repo "$GITHUB_REPOSITORY" \
+            --pattern automata-template-web.tar.gz --output "$RUNNER_TEMP/published-web.tar.gz" || true
+          s=0
+          python3 web/ci/web_size.py "$RUNNER_TEMP/coin_run/build/web/Coin Run" \
+            --before "$RUNNER_TEMP/published-web.tar.gz" \
+            --budget-mb 18 --budget-gz 10.5 \
+            --stats web/dist/smoke/stats.json --budget-start 6 > web/dist/size.txt || s=1
+          cat web/dist/size.txt
+          { echo '### Web build size and start-up'; echo '```'; cat web/dist/size.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python3 android/ci/report.py "web: size and start-up" --log web/dist/size.txt --lines 200 \
+            --conclusion $([ $s = 0 ] && echo neutral || echo failure)
+          exit $s
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -213,6 +236,7 @@ jobs:
             web/dist/coin_run
             web/dist/coin_run-web.zip
             web/dist/automata-template-web.tar.gz
+            web/dist/size.txt
 
   publish:
     # The template every web build starts from, once Coin Run passed with it.
