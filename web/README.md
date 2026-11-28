@@ -185,7 +185,7 @@ What a web build downloads, and how soon it plays, from CI (Pyodide
 | --- | --- | --- |
 | Download (Coin Run) | 17.49 MB, 10.26 MB gzipped | 17.52 MB, 10.41 MB gzipped |
 | Smoke test: first frame | 3.2 s | 1.6 s |
-| Coin Run (after a reload): Pyodide / engine / first frame | 3.4 / 3.7 / 4.4 s | 1.7–2.5 / 1.9–2.7 / 2.2–3.0 s |
+| Coin Run (after a reload): Pyodide / engine / first frame | 3.4 / 3.7 / 4.4 s | 1.7–2.9 / 1.9–3.1 / 2.2–3.7 s |
 
 The download stayed the same size; the start-up halved. Where the time went
 was compiling: Pyodide ships its standard library as source, so Python

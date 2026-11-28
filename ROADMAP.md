@@ -1236,7 +1236,7 @@ bundled in every export, and it targets desktop and phone browsers.
   precompiled, as is the engine wheel's Python; the package index is empty
   and the page preloads Pyodide and fetches the game in parallel. Start-up
   halved (first frame 3.2 s → 1.6 s in the smoke test, Coin Run 4.4 s →
-  2.2–3.0 s under SwiftShader) at the same 17.5 MB (10.4 MB gzipped). CI fails
+  2.2–3.7 s after a reload under SwiftShader) at the same 17.5 MB (10.4 MB gzipped). CI fails
   over 18.5 MB, 11 MB gzipped, or a first frame later than 3 s, and posts
   `web: size and start-up`.
 
