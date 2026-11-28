@@ -105,7 +105,10 @@ the top of the repo:
   (x86_64). It's signed with CI's debug key, for testing. The Android
   workflow commits it after the APK passed its emulator test.
 - **`game.zip`**: the exported game folder the web player runs
-  (`automata-cli stage --zip`). Package it with the player using
+  (`automata-cli stage --zip`), exactly what `automata-cli build
+  --target web` puts in a web build. Build it for your browser with
+  `automata-cli build examples/oberon/coin_run --target web` and play it
+  with `automata-cli serve examples/oberon/coin_run`, or package it with
   `web/ci/package.sh game.zip` (see [`web/README.md`](web/README.md)).
 
 ## Repository layout

@@ -3,12 +3,14 @@
 An export turns your project into a game other people can run. They don't
 need Oberon, Rust or Python installed. AUTOMATA exports to **Windows**
 and **Linux** (64-bit), to **macOS** as one app for Apple Silicon and
-Intel Macs ([macOS](#macos) below), and to **Android** as an `.apk` you can
-install on a phone ([Android](#android) below; still being polished).
+Intel Macs ([macOS](#macos) below), to **Android** as an `.apk` you can
+install on a phone ([Android](#android) below; still being polished), and
+to the **web**, as a page that plays in desktop and phone browsers and
+uploads to itch.io ([Web](#web) below).
 
 Each export is a folder you can zip and share. You can also turn on
-**Archive** to get a ready-made `.zip` (Windows, macOS) or `.tar.gz`
-(Linux).
+**Archive** to get a ready-made `.zip` (Windows, macOS, the web) or
+`.tar.gz` (Linux).
 
 ```
 build/
@@ -27,6 +29,10 @@ build/
   Coin Run-0.1.0-macos-universal.zip
   android/
     Coin Run-0.1.0.apk  ← install this on a phone
+  web/
+    Coin Run/           ← put this on a web host
+      index.html
+    Coin Run-0.1.0-web.zip  ← …or upload this to itch.io
 ```
 
 ## Build from Oberon
@@ -56,8 +62,8 @@ the result in your file manager.
 | Android processors | Which processor types the APK holds code for: `arm64-v8a` (phones and tablets) and `x86_64` (emulators on PCs). Empty: both. `arm64-v8a` alone makes a smaller APK for phones |
 | macOS bundle ID | The app's unique ID on macOS, like `com.yourname.coinrun`. macOS keeps the game's permissions and preferences under it. Empty: `com.example.<name>`, fine for testing |
 | macOS icon | A square PNG in the project (1024×1024 looks sharpest; 16 to 1024 pixels, a power of two) or an `.icns` file. Empty: the standard app icon |
-| Platforms | What **Build** / Ctrl+Shift+B exports. **Build ▸ Build for Linux / Windows / macOS / Android** exports just one. |
-| Archive | Also write a `.zip` / `.tar.gz` of each build |
+| Platforms | What **Build** / Ctrl+Shift+B exports. **Build ▸ Build for Linux / Windows / macOS / Android / Web** exports just one. |
+| Archive | Also write a `.zip` / `.tar.gz` of each build (for the web, the zip itch.io takes) |
 | Touch controls | An on-screen stick and buttons that hold the game's keys on touch screens. Turning it on writes a stick for WASD and a Jump button for Space; change them in `build.ron` ([Touch controls](../guides/touch-controls.md)) |
 
 Settings are saved to `build.ron` in the project folder, so commit it with
@@ -72,7 +78,7 @@ BuildConfig(
     name: "Coin Run",
     version: "1.0.0",
     start_scene: Some("level.ron"),
-    targets: [Linux, Windows, MacOS, Android],
+    targets: [Linux, Windows, MacOS, Android, Web],
     archive: true,
     exclude: ["tests/", "art/source/"],
     android: (
@@ -101,7 +107,9 @@ Templates** or the **Download** buttons on the Build page. The Linux
 template is about 75 MB and the Windows one about 25 MB. The macOS one
 is about 100 MB, because it holds Python twice, for Apple Silicon and for
 Intel. The Android
-template is an APK for phones (`arm64-v8a`) and emulators (`x86_64`).
+template is an APK for phones (`arm64-v8a`) and emulators (`x86_64`). The
+web template, about 17 MB, is the web page with Python for the browser
+([Pyodide](https://pyodide.org)) and the engine.
 
 While the repository is private, the plain download link needs you to be
 signed in. Oberon and `automata-cli` try these in order:
@@ -144,7 +152,8 @@ automata-cli init my_game --scene level.ron # writes build.ron
 automata-cli check my_game                  # validate without building
 automata-cli stage my_game --out staged/    # just the game folder
 automata-cli stage my_game --zip game.zip   # …and zipped, for the web player
-automata-cli build my_game --target all     # or linux / windows / macos / android
+automata-cli build my_game --target all     # or linux / windows / macos / android / web
+automata-cli serve my_game                  # play the web build in your browser
 ```
 
 A code-first game, written in Python with `at.Game` and no scene file,
@@ -161,8 +170,8 @@ relative to that folder.
 `stage` writes only the game folder a build would ship: your files minus
 the ones left out, plus `game.json`. It doesn't need a template. Use it to
 look at what gets shipped, or to package the game yourself. `--zip FILE`
-also zips that folder: that `game.zip` is what the web player (in
-progress) loads. The same files always give the same zip, byte for byte.
+also zips that folder: that `game.zip` is what a web build holds. The same
+files always give the same zip, byte for byte.
 
 ## macOS
 
@@ -354,6 +363,48 @@ On a phone the game fills the screen in the shape of its resolution
 (landscape for 1280×720). Touch controls are set up under
 [Touch controls](../guides/touch-controls.md).
 
+## Web
+
+**Build ▸ Build for Web** (or `automata-cli build --target web`) writes
+`build/web/<name>/`, a folder that is the whole game as a web page, and,
+with **Archive** on, `build/web/<name>-<version>-web.zip` beside it. Like
+the other builds it takes seconds: it copies the web template and adds your
+game, zipped, as `game.zip`. The game runs exactly as on desktop: Python
+runs in the browser (CPython compiled to WebAssembly, by Pyodide), the
+engine draws with WebGL2, and nothing is loaded from other sites.
+
+**Play it.** **Build ▸ Play in Browser** builds for the web, serves the
+build from Oberon and opens it in your browser (at
+`http://127.0.0.1:8060/` when that port is free). From the command line,
+`automata-cli serve my_game` does the same at `http://127.0.0.1:8000/`
+until you press Ctrl+C; `--host 0.0.0.0` lets phones on your Wi-Fi open it
+at your computer's address. Opening `index.html` straight from the disk
+doesn't work: browsers don't let a page from a file fetch the engine and
+the game.
+
+**Publish it.** On [itch.io](https://itch.io), make a new project with
+*Kind of project: HTML*, upload the `-web.zip` and tick *This file will be
+played in the browser*; its `index.html` is at the top of the zip, as
+itch.io wants. 960×540 or larger suits the embed size, and *Mobile
+friendly* lets phones play. Any static web host works too (GitHub Pages,
+Netlify, your own server): upload the folder's contents.
+
+**Players' saves and settings** (`ctx.save`, `ctx.settings`) stay in the
+browser (IndexedDB), per site: a game on another address starts afresh.
+
+**Controls.** Keyboard, mouse (with pointer lock for mouse look after the
+first click), gamepads and touch all work. Touch controls show by
+themselves on phones and tablets. Sound starts after the player's first
+click, key or tap, as browsers require.
+
+**Size and start-up.** A web build is about 17.5 MB (about 10 MB as sent
+compressed) plus your game, and starts in a few seconds. The game needs
+WebGL2, which current desktop and phone browsers have.
+
+**What doesn't work yet.** Python packages beyond the standard library
+and the engine (`pip install`ed ones) aren't included, and native
+extension modules can't load in a browser.
+
 ## Running an exported game
 
 Players start the executable. It also accepts two flags, which help with
@@ -403,3 +454,14 @@ template. An Android build puts the game in the APK under
 `assets/automata/game/`. It changes the app ID, name and version in the
 APK's compiled manifest and resource table, and signs the APK with APK
 Signature Scheme v2.
+
+The web template comes from the
+[Web workflow](https://github.com/x017/automata/actions/workflows/web.yml):
+it builds the engine as a Pyodide extension (Rust for WebAssembly, WebGL2
+through wgpu), puts it beside the page, its scripts and Pyodide's runtime,
+builds *Coin Run* from it with `automata-cli`, plays it in headless
+Chromium, and publishes the template. A web build adds `game.zip` and
+`player.json` (naming the engine, the game and its name) and puts the
+game's name in the page title; the page unpacks the game and runs it with
+the same `automata.player` the other platforms use. More in
+[`web/README.md`](https://github.com/x017/automata/blob/main/web/README.md).

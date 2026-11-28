@@ -137,6 +137,7 @@ const firstStarted = Date.now();
 s = await stats();
 if (check("starts", first.line, first.line ?? `no start line; phase ${s?.phase}, error ${s?.error}`)) {
   check("unpacks game.zip", s.timings?.unpacked !== undefined, `unpacked at ${s.timings?.unpacked} ms, title "${await page.title()}"`);
+  check("titled with the game's name", (await page.title()) === "Coin Run", `title "${await page.title()}"`);
   check("keyboard controls on a computer", /WASD/.test(first.line) && !s.touchScreen, first.line);
   check("storage mounted", s.storage?.mounted, JSON.stringify(s.storage));
   await page.waitForTimeout(1500);

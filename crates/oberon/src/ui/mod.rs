@@ -641,6 +641,9 @@ pub enum Intent {
     DownloadTemplates(Option<crate::build::Target>),
     /// Open the project's build folder in the system file manager.
     OpenBuildFolder,
+    /// Build for the web, serve the build on this computer and open it in
+    /// the browser.
+    PlayInBrowser,
     /// Run an intent without the unsaved-changes prompt.
     Force(Box<Intent>),
 }
@@ -754,6 +757,7 @@ impl Intent {
                 | Self::Build(_)
                 | Self::DownloadTemplates(_)
                 | Self::OpenBuildFolder
+                | Self::PlayInBrowser
         )
     }
 }

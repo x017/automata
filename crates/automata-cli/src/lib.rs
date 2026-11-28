@@ -26,6 +26,8 @@ pub mod android;
 pub mod archive;
 pub mod cli;
 pub mod macos;
+pub mod serve;
+pub mod web;
 
 use std::fmt;
 use std::fmt::Write as _;
@@ -59,15 +61,19 @@ pub enum Target {
     /// Android 7+ phones and tablets (`arm64-v8a`, and `x86_64` for
     /// emulators), as a signed APK.
     Android,
+    /// Desktop and phone browsers (WebGL2), as a folder for any static web
+    /// host plus a zip for itch.io.
+    Web,
 }
 
 impl Target {
     /// Every supported target.
-    pub const ALL: [Target; 4] = [
+    pub const ALL: [Target; 5] = [
         Target::Linux,
         Target::Windows,
         Target::MacOS,
         Target::Android,
+        Target::Web,
     ];
 
     /// The desktop targets (a template with a launcher and Python).
@@ -81,6 +87,7 @@ impl Target {
             Target::Windows => "windows",
             Target::MacOS => "macos",
             Target::Android => "android",
+            Target::Web => "web",
         }
     }
 
@@ -92,6 +99,7 @@ impl Target {
             Target::Windows => "Windows",
             Target::MacOS => "macOS",
             Target::Android => "Android",
+            Target::Web => "Web",
         }
     }
 
@@ -103,17 +111,19 @@ impl Target {
             Target::Windows => "windows-x86_64",
             Target::MacOS => "macos-universal",
             Target::Android => "android",
+            Target::Web => "web",
         }
     }
 
     /// The launcher's file name inside a template (the template APK for
-    /// Android).
+    /// Android, the page for the web).
     #[must_use]
     pub fn player_file(self) -> &'static str {
         match self {
             Target::Linux | Target::MacOS => "automata-player",
             Target::Windows => "automata-player.exe",
             Target::Android => android::TEMPLATE_FILE,
+            Target::Web => web::PAGE,
         }
     }
 
@@ -124,6 +134,7 @@ impl Target {
             Target::Linux | Target::MacOS => "",
             Target::Windows => ".exe",
             Target::Android => ".apk",
+            Target::Web => ".html",
         }
     }
 
@@ -133,7 +144,7 @@ impl Target {
     pub fn archive_ext(self) -> &'static str {
         match self {
             Target::Linux => "tar.gz",
-            Target::Windows | Target::MacOS => "zip",
+            Target::Windows | Target::MacOS | Target::Web => "zip",
             Target::Android => "apk",
         }
     }
@@ -152,15 +163,16 @@ impl Target {
         }
     }
 
-    /// Parses `linux` / `windows` / `macos` / `android` (`mac` and `osx`
-    /// mean macOS too).
+    /// Parses `linux` / `windows` / `macos` / `android` / `web` (`mac` and
+    /// `osx` mean macOS too; `browser` and `html5` the web).
     #[must_use]
     pub fn parse(s: &str) -> Option<Target> {
-        if ["mac", "osx"]
-            .iter()
-            .any(|a| a.eq_ignore_ascii_case(s.trim()))
-        {
+        let is = |names: &[&str]| names.iter().any(|a| a.eq_ignore_ascii_case(s.trim()));
+        if is(&["mac", "osx"]) {
             return Some(Target::MacOS);
+        }
+        if is(&["browser", "html5", "html"]) {
+            return Some(Target::Web);
         }
         Target::ALL
             .into_iter()
@@ -1331,7 +1343,9 @@ pub fn find_template(target: Target) -> Option<PathBuf> {
 /// Android template APK always does.
 #[must_use]
 pub fn template_has_runtime(dir: &Path) -> bool {
-    !macos::runtimes(dir).is_empty() || android::installed_template(dir).is_some()
+    !macos::runtimes(dir).is_empty()
+        || android::installed_template(dir).is_some()
+        || web::is_template(dir)
 }
 
 /// Installs a template archive (`automata-template-<target>.tar.gz`, or
@@ -1366,6 +1380,12 @@ pub fn install_template(archive_path: &Path, target: Target) -> Result<PathBuf, 
             target.label(),
             target.player_file()
         ));
+    }
+    if target == Target::Web {
+        if let Err(e) = web::template_wheel(&staging) {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(format!("{}: {e}", archive_path.display()));
+        }
     }
     let _ = std::fs::remove_dir_all(&dest);
     std::fs::rename(&staging, &dest).map_err(|e| e.to_string())?;
@@ -1537,8 +1557,14 @@ pub fn pack_template(dir: &Path, target: Target, dest: &Path) -> Result<(), Stri
 ///
 /// When the player can't be copied.
 pub fn install_dev_template(player: &Path, target: Target) -> Result<PathBuf, String> {
-    if target == Target::Android {
-        return Err("Android has no development template: install the template APK".into());
+    match target {
+        Target::Android => {
+            return Err("Android has no development template: install the template APK".into())
+        }
+        Target::Web => {
+            return Err("the web has no development template: install the web template".into())
+        }
+        Target::Linux | Target::Windows | Target::MacOS => {}
     }
     let dest = templates_dir().join(target.triple());
     let _ = std::fs::remove_dir_all(&dest);
@@ -1601,6 +1627,7 @@ pub fn export(
     match target {
         Target::Android => return android::export(project, cfg, template, progress),
         Target::MacOS => return macos::export(project, cfg, template, progress),
+        Target::Web => return web::export(project, cfg, template, progress),
         Target::Linux | Target::Windows => {}
     }
     let player = template.join(target.player_file());
@@ -1871,7 +1898,11 @@ pub fn plain_path(p: PathBuf) -> PathBuf {
     plain.map_or(p, PathBuf::from)
 }
 
-fn copy_tree(from: &Path, to: &Path, keep: &dyn Fn(&str) -> bool) -> Result<usize, String> {
+pub(crate) fn copy_tree(
+    from: &Path,
+    to: &Path,
+    keep: &dyn Fn(&str) -> bool,
+) -> Result<usize, String> {
     let mut count = 0;
     let mut stack = vec![from.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -1900,7 +1931,7 @@ fn copy_tree(from: &Path, to: &Path, keep: &dyn Fn(&str) -> bool) -> Result<usiz
     Ok(count)
 }
 
-fn json_string(s: &str) -> String {
+pub(crate) fn json_string(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
         match c {
@@ -2207,6 +2238,97 @@ mod tests {
             std::fs::write(tpl.join(format!("python3-{arch}")), b"interpreter").unwrap();
         }
         tpl
+    }
+
+    fn web_template(tag: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("automata-template-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("pyodide")).unwrap();
+        std::fs::write(
+            dir.join("index.html"),
+            "<html><head><title>AUTOMATA</title></head></html>",
+        )
+        .unwrap();
+        for file in ["player.js", "audio-worklet.js", "pyodide/pyodide.mjs"] {
+            std::fs::write(dir.join(file), b"js").unwrap();
+        }
+        std::fs::write(
+            dir.join("automata-0.1.0-cp314-cp314-pyodide_2025_0_wasm32.whl"),
+            b"whl",
+        )
+        .unwrap();
+        // Left over from a hand-made site: a build writes its own.
+        std::fs::write(dir.join("player.json"), b"{}").unwrap();
+        std::fs::write(dir.join("game.zip"), b"old").unwrap();
+        dir
+    }
+
+    #[test]
+    fn exports_a_web_build_and_an_itch_zip() {
+        let dir = project("web");
+        let mut cfg = BuildConfig::for_project(&dir, Some(&dir.join("level.ron")));
+        cfg.name = "Coin <Run>".into();
+        cfg.version = "1.0".into();
+        cfg.targets = vec![Target::Web];
+        let tpl = web_template("web");
+        assert!(template_has_runtime(&tpl));
+        let mut log = Vec::new();
+        let out = export(&dir, &cfg, Target::Web, &tpl, &mut |m| log.push(m)).unwrap();
+        assert!(log.iter().all(|m| m.level == Level::Info), "{log:?}");
+        assert!(out.standalone);
+        assert!(
+            out.folder.ends_with("build/web/Coin Run"),
+            "{:?}",
+            out.folder
+        );
+        assert_eq!(out.executable, out.folder.join("index.html"));
+        let html = std::fs::read_to_string(&out.executable).unwrap();
+        assert!(html.contains("<title>Coin &lt;Run&gt;</title>"), "{html}");
+        let config = std::fs::read_to_string(out.folder.join("player.json")).unwrap();
+        assert_eq!(
+            config.trim(),
+            r#"{"wheel": "automata-0.1.0-cp314-cp314-pyodide_2025_0_wasm32.whl", "game": "game.zip", "name": "Coin <Run>"}"#
+        );
+        // The game, as `stage --zip` zips it: no editor state or bytecode.
+        let game =
+            android::zip::read(&std::fs::read(out.folder.join("game.zip")).unwrap()).unwrap();
+        let names: Vec<&str> = game.iter().map(|e| e.name.as_str()).collect();
+        assert!(
+            names.contains(&"game.json") && names.contains(&"scripts/coin.py"),
+            "{names:?}"
+        );
+        assert!(names
+            .iter()
+            .all(|n| !n.contains(".oberon") && !n.contains("__pycache__")));
+        assert!(!out.folder.parent().unwrap().join(".game").exists());
+        // itch.io: index.html at the top of the zip.
+        let zip = out.archive.clone().unwrap();
+        assert!(zip.ends_with("build/web/Coin Run-1.0-web.zip"), "{zip:?}");
+        let entries = android::zip::read(&std::fs::read(&zip).unwrap()).unwrap();
+        let mut names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            [
+                "audio-worklet.js",
+                "automata-0.1.0-cp314-cp314-pyodide_2025_0_wasm32.whl",
+                "game.zip",
+                "index.html",
+                "player.js",
+                "player.json",
+                "pyodide/pyodide.mjs"
+            ]
+        );
+        // Building again replaces the folder.
+        std::fs::write(out.folder.join("stale.txt"), b"x").unwrap();
+        export(&dir, &cfg, Target::Web, &tpl, &mut |_| {}).unwrap();
+        assert!(!out.folder.join("stale.txt").exists());
+        // An incomplete template says what's missing.
+        std::fs::remove_file(tpl.join("player.js")).unwrap();
+        let err = export(&dir, &cfg, Target::Web, &tpl, &mut |_| {}).unwrap_err();
+        assert!(err.contains("no player.js"), "{err}");
+        assert!(!template_has_runtime(&tpl));
     }
 
     #[test]
@@ -3131,6 +3253,13 @@ mod tests {
         assert_eq!(BuildConfig::for_project(&dir, None), cfg, "build.ron wins");
         assert_eq!(title_case("coin_run"), "Coin Run");
         assert_eq!(Target::parse("Windows"), Some(Target::Windows));
+        assert_eq!(Target::parse("web"), Some(Target::Web));
+        assert_eq!(Target::parse("HTML5"), Some(Target::Web));
+        assert_eq!(
+            Target::Web.template_archive(),
+            "automata-template-web.tar.gz"
+        );
+        assert_ne!(Target::host(), Some(Target::Web));
     }
 
     #[test]

@@ -1200,7 +1200,7 @@ builds. CI runs the universal *Coin Run* natively, under Rosetta when the
 runner has it, unzipped, and ad-hoc signed.
 
 ### E3. Web export 🔨 L
-[`NEXT_PLANS.md` #7](NEXT_PLANS.md#7-web-export--decided-phases-13-done):
+[`NEXT_PLANS.md` #7](NEXT_PLANS.md#7-web-export--decided-phases-14-done):
 Pyodide 314 (CPython 3.14), with the engine as a Pyodide extension module
 drawing through WebGL2 (wgpu's GLES backend under emscripten). Pyodide is
 bundled in every export, and it targets desktop and phone browsers.
@@ -1222,8 +1222,15 @@ bundled in every export, and it targets desktop and phone browsers.
   traps of wgpu's GL backend, now fixed and checked: the sky read a mesh's
   uniform slot (and wasn't drawn), and one-layer shadow arrays were taken
   for 2D textures.
-- ⬜ The `web` template, `automata-cli build --target web` and Oberon's
-  **Build for Web** (folder plus an itch.io zip).
+- ✅ Template and build: the `web` export template (Pyodide, the engine
+  wheel, the page, the audio worklet) is published to `export-templates`;
+  `automata-cli build --target web` writes `build/web/<name>/` and an
+  itch.io-ready `<name>-<version>-web.zip` (`index.html` at the top);
+  `automata-cli serve` plays a build locally; Oberon has **Build ▸ Build
+  for Web** and **Play in Browser** (builds, serves from the editor, opens
+  the browser). CI builds Coin Run from the template, checks its
+  `game.zip` is the repo's byte for byte, serves it with `automata-cli
+  serve` and plays it.
 - ⬜ Size and startup budget.
 
 ### E4. Steam integration ⬜ M

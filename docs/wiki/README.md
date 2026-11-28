@@ -70,7 +70,7 @@ hours.
 | Give enemies moods, sight and hearing | [AI](oberon/ai.md) |
 | Reuse objects and add custom data | [Prefabs & attributes](oberon/prefabs-and-attributes.md) |
 | Edit many objects at once, snap to a grid, see frame timings | [Editor workflow](oberon/editor-workflow.md) |
-| Ship your game for Windows, Linux, macOS and Android | [Exporting your game](oberon/exporting.md) |
+| Ship your game for Windows, Linux, macOS, Android and the web | [Exporting your game](oberon/exporting.md) |
 | Look up a shortcut | [Keyboard shortcuts](oberon/shortcuts.md) |
 
 ### Python

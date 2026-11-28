@@ -2,8 +2,9 @@
 //! binary and `oberon export`.
 //!
 //! ```text
-//! automata-cli build [PROJECT] [--target linux|windows|macos|android|all] [--template DIR]
-//!                    [--key FILE] [--abis arm64-v8a,x86_64]
+//! automata-cli build [PROJECT] [--target linux|windows|macos|android|web|all]
+//!                    [--template DIR] [--key FILE] [--abis arm64-v8a,x86_64]
+//! automata-cli serve [PROJECT | FOLDER] [--port 8000] [--host 127.0.0.1]
 //! automata-cli init [PROJECT] [--scene level.ron | --main main.py] [--package ID]
 //! automata-cli keygen FILE [--name NAME]
 //! automata-cli check [PROJECT]
@@ -22,21 +23,22 @@ use crate::{BuildConfig, Level, Message, Target};
 /// The usage text, as printed by `automata-cli help`.
 pub const USAGE: &str = "\
 automata-cli — the AUTOMATA command line: export games to Windows, Linux,
-macOS and Android
+macOS, Android and the web
 
 usage:
-  automata-cli build [PROJECT] [--target linux|windows|macos|android|all]
+  automata-cli build [PROJECT] [--target linux|windows|macos|android|web|all]
                      [--template DIR] [--key FILE] [--abis arm64-v8a,x86_64]
+  automata-cli serve [PROJECT | FOLDER] [--port 8000] [--host 127.0.0.1]
   automata-cli init [PROJECT] [--scene SCENE.ron | --main MAIN.py] [--name NAME]
                     [--package com.you.game] [--bundle-id com.you.game]
   automata-cli keygen FILE [--name \"Your Name\"]
   automata-cli check [PROJECT]
   automata-cli stage [PROJECT] [--out DIR] [--zip FILE]
   automata-cli templates path|list
-  automata-cli templates download [--target linux|windows|macos|android|all]
-  automata-cli templates install ARCHIVE --target linux|windows|macos|android
+  automata-cli templates download [--target linux|windows|macos|android|web|all]
+  automata-cli templates install ARCHIVE --target linux|windows|macos|android|web
   automata-cli templates dev PLAYER [--target linux|windows|macos]
-  automata-cli templates pack DIR --target linux|windows|macos --out ARCHIVE
+  automata-cli templates pack DIR --target linux|windows|macos|web --out ARCHIVE
 
 PROJECT defaults to the current folder; settings come from PROJECT/build.ron.
 `--target android` writes PROJECT/<output>/android/NAME-VERSION.apk. It's
@@ -49,6 +51,12 @@ arm64-v8a for phones, x86_64 for emulators; default: both).
 `--package` sets the Android app ID (build.ron's android.package).
 `--target macos` writes PROJECT/<output>/macos/NAME.app, one app for Apple
 Silicon and Intel Macs; `--bundle-id` sets its bundle ID (macos.bundle_id).
+`--target web` writes PROJECT/<output>/web/NAME/, a folder for any static web
+host (index.html, the engine, the game), and NAME-VERSION-web.zip beside it,
+ready to upload to itch.io as an HTML game. Browsers won't run it from a file:
+`serve` plays it on this computer (PROJECT: its web build; FOLDER: any folder),
+at http://127.0.0.1:8000/ until Ctrl+C; `--host 0.0.0.0` lets phones on your
+network play too.
 `stage` writes only the game folder a build ships (game files and game.json),
 by default to PROJECT/<output>/game; `--zip` also zips it (the game.zip the
 web player loads; the same files always give the same bytes).";
@@ -220,11 +228,47 @@ pub fn run(args: impl IntoIterator<Item = String>, program: &str) -> Result<(), 
                 println!("zipped it ({n} files) to {}", zip.display());
             }
         }
+        "serve" => serve(&args)?,
         "keygen" => keygen(&args, program)?,
         "templates" => templates(&args, program)?,
         "help" | "-h" | "--help" => println!("{}", usage(program)),
         other => return Err(format!("unknown command: {other}\n\n{}", usage(program))),
     }
+    Ok(())
+}
+
+/// `serve [PROJECT | FOLDER]`: a project (it has a build.ron) means its
+/// web build.
+fn serve(args: &Args) -> Result<(), String> {
+    let given = absolute(&project(args, 1));
+    let root = if given.join(crate::CONFIG_FILE).is_file() {
+        let cfg = BuildConfig::for_project(&given, None);
+        let folder = crate::web::build_folder(&given, &cfg);
+        if !folder.join(crate::web::PAGE).is_file() {
+            return Err(format!(
+                "{} has no web build yet (run: automata-cli build \"{}\" --target web)",
+                cfg.name,
+                given.display()
+            ));
+        }
+        folder
+    } else if given.is_dir() {
+        given
+    } else {
+        return Err(format!("{} is not a folder", given.display()));
+    };
+    let port = match args.flag("port") {
+        Some(p) => p
+            .parse::<u16>()
+            .map_err(|_| format!("--port {p}: not a port number"))?,
+        None => 8000,
+    };
+    let host = args.flag("host").unwrap_or("127.0.0.1");
+    let server = crate::serve::Server::start_on(&root, host, port)
+        .map_err(|e| format!("could not serve on {host}:{port}: {e}"))?;
+    println!("serving {}", root.display());
+    println!("play: {}  (Ctrl+C stops)", server.url());
+    server.wait();
     Ok(())
 }
 

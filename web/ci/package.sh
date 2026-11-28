@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Puts the web player together: Pyodide (from npm, pinned), the page, the
-# engine wheel built by build_wheel.sh, and a game, with player.json
-# naming them. Writes the site to $SITE (default web/dist/site/) and the
-# same as a zip beside it ($SITE.zip, ready for itch.io: index.html at the
-# top).
+# Puts the web player together: the web template (template.sh: Pyodide,
+# the page, the engine wheel built by build_wheel.sh) and a game, with
+# player.json naming them; a quick way to try a game or script without
+# automata-cli (which does the same for projects: build --target web).
+# Writes the site to $SITE (default web/dist/site/) and the same as a zip
+# beside it ($SITE.zip, ready for itch.io: index.html at the top).
 #
 #   package.sh                     the spike (web/spike/main.py)
 #   package.sh path/to/game.py     a single script
@@ -12,30 +13,14 @@
 #   package.sh path/to/game.zip    such a folder, already zipped
 set -euo pipefail
 
-PYODIDE_VERSION="${PYODIDE_VERSION:-314.0.8}"
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 dist="$repo/web/dist"
 site="$(realpath -m "${SITE:-$dist/site}")"
 game="$(realpath -m "${1:-$repo/web/spike/main.py}")"
 
-rm -rf "$site" "$site.zip"
-mkdir -p "$site/pyodide"
-if [ ! -d "$dist/pyodide-npm/package" ]; then
-  mkdir -p "$dist/pyodide-npm"
-  (cd "$dist/pyodide-npm" && npm pack --silent "pyodide@$PYODIDE_VERSION" >/dev/null && tar -xzf pyodide-*.tgz)
-fi
-# The runtime only: the core module, the standard library and the lock
-# file (no REPL consoles, type stubs or source maps).
-for f in pyodide.mjs pyodide.asm.mjs pyodide.asm.wasm python_stdlib.zip pyodide-lock.json package.json; do
-  cp "$dist/pyodide-npm/package/$f" "$site/pyodide/"
-done
-cp "$repo/web/player/index.html" "$repo/web/player/player.js" "$repo/web/player/audio-worklet.js" "$site/"
-wheel="$(basename "$(ls "$dist"/wheel/*.whl | head -1)")"
-cp "$dist/wheel/$wheel" "$site/"
-# The module must only import what Pyodide provides.
-rm -rf "$dist/wheel-unpacked" && mkdir -p "$dist/wheel-unpacked"
-(cd "$dist/wheel-unpacked" && unzip -q "$dist/wheel/$wheel")
-node "$repo/web/ci/wasm_imports.mjs" "$(find "$dist/wheel-unpacked" -name '_core*.so' | head -1)"
+rm -rf "$site.zip"
+"$repo/web/ci/template.sh" "$site"
+wheel="$(basename "$(ls "$site"/*.whl)")"
 
 if [ -d "$game" ]; then
   [ -f "$game/game.json" ] || { echo "$game has no game.json (stage it with automata-cli stage)" >&2; exit 1; }

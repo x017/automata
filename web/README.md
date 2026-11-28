@@ -12,8 +12,11 @@ lifecycle) is in: keys, mouse and pointer lock, the wheel, touch, gamepads,
 resizing, hidden tabs, full screen, and sound through an AudioWorklet, all
 driven in CI with fake input. Phase 3 (real games) is in: the player runs
 an exported game from `game.zip`, keeps saves and settings in IndexedDB,
-and CI plays Coin Run (`game.zip` at the top of the repo). The exporter
-(`automata-cli build --target web`) comes next.
+and CI plays Coin Run (`game.zip` at the top of the repo). Phase 4 (the
+exporter) is in: a published web export template, `automata-cli build
+--target web`, `automata-cli serve`, and Oberon's **Build ▸ Build for Web**
+and **Play in Browser** (below). Phase 5 (the download size and start-up
+time) comes next.
 
 | Path | What it is |
 | --- | --- |
@@ -23,11 +26,44 @@ and CI plays Coin Run (`game.zip` at the top of the repo). The exporter
 | `player/audio-worklet.js` | The sound output: plays what the engine mixed each frame |
 | `spike/main.py` | The test game: a cube that answers keys, mouse, touch, gamepads, pointer lock, and beeps |
 | `ci/build_wheel.sh` | Builds the wheel with pyodide-build (cross-build environment, Emscripten, Rust toolchain) |
-| `ci/package.sh` | Puts the site together in `web/dist/site/` (and a zip of it): Pyodide's runtime files, the page, the wheel, the game (a script, a staged game folder or a `game.zip`) |
+| `ci/template.sh` | Puts the web export template together in `web/dist/template/`: Pyodide's runtime files, the page, the wheel |
+| `ci/package.sh` | The template plus a game (a script, a staged game folder or a `game.zip`) in `web/dist/site/` (and a zip of it), for trying things without `automata-cli` |
 | `ci/smoke.mjs` | Loads the site in headless Chromium (Playwright), waits for frames, measures, takes screenshots |
 | `ci/input_checks.mjs` | Drives the test game with fake keys, mouse, touches and a fake gamepad, and checks what it saw |
 | `ci/coin_run.mjs` | Plays Coin Run from `game.zip`: keys, a coin, the setting and the save after a reload, touch controls |
 | `ci/check_screenshot.py` | Fails unless the cube (or, with `--any`, some scene) is on the screenshot |
+
+## Exporting a game for the web
+
+```sh
+automata-cli templates download --target web    # once: the web export template
+automata-cli build PROJECT --target web         # PROJECT/build/web/NAME/ + NAME-VERSION-web.zip
+automata-cli serve PROJECT                      # play it at http://127.0.0.1:8000/
+```
+
+In Oberon: **Build ▸ Build for Web**, or tick *Web* among the platforms in
+Build Settings; **Build ▸ Play in Browser** builds, serves the build from
+the editor and opens it in your browser (on port 8060 when it's free, so
+saves stay between sessions: the browser keeps them per address).
+
+The build folder is a static site: `index.html` (titled with the game's
+name), `player.js`, `audio-worklet.js`, Pyodide's runtime in `pyodide/`,
+the engine wheel, `game.zip` (the game folder, as `automata-cli stage
+--zip` writes it) and `player.json` naming the wheel, the game and its
+name. Put it on any static web host. The zip beside it (with *Archive* on,
+the default) has `index.html` at the top, which is what itch.io wants: make
+an HTML project, upload the zip and tick "This file will be played in the
+browser". Browsers won't run the page from a `file://` URL (it fetches its
+scripts, the engine and the game), so play it through a web server:
+`automata-cli serve` serves a project's web build (or any folder: `serve
+FOLDER`) on this computer; `--host 0.0.0.0` lets phones on your network
+play it too.
+
+The web template (`automata-template-web.tar.gz` on the `export-templates`
+release) is `ci/template.sh`'s output, packed with `automata-cli templates
+pack DIR --target web`; CI publishes it after Coin Run, built from it,
+passed. A template must have `index.html`, `player.js`,
+`audio-worklet.js`, `pyodide/pyodide.mjs` and exactly one engine wheel.
 
 ## How it fits together
 
@@ -190,9 +226,10 @@ and Node:
 
 ```sh
 web/ci/build_wheel.sh            # web/dist/wheel/automata_engine-…-pyemscripten_…whl
+web/ci/template.sh               # web/dist/template/: the export template
 web/ci/package.sh                # web/dist/site/ with the test game
 web/ci/package.sh game.zip       # …or Coin Run (or any staged folder or script)
-cd web/dist/site && python -m http.server 8000
+automata-cli serve web/dist/site # or: cd web/dist/site && python -m http.server 8000
 ```
 
 Then open <http://localhost:8000/>. `build_wheel.sh` installs Pyodide's
@@ -210,7 +247,10 @@ and checks the screenshot. It posts check runs: `web: smoke` (frames,
 frame rate, timings, every input check, download size per file, the
 console) and `web: screenshot`. `INPUT=0` skips the input checks.
 
-Then it packages Coin Run from `game.zip` and plays it (`coin_run.mjs`,
+Then it packs the web export template (`template.sh`, `automata-cli
+templates pack`), installs it, builds Coin Run with `automata-cli build
+--target web` (its `game.zip` must be byte for byte the one at the top of
+the repo), serves the build with `automata-cli serve` and plays it (`coin_run.mjs`,
 the browser twin of the Android emulator test): it must start with
 keyboard controls, F2 must change the graphics preset, the setting must
 reach IndexedDB, and at the low preset (SwiftShader draws on the CPU),
@@ -220,5 +260,7 @@ remembered. With `?touch=1` the touch controls must show. A probe also
 compares every draw's uniform blocks with the buffers bound to them
 (WebGL2 refuses a draw whose buffer is too small) and names any that
 don't fit, and fails on wgpu's texture view guesses. It posts `web: coin run` and `web: coin run screenshot`.
+When it passed, the `publish the template` job uploads the template to the
+`export-templates` release.
 
 [Pyodide]: https://pyodide.org

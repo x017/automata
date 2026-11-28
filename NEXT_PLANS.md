@@ -199,7 +199,7 @@ Other Android work:
 
 ### Web, next
 
-Decided and planned in [#7](#7-web-export--decided-phases-13-done).
+Decided and planned in [#7](#7-web-export--decided-phases-14-done).
 
 ---
 
@@ -521,7 +521,7 @@ tracking or failures).
 
 ---
 
-## 7. Web export 🟢 decided (phases 1–3 done)
+## 7. Web export 🟢 decided (phases 1–4 done)
 
 ROADMAP E3. Games run in the browser with the same Python scripts as on
 desktop and Android.
@@ -578,10 +578,15 @@ IndexedDB; the file store calls `script_api.store_hooks` after each write
 and the page syncs right after. Touch controls show when the main pointer
 is coarse.
 
-Still to do:
-- **The template:** Pyodide's core files, the engine wheel, `index.html`
-  and `player.js`. `automata-cli build --target web` adds `game.zip` and
-  writes `build/web/<name>/` plus a zip ready for itch.io.
+**Template and build** (phase 4): the `web` template is Pyodide's core
+files, the engine wheel, `index.html`, `player.js` and the audio worklet
+(`web/ci/template.sh`), published as `automata-template-web.tar.gz`.
+`automata-cli build --target web` copies it, adds `game.zip` (byte for byte
+what `stage --zip` writes) and `player.json`, titles the page, and writes
+`build/web/<name>/` plus `<name>-<version>-web.zip` with `index.html` at the
+top, for itch.io. `automata-cli serve` plays a build locally; Oberon has
+**Build ▸ Build for Web** and **Play in Browser** (build, serve on port
+8060, open the browser). CI builds Coin Run that way and plays it.
 
 ### Phases (each tested in CI in headless Chromium, WebGL2 through SwiftShader)
 
@@ -597,7 +602,7 @@ Still to do:
 3. ✅ **Real games:** the player runs a game from `game.zip`, with saves and
    settings in IndexedDB. Coin Run plays in CI: keys reach scripts, the
    setting survives a reload, and touch controls show on a touch screen.
-4. **Template and build:** the `web` template is published to the
+4. ✅ **Template and build:** the `web` template is published to the
    `export-templates` release. `automata-cli build --target web` and
    Oberon's **Build for Web** produce a folder and an itch.io-ready zip.
 5. **Size and startup:** trim what the web doesn't use, measure, set a

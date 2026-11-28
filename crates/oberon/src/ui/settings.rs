@@ -748,22 +748,16 @@ impl Ui {
             *y += 60.0;
         }
 
-        // Platforms.
-        Self::setting_label(
-            canvas,
-            body,
-            *y,
-            "Platforms",
-            "Build (Ctrl+Shift+B) exports every ticked platform.",
-            190.0,
-        );
-        let mut x = body.x + body.w;
-        for t in [
+        // Platforms, right to left.
+        let platforms: Vec<(Target, bool, String, f32)> = [
+            Target::Web,
             Target::Android,
             Target::MacOS,
             Target::Windows,
             Target::Linux,
-        ] {
+        ]
+        .into_iter()
+        .map(|t| {
             let on = cfg.targets.contains(&t);
             let label = if on {
                 format!("✓ {}", t.label())
@@ -771,6 +765,20 @@ impl Ui {
                 t.label().to_string()
             };
             let w = canvas.measure_text(layout::FONT_SIZE, &label) + 26.0;
+            (t, on, label, w)
+        })
+        .collect();
+        let buttons: f32 = platforms.iter().map(|p| p.3 + 6.0).sum();
+        Self::setting_label(
+            canvas,
+            body,
+            *y,
+            "Platforms",
+            "Build (Ctrl+Shift+B) exports every ticked platform.",
+            buttons,
+        );
+        let mut x = body.x + body.w;
+        for (t, on, label, w) in platforms {
             x -= w;
             let style = if on {
                 ButtonStyle::Active
@@ -795,7 +803,7 @@ impl Ui {
             body,
             *y,
             "Archive",
-            "Also write a .zip (Windows, macOS) or .tar.gz (Linux), ready to upload. Android builds are an .apk.",
+            "Also write a .zip (Windows, macOS, the web: itch.io-ready) or .tar.gz (Linux), ready to upload. Android builds are an .apk.",
             cfg.archive,
         ) {
             self.build_settings().archive = !cfg.archive;

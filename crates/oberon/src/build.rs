@@ -14,10 +14,67 @@ use std::time::Instant;
 pub use automata_cli::android::pem::{
     create_release_key, load_release_key, release_key_path, suggested_release_key_path,
 };
+pub use automata_cli::serve::Server as WebServer;
 pub use automata_cli::{
     check_android_package, check_bundle_id, parse_android_abis, BuildConfig, Level, Target,
     ANDROID_ABIS,
 };
+
+/// The port **Play in Browser** serves web builds on when it's free. The
+/// browser keeps a game's saves per address, so the same port every time
+/// keeps them between sessions.
+pub const WEB_PORT: u16 = 8060;
+
+/// Serves the web build in `folder` for **Play in Browser** and returns
+/// its URL: `current` when it already serves that folder, otherwise a new
+/// server on [`WEB_PORT`] (or the next free port) replacing it.
+///
+/// # Errors
+///
+/// When no port can be opened.
+pub fn serve_web_build(current: &mut Option<WebServer>, folder: &Path) -> Result<String, String> {
+    if let Some(server) = current.as_ref().filter(|s| s.root() == folder) {
+        return Ok(server.url());
+    }
+    // Free the port before opening it again.
+    if let Some(old) = current.take() {
+        old.stop();
+    }
+    let mut last = String::new();
+    for port in (WEB_PORT..WEB_PORT + 10).chain([0]) {
+        match WebServer::start(folder, port) {
+            Ok(server) => {
+                let url = server.url();
+                *current = Some(server);
+                return Ok(url);
+            }
+            Err(e) => last = e.to_string(),
+        }
+    }
+    Err(format!("could not serve {}: {last}", folder.display()))
+}
+
+/// Opens `url` in the default web browser.
+///
+/// # Errors
+///
+/// When the system's opener can't be started.
+pub fn open_url(url: &str) -> Result<(), String> {
+    let mut command = if cfg!(windows) {
+        let mut c = std::process::Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler");
+        c
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else {
+        std::process::Command::new("xdg-open")
+    };
+    command
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("could not open {url}: {e}"))
+}
 
 /// The touch controls Build Settings turns on: a stick holding WASD and a
 /// Jump button holding Space, the keys most templates use.
@@ -218,7 +275,7 @@ fn template_for(target: Target, log: &mut dyn FnMut(Level, String)) -> Option<Pa
     log(
         Level::Info,
         format!(
-            "No {} export template installed: downloading it (one time, about 25-75 MB)…",
+            "No {} export template installed: downloading it (one time, about 15-75 MB)…",
             target.label()
         ),
     );
@@ -409,6 +466,30 @@ mod tests {
         let cfg = config_for(&dir, Some(&dir.join("levels").join("one.ron")));
         assert_eq!(cfg.start_scene.as_deref(), Some("menu.ron"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn web_builds_are_served_once_per_folder() {
+        let base = std::env::temp_dir().join(format!("oberon-web-serve-{}", std::process::id()));
+        for game in ["one", "two"] {
+            std::fs::create_dir_all(base.join(game)).unwrap();
+            std::fs::write(base.join(game).join("index.html"), game).unwrap();
+        }
+        let mut server = None;
+        let url = serve_web_build(&mut server, &base.join("one")).unwrap();
+        assert!(url.starts_with("http://127.0.0.1:"), "{url}");
+        let addr = server.as_ref().unwrap().addr();
+        assert_eq!(
+            serve_web_build(&mut server, &base.join("one")).unwrap(),
+            url
+        );
+        assert_eq!(server.as_ref().unwrap().addr(), addr, "the same server");
+        // Another game replaces it, on the same port when that's free.
+        serve_web_build(&mut server, &base.join("two")).unwrap();
+        assert_eq!(server.as_ref().unwrap().root(), base.join("two"));
+        assert!(serve_web_build(&mut server, &base.join("missing")).is_err());
+        assert!(server.is_none());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

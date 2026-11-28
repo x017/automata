@@ -36,11 +36,13 @@
 <p>An export turns your project into a game other people can run. They don't
 need Oberon, Rust or Python installed. AUTOMATA exports to <strong>Windows</strong>
 and <strong>Linux</strong> (64-bit), to <strong>macOS</strong> as one app for Apple Silicon and
-Intel Macs (<a href="#macos">macOS</a> below), and to <strong>Android</strong> as an <code>.apk</code> you can
-install on a phone (<a href="#android">Android</a> below; still being polished).</p>
+Intel Macs (<a href="#macos">macOS</a> below), to <strong>Android</strong> as an <code>.apk</code> you can
+install on a phone (<a href="#android">Android</a> below; still being polished), and
+to the <strong>web</strong>, as a page that plays in desktop and phone browsers and
+uploads to itch.io (<a href="#web">Web</a> below).</p>
 <p>Each export is a folder you can zip and share. You can also turn on
-<strong>Archive</strong> to get a ready-made <code>.zip</code> (Windows, macOS) or <code>.tar.gz</code>
-(Linux).</p>
+<strong>Archive</strong> to get a ready-made <code>.zip</code> (Windows, macOS, the web) or
+<code>.tar.gz</code> (Linux).</p>
 <div class="codeblock"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>build/
   windows/Coin Run/
     Coin Run.exe        ← players double-click this
@@ -56,7 +58,11 @@ install on a phone (<a href="#android">Android</a> below; still being polished).
   Coin Run-0.1.0-linux-x86_64.tar.gz
   Coin Run-0.1.0-macos-universal.zip
   android/
-    Coin Run-0.1.0.apk  ← install this on a phone</code></pre></div>
+    Coin Run-0.1.0.apk  ← install this on a phone
+  web/
+    Coin Run/           ← put this on a web host
+      index.html
+    Coin Run-0.1.0-web.zip  ← …or upload this to itch.io</code></pre></div>
 <h2 id="build-from-oberon">Build from Oberon<a class="anchor" href="#build-from-oberon" aria-label="Link to this section">#</a></h2>
 <ol><li>Save your scene into the project folder (Ctrl+S).</li><li>Open <strong>Build ▸ Build Settings…</strong>. Set the game name and version, and
 pick the platforms.</li><li>Press <strong>Build now</strong>, or <strong>Ctrl+Shift+B</strong> anywhere in the editor.</li></ol>
@@ -66,7 +72,7 @@ Its progress appears in the status bar and the Console. If anything
 fails, the Console opens and lists every problem: a missing script, a
 scene that won't load, or a missing template. <strong>Open build folder</strong> shows
 the result in your file manager.</p>
-<div class="table"><table><thead><tr><th>Setting</th><th>What it does</th></tr></thead><tbody><tr><td>Game name</td><td>Window title, executable name and folder name</td></tr><tr><td>Version</td><td>Used in archive names, e.g. <code>Coin Run-0.1.0-linux-x86_64.zip</code></td></tr><tr><td>Start scene</td><td>The scene the game opens. If empty, the build uses the scene open in Oberon.</td></tr><tr><td>Output folder</td><td>Where builds go, relative to the project (<code>build</code>)</td></tr><tr><td>Android app ID</td><td>The app's unique ID on Android, like <code>com.yourname.coinrun</code>. Empty: <code>com.example.&lt;name&gt;</code>, fine for testing</td></tr><tr><td>Android version code</td><td>A whole number Android compares to decide what's an update. Raise it for each release</td></tr><tr><td>Android release key</td><td>Your signing key for publishing (<a href="#signing">Signing</a> below). <strong>New</strong> makes one; the folder button picks one you have. Empty: this machine's debug key, for testing</td></tr><tr><td>Android processors</td><td>Which processor types the APK holds code for: <code>arm64-v8a</code> (phones and tablets) and <code>x86_64</code> (emulators on PCs). Empty: both. <code>arm64-v8a</code> alone makes a smaller APK for phones</td></tr><tr><td>macOS bundle ID</td><td>The app's unique ID on macOS, like <code>com.yourname.coinrun</code>. macOS keeps the game's permissions and preferences under it. Empty: <code>com.example.&lt;name&gt;</code>, fine for testing</td></tr><tr><td>macOS icon</td><td>A square PNG in the project (1024×1024 looks sharpest; 16 to 1024 pixels, a power of two) or an <code>.icns</code> file. Empty: the standard app icon</td></tr><tr><td>Platforms</td><td>What <strong>Build</strong> / Ctrl+Shift+B exports. <strong>Build ▸ Build for Linux / Windows / macOS / Android</strong> exports just one.</td></tr><tr><td>Archive</td><td>Also write a <code>.zip</code> / <code>.tar.gz</code> of each build</td></tr><tr><td>Touch controls</td><td>An on-screen stick and buttons that hold the game's keys on touch screens. Turning it on writes a stick for WASD and a Jump button for Space; change them in <code>build.ron</code> (<a href="../guides/touch-controls.html">Touch controls</a>)</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Setting</th><th>What it does</th></tr></thead><tbody><tr><td>Game name</td><td>Window title, executable name and folder name</td></tr><tr><td>Version</td><td>Used in archive names, e.g. <code>Coin Run-0.1.0-linux-x86_64.zip</code></td></tr><tr><td>Start scene</td><td>The scene the game opens. If empty, the build uses the scene open in Oberon.</td></tr><tr><td>Output folder</td><td>Where builds go, relative to the project (<code>build</code>)</td></tr><tr><td>Android app ID</td><td>The app's unique ID on Android, like <code>com.yourname.coinrun</code>. Empty: <code>com.example.&lt;name&gt;</code>, fine for testing</td></tr><tr><td>Android version code</td><td>A whole number Android compares to decide what's an update. Raise it for each release</td></tr><tr><td>Android release key</td><td>Your signing key for publishing (<a href="#signing">Signing</a> below). <strong>New</strong> makes one; the folder button picks one you have. Empty: this machine's debug key, for testing</td></tr><tr><td>Android processors</td><td>Which processor types the APK holds code for: <code>arm64-v8a</code> (phones and tablets) and <code>x86_64</code> (emulators on PCs). Empty: both. <code>arm64-v8a</code> alone makes a smaller APK for phones</td></tr><tr><td>macOS bundle ID</td><td>The app's unique ID on macOS, like <code>com.yourname.coinrun</code>. macOS keeps the game's permissions and preferences under it. Empty: <code>com.example.&lt;name&gt;</code>, fine for testing</td></tr><tr><td>macOS icon</td><td>A square PNG in the project (1024×1024 looks sharpest; 16 to 1024 pixels, a power of two) or an <code>.icns</code> file. Empty: the standard app icon</td></tr><tr><td>Platforms</td><td>What <strong>Build</strong> / Ctrl+Shift+B exports. <strong>Build ▸ Build for Linux / Windows / macOS / Android / Web</strong> exports just one.</td></tr><tr><td>Archive</td><td>Also write a <code>.zip</code> / <code>.tar.gz</code> of each build (for the web, the zip itch.io takes)</td></tr><tr><td>Touch controls</td><td>An on-screen stick and buttons that hold the game's keys on touch screens. Turning it on writes a stick for WASD and a Jump button for Space; change them in <code>build.ron</code> (<a href="../guides/touch-controls.html">Touch controls</a>)</td></tr></tbody></table></div>
 <p>Settings are saved to <code>build.ron</code> in the project folder, so commit it with
 your project. Each build leaves out <code>.oberon/</code>, <code>__pycache__/</code>, version
 control folders, virtual environments (under any name) and installed
@@ -77,7 +83,7 @@ means a folder:</p>
     name: <span class="tok-s">&quot;Coin Run&quot;</span>,
     version: <span class="tok-s">&quot;1.0.0&quot;</span>,
     start_scene: <span class="tok-k">Some</span>(<span class="tok-s">&quot;level.ron&quot;</span>),
-    targets: [<span class="tok-t">Linux</span>, <span class="tok-t">Windows</span>, <span class="tok-t">MacOS</span>, <span class="tok-t">Android</span>],
+    targets: [<span class="tok-t">Linux</span>, <span class="tok-t">Windows</span>, <span class="tok-t">MacOS</span>, <span class="tok-t">Android</span>, <span class="tok-t">Web</span>],
     archive: <span class="tok-k">true</span>,
     exclude: [<span class="tok-s">&quot;tests/&quot;</span>, <span class="tok-s">&quot;art/source/&quot;</span>],
     android: (
@@ -102,7 +108,9 @@ Templates</strong> or the <strong>Download</strong> buttons on the Build page. T
 template is about 75 MB and the Windows one about 25 MB. The macOS one
 is about 100 MB, because it holds Python twice, for Apple Silicon and for
 Intel. The Android
-template is an APK for phones (<code>arm64-v8a</code>) and emulators (<code>x86_64</code>).</p>
+template is an APK for phones (<code>arm64-v8a</code>) and emulators (<code>x86_64</code>). The
+web template, about 17 MB, is the web page with Python for the browser
+(<a href="https://pyodide.org" rel="noopener">Pyodide</a>) and the engine.</p>
 <p>While the repository is private, the plain download link needs you to be
 signed in. Oberon and <code>automata-cli</code> try these in order:</p>
 <ol><li>the public release link;</li><li>the GitHub CLI, if you've signed in with <code>gh auth login</code>;</li><li>a token in <code>GH_TOKEN</code> or <code>GITHUB_TOKEN</code> (it needs read access to the
@@ -131,7 +139,8 @@ automata-cli init my_game --scene level.ron # writes build.ron
 automata-cli check my_game                  # validate without building
 automata-cli stage my_game --out staged/    # just the game folder
 automata-cli stage my_game --zip game.zip   # …and zipped, for the web player
-automata-cli build my_game --target all     # or linux / windows / macos / android</code></pre></div>
+automata-cli build my_game --target all     # or linux / windows / macos / android / web
+automata-cli serve my_game                  # play the web build in your browser</code></pre></div>
 <p>A code-first game, written in Python with <code>at.Game</code> and no scene file,
 starts from a script instead of a scene:</p>
 <div class="codeblock" data-lang="bash"><button class="copy" type="button" aria-label="Copy code">Copy</button><pre><code>automata-cli init my_game --main main.py</code></pre></div>
@@ -141,8 +150,8 @@ relative to that folder.</p>
 <p><code>stage</code> writes only the game folder a build would ship: your files minus
 the ones left out, plus <code>game.json</code>. It doesn't need a template. Use it to
 look at what gets shipped, or to package the game yourself. <code>--zip FILE</code>
-also zips that folder: that <code>game.zip</code> is what the web player (in
-progress) loads. The same files always give the same zip, byte for byte.</p>
+also zips that folder: that <code>game.zip</code> is what a web build holds. The same
+files always give the same zip, byte for byte.</p>
 <h2 id="macos">macOS<a class="anchor" href="#macos" aria-label="Link to this section">#</a></h2>
 <p><strong>Build ▸ Build for macOS</strong> (or <code>automata-cli build --target macos</code>)
 writes <code>build/macos/&lt;name&gt;.app</code>. You can build it on Linux or Windows too.
@@ -280,6 +289,40 @@ two parts separated by dots (<code>com.yourname.coinrun</code>).</p>
 <p>On a phone the game fills the screen in the shape of its resolution
 (landscape for 1280×720). Touch controls are set up under
 <a href="../guides/touch-controls.html">Touch controls</a>.</p>
+<h2 id="web">Web<a class="anchor" href="#web" aria-label="Link to this section">#</a></h2>
+<p><strong>Build ▸ Build for Web</strong> (or <code>automata-cli build --target web</code>) writes
+<code>build/web/&lt;name&gt;/</code>, a folder that is the whole game as a web page, and,
+with <strong>Archive</strong> on, <code>build/web/&lt;name&gt;-&lt;version&gt;-web.zip</code> beside it. Like
+the other builds it takes seconds: it copies the web template and adds your
+game, zipped, as <code>game.zip</code>. The game runs exactly as on desktop: Python
+runs in the browser (CPython compiled to WebAssembly, by Pyodide), the
+engine draws with WebGL2, and nothing is loaded from other sites.</p>
+<p><strong>Play it.</strong> <strong>Build ▸ Play in Browser</strong> builds for the web, serves the
+build from Oberon and opens it in your browser (at
+<code>http://127.0.0.1:8060/</code> when that port is free). From the command line,
+<code>automata-cli serve my_game</code> does the same at <code>http://127.0.0.1:8000/</code>
+until you press Ctrl+C; <code>--host 0.0.0.0</code> lets phones on your Wi-Fi open it
+at your computer's address. Opening <code>index.html</code> straight from the disk
+doesn't work: browsers don't let a page from a file fetch the engine and
+the game.</p>
+<p><strong>Publish it.</strong> On <a href="https://itch.io" rel="noopener">itch.io</a>, make a new project with
+<em>Kind of project: HTML</em>, upload the <code>-web.zip</code> and tick <em>This file will be
+played in the browser</em>; its <code>index.html</code> is at the top of the zip, as
+itch.io wants. 960×540 or larger suits the embed size, and <em>Mobile
+friendly</em> lets phones play. Any static web host works too (GitHub Pages,
+Netlify, your own server): upload the folder's contents.</p>
+<p><strong>Players' saves and settings</strong> (<code>ctx.save</code>, <code>ctx.settings</code>) stay in the
+browser (IndexedDB), per site: a game on another address starts afresh.</p>
+<p><strong>Controls.</strong> Keyboard, mouse (with pointer lock for mouse look after the
+first click), gamepads and touch all work. Touch controls show by
+themselves on phones and tablets. Sound starts after the player's first
+click, key or tap, as browsers require.</p>
+<p><strong>Size and start-up.</strong> A web build is about 17.5 MB (about 10 MB as sent
+compressed) plus your game, and starts in a few seconds. The game needs
+WebGL2, which current desktop and phone browsers have.</p>
+<p><strong>What doesn't work yet.</strong> Python packages beyond the standard library
+and the engine (<code>pip install</code>ed ones) aren't included, and native
+extension modules can't load in a browser.</p>
 <h2 id="running-an-exported-game">Running an exported game<a class="anchor" href="#running-an-exported-game" aria-label="Link to this section">#</a></h2>
 <p>Players start the executable. It also accepts two flags, which help with
 smoke tests in CI:</p>
@@ -317,11 +360,21 @@ template. An Android build puts the game in the APK under
 <code>assets/automata/game/</code>. It changes the app ID, name and version in the
 APK's compiled manifest and resource table, and signs the APK with APK
 Signature Scheme v2.</p>
+<p>The web template comes from the
+<a href="https://github.com/x017/automata/actions/workflows/web.yml" rel="noopener">Web workflow</a>:
+it builds the engine as a Pyodide extension (Rust for WebAssembly, WebGL2
+through wgpu), puts it beside the page, its scripts and Pyodide's runtime,
+builds <em>Coin Run</em> from it with <code>automata-cli</code>, plays it in headless
+Chromium, and publishes the template. A web build adds <code>game.zip</code> and
+<code>player.json</code> (naming the engine, the game and its name) and puts the
+game's name in the page title; the page unpacks the game and runs it with
+the same <code>automata.player</code> the other platforms use. More in
+<a href="https://github.com/x017/automata/blob/main/web/README.md" rel="noopener"><code>web/README.md</code></a>.</p>
     </article>
     <footer class="pager"><a class="prev" href="editor-workflow.html"><small>Previous</small>Editor workflow</a><a class="next" href="shortcuts.html"><small>Next</small>Keyboard shortcuts</a></footer>
     <p class="edit"><a href="https://github.com/x017/automata/edit/main/docs/wiki/oberon/exporting.md" rel="noopener">Edit this page on GitHub</a></p>
   </main>
-  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#build-from-oberon">Build from Oberon</a></li><li class="l2"><a href="#export-templates">Export templates</a></li><li class="l2"><a href="#build-from-the-command-line">Build from the command line</a></li><li class="l2"><a href="#macos">macOS</a></li><li class="l3"><a href="#signing-and-notarisation">Signing and notarisation</a></li><li class="l2"><a href="#android">Android</a></li><li class="l3"><a href="#signing">Signing</a></li><li class="l2"><a href="#running-an-exported-game">Running an exported game</a></li><li class="l2"><a href="#how-it-works">How it works</a></li></ul></nav></aside>
+  <aside class="aside"><nav class="toc" aria-label="On this page"><h2>On this page</h2><ul><li class="l2"><a href="#build-from-oberon">Build from Oberon</a></li><li class="l2"><a href="#export-templates">Export templates</a></li><li class="l2"><a href="#build-from-the-command-line">Build from the command line</a></li><li class="l2"><a href="#macos">macOS</a></li><li class="l3"><a href="#signing-and-notarisation">Signing and notarisation</a></li><li class="l2"><a href="#android">Android</a></li><li class="l3"><a href="#signing">Signing</a></li><li class="l2"><a href="#web">Web</a></li><li class="l2"><a href="#running-an-exported-game">Running an exported game</a></li><li class="l2"><a href="#how-it-works">How it works</a></li></ul></nav></aside>
 </div>
 </body>
 </html>

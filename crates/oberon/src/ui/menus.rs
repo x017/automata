@@ -634,6 +634,8 @@ impl Ui {
                         Intent::Build(Some(Target::Android)),
                         idle,
                     ),
+                    MenuItem::intent("Build for Web", "", Intent::Build(Some(Target::Web)), idle),
+                    MenuItem::intent("Play in Browser", "", Intent::PlayInBrowser, idle),
                     MenuItem::separator(),
                     MenuItem::ui("Build Settings…", "", UiAction::BuildSettings, true),
                     MenuItem::intent("Open Build Folder", "", Intent::OpenBuildFolder, true),

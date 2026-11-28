@@ -203,6 +203,11 @@ struct EditorApp {
     last_autosave: Instant,
     /// The running game export or template download.
     build: Option<crate::build::BuildJob>,
+    /// Open the web build in the browser when the running build finishes
+    /// (Play in Browser).
+    play_in_browser: bool,
+    /// Serves the last web build played in the browser.
+    web_server: Option<crate::build::WebServer>,
     /// The app should exit at the next opportunity.
     quit: bool,
     /// When model files were last checked for changes (hot reload).
@@ -267,6 +272,8 @@ impl EditorApp {
             fatal_error: None,
             last_autosave: Instant::now(),
             build: None,
+            play_in_browser: false,
+            web_server: None,
             quit: false,
             last_model_check: Instant::now(),
             audio: None,
@@ -686,7 +693,12 @@ impl EditorApp {
                 PlayState::Editing => {}
             },
             Intent::Stop => self.stop(),
-            Intent::Build(target) => self.start_build(target),
+            Intent::Build(target) => {
+                self.start_build(target);
+            }
+            Intent::PlayInBrowser => {
+                self.play_in_browser = self.start_build(Some(crate::build::Target::Web));
+            }
             Intent::DownloadTemplates(target) => self.download_templates(target),
             Intent::OpenBuildFolder => {
                 let cfg = crate::build::config_for(&self.ui.project_root, self.doc.path.as_deref());
@@ -1799,12 +1811,13 @@ impl EditorApp {
     // ----- export ----------------------------------------------------------
 
     /// Exports the game for `target` (or the platforms in Build Settings).
-    fn start_build(&mut self, target: Option<crate::build::Target>) {
+    /// Returns whether a build started.
+    fn start_build(&mut self, target: Option<crate::build::Target>) -> bool {
         use crate::build::{BuildJob, Target};
         if let Some(job) = &self.build {
             self.ui
                 .log(LogLevel::Warn, format!("Busy: {}", job.label()));
-            return;
+            return false;
         }
         // Exports read the project from disk: save what's open first.
         if self.doc.path.is_none() {
@@ -1812,7 +1825,7 @@ impl EditorApp {
                 LogLevel::Error,
                 "Save the scene into a project folder before building (Ctrl+S).",
             );
-            return;
+            return false;
         }
         if self.doc.dirty() {
             self.save();
@@ -1830,12 +1843,32 @@ impl EditorApp {
         if targets.is_empty() {
             self.ui
                 .log(LogLevel::Error, "No platforms ticked in Build Settings.");
-            return;
+            return false;
         }
         let job = BuildJob::export(root, cfg, targets);
         self.ui.log(LogLevel::Info, job.label());
         self.ui.build_status = Some(job.label());
         self.build = Some(job);
+        true
+    }
+
+    /// Serves a finished web build and opens it in the browser.
+    fn open_web_build(&mut self, page: &std::path::Path) {
+        let Some(folder) = page.parent() else {
+            return;
+        };
+        match crate::build::serve_web_build(&mut self.web_server, folder) {
+            Ok(url) => {
+                self.ui.log(
+                    LogLevel::Info,
+                    format!("Playing in the browser: {url} (served from this computer while Oberon runs)"),
+                );
+                if let Err(e) = crate::build::open_url(&url) {
+                    self.ui.log(LogLevel::Error, e);
+                }
+            }
+            Err(e) => self.ui.log(LogLevel::Error, e),
+        }
     }
 
     /// Downloads export templates.
@@ -1907,9 +1940,19 @@ impl EditorApp {
             self.ui.log(level, summary.clone());
             self.ui.build_last = Some((failed == 0, summary));
             self.ui.build_status = None;
+            let web_page = job
+                .succeeded
+                .iter()
+                .find(|(t, _)| *t == crate::build::Target::Web)
+                .map(|(_, page)| page.clone());
             self.build = None;
             if failed > 0 {
                 self.ui.show_console();
+            }
+            if std::mem::take(&mut self.play_in_browser) {
+                if let Some(page) = web_page {
+                    self.open_web_build(&page);
+                }
             }
         }
     }

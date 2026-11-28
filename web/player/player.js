@@ -1,7 +1,8 @@
 // The AUTOMATA web player: loads Pyodide (bundled beside this file), the
 // engine's wheel and the game, then runs one frame per animation frame.
 //
-// `player.json` names the wheel and the game: `game` is a zip of an
+// `player.json` names the wheel, the game and (optionally) the game's
+// `name`; `automata-cli build --target web` writes it. `game` is a zip of an
 // exported game folder (game.json, scenes, scripts, assets; what
 // `automata-cli stage` writes), unpacked to /game and run with
 // `automata.player` as the desktop launchers do; or `main` is a single
@@ -434,6 +435,7 @@ function touchScreen() {
 
 async function start() {
   const config = await (await fetch("player.json")).json();
+  if (config.name) document.title = config.name;
   const pyodide = await loadPyodide({
     indexURL: new URL("pyodide/", location.href).href,
     stdout: (line) => console.log(line),
